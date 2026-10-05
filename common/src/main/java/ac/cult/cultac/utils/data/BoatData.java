@@ -30,6 +30,8 @@ public class BoatData {
     public float vehicleHoriz = 0f;
     public float vehicleForward = 0f;
     public boolean vehicleJump = false;
+    public KnownInput nextVehicleKeys = KnownInput.DEFAULT;
+    public KnownInput vehicleKeys = KnownInput.DEFAULT;
     public float deltaRotation = 0f;
     public SimpleCollisionBox fluidInteractionBox;
     public boolean oldStatusMayBeInAir;
@@ -39,6 +41,7 @@ public class BoatData {
         vehicleHoriz = nextVehicleHoriz;
         vehicleForward = nextVehicleForward;
         vehicleJump = nextVehicleJump;
+        vehicleKeys = nextVehicleKeys;
     }
 
     public boolean usesWaterEntryPositionSnap() {
@@ -107,10 +110,12 @@ public class BoatData {
                     vehicleHoriz = nextVehicleHoriz;
                     vehicleForward = nextVehicleForward;
                     vehicleJump = nextVehicleJump;
+                    vehicleKeys = nextVehicleKeys;
                 } else {
                     vehicleHoriz = 0.0F;
                     vehicleForward = 0.0F;
                     vehicleJump = false;
+                    vehicleKeys = KnownInput.DEFAULT;
                 }
             }
 
