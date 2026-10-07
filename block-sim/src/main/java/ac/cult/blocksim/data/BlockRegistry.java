@@ -17,6 +17,10 @@ public final class BlockRegistry {
     private final StateShapes shapes;
 
     public BlockRegistry(List<BlockDefinition> blocks, List<StateFacts> facts, int maxValidChunkCoordinate) {
+        this(blocks, facts, maxValidChunkCoordinate, null);
+    }
+
+    BlockRegistry(List<BlockDefinition> blocks, List<StateFacts> facts, int maxValidChunkCoordinate, StateShapes exactShapes) {
         if (maxValidChunkCoordinate <= 0) throw new IllegalArgumentException("Invalid chunk-coordinate bound");
         this.maxValidChunkCoordinate = maxValidChunkCoordinate;
         this.blocks = List.copyOf(blocks);
@@ -58,7 +62,7 @@ public final class BlockRegistry {
         byKey = Map.copyOf(keys);
         properties = java.util.Collections.unmodifiableMap(propertyTables);
         valueIndices = java.util.Collections.unmodifiableMap(indices);
-        shapes = new StateShapes(this.facts);
+        shapes = exactShapes == null ? new StateShapes(this.facts) : exactShapes;
     }
 
     public List<BlockDefinition> blocks() { return blocks; }

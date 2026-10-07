@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
 
-/** Immutable discrete occupancy and exact coordinate lists; movement collisions stay outside this module. */
+/** Immutable discrete occupancy and exact coordinate lists for geometry and axis clipping. */
 public final class VoxelShape {
     final double[][] coords;
     final boolean[] cubeCoords;
@@ -23,6 +23,39 @@ public final class VoxelShape {
     }
     public boolean isEmpty() { return cells.isEmpty(); }
     public double[] coordinates(int axis) { return coords[axis].clone(); }
+
+    /** Vanilla VoxelShape.collideX scans occupied cells past the actor's leading face. */
+    public double collide(int axis, Box moving, double distance) {
+        if (isEmpty()) return distance;
+        if (Math.abs(distance) < Shapes.EPSILON) return 0.0;
+        int b = (axis + 1) % 3, c = (axis + 2) % 3;
+        double[] min = {moving.minX(), moving.minY(), moving.minZ()};
+        double[] max = {moving.maxX(), moving.maxY(), moving.maxZ()};
+        int fromB = Math.max(0, findIndex(b, min[b] + Shapes.EPSILON));
+        int toB = Math.min(size(b), findIndex(b, max[b] - Shapes.EPSILON) + 1);
+        int fromC = Math.max(0, findIndex(c, min[c] + Shapes.EPSILON));
+        int toC = Math.min(size(c), findIndex(c, max[c] - Shapes.EPSILON) + 1);
+        int start = distance > 0 ? findIndex(axis, max[axis] - Shapes.EPSILON) + 1
+                : findIndex(axis, min[axis] + Shapes.EPSILON) - 1;
+        int step = distance > 0 ? 1 : -1;
+        for (int a = start; a >= 0 && a < size(axis); a += step) {
+            for (int ib = fromB; ib < toB; ib++) for (int ic = fromC; ic < toC; ic++) {
+                boolean occupied = switch (axis) {
+                    case 0 -> full(a, ib, ic);
+                    case 1 -> full(ic, a, ib);
+                    case 2 -> full(ib, ic, a);
+                    default -> throw new IllegalArgumentException("Invalid collision axis");
+                };
+                if (occupied) {
+                    double gap = distance > 0 ? coords[axis][a] - max[axis] : coords[axis][a + 1] - min[axis];
+                    if (distance > 0 && gap >= -Shapes.EPSILON) return Math.min(distance, gap);
+                    if (distance < 0 && gap <= Shapes.EPSILON) return Math.max(distance, gap);
+                    return distance;
+                }
+            }
+        }
+        return distance;
+    }
     int size(int axis) { return coords[axis].length - 1; }
     boolean full(int x, int y, int z) {
         return x >= 0 && y >= 0 && z >= 0 && x < xSize && y < ySize && z < zSize && cells.get(index(x, y, z));

@@ -55,7 +55,8 @@ public final class VanillaDataGenerator {
         new BlockPos(0, 0, 0), new BlockPos(1, 64, -3), new BlockPos(123, -17, 456), new BlockPos(-29_999_000, 200, 12_345)
     };
     private static final List<ProbeGetter> WORLDS = List.of(new ProbeGetter(false, false), new ProbeGetter(true, false), new ProbeGetter(false, true));
-    private static final Map<List<AABB>, Integer> SHAPE_IDS = new LinkedHashMap<>();
+    private record ShapeSnapshot(List<AABB> boxes, List<List<Double>> coordinates, boolean cube, java.util.BitSet cells) {}
+    private static final Map<ShapeSnapshot, Integer> SHAPE_IDS = new LinkedHashMap<>();
 
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
@@ -108,17 +109,24 @@ public final class VanillaDataGenerator {
         Map<String, Set<String>> tags = tags(jar);
         Path dataFile = output.resolve("data.bin.gz");
         try (var out = new DataOutputStream(new BufferedOutputStream(new GZIPOutputStream(Files.newOutputStream(dataFile))))) {
-            out.writeInt(0x4253494d); out.writeInt(4);
+            out.writeInt(0x4253494d); out.writeInt(5);
             out.writeUTF("26.3"); out.writeUTF(sha256(Files.readAllBytes(jar))); out.writeUTF(sha256(blockReport));
             writeStrings(out, FeatureFlags.REGISTRY.toNames(FeatureFlags.DEFAULT_FLAGS).stream().map(Object::toString).sorted().toList());
             out.writeInt(ChunkPyramid.MAX_CHUNK_COORDINATE_VALUE);
             out.writeInt(SHAPE_IDS.size());
-            for (List<AABB> shape : SHAPE_IDS.keySet()) {
-                out.writeInt(shape.size());
-                for (AABB box : shape) {
+            for (ShapeSnapshot shape : SHAPE_IDS.keySet()) {
+                out.writeInt(shape.boxes.size());
+                for (AABB box : shape.boxes) {
                     out.writeDouble(box.minX); out.writeDouble(box.minY); out.writeDouble(box.minZ);
                     out.writeDouble(box.maxX); out.writeDouble(box.maxY); out.writeDouble(box.maxZ);
                 }
+                out.writeBoolean(shape.cube);
+                for (var coordinates : shape.coordinates) {
+                    out.writeInt(coordinates.size());
+                    for (double coordinate : coordinates) out.writeDouble(coordinate);
+                }
+                byte[] cells = shape.cells.toByteArray();
+                out.writeInt(cells.length); out.write(cells);
             }
             out.writeInt(blocks.size());
             for (Block block : blocks) writeBlock(out, block, report);
@@ -397,7 +405,19 @@ public final class VanillaDataGenerator {
     }
     private static int shape(VoxelShape shape) {
         List<AABB> boxes = List.copyOf(shape.toAabbs());
-        return SHAPE_IDS.computeIfAbsent(boxes, ignored -> SHAPE_IDS.size());
+        var coordinates = new ArrayList<List<Double>>(3);
+        for (var axis : Direction.Axis.values()) coordinates.add(List.copyOf(shape.getCoords(axis)));
+        var cells = new java.util.BitSet();
+        try {
+            var field = VoxelShape.class.getDeclaredField("shape");
+            field.setAccessible(true);
+            var discrete = (net.minecraft.world.phys.shapes.DiscreteVoxelShape) field.get(shape);
+            int xs = discrete.getSize(Direction.Axis.X), ys = discrete.getSize(Direction.Axis.Y), zs = discrete.getSize(Direction.Axis.Z);
+            for (int x = 0; x < xs; x++) for (int y = 0; y < ys; y++) for (int z = 0; z < zs; z++)
+                if (discrete.isFull(x, y, z)) cells.set((x * ys + y) * zs + z);
+        } catch (ReflectiveOperationException failure) { throw new IllegalStateException("Cannot export vanilla shape grid", failure); }
+        var snapshot = new ShapeSnapshot(boxes, List.copyOf(coordinates), shape.getClass().getSimpleName().equals("CubeVoxelShape"), cells);
+        return SHAPE_IDS.computeIfAbsent(snapshot, ignored -> SHAPE_IDS.size());
     }
 
     /** These pinned getShape implementations explicitly move by getOffset; having an offset function alone does not. */

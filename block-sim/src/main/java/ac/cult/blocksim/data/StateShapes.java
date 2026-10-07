@@ -23,6 +23,13 @@ public final class StateShapes {
         }
     }
 
+    StateShapes(List<VoxelShape> collision, List<VoxelShape> outline, List<VoxelShape> support, List<VoxelShape> interaction) {
+        this.collision = collision.toArray(VoxelShape[]::new);
+        this.outline = outline.toArray(VoxelShape[]::new);
+        this.support = support.toArray(VoxelShape[]::new);
+        this.interaction = interaction.toArray(VoxelShape[]::new);
+    }
+
     public VoxelShape collision(int state) { return collision[state]; }
     public VoxelShape outline(int state) { return outline[state]; }
     public VoxelShape support(int state) { return support[state]; }

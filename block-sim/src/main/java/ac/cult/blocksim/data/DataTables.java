@@ -51,17 +51,33 @@ public record DataTables(String version, String vanillaSha256, String reportSha2
 
     public static DataTables read(InputStream stream) throws IOException {
         var in = new DataInputStream(new BufferedInputStream(new GZIPInputStream(stream)));
-        if (in.readInt() != 0x4253494d || in.readInt() != 4) throw new IOException("Invalid block simulator data header");
+        if (in.readInt() != 0x4253494d) throw new IOException("Invalid block simulator data header");
+        int format = in.readInt();
+        if (format != 4 && format != 5) throw new IOException("Invalid block simulator data version");
         String version = in.readUTF(), vanillaHash = in.readUTF(), reportHash = in.readUTF();
         Set<String> features = Set.copyOf(strings(in));
         int maxValidChunkCoordinate = in.readInt();
         List<List<Box>> shapes = new ArrayList<>();
+        List<ac.cult.blocksim.engine.shapes.VoxelShape> grids = new ArrayList<>();
         for (int size = count(in), i = 0; i < size; i++) {
             List<Box> boxes = new ArrayList<>();
             for (int boxCount = count(in), j = 0; j < boxCount; j++) {
                 boxes.add(new Box(in.readDouble(), in.readDouble(), in.readDouble(), in.readDouble(), in.readDouble(), in.readDouble()));
             }
             shapes.add(List.copyOf(boxes));
+            if (format == 5) {
+                boolean cube = in.readBoolean();
+                double[][] coordinates = new double[3][];
+                for (int axis = 0; axis < 3; axis++) {
+                    coordinates[axis] = new double[count(in)];
+                    for (int j = 0; j < coordinates[axis].length; j++) coordinates[axis][j] = in.readDouble();
+                }
+                int bytes = count(in);
+                byte[] occupancy = in.readNBytes(bytes);
+                if (occupancy.length != bytes) throw new IOException("Truncated shape grid");
+                try { grids.add(ac.cult.blocksim.engine.shapes.Shapes.fromGrid(coordinates, cube, java.util.BitSet.valueOf(occupancy))); }
+                catch (IllegalArgumentException invalid) { throw new IOException("Invalid shape grid", invalid); }
+            }
         }
         List<BlockDefinition> blocks = new ArrayList<>();
         for (int size = count(in), i = 0; i < size; i++) {
@@ -74,6 +90,10 @@ public record DataTables(String version, String vanillaSha256, String reportSha2
             blocks.add(new BlockDefinition(key, vanillaClass, first, states, defaultState, properties, stringMap(in), strings(in)));
         }
         List<StateFacts> facts = new ArrayList<>();
+        var exactCollision = new ArrayList<ac.cult.blocksim.engine.shapes.VoxelShape>();
+        var exactOutline = new ArrayList<ac.cult.blocksim.engine.shapes.VoxelShape>();
+        var exactSupport = new ArrayList<ac.cult.blocksim.engine.shapes.VoxelShape>();
+        var exactInteraction = new ArrayList<ac.cult.blocksim.engine.shapes.VoxelShape>();
         for (int size = count(in), i = 0; i < size; i++) {
             float destroy = in.readFloat();
             int flags = in.readInt();
@@ -81,9 +101,14 @@ public record DataTables(String version, String vanillaSha256, String reportSha2
             int amount = in.readInt();
             boolean falling = in.readBoolean();
             int fluidBlock = in.readInt(), sturdy = in.readInt(), dynamic = in.readInt();
+            int collision = in.readInt(), outline = in.readInt(), support = in.readInt(), interaction = in.readInt();
             facts.add(new StateFacts(destroy, flags, fluid, amount, falling, fluidBlock, sturdy, dynamic,
-                shapes.get(in.readInt()), shapes.get(in.readInt()), shapes.get(in.readInt()), shapes.get(in.readInt()),
+                shapes.get(collision), shapes.get(outline), shapes.get(support), shapes.get(interaction),
                 in.readFloat(), in.readFloat(), in.readFloat(), StateFacts.PushReaction.valueOf(in.readUTF())));
+            if (format == 5) {
+                exactCollision.add(grids.get(collision)); exactOutline.add(grids.get(outline));
+                exactSupport.add(grids.get(support)); exactInteraction.add(grids.get(interaction));
+            }
         }
         List<ItemDefinition> items = new ArrayList<>();
         for (int size = count(in), i = 0; i < size; i++) {
@@ -92,7 +117,8 @@ public record DataTables(String version, String vanillaSha256, String reportSha2
         Map<String, Set<String>> tags = new HashMap<>();
         for (int size = count(in), i = 0; i < size; i++) tags.put(in.readUTF(), Set.copyOf(strings(in)));
         if (in.read() != -1) throw new IOException("Trailing simulator data");
-        return new DataTables(version, vanillaHash, reportHash, features, new BlockRegistry(blocks, facts, maxValidChunkCoordinate), items, tags);
+        StateShapes exactShapes = format == 5 ? new StateShapes(exactCollision, exactOutline, exactSupport, exactInteraction) : null;
+        return new DataTables(version, vanillaHash, reportHash, features, new BlockRegistry(blocks, facts, maxValidChunkCoordinate, exactShapes), items, tags);
     }
 
     private static int count(DataInputStream in) throws IOException {

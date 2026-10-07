@@ -14,6 +14,29 @@ public final class Shapes {
     public static VoxelShape empty() { return EMPTY; }
     public static VoxelShape block() { return BLOCK; }
 
+    /** Exact generated vanilla coordinate lists and occupancy, without re-optimizing their grid. */
+    public static VoxelShape fromGrid(double[][] coordinates, boolean cube, BitSet cells) {
+        if (coordinates.length != 3) throw new IllegalArgumentException("Three coordinate axes required");
+        double[][] copy = new double[3][];
+        long count = 1;
+        for (int axis = 0; axis < 3; axis++) {
+            if (coordinates[axis].length == 0) throw new IllegalArgumentException("Empty coordinate axis");
+            copy[axis] = coordinates[axis].clone();
+            for (int i = 0; i < copy[axis].length; i++) {
+                if (!Double.isFinite(copy[axis][i]) || i > 0 && copy[axis][i] <= copy[axis][i - 1])
+                    throw new IllegalArgumentException("Invalid coordinate axis");
+            }
+            count *= copy[axis].length - 1;
+        }
+        if (count > Integer.MAX_VALUE || cells.length() > count) throw new IllegalArgumentException("Invalid occupancy");
+        if (cells.isEmpty()) return EMPTY;
+        if (cube && cells.cardinality() == 1
+                && java.util.Arrays.equals(copy[0], new double[]{0, 1})
+                && java.util.Arrays.equals(copy[1], new double[]{0, 1})
+                && java.util.Arrays.equals(copy[2], new double[]{0, 1})) return BLOCK;
+        return new VoxelShape(copy, new boolean[]{cube, cube, cube}, cube, (BitSet) cells.clone());
+    }
+
     public static VoxelShape create(Box box) { return create(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()); }
 
     public static VoxelShape create(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
