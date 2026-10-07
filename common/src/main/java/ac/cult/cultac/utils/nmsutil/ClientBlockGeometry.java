@@ -34,7 +34,10 @@ public final class ClientBlockGeometry {
     }
 
     public VoxelShape collision(int state, ac.cult.cultac.protocol.value.BlockPos pos) {
-        return level.behavior(state).collisionShape(level, state, position(pos));
+        // PistonMovingBlockEntity queries both moved collision and shove geometry with
+        // CollisionContext.empty(), using that client's block implementation.
+        return ac.cult.cultac.utils.collisions.ClientBlockShapes.versionedMovementShape(
+                world.player, state, level.behavior(state).collisionShape(level, state, position(pos)));
     }
 
     public VoxelShape movingPiston(

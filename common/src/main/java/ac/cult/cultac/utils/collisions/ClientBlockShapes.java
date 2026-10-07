@@ -30,6 +30,22 @@ public final class ClientBlockShapes {
         return selectIfDifferent(latestJava, movementAlternative(player, state, x, y, z, entityBottom));
     }
 
+    /** Apply the shared Java version catalog to an already-observed local shape. */
+    public static ac.cult.blocksim.engine.shapes.VoxelShape versionedMovementShape(
+            CultPlayer player, int state, ac.cult.blocksim.engine.shapes.VoxelShape observed) {
+        if (player == null || player.isBedrockMovement()
+                || player.getClientVersion().isOlderThan(ac.cult.cultac.network.protocol.ClientVersion.V_1_21_2))
+            return observed;
+        var alternative = VersionedJavaBlockShapes.movement(player, state, 0, 0, 0);
+        if (alternative.isEmpty()) return observed;
+        if (alternative.get() instanceof ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox voxel)
+            return voxel.voxelShape();
+        var parts = new ArrayList<SimpleCollisionBox>();
+        alternative.get().downCast(parts);
+        return ac.cult.blocksim.engine.shapes.Shapes.fromBoxes(parts.stream()
+                .map(box -> new ac.cult.blocksim.data.Box(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ)).toList());
+    }
+
     public static CollisionBox visual(CultPlayer player, int state, int x, int y, int z) {
         int blockState = state;
         CollisionBox latestJava = NativeBlockCollisionHelper.getSelectionBox(player, blockState, x, y, z);
@@ -75,6 +91,9 @@ public final class ClientBlockShapes {
     }
 
     static boolean sameShape(CollisionBox first, CollisionBox second) {
+        if (first instanceof ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox a
+                && second instanceof ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox b
+                && !a.sameGrid(b)) return false;
         List<SimpleCollisionBox> firstBoxes = boxes(first);
         List<SimpleCollisionBox> secondBoxes = boxes(second);
         if (firstBoxes.size() != secondBoxes.size()) {

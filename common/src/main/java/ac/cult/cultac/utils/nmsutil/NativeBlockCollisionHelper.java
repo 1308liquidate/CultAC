@@ -41,7 +41,14 @@ public final class NativeBlockCollisionHelper {
             return player.compensatedWorld.pistons.getLegacyMovingPistonCollisionBox(new BlockPos(x, y, z));
         }
 
-        return fromShape(getCollisionShape(player, state, x, y, z, entityBottom, actor), x, y, z);
+        VoxelShape shape = getCollisionShape(player, state, x, y, z, entityBottom, actor);
+        // Entity#collideWithShapes scans VoxelShape's cells, including internal
+        // faces when a server update places the actor partly inside a shape.
+        boolean voxelMovement = !player.isBedrockMovement()
+                && player.getClientVersion().isNewerThanOrEquals(ac.cult.cultac.network.protocol.ClientVersion.V_1_21_2);
+        if (voxelMovement && !shape.isEmpty()) return new ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox(
+                shape, shape == Shapes.block()).offset(x, y, z);
+        return fromShape(shape, x, y, z);
     }
 
     public static CollisionBox getSelectionBox(CultPlayer player, int state, int x, int y, int z) {
@@ -112,7 +119,10 @@ public final class NativeBlockCollisionHelper {
             return NoCollisionBox.INSTANCE;
         }
 
-        List<SimpleCollisionBox> boxes = toBoxes(shape);
+        return fromBoxes(toBoxes(shape), x, y, z);
+    }
+
+    private static CollisionBox fromBoxes(List<SimpleCollisionBox> boxes, int x, int y, int z) {
         if (boxes.isEmpty()) {
             return NoCollisionBox.INSTANCE;
         }

@@ -17,7 +17,8 @@ final class VersionedJavaBlockShapes {
             movement(
                     state -> BlockIds.is(state, BlockIds.PALE_MOSS_CARPET),
                     VersionedJavaBlockShapes::paleMossCarpetMovement),
-            movement(BlockIds.PITCHER_CROP, VersionedJavaBlockShapes::pitcherCropMovement));
+            movement(BlockIds.PITCHER_CROP, VersionedJavaBlockShapes::pitcherCropMovement),
+            movement(BlockIds.PISTON_HEAD, VersionedJavaBlockShapes::pistonHeadMovement));
 
     private static final List<ShapeOverride> VISUAL_OVERRIDES = List.of();
 
@@ -53,7 +54,7 @@ final class VersionedJavaBlockShapes {
                 && player.bedrockState == null
                 && state >= 0
                 && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)
-                && player.getClientVersion().isOlderThan(ClientVersion.V_26_2);
+                && player.getClientVersion().isOlderThan(ClientVersion.V_26_3);
     }
 
     private static Optional<CollisionBox> firstMatch(
@@ -99,6 +100,13 @@ final class VersionedJavaBlockShapes {
     private static boolean isRaisedMossyCarpet(int state) {
         // Vanilla MossyCarpetBlock.BASE is the shared "bottom" property.
         return BlockProps.BOTTOM.has(state) && !BlockProps.BOTTOM.booleanValue(state);
+    }
+
+    private static Optional<CollisionBox> pistonHeadMovement(ClientVersion version, int state, int x, int y, int z) {
+        if (version.isNewerThanOrEquals(ClientVersion.V_1_21_5)) return Optional.empty();
+        return Optional.of(new ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox(
+                LegacyPistonHeadShapes.shape(BlockProps.FACING.value(state), BlockProps.SHORT.booleanValue(state))
+                        .move(x, y, z)));
     }
 
     private static ShapeOverride movement(BlockDefinition material, ShapeFactory factory) {

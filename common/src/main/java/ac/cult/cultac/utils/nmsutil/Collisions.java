@@ -154,6 +154,8 @@ public class Collisions {
 
         SimpleCollisionBox grabBoxesBB = box.copy();
         double stepUpHeight = player.getMaxUpStep();
+        boolean separateStepQuery = !player.isBedrockMovement()
+                && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2);
 
         if (desiredX == 0.0 && desiredZ == 0.0) {
             if (desiredY > 0.0) {
@@ -162,7 +164,7 @@ public class Collisions {
                 grabBoxesBB.minY += desiredY;
             }
         } else {
-            if (allowStepping && (stepUpHeight > 0.0 && (onGroundForStep || desiredY < 0))) {
+            if (!separateStepQuery && allowStepping && (stepUpHeight > 0.0 && (onGroundForStep || desiredY < 0))) {
                 // don't bother getting the collisions if we don't need them.
                 if (desiredY <= 0.0) {
                     grabBoxesBB.expandToCoordinate(desiredX, desiredY, desiredZ);
@@ -215,7 +217,7 @@ public class Collisions {
                     collidedDown ? box.copy().offset(0.0D, collisionResult.y, 0.0D) : box.copy();
             SimpleCollisionBox stepSearchBox = stepStartBox.copy().expandToCoordinate(desiredX, stepUpHeight, desiredZ);
             if (!collidedDown) {
-                stepSearchBox.expandToCoordinate(0.0D, -1.0E-5D, 0.0D);
+                stepSearchBox.expandToCoordinate(0.0D, separateStepQuery ? -(double) 1.0E-5F : -1.0E-5D, 0.0D);
             }
 
             List<SimpleCollisionBox> stepCollisionBoxes = new ArrayList<>();
@@ -304,6 +306,11 @@ public class Collisions {
         float maxStepHeightFloat = (float) maxStepHeight;
         float stepHeightToSkipFloat = (float) stepHeightToSkip;
         for (SimpleCollisionBox collider : colliders) {
+            if (collider instanceof ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox voxel) {
+                for (double coordinate : voxel.stepCoordinates()) addStepCandidate(
+                        heights, (float) (coordinate - boundingBox.minY), maxStepHeightFloat, stepHeightToSkipFloat);
+                continue;
+            }
             addStepCandidate(
                     heights, (float) (collider.minY - boundingBox.minY), maxStepHeightFloat, stepHeightToSkipFloat);
             addStepCandidate(
@@ -422,6 +429,10 @@ public class Collisions {
             double entityBottom,
             JavaCollisionState actor) {
         SimpleCollisionBox expandedBB = wantedBB.copy();
+        boolean modernJava = !player.isBedrockMovement()
+                && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2);
+        var queryShape = modernJava ? ac.cult.blocksim.engine.shapes.Shapes.create(new ac.cult.blocksim.data.Box(
+                wantedBB.minX, wantedBB.minY, wantedBB.minZ, wantedBB.maxX, wantedBB.maxY, wantedBB.maxZ)) : null;
 
         boolean collided = addWorldBorder(player, wantedBB, listOfBlocks, onlyCheckCollide);
         if (onlyCheckCollide && collided) return true;
@@ -494,11 +505,17 @@ public class Collisions {
                                     && (edgeCount != 1 || facts.has(ac.cult.blocksim.data.StateFacts.LARGE_COLLISION))
                                     && (edgeCount != 2
                                             || ac.cult.blocksim.data.BlockIds.is(
-                                                    data, ac.cult.blocksim.data.BlockIds.PISTON_HEAD))) {
+                                                    data, modernJava ? ac.cult.blocksim.data.BlockIds.MOVING_PISTON
+                                                            : ac.cult.blocksim.data.BlockIds.PISTON_HEAD))) {
+                                // Vanilla BlockCollisions filters the swept query before axis clipping
+                                // or collecting step heights. The full-block path deliberately uses
+                                // strict AABB intersection; other voxel shapes use Shapes AND.
+                                if (modernJava && !(collisionBox instanceof ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox voxel
+                                        ? voxel.intersectsQuery(wantedBB, queryShape) : collisionBox.isIntersected(wantedBB))) continue;
                                 // Don't add to a list if we only care if the player intersects with the block
                                 if (!onlyCheckCollide) {
-                                    collisionBox.downCast(listOfBlocks);
-                                } else if (collisionBox.isIntersected(wantedBB)) {
+                                    collisionBox.downCastForMovement(listOfBlocks);
+                                } else if (modernJava || collisionBox.isIntersected(wantedBB)) {
                                     return true;
                                 }
                             }
