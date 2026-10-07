@@ -1259,8 +1259,10 @@ public class CompensatedWorld {
     public void applyClientBlockEntityData(
             String dimension, ac.cult.cultac.network.packet.WorldPackets.BlockEntityUpdate packet) {
         int x = packet.position().getX() >> 4, z = packet.position().getZ() >> 4;
-        if (isChunkLoaded(x, z) && dimension.equals(visibleDimension) && dimension.equals(dimensionForChunk(x, z)))
+        if (isChunkLoaded(x, z) && dimension.equals(visibleDimension) && dimension.equals(dimensionForChunk(x, z))) {
+            pistons.receiveBlockEntityData(packet);
             clientBlockEntities.receive(packet, getBlockStateIdAt(packet.position()));
+        }
     }
 
     public void applyClientBlockEvent(

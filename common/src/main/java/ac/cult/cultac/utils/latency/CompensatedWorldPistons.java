@@ -271,6 +271,24 @@ public final class CompensatedWorldPistons {
         world.markRecentClientCollisionChange(pos);
     }
 
+    void receiveBlockEntityData(ac.cult.cultac.network.packet.WorldPackets.BlockEntityUpdate packet) {
+        if (player.isBedrockMovement() || player.getClientVersion().isOlderThan(ClientVersion.V_1_21_2)
+                || !packet.type().equals("minecraft:piston") || packet.tag() == null) return;
+        var state = movingPistonStates.get(packet.position().asLong());
+        // MovingPistonBlock.newBlockEntity returns null. Updates and chunk tags
+        // cannot create one; ClientPacketListener only loads an existing entity.
+        if (state == null || !BlockIds.is(world.getBlockStateIdAt(packet.position()), BlockIds.MOVING_PISTON)) return;
+        var fields = ClientPistonFields.load(player, packet.tag());
+        state.movedState = fields.movedState();
+        state.direction = fields.direction();
+        state.extending = fields.extending();
+        state.source = fields.source();
+        state.progress = fields.progress();
+        state.progressO = state.progress;
+        // Vanilla loadAdditional does not reset deathTicks.
+        world.markRecentClientCollisionChange(packet.position());
+    }
+
     public boolean hasMovingPistonCollision(SimpleCollisionBox queryBox) {
         for (long key : movingPistonStates.keySet()) {
             if (blockBox(BlockPos.of(key)).isIntersected(queryBox)) {
@@ -948,14 +966,13 @@ public final class CompensatedWorldPistons {
     }
 
     private static final class MovingPistonState {
-        private static final int GUARANTEED_FINISHED_TICKS = 8;
-
         private final BlockPos pos;
-        private final int movedState;
-        private final Direction direction;
-        private final boolean extending;
-        private final boolean source;
-        private int clientBlockEntityTicks;
+        private int movedState;
+        private Direction direction;
+        private boolean extending;
+        private boolean source;
+        private float progress, progressO;
+        private int deathTicks;
 
         private MovingPistonState(
                 BlockPos pos, int movedState, Direction direction, boolean extending, boolean source) {
@@ -971,17 +988,25 @@ public final class CompensatedWorldPistons {
         }
 
         private boolean tickIfGuaranteedFinished(boolean legacy) {
-            // 1.8 TileEntityPiston#update restores the block on the third pass:
-            // (previous,current) = (0,.5), (.5,1), then completion. It has no death ticks.
-            return ++clientBlockEntityTicks >= (legacy ? 3 : GUARANTEED_FINISHED_TICKS);
+            progressO = progress;
+            if (progressO >= 1.0F) {
+                // Modern client entities wait five additional ticks. Legacy
+                // TileEntityPiston completes on the third pass without that wait.
+                if (legacy || deathTicks >= 5) return true;
+                deathTicks++;
+            } else {
+                progress += 0.5F;
+                if (progress >= 1.0F) progress = 1.0F;
+            }
+            return false;
         }
 
         private float progress() {
-            return Math.min(1.0F, clientBlockEntityTicks * 0.5F);
+            return progress;
         }
 
         private float previousProgress() {
-            return Math.min(1.0F, Math.max(0, clientBlockEntityTicks - 1) * 0.5F);
+            return progressO;
         }
 
         private float extendedProgress(float progress) {
