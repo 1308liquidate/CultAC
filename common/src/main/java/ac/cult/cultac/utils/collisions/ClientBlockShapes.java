@@ -57,6 +57,21 @@ public final class ClientBlockShapes {
         return selectIfDifferent(latestJava, visualAlternative(player, blockData, x, y, z));
     }
 
+    /** Local outline geometry for vanilla VoxelShape.clip, using the same client selection as visual boxes. */
+    public static ac.cult.blocksim.engine.shapes.VoxelShape visualShape(
+            CultPlayer player, int state, int x, int y, int z) {
+        var latest = NativeBlockCollisionHelper.getSelectionShape(player, state, x, y, z);
+        var alternative = visualAlternative(player, state, x, y, z);
+        if (alternative.isEmpty()
+                || sameShape(NativeBlockCollisionHelper.fromShape(latest, x, y, z), alternative.get())) return latest;
+        var parts = new ArrayList<SimpleCollisionBox>();
+        alternative.get().downCast(parts);
+        return ac.cult.blocksim.engine.shapes.Shapes.fromBoxes(parts.stream()
+                .map(box -> new ac.cult.blocksim.data.Box(
+                        box.minX - x, box.minY - y, box.minZ - z, box.maxX - x, box.maxY - y, box.maxZ - z))
+                .toList());
+    }
+
     private static Optional<CollisionBox> movementAlternative(
             CultPlayer player, int state, int x, int y, int z, double entityBottom) {
         Optional<CollisionBox> bedrock = BedrockClientBlockShapeMappings.movement(player, state, x, y, z);

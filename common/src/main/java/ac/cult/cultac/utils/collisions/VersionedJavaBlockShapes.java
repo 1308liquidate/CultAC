@@ -3,6 +3,7 @@ package ac.cult.cultac.utils.collisions;
 import ac.cult.blocksim.data.BlockDefinition;
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.BlockProps;
+import ac.cult.blocksim.data.DataTables;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.CollisionBox;
@@ -13,6 +14,8 @@ import java.util.Optional;
 import java.util.function.IntPredicate;
 
 final class VersionedJavaBlockShapes {
+    private static final BlockDefinition DRAGON_HEAD =
+            DataTables.defaults().registry().block("minecraft:dragon_head");
     private static final List<ShapeOverride> MOVEMENT_OVERRIDES = List.of(
             movement(
                     state -> BlockIds.is(state, BlockIds.PALE_MOSS_CARPET),
@@ -20,7 +23,9 @@ final class VersionedJavaBlockShapes {
             movement(BlockIds.PITCHER_CROP, VersionedJavaBlockShapes::pitcherCropMovement),
             movement(BlockIds.PISTON_HEAD, VersionedJavaBlockShapes::pistonHeadMovement));
 
-    private static final List<ShapeOverride> VISUAL_OVERRIDES = List.of();
+    private static final List<ShapeOverride> VISUAL_OVERRIDES = List.of(
+            movement(DRAGON_HEAD, VersionedJavaBlockShapes::dragonHeadVisual),
+            movement(BlockIds.PITCHER_CROP, VersionedJavaBlockShapes::pitcherCropVisual));
 
     private VersionedJavaBlockShapes() {}
 
@@ -95,6 +100,25 @@ final class VersionedJavaBlockShapes {
                 shapeVersion.isOlderThan(ClientVersion.V_1_21_5)
                         ? box(x, y, z, 5, -1, 5, 11, 3, 11)
                         : NoCollisionBox.INSTANCE);
+    }
+
+    private static Optional<CollisionBox> dragonHeadVisual(ClientVersion shapeVersion, int state, int x, int y, int z) {
+        // SkullBlock#getShape uses the ordinary 8-pixel skull through 26.2.
+        // 26.3 adds the separate 8.5-pixel-high dragon outline, without changing collision.
+        return shapeVersion.isOlderThan(ClientVersion.V_26_3)
+                ? Optional.of(box(x, y, z, 4, 0, 4, 12, 8, 12))
+                : Optional.empty();
+    }
+
+    private static Optional<CollisionBox> pitcherCropVisual(
+            ClientVersion shapeVersion, int state, int x, int y, int z) {
+        if (shapeVersion.isNewerThanOrEquals(ClientVersion.V_1_21_5)
+                || BlockProps.DOUBLE_BLOCK_HALF.value(state) != 0
+                || BlockProps.AGE_4.value(state) >= 3) return Optional.empty();
+        // Through 1.21.4, getShape indexes UPPER_SHAPE_BY_AGE using
+        // min(abs(4 - (age + 1)), 1): upper ages 0..2 use FULL_UPPER_SHAPE.
+        // The 1.21.5 state-shape function instead makes these states empty.
+        return Optional.of(box(x, y, z, 3, 0, 3, 13, 15, 13));
     }
 
     private static boolean isRaisedMossyCarpet(int state) {

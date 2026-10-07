@@ -84,10 +84,14 @@ public final class ClientBlockGeometry {
     public BlockHit clipOutline(
             ac.cult.cultac.utils.math.Vec3 from,
             ac.cult.cultac.utils.math.Vec3 to,
-            EntityCollisionContext context,
+            ac.cult.cultac.player.CultPlayer player,
             IntPredicate pickFluid) {
         return clip(
-                from, to, (state, pos) -> level.behavior(state).outlineShape(level, state, pos, context), pickFluid);
+                from,
+                to,
+                (state, pos) -> ac.cult.cultac.utils.collisions.ClientBlockShapes.visualShape(
+                        player, state, pos.x(), pos.y(), pos.z()),
+                pickFluid);
     }
 
     public BlockHit clipResetting(
@@ -146,10 +150,12 @@ public final class ClientBlockGeometry {
         public int height() {
             return world.getMaxHeight() - world.getMinHeight();
         }
-        // Ordinary shape queries have no block entities. Piston/open-shulker geometry is supplied separately.
+
         @Override
         public BlockEntityData blockEntityAt(BlockPos pos) {
-            return null;
+            // ShulkerBoxBlock#getShape reads the current client-tick lid progress.
+            return world.getClientBlockEntityData(
+                    new ac.cult.cultac.protocol.value.BlockPos(pos.x(), pos.y(), pos.z()));
         }
 
         @Override
