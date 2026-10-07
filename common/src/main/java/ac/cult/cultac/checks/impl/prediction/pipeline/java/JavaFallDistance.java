@@ -6,6 +6,7 @@ import ac.cult.blocksim.data.FluidTags;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.data.CollideAxisData;
@@ -45,7 +46,7 @@ public final class JavaFallDistance {
                         && (player.compensatedEntities.getSlowFallingAmplifier() != null
                                 || player.compensatedEntities.getLevitationAmplifier() != null);
         distance = beforeMove(distance, lava, reset, context.isGliding(), velocity.y);
-        return JavaCollisionState.of(player, actor, distance);
+        return JavaCollisionState.of(player, actor, storedDistance(context.getVersion(), distance));
     }
 
     static double beforeMove(double distance, boolean lava, boolean reset, boolean gliding, double velocityY) {
@@ -87,7 +88,7 @@ public final class JavaFallDistance {
                 actor.riding != null,
                 waterBelow,
                 actor.isStrider() && context.getWorldData().getInLava().determinePessimistically());
-        return new Moved(distance, movement, landed);
+        return new Moved(storedDistance(context.getVersion(), distance), movement, landed);
     }
 
     static double afterMoveForActor(
@@ -141,7 +142,13 @@ public final class JavaFallDistance {
         if (world.getStuckSpeed().getStuckSpeedMultiplier() != null
                 || world.getBubbleColumn().hasBubbleColumn()
                 || world.getHoneySlide().determinePessimistically()) distance = 0.0;
-        return new JavaPredictionCarry(actor(player, context), distance);
+        return new JavaPredictionCarry(actor(player, context), storedDistance(context.getVersion(), distance));
+    }
+
+    static double storedDistance(ClientVersion version, double distance) {
+        // Entity.fallDistance is a float through 1.21.4 and a double from 1.21.5.
+        // Round each stored update: even a sub-1e-7 change can cross PowderSnowBlock's 2.5 threshold.
+        return version.isOlderThan(ClientVersion.V_1_21_5) ? (float) distance : distance;
     }
 
     static double afterMove(double distance, double resolvedY, boolean water, boolean landed) {
