@@ -24,6 +24,7 @@ import ac.cult.cultac.manager.player.SetbackTeleportUtil;
 import ac.cult.cultac.manager.player.features.FeatureManagerImpl;
 import ac.cult.cultac.manager.player.handlers.NoOpResyncHandler;
 import ac.cult.cultac.network.CultWrite;
+import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.network.protocol.util.viaversion.ViaVersionUtil;
@@ -525,6 +526,30 @@ public class CultPlayer implements GrimUser {
     @Nullable
     public TrackedTransaction createTrackedTransactionPacketForBundle() {
         return createTrackedTransactionPacketForDeferredSend();
+    }
+
+    @Nullable
+    public TrackedTransaction appendTrailingProofTransaction(PacketSendEvent<?> event) {
+        return appendTrailingProofTransaction(event, List.of());
+    }
+
+    /**
+     * Writes {@code packetsBeforeProof} and then a tracked ping directly after the event's packet. The
+     * encoder bundles a packet that expands to several frames, and ClientPacketListener#handleBundlePacket
+     * handles the sub-packets in order in one task, so the pong proves the packet was applied before the
+     * client's next tick. Returns null, writing nothing, when no transaction can be sent.
+     */
+    @Nullable
+    public TrackedTransaction appendTrailingProofTransaction(
+            PacketSendEvent<?> event, List<CultWrite> packetsBeforeProof) {
+        TrackedTransaction proof = createTrackedTransactionPacketForDeferredSend();
+        if (proof == null) {
+            return null;
+        }
+        event.getWritesAfterSend().addAll(packetsBeforeProof);
+        event.getWritesAfterSend().add(proof.packet());
+        event.getTasksAfterSend().add(() -> markTrackedTransactionPacketSent(proof));
+        return proof;
     }
 
     @Nullable

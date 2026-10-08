@@ -268,14 +268,8 @@ public class PacketServerTeleport {
     }
 
     private static int appendTrailingProofTransaction(PacketSendEvent<?> event, CultPlayer player) {
-        CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForDeferredSend();
-        if (transaction == null) {
-            return -1;
-        }
-
-        event.getWritesAfterSend().add(transaction.packet());
-        event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(transaction));
-        return transaction.transaction();
+        CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
+        return transaction == null ? -1 : transaction.transaction();
     }
 
     private static float clamp(float value, float min, float max) {

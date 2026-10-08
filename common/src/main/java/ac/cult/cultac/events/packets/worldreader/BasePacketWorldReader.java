@@ -102,11 +102,8 @@ public class BasePacketWorldReader {
     @CultPacketHandler
     public void onBlockChangedAck(
             PacketSendEvent<ClientboundBlockChangedAck> event, CultPlayer player, ClientboundBlockChangedAck packet) {
-        CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForBundle();
+        CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
         if (transaction != null) {
-
-            event.getWritesAfterSend().add(transaction.packet());
-            event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(transaction));
             player.compensatedWorld.handlePredictionConfirmation(packet.sequence(), transaction);
         } else {
             player.compensatedWorld.handlePredictionConfirmation(packet.sequence());
@@ -254,14 +251,8 @@ public class BasePacketWorldReader {
     }
 
     protected int appendTrailingProofTransaction(PacketSendEvent<?> event, CultPlayer player) {
-        CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForDeferredSend();
-        if (transaction == null) {
-            return player.lastTransactionSent.get();
-        }
-
-        event.getWritesAfterSend().add(transaction.packet());
-        event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(transaction));
-        return transaction.transaction();
+        CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
+        return transaction == null ? player.lastTransactionSent.get() : transaction.transaction();
     }
 
     public void handleBlockChange(CultPlayer player, PacketSendEvent<BlockUpdate> event, BlockUpdate blockChange) {
@@ -273,11 +264,9 @@ public class BasePacketWorldReader {
         // thread. Put Cult's ping after the block update so the pong marks the point
         // where the client has processed the new block state.
         if (isNearPlayer(player, blockPosition, range)) {
-            CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForBundle();
+            CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
             if (transaction != null) {
                 if (blockChange != event.getOriginalPacket()) event.replace(blockChange);
-                event.getWritesAfterSend().add(transaction.packet());
-                event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(transaction));
                 player.compensatedWorld.handleServerBlockUpdate(blockPosition, state, transaction);
                 return;
             }
@@ -296,12 +285,10 @@ public class BasePacketWorldReader {
                 blockEvent.position().z());
         String dimension = packetDimension(player);
         if (isNearPlayer(player, blockPosition, range)) {
-            CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForBundle();
+            CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
             if (transaction != null) {
                 if (blockEvent != event.getOriginalPacket()) event.replace(blockEvent);
-                event.getWritesAfterSend().add(transaction.packet());
                 event.getTasksAfterSend().add(() -> {
-                    player.markTrackedTransactionPacketSent(transaction);
                     Runnable applyEvent = () -> {
                         player.compensatedWorld.applyClientBlockEvent(dimension, blockEvent);
                         player.compensatedWorld.pistons.handleBlockEvent(
@@ -339,11 +326,8 @@ public class BasePacketWorldReader {
         }
 
         if (nearPlayer) {
-            CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForBundle();
+            CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
             if (transaction != null) {
-
-                event.getWritesAfterSend().add(transaction.packet());
-                event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(transaction));
                 player.latencyUtils.addRealTimeTask(
                         transaction.transaction(),
                         () -> updates.forEach(update -> player.compensatedWorld.handleServerBlockUpdate(

@@ -42,6 +42,7 @@ public class PacketSelfMetadataListener {
             // If we send multiple transactions, we are very likely to split them
             boolean hasSendTransaction = false;
             boolean changed = false;
+            Runnable bundledSharedFlags = null;
 
             // 1.14+ poses:
             // - Client: I am sneaking
@@ -76,9 +77,6 @@ public class PacketSelfMetadataListener {
                     boolean isSwimming = (field & 0x10) == 0x10;
                     boolean isSprinting = (field & 0x8) == 0x8;
 
-                    if (!hasSendTransaction) player.sendTransaction();
-                    hasSendTransaction = true;
-
                     final Runnable applySharedFlags = () -> {
                         player.isSwimming = isSwimming;
                         player.lastSprinting = isSprinting;
@@ -94,7 +92,13 @@ public class PacketSelfMetadataListener {
                         player.isGliding = isGliding;
                         player.refreshPlayerPose();
                     };
-                    player.latencyUtils.addRealTimeTaskNow(applySharedFlags);
+                    if (player.supportsBundles()) {
+                        bundledSharedFlags = applySharedFlags;
+                    } else {
+                        if (!hasSendTransaction) player.sendTransaction();
+                        hasSendTransaction = true;
+                        player.latencyUtils.addRealTimeTaskNow(applySharedFlags);
+                    }
                 }
             }
 
@@ -173,6 +177,10 @@ public class PacketSelfMetadataListener {
                 }
             }
 
+            if (bundledSharedFlags != null) {
+                bundleSharedFlagsWithProof(event, player, bundledSharedFlags);
+            }
+
             if (changed) {
                 event.replace(new EntityMetadata(entityMetadataPacket.id(), packedItems));
             }
@@ -231,6 +239,16 @@ public class PacketSelfMetadataListener {
                 player.refreshPlayerPose();
             });
         }
+    }
+
+    private static void bundleSharedFlagsWithProof(PacketSendEvent<?> event, CultPlayer player, Runnable task) {
+        CultPlayer.TrackedTransaction proof = player.appendTrailingProofTransaction(event);
+        if (proof == null) {
+            player.sendTransaction();
+            player.latencyUtils.addRealTimeTaskNow(task);
+            return;
+        }
+        player.latencyUtils.addRealTimeTask(proof.transaction(), task);
     }
 
     private static void addTaskAfterPacketProof(PacketSendEvent<?> event, CultPlayer player, Runnable task) {

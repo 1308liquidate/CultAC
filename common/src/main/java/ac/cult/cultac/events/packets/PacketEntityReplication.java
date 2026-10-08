@@ -910,13 +910,11 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         List<AttributeSnapshot> values = packet.attributes();
 
         if (isDirectlyAffectingPlayer(player, entityID)) {
-            CultPlayer.TrackedTransaction proof = player.createTrackedTransactionPacketForDeferredSend();
+            CultPlayer.TrackedTransaction proof = player.appendTrailingProofTransaction(event);
             if (proof == null) {
                 player.compensatedEntities.updateAttributes(entityID, values);
                 return;
             }
-            event.getWritesAfterSend().add(proof.packet());
-            event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(proof));
             player.latencyUtils.addRealTimeTask(
                     proof.transaction(), () -> player.compensatedEntities.updateAttributes(entityID, values));
             return;
@@ -1341,17 +1339,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
 
     private CultPlayer.TrackedTransaction appendTrailingProofTransaction(
             PacketSendEvent<?> event, List<CultWrite> packetsBeforeProof, boolean requestedDelimiter) {
-        CultPlayer.TrackedTransaction proof = player.createTrackedTransactionPacketForBundle();
-        if (proof == null) {
-            return null;
-        }
-
+        CultPlayer.TrackedTransaction proof = player.appendTrailingProofTransaction(event, packetsBeforeProof);
         // The encoder owns delimiters and reuses an existing host bundle. Adding
         // explicit delimiters here would close that bundle or double-wrap this group.
-        if (requestedDelimiter) event.bundle();
-        event.getWritesAfterSend().addAll(packetsBeforeProof);
-        event.getWritesAfterSend().add(proof.packet());
-        event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(proof));
+        if (proof != null && requestedDelimiter) event.bundle();
         return proof;
     }
 

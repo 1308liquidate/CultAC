@@ -266,15 +266,10 @@ public class PacketModHandler extends Check implements EngineCheck, PostPredicti
 
     protected <R extends ac.cult.cultac.protocol.packet.clientbound.ClientboundPacket>
             CultPlayer.TrackedTransaction bundlePacketWithTrailingTransaction(PacketSendEvent<R> event, R packet) {
-        CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForBundle();
+        CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
         if (transaction == null) return null;
         // The original record must keep its bytes: legacy velocity quantization is lossy.
-
         if (packet != event.getOriginalPacket()) event.replace(packet);
-        // ClientPacketListener processes bundle children in order. The trailing
-        // ping proves the velocity/explosion was handled before later movement.
-        event.getWritesAfterSend().add(transaction.packet());
-        event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(transaction));
         return transaction;
     }
 

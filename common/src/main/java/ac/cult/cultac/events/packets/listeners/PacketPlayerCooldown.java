@@ -12,18 +12,9 @@ public class PacketPlayerCooldown {
     public void onCooldown(PacketSendEvent<ClientboundCooldown> event, CultPlayer player, ClientboundCooldown packet) {
         String group = packet.group();
 
-        int proofTransaction = player.lastTransactionSent.get();
-        TrackedTransaction trackedTransaction = player.createTrackedTransactionPacketForBundle();
-        if (trackedTransaction != null) {
-            proofTransaction = trackedTransaction.transaction();
-            TrackedTransaction sentTransaction = trackedTransaction;
-            event.getTasksAfterSend().add(() -> {
-                player.user.write(sentTransaction.packet());
-                player.markTrackedTransactionPacketSent(sentTransaction);
-            });
-        }
-
-        int lastTransactionSent = proofTransaction;
+        TrackedTransaction trackedTransaction = player.appendTrailingProofTransaction(event);
+        int lastTransactionSent =
+                trackedTransaction == null ? player.lastTransactionSent.get() : trackedTransaction.transaction();
         int duration = packet.duration();
         player.latencyUtils.addRealTimeTask(
                 lastTransactionSent,
