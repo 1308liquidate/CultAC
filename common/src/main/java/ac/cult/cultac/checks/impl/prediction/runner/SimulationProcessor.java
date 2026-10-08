@@ -1031,6 +1031,9 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                             .commitNextTick(this.player, result, this.lastPrediction, diff, this.profileCarry)
                     : preparedCommit;
             this.applyProfileCommit(commit);
+            if (!this.player.isBedrockMovement() && result.getSimulationContext().stopsFallFlyingAfterTravel()) {
+                this.player.isGliding = false;
+            }
             this.lastPrediction = result;
             this.lastXRot = xRot;
             this.lastYRot = yRot;

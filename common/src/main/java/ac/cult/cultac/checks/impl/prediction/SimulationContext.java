@@ -235,8 +235,18 @@ public class SimulationContext {
 
     public static boolean usesFallFlyingMovement(ClientVersion version, boolean gliding, DesyncStatus climbingAtStart) {
         // Added in 25w02a / 1.21.5: travelFallFlying calls travelInAir and then
-        // stopFallFlying when already on a climbable, before performing the move.
+        // stopFallFlying when already on a climbable.
         return gliding && (version.isOlderThan(ClientVersion.V_1_21_5) || !climbingAtStart.determinePessimistically());
+    }
+
+    public boolean stopsFallFlyingAfterTravel() {
+        // LivingEntity#travel prioritizes fluids. In dry travelFallFlying,
+        // stopFallFlying runs AFTER travelInAir, even if the move leaves the climbable.
+        return vehicle == null
+                && gliding
+                && version.isNewerThanOrEquals(ClientVersion.V_1_21_5)
+                && worldData.getClimbingAtStart().determinePessimistically()
+                && !worldData.maybeInLiquid();
     }
 
     private double getMovementThreshold(ClientVersion version) {
