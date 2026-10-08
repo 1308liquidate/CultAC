@@ -45,7 +45,7 @@ public final class BlockSimulator {
         var templates = new ItemTemplates(items);
         var transforms = new BlockTransformerBehavior(data, registries);
         var equipment = new EquipmentBehavior(data, registries);
-        var general = new GeneralItemBehavior(consumables, transforms::useOn, equipment::swap);
+        var general = new GeneralItemBehavior(consumables, transforms::useOn, equipment::swap, new LegacyToolBehavior(data));
         var itemBehaviors = new ItemBehaviorRegistry(data, items, general, obstruction, new ac.cult.blocksim.entity.BlockEntityComponentApplication(templates),
             Map.of("net.minecraft.world.item.InstrumentItem", new InstrumentItemBehavior(general, registries)));
         return new BlockSimulator(data, new BehaviorRegistry(data, items, registries), itemBehaviors, templates, tags,
@@ -62,7 +62,7 @@ public final class BlockSimulator {
     public SimResult simulate(SimAction action, SimInput input) {
         if (!tags.equals(input.tags())) return withTags(input.tags()).simulate(action, input);
         var fork = input.fork();
-        var level = new SimLevel(fork.world(), data.registry(), blocks);
+        var level = new SimLevel(fork.world(), data.registry(), blocks, fork.clientVersion());
         var stacks = new ItemStackActions(items, adventure, fork.cooldowns(), templates);
         var use = new InteractionDriver(data.enabledFeatures(), stacks, fork.cooldowns());
         var session = new BreakSession(breaks, mining, fork.breaking());

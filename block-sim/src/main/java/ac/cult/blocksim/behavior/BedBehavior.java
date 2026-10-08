@@ -1,6 +1,7 @@
 package ac.cult.blocksim.behavior;
 
 import ac.cult.blocksim.engine.BlockPos;
+import ac.cult.blocksim.engine.BlockSimClientVersion;
 import ac.cult.blocksim.engine.Direction;
 import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.engine.SimLevel;
@@ -33,9 +34,10 @@ public final class BedBehavior extends BlockBehavior {
 
     @Override
     public void setPlacedBy(SimLevel level, int state, BlockPos pos, SimPlayer player, SimItemStack stack) {
-        // LevelWriter.setBlockAndUpdate writes with flags 3 on both sides.
         super.setPlacedBy(level, state, pos, player, stack);
-        level.setBlock(pos.relative(facing(level, state)), level.registry().with(state, "part", "head"), 3);
+        // BedBlock#setPlacedBy moved the head write onto the client in 26.2.
+        if (level.clientVersion().atLeast(BlockSimClientVersion.V26_2))
+            level.setBlock(pos.relative(facing(level, state)), level.registry().with(state, "part", "head"), 3);
     }
 
     @Override

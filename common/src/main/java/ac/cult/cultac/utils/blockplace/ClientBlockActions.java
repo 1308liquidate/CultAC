@@ -139,7 +139,8 @@ public final class ClientBlockActions {
                 player.checkManager.getCompensatedCooldown().blockSimulatorSnapshot(),
                 null,
                 BreakSession.State.initial(items.empty()),
-                binding.tags());
+                binding.tags(),
+                ac.cult.blocksim.engine.BlockSimClientVersion.of(client.protocol()));
         var result = binding.simulator().simulate(action, input);
         var writes = result.writes().stream()
                 .map(write -> Map.entry(

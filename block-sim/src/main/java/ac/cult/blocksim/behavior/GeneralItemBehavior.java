@@ -3,6 +3,7 @@ package ac.cult.blocksim.behavior;
 import ac.cult.blocksim.interaction.SimInteraction;
 import ac.cult.blocksim.interaction.UseContext;
 import ac.cult.blocksim.data.ItemComponents;
+import ac.cult.blocksim.engine.BlockSimClientVersion;
 import com.google.gson.JsonElement;
 import java.util.function.BiFunction;
 
@@ -11,13 +12,17 @@ public final class GeneralItemBehavior implements ItemBehavior {
     private final ConsumableBehavior consumables;
     private final BiFunction<UseContext, JsonElement, SimInteraction> transformers;
     private final BiFunction<UseContext, ItemComponents.Equippable, SimInteraction> equipment;
+    private final LegacyToolBehavior legacyTools;
     public GeneralItemBehavior(ConsumableBehavior consumables, BiFunction<UseContext, JsonElement, SimInteraction> transformers,
-                               BiFunction<UseContext, ItemComponents.Equippable, SimInteraction> equipment) {
+                               BiFunction<UseContext, ItemComponents.Equippable, SimInteraction> equipment, LegacyToolBehavior legacyTools) {
         this.consumables = java.util.Objects.requireNonNull(consumables); this.transformers = java.util.Objects.requireNonNull(transformers);
         this.equipment = java.util.Objects.requireNonNull(equipment);
+        this.legacyTools = java.util.Objects.requireNonNull(legacyTools);
     }
     @Override
     public SimInteraction useOn(UseContext context) {
+        // Before 26.3 the item identity supplies tool behavior; arbitrary components do not.
+        if (context.level().clientVersion().before(BlockSimClientVersion.V26_3)) return legacyTools.useOn(context);
         var transformer = context.stack().components().get("minecraft:block_transformer");
         return transformer == null ? SimInteraction.PASS : transformers.apply(context, transformer);
     }

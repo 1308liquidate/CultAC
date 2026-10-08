@@ -16,18 +16,22 @@ public final class BlockTransformerBehavior {
         this.data = data; this.registries = registries; predicates = new BlockPredicates(data, this::state);
     }
     public SimInteraction useOn(UseContext context, JsonElement transformer) {
+        boolean componentTool = context.level().clientVersion().atLeast(BlockSimClientVersion.V26_3);
+        var offhand = context.player() == null ? null : context.player().hand(Hand.OFF_HAND);
+        boolean blocking = offhand != null && (context.level().clientVersion().atLeast(BlockSimClientVersion.V1_21_5)
+            ? offhand.components().has("minecraft:blocks_attacks") : offhand.is("minecraft:shield"));
         if (context.hand() == Hand.MAIN_HAND && context.player() != null
-            && context.player().hand(Hand.OFF_HAND).components().has("minecraft:blocks_attacks") && !context.secondaryUseActive()) return SimInteraction.PASS;
+            && blocking && !context.secondaryUseActive()) return SimInteraction.PASS;
         for (var entry : registries.resolve("block_transformer", transformer).getAsJsonArray()) {
             var rule = entry.getAsJsonObject();
             if (rule.has("disallowed_faces") && rule.getAsJsonArray("disallowed_faces").asList().stream()
                 .anyMatch(face -> face.getAsString().equals(context.clickedFace().name().toLowerCase(Locale.ROOT)))) continue;
             int state = provider(context.level(), context.clickedPos(), rule.get("block_state_provider"), true);
             if (state < 0) continue;
-            if (!rule.has("update_from_neighbors") || NbtJson.booleanValue(rule.get("update_from_neighbors"))) {
+            if (componentTool && (!rule.has("update_from_neighbors") || NbtJson.booleanValue(rule.get("update_from_neighbors")))) {
                 state = context.level().updateFromNeighborShapes(state, context.clickedPos());
             }
-            if (context.stack().isStackable()) context.stack().consume(!rule.has("consume_on_use") || NbtJson.booleanValue(rule.get("consume_on_use")) ? 1 : 0, context.player());
+            if (componentTool && context.stack().isStackable()) context.stack().consume(!rule.has("consume_on_use") || NbtJson.booleanValue(rule.get("consume_on_use")) ? 1 : 0, context.player());
             // ItemStack.hurtAndBreak requires ServerLevel; the client does not change damage.
             context.level().setBlock(context.clickedPos(), state, 11);
             return SimInteraction.SUCCESS;

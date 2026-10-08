@@ -124,7 +124,13 @@ public final class BasicBlockRules extends BlockBehavior {
             case SUCCESS -> SimInteraction.SUCCESS;
             case CONSUME -> SimInteraction.CONSUME;
             case DAYLIGHT -> context.player().state().mayBuild() ? SimInteraction.SUCCESS : SimInteraction.PASS;
-            case BERRIES -> number(context.level(), state, "age") > 1 ? SimInteraction.SUCCESS : SimInteraction.PASS;
+            case BERRIES -> {
+                if (number(context.level(), state, "age") <= 1) yield SimInteraction.PASS;
+                // Harvest mutations moved behind ServerLevel in 1.21.9.
+                if (context.level().clientVersion().before(BlockSimClientVersion.V1_21_9))
+                    context.level().setBlock(context.clickedPos(), context.level().registry().with(state, "age", "1"), 2);
+                yield SimInteraction.SUCCESS;
+            }
             case SIGN -> sign.useWithoutItem(state, context);
             case BOOKSHELF -> slots.use(state, context, true, false);
             case GAME_MASTER -> {
@@ -141,7 +147,15 @@ public final class BasicBlockRules extends BlockBehavior {
             case SIGN -> sign.useItemOn(state, context);
             case SHELF, BOOKSHELF -> slots.use(state, context, useRule == ClientUse.BOOKSHELF, true);
             case PUMPKIN -> stack.is("minecraft:shears") ? SimInteraction.SUCCESS : SimInteraction.TRY_WITH_EMPTY_HAND;
-            case TNT -> stack.is("minecraft:flint_and_steel") || stack.is("minecraft:fire_charge") ? SimInteraction.SUCCESS : SimInteraction.TRY_WITH_EMPTY_HAND;
+            case TNT -> {
+                if (!stack.is("minecraft:flint_and_steel") && !stack.is("minecraft:fire_charge")) yield SimInteraction.TRY_WITH_EMPTY_HAND;
+                // 1.21.5 prime() only succeeds on ServerLevel. Before then the client removes TNT.
+                if (context.level().clientVersion().before(BlockSimClientVersion.V1_21_5)) {
+                    context.level().setBlock(context.clickedPos(), context.level().registry().block("minecraft:air").defaultState(), 11);
+                    if (stack.is("minecraft:fire_charge")) stack.consume(1, context.player());
+                }
+                yield SimInteraction.SUCCESS;
+            }
             case VAULT -> !stack.isEmpty() && context.level().registry().value(state, "vault_state").equals("active") ? SimInteraction.SUCCESS_SERVER : SimInteraction.TRY_WITH_EMPTY_HAND;
             case BERRIES -> number(context.level(), state, "age") < 3 && stack.is("minecraft:bone_meal") ? SimInteraction.PASS : SimInteraction.TRY_WITH_EMPTY_HAND;
             default -> SimInteraction.TRY_WITH_EMPTY_HAND;

@@ -36,6 +36,7 @@ public final class SimLevel {
     private final LinkedHashMap<BlockPos, StatePossibilities> retainedStates = new LinkedHashMap<>();
     private final Map<BlockPos, StatePossibilities> pendingRandomStates = new HashMap<>();
     private final IntSupplier knownRandomPlantAges;
+    private final BlockSimClientVersion clientVersion;
     private boolean predicting = true;
 
     public SimLevel(SimWorldView world, BlockRegistry registry, IntFunction<BlockBehavior> behaviors) {
@@ -47,12 +48,21 @@ public final class SimLevel {
     }
     /** A supplied independent RNG is for reproducible oracle fixtures; production declares the vanilla value set. */
     public SimLevel(SimWorldView world, BlockRegistry registry, IntFunction<BlockBehavior> behaviors, int chainLimit, IntSupplier knownRandomPlantAges) {
+        this(world, registry, behaviors, chainLimit, knownRandomPlantAges, BlockSimClientVersion.V26_3);
+    }
+    public SimLevel(SimWorldView world, BlockRegistry registry, IntFunction<BlockBehavior> behaviors, BlockSimClientVersion clientVersion) {
+        this(world, registry, behaviors, CLIENT_CHAIN_LIMIT, null, clientVersion);
+    }
+    private SimLevel(SimWorldView world, BlockRegistry registry, IntFunction<BlockBehavior> behaviors, int chainLimit,
+                     IntSupplier knownRandomPlantAges, BlockSimClientVersion clientVersion) {
         this.world = world;
         this.registry = registry;
         this.behaviors = behaviors;
         this.updater = new ShapeUpdater(this, chainLimit);
         this.knownRandomPlantAges = knownRandomPlantAges;
+        this.clientVersion = java.util.Objects.requireNonNull(clientVersion);
     }
+    public BlockSimClientVersion clientVersion() { return clientVersion; }
     public BlockRegistry registry() { return registry; }
     public int minY() { return world.minY(); }
     public int seaLevel() { return world.seaLevel(); }

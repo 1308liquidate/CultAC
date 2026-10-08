@@ -16,27 +16,31 @@ public final class BlockRaycast {
 
     public static Pick playerPick(SimLevel level, SimPlayer player, Fluid fluids) {
         var sight = player.sight(); Vec3 from = sight.eyePosition();
-        Vec3 to = viewEnd(player);
+        Vec3 to = viewEnd(level, player);
         var hit = clip(level, player, from, to, fluids);
         if (hit != null) return new Pick(hit, false);
         return new Pick(new BlockHit(new BlockPos((int) Math.floor(to.x()), (int) Math.floor(to.y()), (int) Math.floor(to.z())),
             Direction.approximateNearest(from.subtract(to)), to, false), true);
     }
 
-    private static Vec3 viewEnd(SimPlayer player) {
-        return player.sight().eyePosition().addScaled(viewVector(player), player.sight().blockInteractionRange());
+    private static Vec3 viewEnd(SimLevel level, SimPlayer player) {
+        return player.sight().eyePosition().addScaled(viewVector(player, level.clientVersion()), player.sight().blockInteractionRange());
     }
 
     public static Vec3 viewVector(SimPlayer player) {
+        return viewVector(player, BlockSimClientVersion.V26_3);
+    }
+    public static Vec3 viewVector(SimPlayer player, BlockSimClientVersion version) {
         float pitch = player.state().pitch() * (float) (Math.PI / 180.0);
         float yaw = -player.state().yaw() * (float) (Math.PI / 180.0);
-        float yawCos = VanillaMath.cos(yaw), yawSin = VanillaMath.sin(yaw), pitchCos = VanillaMath.cos(pitch), pitchSin = VanillaMath.sin(pitch);
+        float yawCos = VanillaMath.cos(version, yaw), yawSin = VanillaMath.sin(version, yaw),
+            pitchCos = VanillaMath.cos(version, pitch), pitchSin = VanillaMath.sin(version, pitch);
         return new Vec3(yawSin * pitchCos, -pitchSin, yawCos * pitchCos);
     }
 
     /** BrushItem.calculateHitResult / ProjectileUtil.getHitResultOnViewVector, model 26.3. */
     public static boolean brushPicksBlock(SimLevel level, SimPlayer player) {
-        Vec3 from = player.sight().eyePosition(), to = viewEnd(player);
+        Vec3 from = player.sight().eyePosition(), to = viewEnd(level, player);
         BlockHit hit = traverse(from, to, pos -> {
             int state = level.stateAt(pos);
             var behavior = level.behavior(state);

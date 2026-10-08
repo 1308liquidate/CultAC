@@ -39,10 +39,13 @@ public enum Direction {
     }
 
     public static Direction[] orderedByNearest(float rotationYaw, float rotationPitch) {
+        return orderedByNearest(BlockSimClientVersion.V26_3, rotationYaw, rotationPitch);
+    }
+    public static Direction[] orderedByNearest(BlockSimClientVersion version, float rotationYaw, float rotationPitch) {
         float pitch = rotationPitch * (float) (Math.PI / 180.0);
         float yaw = -rotationYaw * (float) (Math.PI / 180.0);
-        float pitchSin = VanillaMath.sin(pitch), pitchCos = VanillaMath.cos(pitch);
-        float yawSin = VanillaMath.sin(yaw), yawCos = VanillaMath.cos(yaw);
+        float pitchSin = VanillaMath.sin(version, pitch), pitchCos = VanillaMath.cos(version, pitch);
+        float yawSin = VanillaMath.sin(version, yaw), yawCos = VanillaMath.cos(version, yaw);
         boolean xPos = yawSin > 0.0F, yPos = pitchSin < 0.0F, zPos = yawCos > 0.0F;
         float xYaw = xPos ? yawSin : -yawSin;
         float yMag = yPos ? -pitchSin : pitchSin;

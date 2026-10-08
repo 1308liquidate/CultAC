@@ -4,6 +4,7 @@ import ac.cult.blocksim.data.Box;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.HolderSets;
 import ac.cult.blocksim.engine.BlockRaycast;
+import ac.cult.blocksim.engine.BlockSimClientVersion;
 import ac.cult.blocksim.engine.SimPlayer;
 import ac.cult.blocksim.engine.SimWorldView;
 import ac.cult.blocksim.engine.Vec3;
@@ -33,6 +34,7 @@ public final class ClientEntityQueries {
     private final CultPlayer player;
     private final SimWorldView world;
     private final HolderSets.Overlay tags;
+    private final BlockSimClientVersion clientVersion;
 
     public ClientEntityQueries(CultPlayer player) {
         this(player, null);
@@ -47,6 +49,7 @@ public final class ClientEntityQueries {
                 ? source
                 : ac.cult.cultac.protocol.ProtocolVersion.of(
                         player.getClientVersion().getProtocolVersion());
+        clientVersion = BlockSimClientVersion.of(client.protocol());
         tags = player.registryState == null
                 ? HolderSets.Overlay.EMPTY
                 : player.registryState.blockSimulatorTags(source, client, DataTables.defaults());
@@ -93,7 +96,7 @@ public final class ClientEntityQueries {
 
     /** Brush's ProjectileUtil overload has zero margin and does not count containment as a ray hit. */
     public boolean hasPickableEntityHit(Vec3 from, Vec3 to, SimPlayer owner) {
-        var delta = BlockRaycast.viewVector(owner).scale(owner.sight().blockInteractionRange());
+        var delta = BlockRaycast.viewVector(owner, clientVersion).scale(owner.sight().blockInteractionRange());
         var search = localBox().expandTowards(delta).inflate(1.0);
         if (any(this::pickable, bounds -> search.intersects(bounds) && bounds.clip(from, to) != null)) return true;
         requireDragonParts();
@@ -103,7 +106,7 @@ public final class ClientEntityQueries {
     /** BoatItem's view search uses a fixed five blocks, then each entity's pick radius. */
     public boolean hasPickableEntityAtEye(SimPlayer owner) {
         var search = localBox()
-                .expandTowards(BlockRaycast.viewVector(owner).scale(5.0))
+                .expandTowards(BlockRaycast.viewVector(owner, clientVersion).scale(5.0))
                 .inflate(1.0);
         if (any(
                 this::pickable,

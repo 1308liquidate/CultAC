@@ -41,7 +41,10 @@ public final class BucketItemBehavior implements ItemBehavior {
         int state = level.stateAt(pos); var facts = level.registry().facts(state); var behavior = level.behavior(state);
         boolean replaceable = behavior.canBeReplacedByFluid(level, state, content);
         boolean placeLiquid = replaceable || behavior.canPlaceLiquid(level, state, pos, content, player != null && player.state().infiniteMaterials());
-        if (!facts.has(StateFacts.AIR) && (!placeLiquid || player != null && player.state().secondaryUseActive() && hit != null)) {
+        // Sneak-to-bypass-waterlogging was added in 1.21.9.
+        boolean bypassContainer = level.clientVersion().atLeast(BlockSimClientVersion.V1_21_9)
+            && player != null && player.state().secondaryUseActive() && hit != null;
+        if (!facts.has(StateFacts.AIR) && (!placeLiquid || bypassContainer)) {
             return hit != null && emptyContents(level, player, hit.pos().relative(hit.face()), null, content);
         }
         if (content.equals("minecraft:water") && level.waterEvaporatesAt(pos)) return true;

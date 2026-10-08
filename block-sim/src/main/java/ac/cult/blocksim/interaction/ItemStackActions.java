@@ -4,6 +4,7 @@ import ac.cult.blocksim.behavior.ItemBehaviorRegistry;
 import ac.cult.blocksim.data.ItemTemplates;
 import ac.cult.blocksim.data.ItemComponents;
 import ac.cult.blocksim.engine.SimCooldowns;
+import ac.cult.blocksim.engine.BlockSimClientVersion;
 import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.engine.SimPlayer;
 
@@ -25,7 +26,9 @@ public final class ItemStackActions implements StackActions {
         var before = original.copy();
         var item = behaviors.itemForStack(original);
         var result = behaviors.behavior(item).useOn(context.forItem(item));
-        if (context.player() != null && result.consumesAction() && result.itemInteraction()) {
+        // Older ItemStack.useOn only awards stats; use() already has its own after-use hooks.
+        if (context.level().clientVersion().atLeast(BlockSimClientVersion.V26_3)
+            && context.player() != null && result.consumesAction() && result.itemInteraction()) {
             var transformed = result.transformedStack() == null ? original : result.transformedStack();
             return result.transformedTo(afterUse(transformed, context.player(), before));
         }

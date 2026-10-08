@@ -3,6 +3,7 @@ package ac.cult.blocksim.behavior;
 import ac.cult.blocksim.engine.BlockPos;
 import ac.cult.blocksim.engine.SimFluidState;
 import ac.cult.blocksim.engine.SimLevel;
+import ac.cult.blocksim.engine.BlockSimClientVersion;
 import ac.cult.blocksim.data.BlockDefinition;
 import ac.cult.blocksim.engine.Direction;
 import ac.cult.blocksim.interaction.PlacementContext;
@@ -20,7 +21,9 @@ public final class CampfireBehavior extends BlockBehavior {
         var level = context.level(); var entity = level.blockEntityAt(context.clickedPos());
         if (entity != null && entity.type().equals("minecraft:campfire")
             && level.isRecipeInput("minecraft:campfire_input", context.player().hand(context.hand()))) return SimInteraction.CONSUME;
-        if (!dousingItems.contains(context.stack().itemKey()) || !bool(level, state, "lit")) return SimInteraction.TRY_WITH_EMPTY_HAND;
+        // Before 26.3 ShovelItem handles dousing and only the server changes the block.
+        if (level.clientVersion().before(BlockSimClientVersion.V26_3)
+            || !dousingItems.contains(context.stack().itemKey()) || !bool(level, state, "lit")) return SimInteraction.TRY_WITH_EMPTY_HAND;
         level.setBlock(context.clickedPos(), level.registry().with(state, "lit", "false"), 3);
         // Food insertion and ItemStack.hurtAndBreak require ServerLevel.
         return SimInteraction.SUCCESS;
