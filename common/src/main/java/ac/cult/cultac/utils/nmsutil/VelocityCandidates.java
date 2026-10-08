@@ -76,9 +76,21 @@ public final class VelocityCandidates {
             diff = new Vec3(diff.x, requiredPostCollisionY.getAsDouble(), diff.z);
             isY = false;
         }
+        boolean stepped = requiredPostCollisionY.isEmpty()
+                && result.getValidMovements().isCanStep()
+                && result.getInitialStartingVel() != null;
+        if (stepped) {
+            diff = new Vec3(
+                    diff.x,
+                    applyPostVerticalCollisionBlockVelocity(
+                            result, preCollisionVelocity(result).y, collisionMovementY),
+                    diff.z);
+            isY = false;
+        }
 
         addVelocityCandidates(validPlayerStartingVels, diff, isX, isY, isZ);
-        addPostMoveDeltaMovementCandidates(validPlayerStartingVels, result, isX, isY, isZ, collisionMovementY);
+        addPostMoveDeltaMovementCandidates(
+                validPlayerStartingVels, result, isX, isY, isZ, collisionMovementY, stepped);
 
         if (lastPrediction != null
                 && lastPrediction
@@ -282,7 +294,8 @@ public final class VelocityCandidates {
             boolean canZeroX,
             boolean canZeroY,
             boolean canZeroZ,
-            double clippedY) {
+            double clippedY,
+            boolean stepped) {
         if (result.getInitialStartingVel() == null) {
             return;
         }
@@ -314,7 +327,8 @@ public final class VelocityCandidates {
                 postMoveDelta = new Vec3(postMoveDelta.x, postMoveDelta.y, -postMoveDelta.z * bounciness);
             }
         }
-        boolean verticalCollision = (result.getCollideAxisData().getYPos() != null
+        boolean verticalCollision = stepped
+                || (result.getCollideAxisData().getYPos() != null
                         && result.getCollideAxisData().getYPos().isLikelyCollide())
                 || (result.getCollideAxisData().getYNeg() != null
                         && result.getCollideAxisData().getYNeg().isLikelyCollide());
