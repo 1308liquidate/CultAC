@@ -153,12 +153,20 @@ public final class CultNetworkManager {
         try {
             runnable.run();
         } catch (Throwable throwable) {
+            reportFailure("Deferred packet task in " + phase, throwable);
+        }
+    }
+
+    /** Cult failures stay out of the host's exception handler, which may disconnect players. */
+    public static void reportFailure(String operation, Throwable failure) {
+        try {
+            LogUtil.error("CultAC failure in " + operation + "; keeping the connection open", failure);
+        } catch (Throwable loggingFailure) {
+            // Logging during startup/shutdown must not turn a recovered failure into a kick.
             try {
-                LogUtil.warn("Deferred packet task failed in " + phase + ": "
-                        + throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
+                failure.printStackTrace();
             } catch (Throwable ignored) {
             }
-            throwable.printStackTrace();
         }
     }
 

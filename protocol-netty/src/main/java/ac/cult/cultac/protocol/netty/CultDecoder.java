@@ -1,6 +1,7 @@
 package ac.cult.cultac.protocol.netty;
 
 import ac.cult.cultac.network.CultConnection;
+import ac.cult.cultac.network.CultNetworkManager;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.PacketType;
@@ -43,30 +44,37 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
                 return;
             }
         } catch (Throwable failure) {
-            frame.release();
-            fail(ctx, failure);
+            CultNetworkManager.reportFailure("inbound packet owner", failure);
+            ctx.fireChannelRead(frame);
             return;
         }
-        connection.runInModel(() -> {
-            try {
+        boolean[] consumed = {false};
+        try {
+            connection.runInModel(() -> {
+                consumed[0] = true;
                 var output = process(frame);
                 if (output != null) {
                     // beginLogin can install its codec and resume LocalChannel reads before
                     // the handshake listener returns. Its next frame already belongs to LOGIN.
                     boolean handshake = output.type == ServerboundPackets.INTENTION;
-                    if (handshake) connection.forwarded(output.type, output.packet);
+                    if (handshake) forwarded(output);
                     ctx.fireChannelRead(output.frame);
-                    if (!handshake && output.type != null) connection.forwarded(output.type, output.packet);
+                    if (!handshake && output.type != null) forwarded(output);
                 }
-            } catch (Throwable failure) {
-                fail(ctx, failure);
-            }
-        });
+            });
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("inbound model context", failure);
+            if (!consumed[0]) ctx.fireChannelRead(frame);
+        }
     }
 
     /** Consumes the input on every path; null means it was cancelled or discarded. */
     @SuppressWarnings("unchecked")
     private Forward process(ByteBuf frame) {
+        ByteBuf originalFrame = frame;
+        boolean releaseOriginal = true;
+        PacketType<?> originalType = null;
+        ServerboundPacket originalPacket = null;
         try {
             var phase = connection.phase(PacketDirection.SERVERBOUND);
             PacketType<?> forwardedType = null;
@@ -82,6 +90,8 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
                 var route = connection.dispatcher().get(value.type());
                 var type = (PacketType<ServerboundPacket>) route.type();
                 var original = (ServerboundPacket) value.packet();
+                originalType = type;
+                originalPacket = original;
                 connection.prepare();
                 var event = new PacketReceiveEvent<>(connection.user(), phase, type, original);
                 if (route.receive() != null) connection.dispatcher().receive(event, route.receive());
@@ -111,7 +121,7 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
                         replacement.frames().forEach(ByteBuf::release);
                         throw new IllegalStateException("Inbound replacement must encode one physical frame");
                     }
-                    frame.release();
+                    if (frame != originalFrame) frame.release();
                     frame = replacement.frames().getFirst();
                 }
                 if (player != null) {
@@ -134,18 +144,26 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
                 forwardedPacket = packet;
             }
             var output = new Forward(frame, forwardedType, forwardedPacket);
+            releaseOriginal = frame != originalFrame;
             frame = null;
             return output;
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("inbound packet decoding", failure);
+            if (frame != originalFrame) frame.release();
+            frame = null;
+            releaseOriginal = false;
+            return new Forward(originalFrame, originalType, originalPacket);
         } finally {
-            if (frame != null) frame.release();
+            if (frame != null && frame != originalFrame) frame.release();
+            if (releaseOriginal) originalFrame.release();
         }
     }
 
-    private void fail(ChannelHandlerContext ctx, Throwable failure) {
+    private void forwarded(Forward output) {
         try {
-            ctx.fireExceptionCaught(failure);
-        } finally {
-            ctx.close();
+            connection.forwarded(output.type, output.packet);
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("inbound protocol transition", failure);
         }
     }
 

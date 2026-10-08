@@ -756,18 +756,26 @@ class CultTransportTest {
     }
 
     @Test
-    void malformedRoutedFramesCloseAndReleaseTheFrame() throws Exception {
+    void malformedRoutedFramesStayWithTheHostAndLaterPacketsAreStillInspected() throws Exception {
         try (var f = new Fixture(true)) {
-            f.routes.receive(ServerboundPackets.PONG, event -> fail("Truncated pong must not dispatch"));
+            var received = new ArrayList<Integer>();
+            f.routes.receive(
+                    ServerboundPackets.PONG,
+                    event -> received.add(event.getPacket().id()));
+            var decoder = f.channel.pipeline().get(CultDecoder.NAME);
+            var encoder = f.channel.pipeline().get(CultEncoder.NAME);
             ByteBuf frame = f.frame(SERVERBOUND, PLAY, "pong");
-            // EmbeddedChannel also drains pending tasks in writeInbound, so a
-            // fast owner may deliver the same failure before pump is called.
-            assertThrows(MalformedPacketException.class, () -> {
-                f.channel.writeInbound(frame);
-                f.pump();
-            });
-            assertFalse(f.channel.isOpen());
+            f.channel.writeInbound(frame);
+            f.pump();
+            assertSame(frame, f.channel.readInbound());
+            frame.release();
             assertEquals(0, frame.refCnt());
+            assertTrue(f.channel.isOpen());
+            f.channel.writeInbound(f.pong(PLAY, 7));
+            ((ByteBuf) f.channel.readInbound()).release();
+            assertEquals(List.of(7), received);
+            assertSame(decoder, f.channel.pipeline().get(CultDecoder.NAME));
+            assertSame(encoder, f.channel.pipeline().get(CultEncoder.NAME));
         }
     }
 
@@ -1010,7 +1018,7 @@ class CultTransportTest {
     }
 
     @Test
-    void failedInjectedDispatchReleasesBothTheParentAndPreparedChildren() throws Exception {
+    void failedInjectedDispatchReleasesPreparedChildrenAndForwardsTheOriginalParent() throws Exception {
         try (var f = new Fixture(false)) {
             var allocated = new ArrayList<ByteBuf>();
             f.channel.config().setAllocator(new AbstractByteBufAllocator(false) {
@@ -1045,13 +1053,21 @@ class CultTransportTest {
             Wire.writeVarInt(parent, 0);
             var promise = f.channel.newPromise();
             f.channel.writeAndFlush(parent, promise);
-            assertThrows(IllegalArgumentException.class, f.channel::checkException);
+            f.channel.checkException();
             assertEquals(2, allocated.size());
             for (var buffer : allocated) assertEquals(0, buffer.refCnt());
-            assertEquals(0, parent.refCnt());
             assertTrue(promise.isDone());
-            assertFalse(promise.isSuccess());
-            assertNull(f.channel.readOutbound());
+            assertTrue(promise.isSuccess());
+            assertEquals(List.of("minecraft:set_passengers"), f.output());
+            assertEquals(0, parent.refCnt());
+            assertTrue(f.channel.isOpen());
+            assertNotNull(f.channel.pipeline().get(CultDecoder.NAME));
+            assertNotNull(f.channel.pipeline().get(CultEncoder.NAME));
+            var later = new AtomicInteger();
+            f.routes.send(ClientboundPackets.PING, event -> later.incrementAndGet());
+            assertTrue(f.channel.writeAndFlush(f.ping(PLAY, 3)).isSuccess());
+            assertEquals(List.of("P3"), f.output());
+            assertEquals(1, later.get());
         }
     }
 

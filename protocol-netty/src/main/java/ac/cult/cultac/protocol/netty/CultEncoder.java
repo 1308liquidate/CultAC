@@ -63,28 +63,37 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                     return;
                 }
             } catch (Throwable failure) {
-                frame.release();
-                promise.tryFailure(failure);
-                ctx.fireExceptionCaught(failure);
+                CultNetworkManager.reportFailure("outbound packet lookup", failure);
+                ctx.write(frame, promise);
                 return;
             }
         }
-        connection.runInModel(() -> {
-            Output output = null;
-            try {
-                if (removed || !ctx.channel().isActive()) {
-                    new Pending(message, promise).discard(new ClosedChannelException());
-                    return;
+        boolean[] consumed = {false};
+        try {
+            connection.runInModel(() -> {
+                consumed[0] = true;
+                Output output = null;
+                try {
+                    if (removed || !ctx.channel().isActive()) {
+                        new Pending(message, promise).discard(new ClosedChannelException());
+                        return;
+                    }
+                    output = process(ctx, new Pending(message, promise));
+                    if (emission == null) emit(ctx, output);
+                    else emission.append(output);
+                } catch (Throwable failure) {
+                    if (output != null) output.discard(failure);
+                    promise.tryFailure(failure);
+                    CultNetworkManager.reportFailure("outbound packet processing", failure);
                 }
-                output = process(ctx, new Pending(message, promise));
-                if (emission == null) emit(ctx, output);
-                else emission.append(output);
-            } catch (Throwable failure) {
-                if (output != null) output.discard(failure);
-                promise.tryFailure(failure);
-                fail(ctx, failure);
+            });
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("outbound model context", failure);
+            if (!consumed[0]) {
+                if (message instanceof ByteBuf frame) ctx.write(frame, promise);
+                else new Pending(message, promise).discard(failure);
             }
-        });
+        }
     }
 
     @Override
@@ -124,6 +133,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         // Reentrant writes observe the emitted wire state, not an enclosing
         // group's planned delimiters. I/O cannot emit while this dispatch runs.
         var batch = new Batch(insideBundle);
+        ByteBuf fallback = pending.message instanceof ByteBuf frame ? frame.retainedDuplicate() : null;
         try {
             if (pending.message instanceof CultConnection.WriteTask task) {
                 // The active writer captures callback-generated packets at this exact
@@ -139,9 +149,29 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             }
             output.append(batch.output);
         } catch (Throwable failure) {
-            batch.output.discard(failure);
-            pending.promise.tryFailure(failure);
-            throw failure;
+            batch.output.discard(failure, fallback == null ? null : pending.promise);
+            CultNetworkManager.reportFailure("outbound packet expansion", failure);
+            if (fallback != null) {
+                output.frames.addLast(new Frame(fallback, pending.promise, fallbackType(fallback)));
+                fallback = null;
+            } else pending.promise.tryFailure(failure);
+        } finally {
+            if (fallback != null) fallback.release();
+        }
+    }
+
+    private PacketType<?> fallbackType(ByteBuf frame) {
+        try {
+            var route = connection
+                    .dispatcher()
+                    .get(
+                            PacketDirection.CLIENTBOUND,
+                            connection.phase(PacketDirection.CLIENTBOUND),
+                            Wire.peekVarInt(frame));
+            return route == null ? null : route.type();
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("outbound fallback identity", failure);
+            return null;
         }
     }
 
@@ -193,8 +223,9 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 throw new UnsupportedOnVersionException("Not clientbound: " + type);
             }
             encoded = connection.packets().encode(phase, type, write.packet(), ctx.alloc(), connection);
-        } catch (RuntimeException failure) {
+        } catch (Throwable failure) {
             pending.promise.tryFailure(failure);
+            CultNetworkManager.reportFailure("authored packet encoding", failure);
             return false;
         }
         if (encoded.frames().isEmpty()) {
@@ -290,9 +321,6 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 bytes = null;
             }
             return requested;
-        } catch (Throwable failure) {
-            promise.tryFailure(failure);
-            throw failure;
         } finally {
             if (bytes != null) bytes.release();
         }
@@ -367,7 +395,13 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                     }
                     ctx.write(frame.bytes, frame.promise);
                     if (frame.type == ClientboundPackets.BUNDLE_DELIMITER) insideBundle = !insideBundle;
-                    else if (frame.type != null) connection.forwarded(frame.type, null);
+                    else if (frame.type != null) {
+                        try {
+                            connection.forwarded(frame.type, null);
+                        } catch (Throwable failure) {
+                            CultNetworkManager.reportFailure("outbound protocol transition", failure);
+                        }
+                    }
                 }
                 if (output.flush) {
                     output.flush = false;
@@ -389,14 +423,6 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             combiner.finish(group.promise);
         }
         output.groups.clear();
-    }
-
-    private void fail(ChannelHandlerContext ctx, Throwable failure) {
-        try {
-            ctx.fireExceptionCaught(failure);
-        } finally {
-            ctx.close();
-        }
     }
 
     @Override
@@ -449,14 +475,20 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
 
         void discard(Throwable failure) {
+            discard(failure, null);
+        }
+
+        void discard(Throwable failure, ChannelPromise preserved) {
             while (!frames.isEmpty()) {
                 Frame frame = frames.removeFirst();
                 if (frame.bytes != null) {
                     frame.bytes.release();
-                    frame.promise.tryFailure(failure);
+                    if (frame.promise != preserved) frame.promise.tryFailure(failure);
                 }
             }
-            for (GroupCompletion group : groups) group.promise.tryFailure(failure);
+            for (GroupCompletion group : groups) {
+                if (group.promise != preserved) group.promise.tryFailure(failure);
+            }
             groups.clear();
             tasks.clear();
         }

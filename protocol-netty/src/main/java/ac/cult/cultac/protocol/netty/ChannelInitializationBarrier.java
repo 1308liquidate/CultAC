@@ -1,5 +1,6 @@
 package ac.cult.cultac.protocol.netty;
 
+import ac.cult.cultac.network.CultNetworkManager;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -21,11 +22,13 @@ public final class ChannelInitializationBarrier extends ChannelInboundHandlerAda
         try {
             initialize.run();
         } catch (Throwable failure) {
-            ctx.fireExceptionCaught(failure);
-            ctx.close();
-            return;
+            CultNetworkManager.reportFailure("channel initialization", failure);
         } finally {
-            ctx.pipeline().remove(this);
+            try {
+                if (ctx.pipeline().context(this) != null) ctx.pipeline().remove(this);
+            } catch (Throwable failure) {
+                CultNetworkManager.reportFailure("channel initializer removal", failure);
+            }
         }
         ctx.fireChannelRegistered();
     }

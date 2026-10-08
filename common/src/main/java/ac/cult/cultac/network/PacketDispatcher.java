@@ -107,7 +107,7 @@ public class PacketDispatcher {
             var player = user.getCultPlayer();
             if (player == null) routes.connection().dispatch(event, null, event.getOriginalPacket());
             else routes.dispatch(event, player);
-        } catch (Exception | LinkageError failure) {
+        } catch (Throwable failure) {
             discardFailedDispatch(event, failure);
         }
     }
@@ -119,15 +119,14 @@ public class PacketDispatcher {
         try {
             var player = user.getCultPlayer();
             if (player != null) route.dispatch(event, player, event.getOriginalPacket());
-        } catch (Exception | LinkageError failure) {
+        } catch (Throwable failure) {
             discardFailedDispatch(event, failure);
         }
     }
 
     void discardFailedDispatch(ac.cult.cultac.network.event.PacketEvent<?> event, Throwable failure) {
         event.discardChanges();
-        String message = "Error handling packet " + event.getPacketType().key()
-                + "; forwarding it because packet-error kicks are disabled.";
-        ac.cult.cultac.utils.anticheat.LogUtil.error(message, failure);
+        CultNetworkManager.reportFailure(
+                "packet handler " + event.getPacketType().key(), failure);
     }
 }

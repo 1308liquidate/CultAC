@@ -91,8 +91,9 @@ final class VelocityTransport {
                         "CultAC on this proxy inspects Bedrock players only through Geyser on this proxy."));
                 return null;
             }
-        } catch (RuntimeException failure) {
-            return EventTask.resumeWhenComplete(CompletableFuture.failedFuture(failure));
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("Velocity login channel lookup", failure);
+            return null;
         }
         CompletableFuture<Void> attached;
         try {
@@ -103,15 +104,15 @@ final class VelocityTransport {
                         }
                     },
                     channel.eventLoop());
-        } catch (RuntimeException failure) {
+        } catch (Throwable failure) {
             attached = CompletableFuture.failedFuture(failure);
         }
-        attached.whenComplete((ignored, failure) -> {
-            if (failure != null) {
-                player.disconnect(Component.text("Unable to initialize the anticheat connection."));
-            }
-        });
-        return EventTask.resumeWhenComplete(attached);
+        // An exceptional PostLogin task can also make the proxy reject login.
+        // Keep any installed Cult handlers and resume the host event normally.
+        return EventTask.resumeWhenComplete(attached.handle((ignored, failure) -> {
+            if (failure != null) CultNetworkManager.reportFailure("Velocity connection attachment", failure);
+            return null;
+        }));
     }
 
     Channel channel(Player player) {
