@@ -57,8 +57,17 @@ public final class RegistryTagValues {
                 names.unavailable(registry, "<registry>");
                 continue;
             }
+            // These dynamic tag families are not consumed. Via may inject their registry
+            // packets outside the host codec; missing those IDs must not abort login.
+            if (!names.hasWireRegistry(registry)
+                    && !ac.cult.cultac.utils.latency.ClientWorldRegistries.REGISTRIES.contains(registry)
+                    && payload.entries().values().stream().anyMatch(members -> !members.isEmpty())) continue;
             var tags = new LinkedHashMap<String, java.util.List<String>>();
-            int registrySize = names.size(registry);
+            // Vanilla resolves only actual members. Via may add empty dynamic-registry
+            // payloads without sending their contents; those require no wire ID table.
+            int registrySize = payload.entries().values().stream().anyMatch(members -> !members.isEmpty())
+                    ? names.size(registry)
+                    : 0;
             for (var entry : payload.entries().entrySet())
                 tags.put(
                         entry.getKey(),

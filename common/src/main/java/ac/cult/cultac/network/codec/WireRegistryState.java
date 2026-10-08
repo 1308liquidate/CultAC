@@ -50,6 +50,10 @@ public final class WireRegistryState implements WireValueDecoder.Registries {
         return entries == null ? source.registry(registry).id(name) : entries.indexOf(name);
     }
 
+    public boolean hasWireRegistry(String registry) {
+        return received.containsKey(registry) || source.hasRegistry(registry);
+    }
+
     public int size(String registry) {
         var entries = received.get(registry);
         return entries == null ? source.registry(registry).size() : entries.size();

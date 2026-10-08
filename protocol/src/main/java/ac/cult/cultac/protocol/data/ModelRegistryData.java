@@ -87,6 +87,10 @@ public final class ModelRegistryData {
         return stateIds.getOrDefault(state, -1);
     }
 
+    public boolean hasRegistry(String key) {
+        return registries.containsKey(key);
+    }
+
     public IdTable registry(String key) {
         var table = registries.get(key);
         if (table == null) throw new ProtocolResolutionException("Unknown static registry " + key);

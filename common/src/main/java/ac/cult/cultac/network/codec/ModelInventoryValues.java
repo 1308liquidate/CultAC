@@ -50,6 +50,14 @@ final class ModelInventoryValues {
         };
     }
 
+    /** ClientboundContainerSetSlotPacket: container/state VarInts, slot short, optional item. */
+    void writeSlot(ByteBuf output, InventoryPackets.Slot packet) {
+        Wire.writeVarInt(output, packet.windowId());
+        Wire.writeVarInt(output, packet.stateId());
+        output.writeShort(packet.slot());
+        values.write(output, packet.item());
+    }
+
     private InventoryPackets.Equipment equipment(ByteBuf input) {
         int id = Wire.readVarInt(input), slot;
         var entries = new ArrayList<EquipmentEntry>();
