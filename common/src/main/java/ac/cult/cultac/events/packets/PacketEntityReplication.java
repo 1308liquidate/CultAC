@@ -1346,10 +1346,11 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             return null;
         }
 
-        if (requestedDelimiter) event.getWritesBeforeSend().add(bundleDelimiter());
+        // The encoder owns delimiters and reuses an existing host bundle. Adding
+        // explicit delimiters here would close that bundle or double-wrap this group.
+        if (requestedDelimiter) event.bundle();
         event.getWritesAfterSend().addAll(packetsBeforeProof);
         event.getWritesAfterSend().add(proof.packet());
-        if (requestedDelimiter) event.getWritesAfterSend().add(bundleDelimiter());
         event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(proof));
         return proof;
     }
@@ -1359,10 +1360,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         packets.add(proof.packet());
         player.user.write(packets, shouldUseVehicleProtocolBundleDelimiter());
         player.markTrackedTransactionPacketSent(proof);
-    }
-
-    private static CultWrite bundleDelimiter() {
-        return new CultWrite(ac.cult.cultac.protocol.packet.ClientboundPackets.BUNDLE_DELIMITER.opaqueValue(), false);
     }
 
     private boolean shouldUseEntityTrackingBundleDelimiter() {

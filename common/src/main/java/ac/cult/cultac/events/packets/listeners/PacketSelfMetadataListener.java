@@ -5,6 +5,7 @@ import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundAnimate;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.data.SprintingState;
@@ -212,8 +213,10 @@ public class PacketSelfMetadataListener {
     private void handleAnimate(
             PacketSendEvent<ClientboundAnimate> event, CultPlayer player, ClientboundAnimate animation) {
         int action = animation.action();
-        // The pinned original listener also compiles WAKE_UP to zero.
-        if (player.entityID == animation.entityId() && action == 0) {
+        // ClientboundAnimatePacket moved WAKE_UP from 2 to 0 in 26.3 when
+        // swings became a separate packet. Use the format decoded at this hook.
+        int wakeUp = event.getDecodedProtocol().atLeast(ProtocolVersion.V26_3) ? 0 : 2;
+        if (player.entityID == animation.entityId() && action == wakeUp) {
             // Geyser's LEAVE_BED animation changes only the upstream pose. Its
             // movement translator continues dropping auth movement while the
             // entity bed position is non-null, so Bedrock release is owned by

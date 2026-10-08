@@ -294,6 +294,41 @@ public final class ReachabilityOrderingParityTest {
     }
 
     @Test
+    public void vehicleControlCanPrecedeTheNewHotbarSelectionReport() throws Exception {
+        CultPlayer player = offlineJavaPlayer();
+        try {
+            TrackingVehicleC vehicleC = new TrackingVehicleC(player);
+            player.checkManager.allChecks.put(VehicleC.class, vehicleC);
+            VehiclePredictionRunner runner = player.checkManager.getListener(VehiclePredictionRunner.class);
+            Method evaluate = VehiclePredictionRunner.class.getDeclaredMethod(
+                    "evaluateItemControlledVehicle", PacketEntity.class);
+            evaluate.setAccessible(true);
+            player.getInventory().selectHotbarSlot(1);
+
+            // Vanilla can select slot 8 in handleKeybinds after gameMode.tick
+            // reported slot 1, then send Rot/MoveVehicle before reporting slot 8.
+            int[] types = {EntityTypeIds.PIG, EntityTypeIds.STRIDER};
+            String[] items = {"minecraft:carrot_on_a_stick", "minecraft:warped_fungus_on_a_stick"};
+            for (int i = 0; i < types.length; i++) {
+                PacketEntity root = new PacketEntity(types[i], 10 + i);
+                var storage = player.getInventory().inventory.getInventoryStorage();
+                storage.setItem(9, OfflineCultTestBootstrap.item(items[i]));
+                evaluate.invoke(runner, root);
+                assertEquals("An item outside both hands and the hotbar cannot enable control", i + 1, vehicleC.flags);
+
+                storage.setItem(Inventory.HOTBAR_OFFSET + 8, OfflineCultTestBootstrap.item(items[i]));
+                evaluate.invoke(runner, root);
+                assertEquals("The current client selection can be ahead of its packet report", i + 1, vehicleC.flags);
+                assertEquals(1, player.packetStateData.lastSlotSelected);
+                storage.setItem(Inventory.HOTBAR_OFFSET + 8, ac.cult.blocksim.engine.SimItemStack.EMPTY);
+                storage.setItem(9, ac.cult.blocksim.engine.SimItemStack.EMPTY);
+            }
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
+    @Test
     public void vehicleCRemainsIsolatedFromBedrockVehiclePrediction() throws Exception {
         CultPlayer player = offlineBedrockPlayer();
         try {

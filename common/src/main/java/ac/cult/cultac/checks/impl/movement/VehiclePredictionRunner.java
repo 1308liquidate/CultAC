@@ -218,7 +218,9 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
         }
 
         VehicleC vehicleC = player.checkManager.getCheck(VehicleC.class);
-        if (player.getInventory().hasClientSelectedHandItem(requiredItem)) {
+        // mojang is stupid and sends held item a tick behind
+        // TODO: just buffer this?
+        if (player.getInventory().hasClientSelectableHandItem(requiredItem)) {
             vehicleC.reward();
         } else {
             vehicleC.flag();
