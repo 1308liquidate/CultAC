@@ -141,7 +141,7 @@ public class PacketServerTeleport {
 
         player.getSetbackTeleportUtil()
                 .addImmediatePlayerRotationTeleport(
-                        flags, proofTransaction, sourceYaw, sourcePitch, finalYaw, finalPitch);
+                        flags, proofTransaction, sourceYaw, sourcePitch, finalYaw, finalPitch, rotation);
     }
 
     private void handleMoveVehicle(

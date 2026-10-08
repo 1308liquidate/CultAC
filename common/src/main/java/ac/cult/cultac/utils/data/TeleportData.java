@@ -4,6 +4,7 @@ import ac.cult.cultac.bedrock.protocol.BedrockCoordinateFrame;
 import ac.cult.cultac.bedrock.protocol.BedrockTeleportOperation;
 import ac.cult.cultac.bedrock.protocol.BedrockTeleportProvenance;
 import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerRotation;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.utils.math.Vec3;
 import lombok.Getter;
@@ -46,6 +47,9 @@ public class TeleportData {
 
     @Setter
     boolean rotationOnly;
+
+    @Setter
+    ClientboundPlayerRotation playerRotation;
 
     @Setter
     boolean sentWhileVehicle;
@@ -106,12 +110,25 @@ public class TeleportData {
         copy.bedrockLocalPacketTarget = bedrockLocalPacketTarget;
         copy.positionOnly = positionOnly;
         copy.rotationOnly = rotationOnly;
+        copy.playerRotation = playerRotation;
         copy.sentWhileVehicle = sentWhileVehicle;
         copy.sentDuringVehicleDismount = sentDuringVehicleDismount;
         copy.bedrockOnGround = bedrockOnGround;
         copy.bedrockTransportOnly = bedrockTransportOnly;
         copy.bedrockTransportRevision = bedrockTransportRevision;
         copy.bedrockOperation = bedrockOperation;
+        return copy;
+    }
+
+    /** Resolve handleRotatePlayer against the last rotation reported before its immediate echo. */
+    public TeleportData resolvePlayerRotation(float yaw, float pitch) {
+        if (playerRotation == null) return this;
+        TeleportData copy = copyWithLocation(location);
+        copy.sourceYaw = yaw;
+        copy.sourcePitch = pitch;
+        copy.finalYaw = (playerRotation.relativeYaw() ? yaw : 0.0F) + playerRotation.yaw();
+        float changedPitch = (playerRotation.relativePitch() ? pitch : 0.0F) + playerRotation.pitch();
+        copy.finalPitch = Math.max(-90.0F, Math.min(90.0F, changedPitch));
         return copy;
     }
 

@@ -1091,9 +1091,13 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 return teleportData;
             }
 
-            if (matchesRotationTeleport(teleportPos, yaw, pitch)) {
+            // ClientPacketListener handles bundled rotations in order and immediately
+            // sends each Rot. In-flight ordinary look updates also precede that echo.
+            // Relative angles therefore use the receive timeline, not the send snapshot.
+            TeleportData resolved = teleportPos.resolvePlayerRotation(player.xRot, player.yRot);
+            if (matchesRotationTeleport(resolved, yaw, pitch)) {
                 pendingTeleports.poll();
-                teleportData.setTeleportData(teleportPos.copyWithLocation(new Vec3(player.x, player.y, player.z)));
+                teleportData.setTeleportData(resolved.copyWithLocation(new Vec3(player.x, player.y, player.z)));
                 teleportData.setTeleport(true);
                 return teleportData;
             }
@@ -1730,11 +1734,13 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             float sourceYaw,
             float sourcePitch,
             float finalYaw,
-            float finalPitch) {
+            float finalPitch,
+            ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerRotation rotation) {
         int transaction = proofTransaction < 0 ? Integer.MAX_VALUE : proofTransaction;
         TeleportData data = new TeleportData(
                 Vec3.ZERO, flags, Vec3.ZERO, transaction, 0, sourceYaw, sourcePitch, finalYaw, finalPitch);
         data.setRotationOnly(true);
+        data.setPlayerRotation(rotation);
         pendingTeleports.add(data);
         if (proofTransaction >= 0) {
             player.latencyUtils.addRealTimeTask(transaction, () -> {
