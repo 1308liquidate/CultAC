@@ -1,5 +1,6 @@
 package ac.cult.cultac.bedrock.logging;
 
+import ac.cult.cultac.logging.PacketLogText;
 import org.cloudburstmc.protocol.bedrock.packet.BedrockPacket;
 import org.cloudburstmc.protocol.bedrock.packet.MovePlayerPacket;
 import org.cloudburstmc.protocol.bedrock.packet.PlayerAuthInputPacket;
@@ -15,6 +16,6 @@ public final class BedrockPacketLogFormatter {
     }
 
     public static String escape(String value) {
-        return value.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n");
+        return PacketLogText.escape(value);
     }
 }

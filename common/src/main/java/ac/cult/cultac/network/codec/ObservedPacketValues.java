@@ -95,6 +95,15 @@ public final class ObservedPacketValues implements PacketValueAdapter {
     }
 
     @Override
+    public Object readForObservation(ByteBuf input, ProtocolContext context) {
+        if (context.wireName().equals("minecraft:registry_data")) {
+            var packet = decoder.registry(input);
+            return new RegistryData(packet.registry(), packet.entries());
+        }
+        return read(input, context);
+    }
+
+    @Override
     public void write(ByteBuf output, ProtocolContext context, Object packet) {
         if (packet instanceof WorldPackets.BlockUpdate block) {
             output.writeLong(block.position().asLong());

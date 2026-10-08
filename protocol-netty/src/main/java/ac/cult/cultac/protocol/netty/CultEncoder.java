@@ -59,6 +59,10 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             try {
                 var phase = connection.phase(PacketDirection.CLIENTBOUND);
                 if (connection.dispatcher().get(PacketDirection.CLIENTBOUND, phase, Wire.peekVarInt(frame)) == null) {
+                    if (connection.packetLoggingActive()) {
+                        connection.runInModel(
+                                () -> connection.observePacket(PacketDirection.CLIENTBOUND, phase, frame));
+                    }
                     ctx.write(frame, promise);
                     return;
                 }
@@ -393,6 +397,8 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                         ctx.flush();
                         continue;
                     }
+                    connection.observePacket(
+                            PacketDirection.CLIENTBOUND, connection.phase(PacketDirection.CLIENTBOUND), frame.bytes);
                     ctx.write(frame.bytes, frame.promise);
                     if (frame.type == ClientboundPackets.BUNDLE_DELIMITER) insideBundle = !insideBundle;
                     else if (frame.type != null) {

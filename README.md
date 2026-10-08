@@ -149,3 +149,18 @@ What makes Cult stand out against other anticheats?
 
 * All systems are designed to be highly secure and mathematically impossible to bypass
 * For example, the prediction engine knows all possible movements and cannot be bypassed
+
+### Java packet logging
+
+Use `/cult debug javapacketlog <username>` to start or stop a readable packet capture for a connected player.
+The command requires `cult.debug` and also works through the `cultac`, `grim`, and `grimac` aliases.
+Use `/cult debug javapacketlog <username> --onjoin` to capture the next connection for that Java-side profile name,
+including the Floodgate prefix when applicable. Captures start when the authenticated profile is available,
+covering configuration and play traffic.
+
+Logs are saved under the plugin data folder in `javapacketlogs/`. They contain inbound packets before listener changes
+and outbound packets in their emitted order, including Geyser's translated Java traffic. The logger uses existing
+decoded fields and named empty packets; unread payloads are omitted and counted in the footer. Binary fields are
+summarized by size, and item stacks show type and quantity. Headers identify the observed and model protocols.
+Outbound records describe observed writes rather than client acknowledgements. Disconnecting stops the capture,
+and the command reports the path after saving.

@@ -1,5 +1,6 @@
 package ac.cult.cultac.network;
 
+import ac.cult.cultac.network.logging.JavaPacketLogger;
 import ac.cult.cultac.network.packet.LegacyViaInputBridge;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.network.protocol.util.viaversion.ViaVersionUtil;
@@ -23,6 +24,22 @@ public final class CultNetworkManager {
     private boolean loaded;
     private boolean started;
     private CompletableFuture<Void> stopped;
+    private volatile JavaPacketLogger packetLogger;
+
+    public JavaPacketLogger getJavaPacketLogger() {
+        return packetLogger;
+    }
+
+    public synchronized void initializePacketLogger(
+            java.nio.file.Path directory, String platform, String version, java.util.function.Consumer<String> report) {
+        if (packetLogger != null) return;
+        var logger = new JavaPacketLogger(directory, platform, version, report);
+        packetLogger = logger;
+        for (var connection : connections.snapshot()) {
+            connection.packetObserver(logger.observer(connection));
+            connection.execute(connection::notifyPacketLogIdentity);
+        }
+    }
 
     public PacketDispatcher dispatcher() {
         return java.util.Objects.requireNonNull(dispatcher, "Configure transport before use");
@@ -48,6 +65,8 @@ public final class CultNetworkManager {
     public CultConnection createConnection(PlatformConnection platform, Channel channel) {
         var connection = new CultConnection(
                 java.util.Objects.requireNonNull(platform), channel, dispatcher(), ch -> ownerResolver.apply(ch));
+        var logger = packetLogger;
+        if (logger != null) connection.packetObserver(logger.observer(connection));
         connections.attach(connection);
         return connection;
     }
@@ -94,7 +113,8 @@ public final class CultNetworkManager {
             removeChannels
                     .get()
                     .thenCompose(ignored -> connections.disconnectRemainingUsers())
-                    .thenRun(this::finishStop)
+                    // Writer draining must not block a connection's packet owner.
+                    .thenRunAsync(this::finishStop)
                     .whenComplete((ignored, failure) -> {
                         if (failure == null) completion.complete(null);
                         else completion.completeExceptionally(failure);
@@ -106,6 +126,9 @@ public final class CultNetworkManager {
     }
 
     private synchronized void finishStop() {
+        var logger = packetLogger;
+        packetLogger = null;
+        if (logger != null) logger.close();
         connections.clearUsers();
         dispatcher.clear();
         loaded = false;

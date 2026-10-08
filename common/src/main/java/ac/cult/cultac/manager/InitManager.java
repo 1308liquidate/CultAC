@@ -49,6 +49,7 @@ public class InitManager {
                 .add(new PacketManager())
                 .add(new ViaBackwardsManager())
                 .add(new TickRunner())
+                .add(new JavaPacketLoggerInit())
                 .add(new CommandRegister(CultAPI.INSTANCE.getCommandService()))
                 .add(new UpdateChecker())
                 .add(new PacketLimiter())

@@ -1,5 +1,6 @@
 package ac.cult.cultac.network;
 
+import ac.cult.cultac.network.logging.PacketLogObserver;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.*;
@@ -31,6 +32,47 @@ public final class CultConnection implements CodecState {
     private Consumer<CultConnection> initializer = ignored -> {};
     private BiConsumer<Object, ChannelPromise> reentrantWriter;
     private volatile CompletableFuture<Void> removed;
+    private volatile PacketLogObserver packetObserver = PacketLogObserver.NONE;
+
+    public void packetObserver(PacketLogObserver observer) {
+        packetObserver = Objects.requireNonNull(observer);
+    }
+
+    public boolean packetLoggingActive() {
+        try {
+            return packetObserver.active();
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("packet log status", failure);
+            stopPacketLog("INCOMPLETE: observer failure");
+            return false;
+        }
+    }
+
+    public void observePacket(PacketDirection direction, ConnectionPhase phase, io.netty.buffer.ByteBuf frame) {
+        try {
+            packetObserver.packet(direction, phase, frame);
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("packet logging", failure);
+            stopPacketLog("INCOMPLETE: observer failure");
+        }
+    }
+
+    public void notifyPacketLogIdentity() {
+        try {
+            if (user != null) packetObserver.identity(user.getProfile());
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("packet log identity", failure);
+            stopPacketLog("INCOMPLETE: identity failure");
+        }
+    }
+
+    public void stopPacketLog(String reason) {
+        try {
+            packetObserver.stop(reason);
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("packet log stop", failure);
+        }
+    }
 
     public CultConnection(Channel channel, PacketDispatcher dispatcher, Function<Channel, PacketOwner> resolver) {
         this(null, channel, dispatcher, resolver);
@@ -163,6 +205,7 @@ public final class CultConnection implements CodecState {
         if (this.user != null && this.user != user) throw new IllegalStateException("Session already has an identity");
         if (disconnected) throw new IllegalStateException("Session has disconnected");
         this.user = user;
+        notifyPacketLogIdentity();
     }
     /** PlayerDataManager owns attachment mutations under this session's monitor. */
     public void player(CultPlayer player) {
@@ -236,6 +279,8 @@ public final class CultConnection implements CodecState {
             removed.complete(null);
         } catch (Throwable failure) {
             removed.completeExceptionally(failure);
+        } finally {
+            stopPacketLog("transport removal");
         }
         return removed;
     }

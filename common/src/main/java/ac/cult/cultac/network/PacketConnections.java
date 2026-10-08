@@ -115,6 +115,7 @@ final class PacketConnections {
 
     private void finishDisconnect(CultConnection session) {
         if (!session.markDisconnected()) return;
+        session.stopPacketLog("disconnect");
         var user = session.user();
         try {
             if (user != null) {

@@ -39,6 +39,26 @@ public final class ProjectedPackets implements AutoCloseable {
             ByteBuf physical,
             CodecState state,
             Predicate<PacketType<?>> consumed) {
+        return read(phase, direction, physical, state, consumed, false);
+    }
+
+    /** Borrows the frame and reads diagnostic values without committing adapter state. */
+    public List<Value> observe(
+            ConnectionPhase phase,
+            PacketDirection direction,
+            ByteBuf physical,
+            CodecState state,
+            Predicate<PacketType<?>> consumed) {
+        return read(phase, direction, physical, state, consumed, true);
+    }
+
+    private List<Value> read(
+            ConnectionPhase phase,
+            PacketDirection direction,
+            ByteBuf physical,
+            CodecState state,
+            Predicate<PacketType<?>> consumed,
+            boolean observation) {
         if (closed) throw new IllegalStateException("Packet values are closed");
         var input = physical.duplicate();
         int id = Wire.readVarInt(input);
@@ -58,8 +78,8 @@ public final class ProjectedPackets implements AutoCloseable {
                     32767,
                     0,
                     state);
-            packet = Objects.requireNonNull(adapter.get(), "Missing observed value decoder")
-                    .read(input, context);
+            var values = Objects.requireNonNull(adapter.get(), "Missing observed value decoder");
+            packet = observation ? values.readForObservation(input, context) : values.read(input, context);
             if (!type.recordClass().isInstance(packet))
                 throw new ProtocolResolutionException("Wrong observed value record for " + type);
             if (type.codec().readsEntirePayload() && input.isReadable())

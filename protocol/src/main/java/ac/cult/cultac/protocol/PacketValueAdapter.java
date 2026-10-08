@@ -6,5 +6,10 @@ import io.netty.buffer.ByteBuf;
 public interface PacketValueAdapter {
     Object read(ByteBuf input, ProtocolContext context);
 
+    /** Diagnostic decoding must not update connection registry or simulation state. */
+    default Object readForObservation(ByteBuf input, ProtocolContext context) {
+        throw new UnsupportedOnVersionException("Adapter does not support read-only observation");
+    }
+
     void write(ByteBuf output, ProtocolContext context, Object packet);
 }

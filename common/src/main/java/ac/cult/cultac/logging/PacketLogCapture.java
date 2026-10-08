@@ -1,4 +1,4 @@
-package ac.cult.cultac.bedrock.logging;
+package ac.cult.cultac.logging;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /** Producers snapshot records; only the logger's writer thread touches the file. */
-final class PacketLogCapture {
+public final class PacketLogCapture {
     private record Record(byte[] bytes) {}
 
     private final ArrayDeque<Record> queue = new ArrayDeque<>();
@@ -21,27 +21,51 @@ final class PacketLogCapture {
     private final long globalLimit;
     private final long started = System.nanoTime();
     private final String header;
-    final Path path;
-    final CompletableFuture<Path> opened = new CompletableFuture<>();
-    final CompletableFuture<Path> finished = new CompletableFuture<>();
+    private final Supplier<String> footer;
+    private final Path path;
+    private final CompletableFuture<Path> opened = new CompletableFuture<>();
+    private final CompletableFuture<Path> finished = new CompletableFuture<>();
     private BufferedWriter writer;
     private long pendingBytes;
     private long sequence;
     private String stopReason;
 
-    PacketLogCapture(Path path, String header, AtomicLong globalBytes, long captureLimit, long globalLimit) {
+    public PacketLogCapture(Path path, String header, AtomicLong globalBytes, long captureLimit, long globalLimit) {
+        this(path, header, globalBytes, captureLimit, globalLimit, () -> "");
+    }
+
+    public PacketLogCapture(
+            Path path,
+            String header,
+            AtomicLong globalBytes,
+            long captureLimit,
+            long globalLimit,
+            Supplier<String> footer) {
         this.path = path;
         this.header = header;
         this.globalBytes = globalBytes;
         this.captureLimit = captureLimit;
         this.globalLimit = globalLimit;
+        this.footer = footer;
     }
 
-    synchronized boolean recording() {
+    public Path path() {
+        return path;
+    }
+
+    public CompletableFuture<Path> opened() {
+        return opened;
+    }
+
+    public CompletableFuture<Path> finished() {
+        return finished;
+    }
+
+    public synchronized boolean recording() {
         return stopReason == null;
     }
 
-    synchronized void record(Supplier<String> snapshot) {
+    public synchronized void record(Supplier<String> snapshot) {
         if (stopReason != null) return;
         try {
             String value = snapshot.get();
@@ -66,7 +90,7 @@ final class PacketLogCapture {
         }
     }
 
-    synchronized void stop(String reason) {
+    public synchronized void stop(String reason) {
         if (stopReason == null) stopReason = reason;
     }
 
@@ -79,7 +103,7 @@ final class PacketLogCapture {
         return record;
     }
 
-    void drain() {
+    public void drain() {
         if (finished.isDone()) return;
         try {
             if (writer == null) {
@@ -100,7 +124,8 @@ final class PacketLogCapture {
                 reason = queue.isEmpty() ? stopReason : null;
             }
             if (reason != null) {
-                writer.write("END records=" + sequence + " reason=" + BedrockPacketLogFormatter.escape(reason) + "\n");
+                writer.write(
+                        "END records=" + sequence + " reason=" + PacketLogText.escape(reason) + footer.get() + "\n");
                 writer.close();
                 if (reason.startsWith("INCOMPLETE:")) {
                     finished.completeExceptionally(new IOException(reason));

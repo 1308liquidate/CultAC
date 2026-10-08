@@ -2,6 +2,8 @@ package ac.cult.cultac.bedrock.logging;
 
 import ac.cult.cultac.bedrock.protocol.BedrockCoordinateFrame;
 import ac.cult.cultac.bedrock.protocol.BedrockTeleportProvenance;
+import ac.cult.cultac.logging.PacketLogCapture;
+import ac.cult.cultac.logging.PendingPacketCaptures;
 import ac.cult.cultac.utils.math.Vec3;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -65,10 +67,11 @@ public final class BedrockPacketLogger implements AutoCloseable {
         PacketLogCapture existing = captures.get(connection);
         if (existing != null) {
             existing.stop("manual stop");
-            existing.finished.whenComplete((path, failure) -> feedback.accept(
-                    failure == null
-                            ? "Saved Geyser packet log: " + path
-                            : "Geyser packet log failed: " + existing.path + ": " + failure.getMessage()));
+            existing.finished()
+                    .whenComplete((path, failure) -> feedback.accept(
+                            failure == null
+                                    ? "Saved Geyser packet log: " + path
+                                    : "Geyser packet log failed: " + existing.path() + ": " + failure.getMessage()));
             return;
         }
         start(connection, username, protocol, uuid, "online command", feedback);
@@ -84,14 +87,16 @@ public final class BedrockPacketLogger implements AutoCloseable {
                 + "\noutbound=observed writes, not client acknowledgement\n\n";
         PacketLogCapture capture = new PacketLogCapture(path, header, queuedBytes, 16L << 20, 64L << 20);
         captures.put(connection, capture);
-        capture.opened.whenComplete((file, failure) -> feedback.accept(
-                failure == null
-                        ? "Started Geyser packet capture for " + username + ": " + file
-                        : "Unable to open Geyser packet log: " + path + ": " + failure.getMessage()));
-        capture.finished.whenComplete((file, failure) -> report.accept(
-                failure == null
-                        ? "Saved Geyser packet log: " + file
-                        : "Geyser packet log incomplete: " + path + ": " + failure.getMessage()));
+        capture.opened()
+                .whenComplete((file, failure) -> feedback.accept(
+                        failure == null
+                                ? "Started Geyser packet capture for " + username + ": " + file
+                                : "Unable to open Geyser packet log: " + path + ": " + failure.getMessage()));
+        capture.finished()
+                .whenComplete((file, failure) -> report.accept(
+                        failure == null
+                                ? "Saved Geyser packet log: " + file
+                                : "Geyser packet log incomplete: " + path + ": " + failure.getMessage()));
     }
 
     public void record(Object connection, String direction, BedrockPacket packet) {
@@ -140,7 +145,7 @@ public final class BedrockPacketLogger implements AutoCloseable {
     private void drain() {
         captures.forEach((connection, capture) -> {
             capture.drain();
-            if (capture.finished.isDone()) captures.remove(connection, capture);
+            if (capture.finished().isDone()) captures.remove(connection, capture);
         });
     }
 

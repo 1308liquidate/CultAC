@@ -77,6 +77,7 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
         ServerboundPacket originalPacket = null;
         try {
             var phase = connection.phase(PacketDirection.SERVERBOUND);
+            connection.observePacket(PacketDirection.SERVERBOUND, phase, frame);
             PacketType<?> forwardedType = null;
             ServerboundPacket forwardedPacket = null;
             for (var value : connection

@@ -1,4 +1,4 @@
-package ac.cult.cultac.bedrock.logging;
+package ac.cult.cultac.logging;
 
 import com.google.common.collect.EvictingQueue;
 import java.util.Locale;
