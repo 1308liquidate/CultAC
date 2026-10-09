@@ -29,6 +29,11 @@ public class PredVector extends Vec3 {
     @Setter
     boolean isTickSkip = false;
 
+    // Player#causeExtraKnockback 0.6 X/Z dampings applied to this starting velocity
+    @Getter
+    @Setter
+    int attackSlows = 0;
+
     List<TransactionVel> packetModifiers = null;
 
     public PredVector(Vec3 vec, PredVector lastVector, String reason) {
@@ -38,6 +43,7 @@ public class PredVector extends Vec3 {
         this.isKnockback = lastVector.isKnockback;
         this.isBoundedStep = lastVector.isBoundedStep;
         this.isTickSkip = lastVector.isTickSkip;
+        this.attackSlows = lastVector.attackSlows;
         this.reason = reason;
         this.packetModifiers = lastVector.packetModifiers;
     }

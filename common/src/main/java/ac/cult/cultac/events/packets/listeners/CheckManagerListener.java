@@ -58,6 +58,7 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItemOn;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.protocol.value.Hand;
+import ac.cult.cultac.utils.nmsutil.IsUsingItem;
 import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
 import ac.cult.cultac.protocol.value.Vec3d;
@@ -382,7 +383,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
 
     private void processPlayerLoadedReceive(PacketReceiveEvent event, CultPlayer player) {
         if (event.getPhase() != ConnectionPhase.PLAY) return;
-        // TODO: This packet is skipped if the client ticks more than 60 times without loading in
+        // ClientPacketListener#notifyPlayerLoaded sends this as it sets clientLoaded, before this tick's player tick.
         player.packetStateData.playerLoadedIntoLevel = true;
         processNonMovementReceiveAfterPlayGate(event, player);
     }
@@ -404,6 +405,27 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         dispatchPrePredictionReceive(event, player);
         dispatchReceiveHandlers(event, player);
         clearTransientPacketState(player);
+    }
+
+    private static void onLocalPlayerSprintTick(CultPlayer player) {
+        // LocalPlayer#tick only reaches sendIsSprintingIfNeeded mounted when the root vehicle is
+        // locally authoritative, and then after the vehicle movement; hold the model while mounted.
+        if (!localPlayerTicked(player) || player.compensatedEntities.getSelf().inVehicle()) return;
+        player.sprintState.onClientTick(player.isSprinting);
+    }
+
+    // LocalPlayer#tick runs only once ClientPacketListener#hasClientLoaded, which 1.21.4 introduced.
+    private static boolean localPlayerTicked(CultPlayer player) {
+        return !player.isBedrockMovement()
+                && (player.packetStateData.playerLoadedIntoLevel
+                        || player.getClientVersion().isOlderThan(ClientVersion.V_1_21_4));
+    }
+
+    // Player#tick advances the attack ticker every client tick, including Entity#rideTick.
+    private static void onLocalPlayerAttackTick(CultPlayer player) {
+        if (!localPlayerTicked(player)) return;
+        player.attackStrength.onClientTick(
+                player.getInventory().getHeldItem(), player.packetStateData.carriedItemChangedThisClientTick);
     }
 
     private void processMovePlayerReceive(
@@ -556,6 +578,13 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         // A teleport acknowledgement is not LocalPlayer#tick movement.
         if (!player.packetStateData.lastPacketWasTeleport) {
             player.packetStateData.receivedMovementThisClientTick = true;
+            // Only LocalPlayer#tick sends movement, and it requires ClientPacketListener#hasClientLoaded.
+            player.packetStateData.playerLoadedIntoLevel = true;
+            // LocalPlayer#sendPosition sends this tick's START/STOP_SPRINTING before its movement.
+            // The 1.17 duplicate is sent from MultiPlayerGameMode#useItem, before aiStep.
+            if (!player.packetStateData.lastPacketWasOnePointSeventeenDuplicate) {
+                onLocalPlayerSprintTick(player);
+            }
         }
 
         dispatchPrePredictionReceive(event, player);
@@ -1098,6 +1127,9 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         // The Geyser bridge ends each Bedrock client tick after translating its frame. Geyser's
         // tick end here only closes that frame's Java projection.
         if (player.user.getBedrockBridgeConnection() == null) {
+            // LocalPlayer#aiStep finished before ServerboundClientTickEndPacket.
+            onLocalPlayerSprintTick(player);
+            onLocalPlayerAttackTick(player);
             dispatchPrePredictionReceive(event, player);
             dispatchReceiveHandlers(event, player);
 

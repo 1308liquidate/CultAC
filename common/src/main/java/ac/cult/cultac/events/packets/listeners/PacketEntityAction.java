@@ -28,12 +28,10 @@ public class PacketEntityAction {
             case START_SPRINTING:
                 player.isSprinting = true;
                 player.vehicleData.camelSprintingState = SprintingState.STARTED;
-                player.compensatedEntities.hasSprintingAttributeEnabled = true;
                 break;
             case STOP_SPRINTING:
                 player.isSprinting = false;
                 player.vehicleData.camelSprintingState = SprintingState.STOPPED;
-                player.compensatedEntities.hasSprintingAttributeEnabled = false;
                 break;
             case START_FLYING_WITH_ELYTRA:
                 if (player.onGround || player.lastOnGround || lavaPreventsGlideActivation(player)) {

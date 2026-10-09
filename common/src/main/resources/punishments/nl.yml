@@ -38,6 +38,7 @@ Punishments:
     checks:
       - "Knockback"
       - "Explosion"
+      - "KeepSprint"
     commands:
       - "5:5 [alert]"
       - "1:1 [log]"

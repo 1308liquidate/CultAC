@@ -1612,6 +1612,24 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 this.currentPredictionVehicle());
     }
 
+    /**
+     * LocalPlayer#aiStep updates the sprint flag before LivingEntity#travel, and LocalPlayer#sendPosition sends
+     * the resulting START/STOP_SPRINTING before the movement, so the client's last START/STOP is the travel flag.
+     * LivingEntity#checkAutoSpinAttack runs after travel and can reach Player#causeExtraKnockback ->
+     * setSprinting(false) before that START/STOP, so a riptide spin keeps both states.
+     */
+    private DesyncStatus sprintingAtTravel(CultPlayer player, @Nullable PacketEntity riding) {
+        if (riding != null) return DesyncStatus.FALSE;
+        if (player.isBedrockMovement() || player.riptideSpinAttackTicks > 0) return DesyncStatus.UNKNOWN;
+        return DesyncStatus.fromBoolean(player.isSprinting);
+    }
+
+    // The tick's START/STOP and movement have already reconciled ClientSprintState to post-aiStep.
+    private boolean sprintModifierAtTravel(CultPlayer player, @Nullable PacketEntity riding) {
+        if (riding != null || player.isBedrockMovement() || player.riptideSpinAttackTicks > 0) return true;
+        return player.sprintState.modifier();
+    }
+
     private SimulationContext createSimulationContext(
             CultPlayer player,
             PredictionResult lastPrediction,
@@ -1646,7 +1664,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 player.compensatedEntities.getPotionLevelForPlayer(MovementEffect.JUMP_BOOST),
                 this.getDepthStriderLevel(),
                 this.getSwiftSneakLevel(),
-                riding != null ? DesyncStatus.FALSE : DesyncStatus.UNKNOWN,
+                this.sprintingAtTravel(player, riding),
                 player.minPlayerAttackSlow,
                 player.maxPlayerAttackSlow,
                 player.packetStateData.riptideLevel,
@@ -1660,6 +1678,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                         : lastPrediction.getSimulationContext().getWorldData().getMainSupportingBlockPos(),
                 player.pose,
                 player.getScale());
+        context.setSprintModifier(this.sprintModifierAtTravel(player, riding));
         context.setProfileCarry(this.profileCarry);
         context.setBedrockTeleport(player.isBedrockMovement() ? this.bedrockTeleport : null);
         context = movementProfile.createContext(player, context, authoredMovementFrame);

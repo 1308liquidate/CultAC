@@ -119,12 +119,14 @@ public final class PacketPlayerRespawnLifecycleTest {
                 int dimensionType = worldChange
                         ? ModelRegistryNamesState.defaults().id("minecraft:dimension_type", "minecraft:the_nether")
                         : initial.dimensionTypeId();
-                var respawn = new ClientboundRespawn(new PlayerSpawnInfo(
-                        dimensionType,
-                        worldChange ? "minecraft:the_nether" : initial.dimension(),
-                        GameMode.SURVIVAL,
-                        19,
-                        -99));
+                var respawn = new ClientboundRespawn(
+                        new PlayerSpawnInfo(
+                                dimensionType,
+                                worldChange ? "minecraft:the_nether" : initial.dimension(),
+                                GameMode.SURVIVAL,
+                                19,
+                                -99),
+                        (byte) 0);
                 listener.onRespawn(sendEvent(player, ClientboundPackets.RESPAWN, respawn), player, respawn);
                 assertEquals(81, player.compensatedWorld.clientSeaLevel());
                 assertEquals(55L, player.compensatedWorld.clientBiomeZoomSeed());
@@ -140,7 +142,7 @@ public final class PacketPlayerRespawnLifecycleTest {
 
     private static ClientboundRespawn respawnPacket() {
         int id = ModelRegistryNamesState.defaults().id("minecraft:dimension_type", "minecraft:overworld");
-        return new ClientboundRespawn(new PlayerSpawnInfo(id, "minecraft:overworld", GameMode.SURVIVAL));
+        return new ClientboundRespawn(new PlayerSpawnInfo(id, "minecraft:overworld", GameMode.SURVIVAL), (byte) 0);
     }
 
     private static ClientboundLogin loginPacket(boolean showDeathScreen) {

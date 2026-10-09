@@ -32,6 +32,9 @@ public class PacketChangeGameState extends CultProcessor implements CheckListene
                 case 3 -> GameMode.SPECTATOR;
                 default -> GameMode.SURVIVAL;
             };
+            // MultiPlayerGameMode#setLocalMode -> GameType#updatePlayerAbilities. An explicit
+            // abilities packet can subsequently overwrite instabuild independently of game mode.
+            player.canInstabuild = player.gamemode == GameMode.CREATIVE;
             player.isInvulnerable = player.gamemode == GameMode.CREATIVE || player.gamemode == GameMode.SPECTATOR;
             player.compensatedEntities.getSelf().setDefaultBlockInteractionRange(player.gamemode == GameMode.CREATIVE);
 

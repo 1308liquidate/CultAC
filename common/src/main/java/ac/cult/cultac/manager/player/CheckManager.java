@@ -357,6 +357,7 @@ public class CheckManager {
                 new SetbackTeleportUtil(player), // setback state depends on current friction
                 player.knockbackHandler,
                 player.explosionHandler,
+                player.keepSprint,
                 player.compensatedFireworks,
                 player.lastInstanceManager,
                 new PacketOrderA(player),

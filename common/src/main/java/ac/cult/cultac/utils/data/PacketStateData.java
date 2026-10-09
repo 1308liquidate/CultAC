@@ -22,8 +22,9 @@ public class PacketStateData {
     // Geyser sent AcceptTeleportation; its teleport PosRot is the next MovePlayer.
     public boolean bedrockServerResponse;
     private Boolean desiredOnGround;
-    // ServerboundPlayerLoadedPacket is the client-visible post-load boundary for modern clients.
-    public boolean playerLoadedIntoLevel = false;
+    // ClientPacketListener#hasClientLoaded: cleared by login and respawn, set with ServerboundPlayerLoadedPacket.
+    // LocalPlayer#tick only runs while it is set. A connection attached mid-session starts loaded.
+    public boolean playerLoadedIntoLevel = true;
     public int lastSlotSelected;
     // Packet-ordered mirror of LocalPlayer's active item state.  Checks must not
     // read Bukkit's server-thread active item because the attack/use ordering is

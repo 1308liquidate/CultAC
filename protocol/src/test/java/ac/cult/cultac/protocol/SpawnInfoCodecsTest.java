@@ -50,7 +50,7 @@ class SpawnInfoCodecsTest {
     }
 
     @Test
-    void respawnPreservesNegativeSeaLevelAndLeavesTheKeptDataByteUnread() {
+    void respawnPreservesNegativeSeaLevelAndDecodesTheKeptDataByte() {
         for (var version : ProtocolVersion.values())
             for (boolean deathLocation : new boolean[] {false, true}) {
                 ByteBuf bytes = Unpooled.buffer();
@@ -67,8 +67,8 @@ class SpawnInfoCodecsTest {
                     var respawn = new RespawnCodec().read(bytes, context);
                     assertEquals(
                             new PlayerSpawnInfo(2, "cult:level", GameMode.ADVENTURE, -48, 1234), respawn.spawnInfo());
-                    assertEquals(1, bytes.readableBytes());
-                    assertEquals(3, bytes.readUnsignedByte());
+                    assertEquals(3, respawn.dataToKeep());
+                    assertEquals(0, bytes.readableBytes());
                 } finally {
                     bytes.release();
                 }

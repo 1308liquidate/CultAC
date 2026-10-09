@@ -46,10 +46,12 @@ import ac.cult.cultac.utils.anticheat.update.PositionUpdate;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ReachInterpolationData;
+import ac.cult.cultac.utils.data.ClientAttackStrength;
 import ac.cult.cultac.utils.data.TeleportAcceptData;
 import ac.cult.cultac.utils.data.TeleportData;
 import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.data.VehicleTeleportData;
+import ac.cult.cultac.utils.inventory.Inventory;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHook;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
@@ -909,12 +911,15 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         int entityID = packet.entityId();
         List<AttributeSnapshot> values = packet.attributes();
 
-        if (isDirectlyAffectingPlayer(player, entityID)) {
+        if (entityID == player.entityID || isDirectlyAffectingPlayer(player, entityID)) {
             CultPlayer.TrackedTransaction proof = player.appendTrailingProofTransaction(event);
             if (proof == null) {
                 player.compensatedEntities.updateAttributes(entityID, values);
                 return;
             }
+            // handleBundlePacket applies the attribute snapshot and its proof in one client task,
+            // before the next client tick. Keep an existing wire bundle rather than nesting one.
+            if (player.supportsBundles() && !event.isInsideBundle()) event.bundle();
             player.latencyUtils.addRealTimeTask(
                     proof.transaction(), () -> player.compensatedEntities.updateAttributes(entityID, values));
             return;
@@ -931,6 +936,33 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     private void handleEntityEvent(PacketSendEvent<ClientboundEntityEvent> event, ClientboundEntityEvent packet) {
         int entityId = packet.entityId();
         byte status = packet.status();
+        if (status == 9 && entityId == player.entityID && !player.isBedrockMovement()) {
+            // Player#handleEntityEvent(9) calls completeUsingItem. The client never completes timed
+            // consumption autonomously. Group the event and proof so its replacement is before one
+            // precise client tick, retaining only the unreported selected-slot/active-use ambiguity.
+            var proof = player.appendTrailingProofTransaction(event);
+            if (proof != null && player.supportsBundles() && !event.isInsideBundle()) event.bundle();
+            Runnable apply = () -> {
+                if (player.canInstabuild) return;
+                // A failed inventory prediction or an unconfirmed instant use can leave the
+                // actual consumable/count unknown; a stale modeled count must not rule it out.
+                if (player.attackStrength.hasUnconfirmedHotbarChange()) {
+                    player.attackStrength.onPossibleMainHandChange();
+                }
+                for (int slot = 0; slot < 9; slot++) {
+                    var stack = player.getInventory().inventory.getInventoryStorage()
+                            .getItem(Inventory.HOTBAR_OFFSET + slot);
+                    // A hotbar selection can precede its claim by one tick. Do not assume the
+                    // server's selected slot or live item-use state identifies the client hand.
+                    if (ClientAttackStrength.changesItemOnUseCompletion(stack, player.canInstabuild)) {
+                        player.attackStrength.onPossibleMainHandChange();
+                        player.attackStrength.markUnconfirmedHotbarSlot(slot);
+                    }
+                }
+            };
+            if (proof != null) player.latencyUtils.addRealTimeTask(proof.transaction(), apply);
+            else player.latencyUtils.addRealTimeTaskNow(apply);
+        }
         if (status == 3) {
             // LivingEntity.handleEntityEvent sets non-player health to zero. Keep the action
             // predicate on the client-confirmed boundary; existing movement death handling stays below.

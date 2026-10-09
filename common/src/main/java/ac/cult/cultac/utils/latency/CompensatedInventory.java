@@ -341,7 +341,27 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
             return;
         }
 
-        applyContainerClick(packet);
+        // Only changes of item type can reset Player#attackStrengthTicker. Use the existing
+        // validated inventory prediction, not the packet's unvalidated changed-slot claims.
+        String[] hotbarBefore = new String[9];
+        for (int slot = 0; slot < 9; slot++) {
+            hotbarBefore[slot] = inventory.getInventoryStorage().getItem(Inventory.HOTBAR_OFFSET + slot).itemKey();
+        }
+        boolean mirrored = applyContainerClick(packet);
+        if (!player.isBedrockMovement()) {
+            // Retain the possible reset if the local click could not be reconstructed. The
+            // selected slot can trail the client by one tick, so compare every hotbar slot.
+            boolean changed = !mirrored;
+            for (int slot = 0; slot < 9 && !changed; slot++) {
+                changed = !hotbarBefore[slot].equals(
+                        inventory.getInventoryStorage().getItem(Inventory.HOTBAR_OFFSET + slot).itemKey());
+            }
+            if (!mirrored) {
+                for (int slot = 0; slot < 9; slot++) player.attackStrength.onUnconfirmedMainHandChange(slot);
+            } else if (changed) {
+                player.attackStrength.onPossibleReset();
+            }
+        }
     }
 
     public boolean applyContainerClick(InventoryClick click) {
@@ -949,6 +969,7 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
                 for (int i = 0; i < slots.size(); i++) {
                     Slot slot = inventory.getSlot(i);
                     slot.set(slots.get(i));
+                    confirmHotbarSlot(slot);
                 }
                 setClientCarried(items.carriedItem());
             });
@@ -965,6 +986,7 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
                     Slot menuSlot = menu.getSlot(i);
                     if (menuSlot != null) {
                         menuSlot.set(slots.get(i));
+                        confirmHotbarSlot(menuSlot);
                     }
                 }
                 setClientCarried(items.carriedItem());
@@ -982,8 +1004,10 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
             InventoryPackets.PlayerInventory packet) {
         int storageSlot = directPlayerInventorySlotToStorageSlot(packet.slot());
         if (storageSlot != -1) {
-            deferClientboundInventoryTask(
-                    event, () -> inventory.getInventoryStorage().setItem(storageSlot, packet.item()));
+            deferClientboundInventoryTask(event, () -> {
+                inventory.getInventoryStorage().setItem(storageSlot, packet.item());
+                player.attackStrength.confirmHotbarSlot(storageSlot - Inventory.HOTBAR_OFFSET);
+            });
         }
     }
 
@@ -1023,11 +1047,13 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
                 if (slotData.slot() >= 0 && slotData.slot() <= 45) {
                     Slot slot = inventory.getSlot(slotData.slot());
                     slot.set(slotData.item());
+                    confirmHotbarSlot(slot);
                 }
             } else if (slotData.windowId() == openWindowID) { // Opened inventory (if not valid, client crashes)
                 Slot s = menu.getSlot(slotData.slot());
                 if (s != null) {
                     s.set(slotData.item());
+                    confirmHotbarSlot(s);
                     if (serverContainerType == MenuType.MERCHANT && (slotData.slot() == 0 || slotData.slot() == 1)) {
                         PredictedMerchantInventory.mirrorTrade(menu, merchantOffers, selectedMerchantOffer);
                     }
@@ -1043,6 +1069,12 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
 
     private boolean isApplicableContainerMirror(int windowId) {
         return isApplicableContainerMirror(openWindowID, windowId);
+    }
+
+    private void confirmHotbarSlot(Slot slot) {
+        if (slot.isBackedBy(inventory.getInventoryStorage())) {
+            player.attackStrength.confirmHotbarSlot(slot.getContainerSlot() - Inventory.HOTBAR_OFFSET);
+        }
     }
 
     static boolean isApplicableContainerMirror(int openWindowId, int windowId) {

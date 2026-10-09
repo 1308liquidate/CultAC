@@ -39,7 +39,6 @@ public class CompensatedEntities {
             new Int2ObjectOpenHashMap<>(10, 0.7f);
     private final Int2ObjectOpenHashMap<List<EquipmentEntry>> pendingEquipment = new Int2ObjectOpenHashMap<>(10, 0.7f);
     public final CompensatedVehicleState vehicles;
-    public boolean hasSprintingAttributeEnabled = false;
     public List<SimpleCollisionBox> fishingRodPulls = new EvictingQueue<>(100); // sanity limit to prevent leaks.
     private long nextClientEntityTickOrder = 1L;
 
@@ -91,10 +90,6 @@ public class CompensatedEntities {
         if (player.isBedrockMovement()) {
             vehicles.seedStartingVelocityIfRootChanged(previousRoot);
             if (previousRoot == null) player.getSetbackTeleportUtil().transferBedrockVehicleSetback(entityID);
-        }
-
-        if (removedSelfVehicle) {
-            hasSprintingAttributeEnabled = false;
         }
     }
 
@@ -152,6 +147,7 @@ public class CompensatedEntities {
         boolean selfScaleChanged = false;
         if (entityID == player.entityID) {
             for (AttributeSnapshot snapshot : objects) {
+                if (!player.isBedrockMovement()) player.combatAttributes.onServerSnapshot(snapshot);
                 if (matchesAttribute(snapshot, "movement_speed")) {
 
                     boolean foundSprintingModifier = false;
@@ -161,8 +157,8 @@ public class CompensatedEntities {
                         }
                     }
 
-                    // The server can set the player's sprinting attribute
-                    if (!player.isBedrockMovement()) hasSprintingAttributeEnabled = foundSprintingModifier;
+                    // The server replaces the client's sprinting modifier without touching its sprint flag
+                    if (!player.isBedrockMovement()) player.sprintState.onServerModifier(foundSprintingModifier);
                     player.compensatedEntities.getSelf().playerSpeed =
                             calculateAttribute(snapshot, 0.0, 1024.0, Set.of(SPRINTING_MODIFIER_ID, SNOW_MODIFIER_ID));
                 }
@@ -318,7 +314,7 @@ public class CompensatedEntities {
                 (float) calculateAttributeValue(snapshot, excludedModifierIds), (float) minValue, (float) maxValue);
     }
 
-    private double calculateAttributeValue(AttributeSnapshot snapshot, Set<String> excludedModifierIds) {
+    public static double calculateAttributeValue(AttributeSnapshot snapshot, Set<String> excludedModifierIds) {
         double d0 = snapshot.base();
 
         List<AttributeModifier> modifiers = new ArrayList<>(snapshot.modifiers());

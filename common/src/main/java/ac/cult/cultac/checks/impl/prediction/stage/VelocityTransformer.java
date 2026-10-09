@@ -455,14 +455,16 @@ public class VelocityTransformer {
         List<PredVector> output = new ArrayList<>();
 
         for (PredVector vector : input) {
-            // TODO: Actually check if attacks aren't slowing the player on 1.8
             for (int i = 0; i <= Math.min(5, simulationContext.getMaxAttackSlow()); i++) {
                 Vec3 multVector = new Vec3(1, 1, 1);
                 for (int j = 0; j < i; j++) {
                     multVector = multVector.multiply(attackSlowMultiplier);
                 }
 
-                output.add(new PredVector(vector.multiply(multVector), vector, "Attack slow"));
+                PredVector slowed = new PredVector(vector.multiply(multVector), vector, "Attack slow");
+                // KeepSprint compares this with the attacks PacketPlayerAttack proves reached causeExtraKnockback.
+                slowed.setAttackSlows(i);
+                output.add(slowed);
             }
         }
 

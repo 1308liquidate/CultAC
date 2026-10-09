@@ -58,6 +58,10 @@ public class SimulationContext {
     int swiftSneakLevel;
     // This is NOT the same thing as
     DesyncStatus isSprinting;
+    // Whether movement_speed may carry minecraft:sprinting during travel
+    @Setter
+    boolean sprintModifier = true;
+
     int minAttackSlow, maxAttackSlow;
     // WorldData must be generated based on movement state...
     // I don't want to give access to the world to everything - bad for performance and an antipattern
@@ -310,6 +314,32 @@ public class SimulationContext {
     public float getMaxSpeed(CultPlayer player) {
         float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
         return getFrictionInfluencedSpeed(blockUnderPlayer, player);
+    }
+
+    /**
+     * The largest moveRelative speed the client's sprint state permits. LivingEntity#getFrictionInfluencedSpeed
+     * reads getSpeed(), which carries the minecraft:sprinting modifier, on the ground, and Player#getFlyingSpeed,
+     * which reads the sprint flag, in the air.
+     */
+    public double getMaxSprintInputSpeed(CultPlayer player) {
+        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        double maxSpeed = 0;
+        for (boolean onGround : worldData.getLastOnGround().getStates()) {
+            for (boolean water : worldData.getInWater().getStates()) {
+                for (boolean lava : worldData.getInLava().getStates()) {
+                    float speed = getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava);
+                    maxSpeed = Math.max(maxSpeed, speed * sprintSpeedMultiplier(player, onGround, water || lava));
+                }
+            }
+        }
+        return maxSpeed;
+    }
+
+    private double sprintSpeedMultiplier(CultPlayer player, boolean onGround, boolean fluid) {
+        // Fluid, creative flight and vehicle travel keep their existing allowance.
+        if (vehicle != null || fluid || player.isFlying) return 1.3D;
+        if (onGround) return sprintModifier ? 1.3D : 1.0D;
+        return isSprinting.determineOptimistically() ? 1.3D : 1.0D;
     }
 
     public float getGroundAirSpeed(CultPlayer player) {

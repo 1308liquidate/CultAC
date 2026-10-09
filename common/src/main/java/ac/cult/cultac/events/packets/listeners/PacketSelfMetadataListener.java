@@ -79,7 +79,7 @@ public class PacketSelfMetadataListener {
 
                     final Runnable applySharedFlags = () -> {
                         player.isSwimming = isSwimming;
-                        player.lastSprinting = isSprinting;
+                        player.sprintState.onServerFlag(isSprinting);
                         if (!isSprinting) {
                             // The local client can retain its Camel sprint input for
                             // the movement tick in which the replicated flag stops.

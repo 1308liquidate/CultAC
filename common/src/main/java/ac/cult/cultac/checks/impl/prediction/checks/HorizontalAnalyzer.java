@@ -39,6 +39,9 @@ public class HorizontalAnalyzer implements EngineCheck {
         }
 
         float playerSpeed = result.getSimulationContext().getMaxSpeed(player);
+        // ClientSprintState decides whether the sprint speed is available for this tick's travel branches
+        double sprintMultiplier =
+                playerSpeed > 0 ? result.getSimulationContext().getMaxSprintInputSpeed(player) / playerSpeed : 1.3D;
 
         Vec3 target = result.getTarget();
 
@@ -65,6 +68,7 @@ public class HorizontalAnalyzer implements EngineCheck {
         double speedFlagAmount = getHorizontalInputFlagAmount(
                 absInput,
                 playerSpeed,
+                sprintMultiplier,
                 result.getSimulationContext().getWorldData().mustBeInLiquid());
 
         if (speedFlagAmount > 0.0D) {
@@ -95,7 +99,7 @@ public class HorizontalAnalyzer implements EngineCheck {
 
         if (isSlowed) {
             double maxDirLength = getSneakingMaxInputAxis(
-                    playerSpeed, result.getSimulationContext().getSwiftSneakLevel());
+                    playerSpeed, sprintMultiplier, result.getSimulationContext().getSwiftSneakLevel());
             speedFlagAmount = Math.max(absInput.x - maxDirLength, absInput.z - maxDirLength);
 
             if (!result.getSimulationContext().getWorldData().maybeInLiquid() && speedFlagAmount > 0.001) {
@@ -169,21 +173,22 @@ public class HorizontalAnalyzer implements EngineCheck {
         // Probably not, what would it even be checking?
     }
 
-    static double getHorizontalInputFlagAmount(Vec3 input, double playerSpeed, boolean mustBeInLiquid) {
+    static double getHorizontalInputFlagAmount(
+            Vec3 input, double playerSpeed, double sprintMultiplier, boolean mustBeInLiquid) {
         double absX = Math.abs(input.x);
         double absZ = Math.abs(input.z);
         double magnitude = input.length();
-        if (magnitude > playerSpeed * (1.3D + HORIZONTAL_INPUT_UNCERTAINTY)) {
+        if (magnitude > playerSpeed * (sprintMultiplier + HORIZONTAL_INPUT_UNCERTAINTY)) {
             return magnitude;
         }
-        double sprinting = mustBeInLiquid ? 1.0D : 1.3D;
+        double sprinting = mustBeInLiquid ? 1.0D : sprintMultiplier;
         double maxSpeedInOneDirection = playerSpeed * sprinting * 0.98D;
         double axisExcess = Math.max(absX - maxSpeedInOneDirection, absZ - maxSpeedInOneDirection);
         return axisExcess > HORIZONTAL_INPUT_UNCERTAINTY ? axisExcess : 0.0D;
     }
 
-    static double getSneakingMaxInputAxis(double playerSpeed, int swiftSneakLevel) {
-        return playerSpeed * 1.3D * 0.295D + (0.15D * swiftSneakLevel);
+    static double getSneakingMaxInputAxis(double playerSpeed, double sprintMultiplier, int swiftSneakLevel) {
+        return playerSpeed * sprintMultiplier * 0.295D + (0.15D * swiftSneakLevel);
     }
 
     public static double minDistanceToValidMovementAngle(double angleMin, double angleMax) {

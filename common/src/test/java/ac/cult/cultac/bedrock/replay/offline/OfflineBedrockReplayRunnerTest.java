@@ -457,7 +457,6 @@ public final class OfflineBedrockReplayRunnerTest {
         int processed = 0;
         for (BedrockAuthInputFrame frame : frames.subList(firstReplayFrame, frames.size())) {
             replayEvents.applyBeforeOrAt(player, frame.getClientTick());
-            applySprintingAttributeTransition(player, frame);
             player.bedrockState.offerAuthInputFrame(frame);
             PredictionResult result = player.checkManager
                     .getSimulationProcessor()
@@ -666,15 +665,6 @@ public final class OfflineBedrockReplayRunnerTest {
     private static boolean shouldStartGliding(JsonObject manifest) {
         JsonObject replay = manifest.getAsJsonObject("replay");
         return replay != null && booleanValue(replay, "startGliding", false);
-    }
-
-    private static void applySprintingAttributeTransition(CultPlayer player, BedrockAuthInputFrame frame) {
-        if (frame.hasRawInputFlag(PlayerAuthInputData.STOP_SPRINTING)) {
-            player.compensatedEntities.hasSprintingAttributeEnabled = false;
-        }
-        if (frame.hasRawInputFlag(PlayerAuthInputData.START_SPRINTING)) {
-            player.compensatedEntities.hasSprintingAttributeEnabled = true;
-        }
     }
 
     private static long inputFlagMask(PlayerAuthInputData input) {

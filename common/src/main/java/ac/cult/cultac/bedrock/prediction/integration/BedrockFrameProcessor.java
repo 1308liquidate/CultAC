@@ -91,8 +91,6 @@ public final class BedrockFrameProcessor {
         if (!state.isVehicle()) {
             player.isGliding = state.gliding();
             player.isSprinting = state.sprinting();
-            player.compensatedEntities.hasSprintingAttributeEnabled =
-                    state.movementAttribute().hasSprintModifier();
         }
         return state;
     }

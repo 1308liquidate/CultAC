@@ -5,6 +5,7 @@ import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.bedrock.player.BedrockPlayerState;
 import ac.cult.cultac.checks.Check;
+import ac.cult.cultac.checks.impl.combat.KeepSprint;
 import ac.cult.cultac.checks.impl.aim.processor.AimProcessor;
 import ac.cult.cultac.checks.impl.combat.FairReach;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
@@ -39,6 +40,9 @@ import ac.cult.cultac.utils.anticheat.NettyScheduler;
 import ac.cult.cultac.utils.change.PlayerBlockHistory;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.BoatData;
+import ac.cult.cultac.utils.data.ClientAttackStrength;
+import ac.cult.cultac.utils.data.ClientCombatAttributes;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.data.PacketStateData;
 import ac.cult.cultac.utils.data.VehicleData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
@@ -182,11 +186,11 @@ public class CultPlayer implements GrimUser {
     public boolean onGround;
     public boolean lastOnGround;
     public boolean isSneaking;
+    // The client's last START/STOP_SPRINTING (LocalPlayer#wasSprinting)
     public boolean isSprinting;
-    public boolean lastSprinting;
-    // The client updates sprinting attribute at end of each tick
-    // Don't false if the server update's the player's sprinting status
-    public boolean lastSprintingForSpeed;
+    public final ClientSprintState sprintState = new ClientSprintState();
+    public final ClientAttackStrength attackStrength = new ClientAttackStrength();
+    public final ClientCombatAttributes combatAttributes = new ClientCombatAttributes();
     public boolean isFlying;
     public boolean canFly;
     public boolean canInstabuild;
@@ -218,6 +222,7 @@ public class CultPlayer implements GrimUser {
     public ClientComponentRegistries registryState;
     public final @NotNull KnockbackHandler knockbackHandler;
     public final @NotNull ExplosionHandler explosionHandler;
+    public final @NotNull KeepSprint keepSprint;
     public final @NotNull PluginChannelManager pluginChannelManager;
     public final @NotNull PacketEntityReplication packetEntityReplication;
     private final @NotNull GhostBlockMitigator ghostBlockMitigator;
@@ -337,6 +342,7 @@ public class CultPlayer implements GrimUser {
         this.movementData = new MovementData(this);
         this.knockbackHandler = new KnockbackHandler(this);
         this.explosionHandler = new ExplosionHandler(this);
+        this.keepSprint = new KeepSprint(this);
         this.actionManager = new ActionManager(this);
         this.pluginChannelManager = new PluginChannelManager(this);
         this.keepAliveProcessor = new KeepAliveProcessor(this);

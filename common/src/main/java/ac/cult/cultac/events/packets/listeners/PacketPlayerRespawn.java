@@ -69,6 +69,7 @@ public class PacketPlayerRespawn {
         var dimensionType = player.getWorldRegistries().dimension(spawnInfo.dimensionTypeId());
         player.gamemode = ac.cult.cultac.protocol.value.GameMode.valueOf(
                 spawnInfo.gameMode().name());
+        player.canInstabuild = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE;
         player.isInvulnerable = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE
                 || player.gamemode == ac.cult.cultac.protocol.value.GameMode.SPECTATOR;
         // ClientPacketListener.handleLogin sets the local player's ID from this packet.
@@ -77,6 +78,16 @@ public class PacketPlayerRespawn {
         player.compensatedEntities.vehicles.clearServerVehicle();
         final PacketEntitySelf freshSelf = new PacketEntitySelf(player);
         player.compensatedEntities.playerEntity = freshSelf;
+        // ClientPacketListener#handleLogin clears clientLoaded until ServerboundPlayerLoadedPacket.
+        player.packetStateData.playerLoadedIntoLevel = false;
+        if (!player.isBedrockMovement()) {
+            // Minecraft#clearClientLevel discards the LocalPlayer before a reconfiguration login.
+            player.isSprinting = false;
+            player.sprintState.reset();
+            player.attackStrength.reset();
+            player.combatAttributes.reset();
+            player.checkManager.getListener(BadPacketsF.class).lastSprinting = false;
+        }
         // The login replacement swaps the self-entity instance; the camera entity seeded its
         // identity-compared deque with the constructor-time instance, so re-seed it from the
         // replacement or isSelf() stays false forever after every login.
@@ -126,6 +137,8 @@ public class PacketPlayerRespawn {
             player.compensatedEntities.serverPositionsMap.clear();
         }
 
+        final boolean keepEntityData = packet.shouldKeep(ClientboundRespawn.KEEP_ENTITY_DATA);
+        final boolean keepAttributeModifiers = packet.shouldKeep(ClientboundRespawn.KEEP_ATTRIBUTE_MODIFIERS);
         // TODO: What does keep all metadata do?
         final Runnable applyRespawnState = () -> {
             player.isSneaking = false;
@@ -144,7 +157,6 @@ public class PacketPlayerRespawn {
             player.packetStateData.clientSidePosition = Vec3.ZERO;
             player.packetStateData.lastClientTickEndTransaction = Integer.MIN_VALUE;
             player.packetStateData.clearPendingVehicleMoveAfterPassengerRotation();
-            player.lastSprintingForSpeed = false; // This is reverted even on 1.18 clients
             final ac.cult.cultac.manager.player.ActionManager actions = player.actionManager;
             actions.onRespawn();
             player.checkManager.getListener(BadPacketsM.class).onRespawn();
@@ -194,13 +206,20 @@ public class PacketPlayerRespawn {
             player.compensatedEntities.selfTrackedEntity =
                     new TrackerData(0, 0, 0, 0, 0, EntityTypeIds.PLAYER, player.lastTransactionSent.get());
 
-            player.isSprinting = false;
+            // ClientPacketListener#handleRespawn gives the new LocalPlayer the old sprint flag as
+            // wasSprinting, and copies the old shared flags, only for KEEP_ENTITY_DATA.
+            // ClientPacketListener#handleRespawn clears clientLoaded until ServerboundPlayerLoadedPacket.
+            player.packetStateData.playerLoadedIntoLevel = false;
+            player.sprintState.onRespawn(keepEntityData, keepAttributeModifiers);
+            player.attackStrength.reset();
+            player.combatAttributes.onRespawn(keepAttributeModifiers);
+            player.isSprinting = !player.isBedrockMovement() && player.sprintState.flag();
             player.vehicleData.camelSprintingState = SprintingState.STOPPED;
-            badPacketsF.lastSprinting = false;
-            player.compensatedEntities.hasSprintingAttributeEnabled = false;
+            badPacketsF.lastSprinting = player.isSprinting;
             player.refreshPlayerPose();
             player.gamemode = ac.cult.cultac.protocol.value.GameMode.valueOf(
                     spawnInfo.gameMode().name());
+            player.canInstabuild = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE;
             player.isInvulnerable = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE
                     || player.gamemode == ac.cult.cultac.protocol.value.GameMode.SPECTATOR;
             player.compensatedEntities
