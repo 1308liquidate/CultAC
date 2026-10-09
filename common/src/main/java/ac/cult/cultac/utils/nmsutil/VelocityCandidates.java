@@ -78,7 +78,8 @@ public final class VelocityCandidates {
         }
         boolean stepped = requiredPostCollisionY.isEmpty()
                 && result.getValidMovements().isCanStep()
-                && result.getInitialStartingVel() != null;
+                && result.getInitialStartingVel() != null
+                && result.getRealities().stream().allMatch(r -> r.getValidMovements().isCanStep());
         if (stepped) {
             diff = new Vec3(
                     diff.x,
