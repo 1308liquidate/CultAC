@@ -51,6 +51,11 @@ public final class ObservedPacketValues implements PacketValueAdapter {
         return names;
     }
 
+    /** Read-only registry lookup for native client observations using this wire schema. */
+    public WireValueDecoder.Registries sourceRegistries() {
+        return names;
+    }
+
     ProtocolVersion version() {
         return version;
     }
