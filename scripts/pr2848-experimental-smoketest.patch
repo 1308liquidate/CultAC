@@ -1,0 +1,20 @@
+--- a/src/main/java/ac/grim/movementvalidation/RealServerLauncher.java
++++ b/src/main/java/ac/grim/movementvalidation/RealServerLauncher.java
+@@ -335,6 +335,7 @@
+     private static String grimConfigOverride() {
+         return """
+                 config-version: 8
++                experimental-checks: %s
+ 
+                 alerts:
+                   print-to-console: true
+@@ -351,7 +352,8 @@
+ 
+                 Reach:
+                   use-bundle-delimiter: %s
+-                """.formatted(System.getProperty("cult.validation.reachBundleDelimiter", "true"));
++                """.formatted(System.getenv().getOrDefault("REAL_VALIDATION_EXPERIMENTAL_CHECKS", "false"),
++                System.getProperty("cult.validation.reachBundleDelimiter", "true"));
+     }
+ 
+     private static void installPlugins(Path pluginsDir, List<Path> pluginJars) throws IOException {

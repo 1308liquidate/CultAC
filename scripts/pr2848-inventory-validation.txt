@@ -1,0 +1,168 @@
+Grim PR #2848 native inventory port
+=================================
+
+Worktree: /home/hunter/Downloads/CultAC-pr-2848
+Branch: port/grim-pr-2848
+Starting commit: 33335f3e5 (Modernize sprinting and implement KeepSprint)
+Upstream: https://github.com/GrimAnticheat/Grim/pull/2848
+Upstream base: 8eb5f2809591c891deb4958bb2927844871e0600
+Imported head: 5542b8538d04b13c8fbfc8e340a7a9753ab93592
+Author: ManInMyVan <113963219+ManInMyVan@users.noreply.github.com>
+
+History and scope
+-----------------
+9863ef1d1 contains the native port, with the upstream author's Co-authored-by
+trailer. 7f367d692 connects the original PR branch as a second parent after
+the implementation was adapted. All 31 original PR commits retain their
+hashes and author metadata. This explicit history merge uses the ours strategy:
+the upstream PacketEvents implementation cannot replace this fork's packet
+records, transaction/bundle dispatcher, or Java 3.0 runner.
+
+c54a88226 brings across the existing two-file snapshot compatibility change
+from the original working tree. It accepts the prepared client's v6 snapshots
+and uses their source protocol for registry decoding; comparisons stay intact.
+The original working tree and original client harness were not edited.
+
+The port includes split-state open-window tracking, BadPacketsWindow (the
+upstream BadPacketsW name already belongs to another check here), ChatE,
+SprintH, ElytraJ, MultiActionsH-S, and the default three-click server-tick cap.
+Legacy inventory-open, sneak and vehicle-jump evidence is captured before Via
+translation. Native before/after proofs surround the outbound packet group,
+including bundles. Unknown menu packets follow the client's ignored-packet
+behavior. The existing Bedrock dispatch policy excludes these Java checks;
+the new rate cap and cancelled-click prediction change are Java-only.
+
+False-positive fixes and client sources
+--------------------------------------
+Sources were inspected before each behavior change in the verified MCP-Reborn
+26.2 checkout under CultAC-old/mcp-client-smoketest/.real-validation/toolchains.
+The following paths are relative to its src/main/java directory:
+
+* net/minecraft/client/multiplayer/MultiPlayerGameMode.java,
+  handleContainerInput, lines 451-489: menu.clicked runs before the packet is
+  sent. Cancelling server processing does not undo the client's local click.
+  The port keeps validated local slot/cursor prediction while retaining the
+  cap. Initially furnace, blast furnace, smoker, loom and smithing replays
+  diverged after four/six rapid clicks. They converge with this fix.
+
+* net/minecraft/client/player/LocalPlayer.java, sendPosition, lines 266-309;
+  net/minecraft/client/multiplayer/ClientPacketListener.java, handleMovePlayer,
+  lines 796-806, and handleRespawn, lines 1284-1325: teleport responses do not
+  update sendPosition's cached position, and a new LocalPlayer starts that
+  cache at zero. BadPacketsV now tracks this cache separately. Login/respawn
+  redundant-position flags disappear while actual duplicates still flag.
+
+* net/minecraft/client/player/LocalPlayer.java, aiStep, lines 789-795, move,
+  lines 982-998, updateAutoJump, lines 1008-1110, and canAutoJump, lines
+  1124-1133; net/minecraft/client/player/ClientInput.java, makeJump:
+  automatic jump is scheduled after one move and sets next tick's jump input
+  even if a menu opened in between. A live vanilla client reproduced a
+  MultiActionsH false flag. JavaAutoJump models this single queued state from
+  the compensated geometry and accepted prediction, then the input checks
+  consume it. Flat ground, excessive obstacle height and low ceilings cannot
+  schedule it. No movement radius, offsets or nearby-block exemptions were
+  added. Post-move ground comes from the existing down collision result.
+
+* net/minecraft/world/phys/AABB.java, intersects(Vec3, Vec3), lines 242-260;
+  net/minecraft/world/level/CollisionGetter.java; BlockCollisions.java;
+  net/minecraft/core/Cursor3D.java: auto-jump uses two-point bounds, ordered
+  entity/block shapes, and X/Y/Z block iteration. The helper preserves this
+  query and the client's float operations, jump height and clearance rules.
+
+Client/server identity
+----------------------
+Real Java client: 26.2, protocol 776; Paper: 26.2 build 111.
+Client SHA256: 40896ee9f1e2bec3c934daac7e93d41e9e3d9c2f8ae0ca366d52ffbfd1afa290
+Prepared SHA256: 8e28eac5bac239e9c778ba2790525fe650d3529d10905b58e5b4eb9b7e784ca2
+scripts/verify-smoketest-client.py verified 10,952 client classes.
+The real vanilla client, real Paper server, and native wire codec were used.
+Experimental checks and vanilla auto-jump were enabled explicitly.
+Live validation covers this client version; it does not prove every older
+Via-translated client version or Bedrock behavior.
+
+Harness adaptations
+-------------------
+An isolated copy of the prepared harness was made at .ignored/pr-2848/harness,
+based on 90b7ab41dd9895c9c2a55a303dacde44896f1fb4 plus its existing working
+probes. The two adjacent patches record only the inventory validation changes:
+
+* pr2848-experimental-smoketest.patch exposes the experimental-checks setting.
+* pr2848-inventory-smoketest.patch sends four existing fuzz probes through the
+  real wire because this fork has no packetfuzzinject post-decode control hook.
+  It preserves world/inventory convergence assertions and requires captured
+  packet evidence. Invalid hotbar slot 9 must flag BadPacketsY and later normal
+  placement must still work. Requiring this flag corrects the old assertion
+  after switching from a bypassed handler to the full packet dispatcher.
+  Eight additional probes require flags for menu movement, jump, sneak,
+  sprint, swing, rotation, use and wrong-window clicks. Two legitimate probes
+  cover residual momentum and queued automatic jump followed by a menu click.
+  The patch also initializes the headless rendering sentinel: vanilla
+  setScreenAndShow otherwise dereferences a missing GPU surface on respawn.
+  Screen initialization and gameplay/packet processing remain vanilla.
+
+Reproduce against the isolated prepared harness
+---------------------------------------------
+Run from the port worktree:
+
+  ./gradlew :bukkit:shadowJar
+  SMOKETEST_REPO="$PWD/.ignored/pr-2848/harness" \
+  SMOKETEST_WORKSPACE_MANIFEST="$PWD/.ignored/pr-2848/workspace-autojump-ground.properties" \
+  scripts/run-local-pr2848-inventory-smoketests.sh
+
+The wrapper pins a copy and SHA256 of the plugin, enables experimental checks
+and auto-jump, and runs inventory,core. To use another prepared harness, apply
+both patches in an isolated checkout and supply its workspace manifest.
+
+Validation results
+------------------
+Final live run: inventory 54/54 passed; broader core 26/28 passed (80/82 total).
+All 42 legitimate inventory scenarios have no anticheat flags;
+maximum reported prediction offset was 0.0. Each of the eight new impossible
+claims flagged its intended check, verified in the captured flag records:
+move/jump -> MultiActionsH, sneak -> MultiActionsM, sprint -> SprintH,
+swing -> MultiActionsS, rotation -> MultiActionsO, use -> MultiActionsJ,
+wrong-window -> BadPacketsWindow. Summary: live-results.json.
+
+The broader failures are recorded, not allowlisted:
+* reach-zombie-moving-barrage: SprintE and PacketOrderO (client_information).
+  The pre-port code plus snapshot compatibility reproduced SprintE in the
+  initial comparison and all three repeated runs. Neither check was edited
+  by the port. The additional PacketOrderO flag was observed in the full run
+  but not reproduced in those baseline reruns; it remains an open issue.
+  Evidence: baseline-core-targets/ and baseline-barrage-repeat/.
+* strider-fungus-empty-hand-air-switch: scenario validity failed because the
+  sampled block at ticks 58-71 was air, where the fixture assertion required
+  flowing water. No anticheat flags. The same scenario passed the baseline
+  comparison. It also passed the committed-jar rerun. Its fixture and assertion were not changed.
+
+One legitimate golden-apple snapshot differed for a single tick before
+converging on the next authoritative update; it produced no anticheat flags.
+The invalid hotbar-slot probe also briefly reports its malicious selected-slot
+claim before restoring the valid slot. Final snapshot comparisons passed;
+this does not claim every intermediate snapshot matched.
+
+The committed-source rerun passed 7/7 cases, including window replacement,
+horse inventory, rapid furnace clicks, respawn, automatic jump, impossible
+menu jump and the strider case. Evidence: committed-targets/ and
+committed-targets.log. Its plugin and workspace SHA256 are pinned there.
+Artifacts and logs: .ignored/pr-2848/final-live/ and final-live.log.
+The pinned suite binary SHA256 is
+c449f08fa2f2a948c3848025746216f79350223ad661d70df9bf8445f9fa18d4.
+
+Focused tests and :bukkit:shadowJar pass (final-java-build.log). Ten new unit
+tests cover transaction/window proofs, current input versus momentum,
+GUI drop/swing ordering, cancelled local clicks, sent-position cache and
+queued auto-jump geometry. The verbose schema audit also passes.
+
+:common:test ran 821 tests: 804 passed, 10 failed, 7 skipped. The untouched
+33335f3e5 baseline ran 811: 794 passed, the same 10 failed, the same 7 skipped.
+No new failures. Details: committed-common-tests.log, final-all-unit.log, baseline-tests.log and
+unit-comparison.json. Failures are in Bedrock collision/reconciliation and
+offline replay tests; three replay failures lack fixture files.
+
+./gradlew build fails in :velocity-platform:test: 45 tests, 20 failures in
+vehicleProofUsesOneBundle/vehicleProofStaysInsideTheServersBundle across ten
+versions. The detached untouched baseline has identical failure messages and
+counts. Details: final-build.log, baseline-velocity-tests.log and
+velocity-unit-comparison.json. The PR does not edit the Velocity adapter.
+The distributable shadow jar and private-codec packaging verification pass.

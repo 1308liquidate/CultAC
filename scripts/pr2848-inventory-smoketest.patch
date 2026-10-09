@@ -1,0 +1,226 @@
+--- a/src/main/java/ac/grim/movementvalidation/ReflectionBackedHeadlessLocalPlayerRunner.java
++++ b/src/main/java/ac/grim/movementvalidation/ReflectionBackedHeadlessLocalPlayerRunner.java
+@@ -1662,6 +1662,10 @@
+             return withRuntimeContext(() -> {
+                 lastSlowTickDebug = "";
+                 activeSmokeTick = tickIndex;
++                if (Boolean.parseBoolean(System.getenv().getOrDefault("REAL_VALIDATION_AUTO_JUMP", "false"))) {
++                    Object liveOptions = getDeclaredFieldValue(minecraftClass, minecraftInstance, "options");
++                    invoke(invoke(liveOptions, "autoJump"), "set", true);
++                }
+                 vehiclePacketObservationIndex = 0;
+                 pendingVehicleObservations.clear();
+                 // LocalPlayer#tick proves client-controlled vehicle movement by a
+@@ -3033,6 +3037,14 @@
+                 .newInstance(null, particleResources);
+         setField(minecraftClass, minecraftInstance, "gameDirectory", clientGameDirectoryFile);
+         setField(minecraftClass, minecraftInstance, "window", window);
++        // Vanilla respawn may call setScreenAndShow, which renders a loading
++        // frame. The headless runner has no presentation surface: an acquired
++        // sentinel skips renderFrame's presentation-only body without changing
++        // screen initialization, packet processing, or gameplay ticks.
++        Class<?> surfaceClass = Class.forName("com.mojang.blaze3d.systems.GpuSurface", true, classLoader);
++        Object surface = allocate(unsafe, surfaceClass);
++        setField(surfaceClass, surface, "hasImageAcquired", true);
++        setField(minecraftClass, minecraftInstance, "windowSurface", surface);
+         setField(minecraftClass, minecraftInstance, "resourceManager", resourceManager);
+         setField(minecraftClass, minecraftInstance, "textureManager", textureManager);
+         setField(minecraftClass, minecraftInstance, "shaderManager", shaderManager);
+@@ -4162,7 +4174,7 @@
+                         "FIRST_PERSON"
+                 )
+         );
+-        Object autoJump = optionInstanceClass.getMethod("createBoolean", String.class, boolean.class).invoke(null, "options.autoJump", false);
++        Object autoJump = optionInstanceClass.getMethod("createBoolean", String.class, boolean.class).invoke(null, "options.autoJump", Boolean.parseBoolean(System.getenv().getOrDefault("REAL_VALIDATION_AUTO_JUMP", "false")));
+         setField(optionsClass, optionsInstance, "autoJump", autoJump);
+         setField(optionsClass, optionsInstance, "sprintWindow", createSprintWindowOption(optionInstanceClass));
+     }
+@@ -6209,6 +6221,23 @@
+         }
+ 
+         if (action instanceof ClientGameplayAction.PacketFuzzInject packetFuzzInject) {
++            // This fork has no post-decode inventory fuzz hook. Exercise its real wire instead.
++            Object nativeInventoryPacket = switch (packetFuzzInject.target()) {
++                case "set_carried_item_slot_9" -> runtimeClass("net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket")
++                        .getConstructor(int.class).newInstance(9);
++                case "bundle_select_negative_slot" -> runtimeClass("net.minecraft.network.protocol.game.ServerboundSelectBundleItemPacket")
++                        .getConstructor(int.class, int.class).newInstance(-1, -1);
++                case "select_trade_large_index" -> runtimeClass("net.minecraft.network.protocol.game.ServerboundSelectTradePacket")
++                        .getConstructor(int.class).newInstance(Integer.MAX_VALUE);
++                case "container_slot_state_negative_slot" -> runtimeClass("net.minecraft.network.protocol.game.ServerboundContainerSlotStateChangedPacket")
++                        .getConstructor(int.class, int.class, boolean.class).newInstance(-1, 0, false);
++                default -> null;
++            };
++            if (nativeInventoryPacket != null) {
++                invoke(connectionInstance, "send", nativeInventoryPacket);
++                tryDrainConnectionEventLoopTasks(LIVE_TICK_OUTBOUND_EVENT_LOOP_DRAIN_TIMEOUT);
++                return;
++            }
+             sendRawSmoketestCustomPayload(
+                     SMOKETEST_CONTROL_PATH,
+                     createSmoketestControlPayload("packetfuzzinject", packetFuzzInject.target())
+@@ -6221,7 +6250,7 @@
+         if (action instanceof ClientGameplayAction.RawPacketFuzzInject rawPacketFuzzInject) {
+             sendRawPacketFuzz(rawPacketFuzzInject.target());
+             tryDrainConnectionEventLoopTasks(LIVE_TICK_OUTBOUND_EVENT_LOOP_DRAIN_TIMEOUT);
+-            drainOutboundMovementPackets(true);
++            if (!rawPacketFuzzInject.target().startsWith("inventory:")) drainOutboundMovementPackets(true);
+             return;
+         }
+ 
+@@ -8302,6 +8331,48 @@
+ 
+     private void sendRawPacketFuzz(String target) throws ReflectiveOperationException {
+         String normalized = target == null ? "" : target.trim().toLowerCase(java.util.Locale.ROOT);
++        if (normalized.startsWith("inventory:")) {
++            String inventoryClaim = normalized.substring("inventory:".length());
++            Class<?> handClass = runtimeClass("net.minecraft.world.InteractionHand");
++            Object hand = handClass.getField("MAIN_HAND").get(null);
++            Object packet;
++            switch (inventoryClaim) {
++                case "move", "sneak", "jump" -> {
++                    Class<?> inputClass = runtimeClass("net.minecraft.world.entity.player.Input");
++                    Object input = inputClass.getConstructor(boolean.class, boolean.class, boolean.class,
++                                    boolean.class, boolean.class, boolean.class, boolean.class)
++                            .newInstance(inventoryClaim.equals("move"), false, false, false, inventoryClaim.equals("jump"), inventoryClaim.equals("sneak"), false);
++                    packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundPlayerInputPacket")
++                            .getConstructor(inputClass).newInstance(input);
++                }
++                case "sprint" -> {
++                    Class<?> actionClass = runtimeClass("net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket$Action");
++                    packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket")
++                            .getConstructor(runtimeClass("net.minecraft.world.entity.Entity"), actionClass)
++                            .newInstance(localPlayerInstance, actionClass.getField("START_SPRINTING").get(null));
++                }
++                case "swing" -> packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundSwingPacket")
++                        .getConstructor(handClass).newInstance(hand);
++                case "rotation" -> packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundMovePlayerPacket$Rot")
++                        .getConstructor(float.class, float.class, boolean.class, boolean.class)
++                        .newInstance(35.0F, 0.0F, true, false);
++                case "use" -> packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundUseItemPacket")
++                        .getConstructor(handClass, int.class, float.class, float.class)
++                        .newInstance(hand, 0, 0.0F, 0.0F);
++                case "wrong-window" -> {
++                    Class<?> mapClass = runtimeClass("it.unimi.dsi.fastutil.ints.Int2ObjectMap");
++                    Class<?> inputClass = runtimeClass("net.minecraft.world.inventory.ContainerInput");
++                    Class<?> hashClass = runtimeClass("net.minecraft.network.HashedStack");
++                    Object map = runtimeClass("it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap").getConstructor().newInstance();
++                    packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundContainerClickPacket")
++                            .getConstructor(int.class, int.class, short.class, byte.class, inputClass, mapClass, hashClass)
++                            .newInstance(99, 0, (short) 0, (byte) 0, inputClass.getField("PICKUP").get(null), map, hashClass.getField("EMPTY").get(null));
++                }
++                default -> throw new IllegalArgumentException("Unknown inventory claim " + inventoryClaim);
++            }
++            invoke(connectionInstance, "send", packet);
++            return;
++        }
+         if ("truncated_custom_payload".equals(normalized)) {
+             Object rawBuffer = runtimeClass("io.netty.buffer.Unpooled")
+                     .getMethod("buffer", int.class)
+--- a/src/main/java/ac/grim/movementvalidation/PacketFuzzScenarios.java
++++ b/src/main/java/ac/grim/movementvalidation/PacketFuzzScenarios.java
+@@ -72,7 +72,7 @@
+                 .advanceTicks(2)
+                 .injectPacketFuzz(target)
+                 .advanceTicks(4)
+-                .expectDebugLineContainsFragment("Cult packet fuzz debug injection player=CodexClient target=" + target)
++                .expectClientOutboundPacketClassCountAtLeast(0, 6, packetClassName, 1)
+                 .expectNoFlag()
+                 .build();
+     }
+@@ -104,7 +104,7 @@
+ 
+     private static MovementScenario hotbarIgnoreScenario(String target, String packetClassName) {
+         return MovementScenarioBuilder.cheat("inventory-packet-fuzz-" + normalizeTarget(target))
+-                .description("Injects an invalid carried-slot packet, then proves Cult ignores it and a later normal place still uses the real hotbar selection.")
++                .description("Injects an invalid carried-slot packet, then proves Cult rejects the invalid selection and a later normal place still uses the real hotbar selection.")
+                 .fixture(ScenarioWorldFixture.builder("packet_fuzz_set_carried_item_slot_9")
+                         .defaultSpawn(0.5D, 64.0D, 0.5D)
+                         .clientLevelFlat(true)
+@@ -119,10 +119,10 @@
+                 .startUseItem()
+                 .advanceTicks(3)
+                 .releaseUsingItem()
+-                .expectDebugLineContainsFragment("Cult packet fuzz debug injection player=CodexClient target=" + target)
++                .expectClientOutboundPacketClassCountAtLeast(0, 6, packetClassName, 1)
+                 .expectClientWorldBlockContainsWithinTickRange(0, 10, 0, 64, 1, "dirt")
+                 .expectClientOutboundPacketClassCountAtLeast(0, 10, "ServerboundUseItemOnPacket", 1)
+-                .expectNoFlag()
++                .expectMustFlag()
+                 .expectNoCorrection()
+                 .expectNoSetback()
+                 .build();
+@@ -145,8 +145,8 @@
+                 .advanceTicks(3)
+                 .selectMerchantTrade(0)
+                 .advanceTicks(10)
+-                .expectDebugLineContainsFragment("Cult packet fuzz debug injection player=CodexClient target=" + target)
+-                .expectClientOutboundPacketClassCountAtLeast(0, 34, "ServerboundSelectTradePacket", 1)
++                .expectClientOutboundPacketClassCountAtLeast(14, 16, packetClassName, 1)
++                .expectClientOutboundPacketClassCountAtLeast(0, 34, "ServerboundSelectTradePacket", 2)
+                 .expectNoFlag()
+                 .expectNoCorrection()
+                 .expectNoSetback()
+--- a/src/main/java/ac/grim/movementvalidation/ScenarioCatalog.java
++++ b/src/main/java/ac/grim/movementvalidation/ScenarioCatalog.java
+@@ -5460,6 +5460,7 @@
+         combined.addAll(cheatingScenarios());
+         combined.addAll(experimentScenarios());
+         combined.addAll(PacketFuzzScenarios.catalog());
++        combined.addAll(Pr2848InventoryScenarios.catalog());
+         return List.copyOf(combined);
+     }
+ 
+--- /dev/null
++++ b/src/main/java/ac/grim/movementvalidation/Pr2848InventoryScenarios.java
+@@ -0,0 +1,50 @@
++package ac.grim.movementvalidation;
++
++import java.util.ArrayList;
++import java.util.List;
++
++final class Pr2848InventoryScenarios {
++    static List<MovementScenario> catalog() {
++        List<MovementScenario> result = new ArrayList<>();
++        String[][] cases = {
++            {"move", "ServerboundPlayerInputPacket"},
++            {"jump", "ServerboundPlayerInputPacket"},
++            {"sneak", "ServerboundPlayerInputPacket"},
++            {"sprint", "ServerboundPlayerCommandPacket"},
++            {"swing", "ServerboundSwingPacket"},
++            {"rotation", "ServerboundMovePlayerPacket$Rot"},
++            {"use", "ServerboundUseItemPacket"},
++            {"wrong-window", "ServerboundContainerClickPacket"}
++        };
++        for (String[] entry : cases) {
++            result.add(MovementScenarioBuilder.cheat("inventory-pr2848-" + entry[0])
++                    .description("Sends an impossible " + entry[0] + " claim over the real client wire while a proven menu is open.")
++                    .tags("inventory", "pr2848")
++                    .fixture(ScenarioWorldFixture.builder("inventory-pr2848-" + entry[0])
++                            .defaultSpawn(0.5D, 64.0D, 0.5D).clientLevelFlat(true)
++                            .fillRect(-12, 12, 63, -12, 12, "STONE").build())
++                    .advanceTicks(2).openSmoketestInventory("generic:1").advanceTicks(12)
++                    .injectRawPacketFuzz("inventory:" + entry[0]).advanceTicks(4)
++                    .expectClientOutboundPacketClassCountAtLeast(14, 18, entry[1], 1)
++                    .expectMustFlag().build());
++        }
++        result.add(MovementScenarioBuilder.legitimate("inventory-pr2848-residual-motion")
++                .description("Opens a real menu after releasing movement keys while ordinary momentum remains.")
++                .tags("inventory", "pr2848")
++                .advanceTicks(2).pressSprint().pressForward(4).releaseAll()
++                .openSmoketestInventory("generic:1").advanceTicks(12)
++                .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        result.add(MovementScenarioBuilder.legitimate("inventory-pr2848-autojump-carry")
++                .description("Vanilla completes an already scheduled automatic jump after a server menu opens.")
++                .tags("inventory", "pr2848")
++                .fixture(ScenarioWorldFixture.builder("inventory-pr2848-autojump-carry")
++                        .defaultSpawn(0.5D, 64.0D, 0.5D).clientLevelFlat(true)
++                        .fillRect(-12, 12, 63, -12, 12, "STONE")
++                        .fillRect(0, 0, 64, 1, 1, "STONE").build())
++                .advanceTicks(2).pressForward(1).releaseAll()
++                .openSmoketestInventory("generic:1").advanceTicks(1).containerClick(36, 0, "PICKUP").advanceTicks(11)
++                .expectClientDoubleWithinTickRange(3, 7, ClientDoubleField.VEL_Y, 0.2D, 0.43D)
++                .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        return List.copyOf(result);
++    }
++}
