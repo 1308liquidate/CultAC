@@ -7,6 +7,11 @@ public record KnownInput(
     public static final KnownInput DEFAULT = new KnownInput(false, false, false, false, false, false, false);
 
     @Contract(pure = true)
+    public boolean movingNoJump() {
+        return forward || backward || left || right;
+    }
+
+    @Contract(pure = true)
     public boolean moving() {
         return forward || backward || left || right || jump;
     }

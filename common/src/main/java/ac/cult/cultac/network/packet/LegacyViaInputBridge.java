@@ -143,7 +143,24 @@ public final class LegacyViaInputBridge extends com.viaversion.viaversion.protoc
                 return false;
             }
             packet.skipBytes(Float.BYTES * 2);
-            return handleLegacySteer(player, (packet.readByte() & 2) != 0);
+            byte flags = packet.readByte();
+            player.checkManager.getCheck(ac.cult.cultac.checks.impl.multiactions.MultiActionsH.class).vehicleJumping =
+                    (flags & 1) != 0;
+            return handleLegacySteer(player, (flags & 2) != 0);
+        }
+
+        if ("CLIENT_COMMAND".equals(packetName) && player.openWindow.clientSendsOpenInventoryPacket) {
+            int action = Wire.readVarInt(packet);
+            if (!packet.isReadable() && action == 2) {
+                if (player.checkManager
+                        .getCheck(ac.cult.cultac.checks.impl.multiactions.MultiActionsN.class)
+                        .onLegacyOpenInventory()) {
+                    player.onPacketCancel();
+                    return true;
+                }
+                player.openWindow.onClientOpenOrCloseWindow(true);
+            }
+            return false;
         }
 
         if (!PLAYER_COMMAND.equals(packetName)) {
@@ -188,6 +205,9 @@ public final class LegacyViaInputBridge extends com.viaversion.viaversion.protoc
     }
 
     private static boolean handleLegacySneak(CultPlayer player, boolean sneaking) {
+        player.checkManager
+                .getCheck(ac.cult.cultac.checks.impl.multiactions.MultiActionsM.class)
+                .onChange(sneaking);
         boolean rejected = player.checkManager.getCheck(BadPacketsG.class).handleLegacySneak(sneaking);
         player.checkManager.getCheck(BadPacketsX.class).handleLegacySneakAction();
         player.packetOrderProcessor.handleLegacySneakAction();

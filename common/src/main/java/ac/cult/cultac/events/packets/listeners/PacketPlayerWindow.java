@@ -20,7 +20,17 @@ public class PacketPlayerWindow {
     @CultPacketHandler
     public void onMovePlayer(
             PacketReceiveEvent<ServerboundMovePlayer> event, CultPlayer player, ServerboundMovePlayer packet) {
-        handleMovePlayer(event, player);
+        if (player.isBedrockMovement()) {
+            handleMovePlayer(event, player);
+        } else if (player.getClientVersion().isOlderThan(ac.cult.cultac.network.protocol.ClientVersion.V_1_12_2)
+                && !player.inVehicle()
+                && !event.isCancelled()
+                && Collisions.hasState(
+                        player,
+                        player.boundingBox.copy().expand(0.03),
+                        (state, pos) -> BlockIds.is(state, BlockIds.NETHER_PORTAL))) {
+            player.openWindow.maybeClose();
+        }
     }
 
     private void handleMovePlayer(PacketReceiveEvent event, CultPlayer player) {
@@ -31,16 +41,28 @@ public class PacketPlayerWindow {
 
     @CultPacketHandler
     public void onContainerClick(PacketReceiveEvent<InventoryClick> event, CultPlayer player, InventoryClick packet) {
-        handleInventory(player, true);
+        if (player.isBedrockMovement()) handleInventory(player, true);
+        else if (!player.openWindow.clientSendsOpenInventoryPacket && packet.windowId() == 0 && !event.isCancelled())
+            player.openWindow.onClientOpenOrCloseWindow(true);
     }
 
     @CultPacketHandler("serverbound.container_close")
     public void onServerboundContainerClose(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {
-        handleInventory(player, false);
+        if (player.isBedrockMovement()) handleInventory(player, false);
+        else player.openWindow.onClientOpenOrCloseWindow(false);
     }
 
     @CultPacketHandler
     public void onRespawn(PacketSendEvent<ClientboundRespawn> event, CultPlayer player, ClientboundRespawn packet) {
+        if (!player.isBedrockMovement()) {
+            CultPlayer.TrackedTransaction before = player.createTrackedTransactionPacketForDeferredSend();
+            if (before != null) {
+                event.getWritesBeforeSend().add(before.packet());
+                event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(before));
+                player.latencyUtils.addRealTimeTask(before.transaction(), player.openWindow::maybeClose);
+            }
+            return;
+        }
         player.sendTransaction();
         final Runnable closeInventory = () -> handleInventory(player, false);
         player.latencyUtils.addRealTimeTaskNow(closeInventory);
@@ -49,6 +71,11 @@ public class PacketPlayerWindow {
     @CultPacketHandler
     public void onOpenScreen(
             PacketSendEvent<ClientboundOpenScreen> event, CultPlayer player, ClientboundOpenScreen packet) {
+        if (!player.isBedrockMovement()) {
+            MenuType type = MenuType.fromRegistryKey(packet.menuType());
+            if (type != MenuType.UNKNOWN) player.openWindow.onServerWindow(event, packet.containerId(), type);
+            return;
+        }
         player.sendTransaction();
         // Mark the tick only after the client can observe the screen.
         player.latencyUtils.addRealTimeTask(
@@ -61,6 +88,17 @@ public class PacketPlayerWindow {
     @CultPacketHandler
     public void onMountScreenOpen(
             PacketSendEvent<ClientboundMountScreenOpen> event, CultPlayer player, ClientboundMountScreenOpen packet) {
+        if (!player.isBedrockMovement()) {
+            var entity = player.compensatedEntities.serverPositionsMap.get(packet.entityId());
+            if (entity != null
+                    && (ac.cult.cultac.utils.nmsutil.EntityTypeUtil.isHorseFamily(entity.getEntityType())
+                            || ac.cult.cultac.utils.nmsutil.EntityTypeUtil.isType(entity.getEntityType(), "nautilus")
+                            || ac.cult.cultac.utils.nmsutil.EntityTypeUtil.isType(
+                                    entity.getEntityType(), "zombie_nautilus"))) {
+                player.openWindow.onServerWindow(event, packet.containerId(), MenuType.UNKNOWN);
+            }
+            return;
+        }
         player.sendTransaction();
         player.latencyUtils.addRealTimeTask(
                 player.lastTransactionSent.get(), () -> player.serverOpenedInventoryThisTick = true);
@@ -70,6 +108,10 @@ public class PacketPlayerWindow {
 
     @CultPacketHandler("clientbound.container_close")
     public void onClientboundContainerClose(PacketSendEvent<Opaque> event, CultPlayer player, Opaque packet) {
+        if (!player.isBedrockMovement()) {
+            player.openWindow.onServerWindow(event, 0, null);
+            return;
+        }
         player.sendTransaction();
         final Runnable closeInventory = () -> handleInventory(player, false);
         player.latencyUtils.addRealTimeTaskNow(closeInventory);

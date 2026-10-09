@@ -94,9 +94,24 @@ public final class ClientEntityQueries {
                         search.intersects(bounds) && (collidable(entity) || boatSource && pushable(entity, bounds)));
     }
 
+    /** Concrete compensated boxes selected by EntityGetter#getEntityCollisions for a player source. */
+    public java.util.List<Box> playerCollisionBoxes(Box query) {
+        var result = new java.util.ArrayList<Box>();
+        var search = query.inflate(1.0E-7);
+        for (var entity : player.compensatedEntities.entityMap.values()) {
+            if (!present(entity) || spectator(entity) || !collidable(entity)) continue;
+            for (var bounds : entity.getPossibleMovementCollisionBoxCandidates()) {
+                var box = new Box(bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ);
+                if (search.intersects(box) && !result.contains(box)) result.add(box);
+            }
+        }
+        return java.util.List.copyOf(result);
+    }
+
     /** Brush's ProjectileUtil overload has zero margin and does not count containment as a ray hit. */
     public boolean hasPickableEntityHit(Vec3 from, Vec3 to, SimPlayer owner) {
-        var delta = BlockRaycast.viewVector(owner, clientVersion).scale(owner.sight().blockInteractionRange());
+        var delta = BlockRaycast.viewVector(owner, clientVersion)
+                .scale(owner.sight().blockInteractionRange());
         var search = localBox().expandTowards(delta).inflate(1.0);
         if (any(this::pickable, bounds -> search.intersects(bounds) && bounds.clip(from, to) != null)) return true;
         requireDragonParts();

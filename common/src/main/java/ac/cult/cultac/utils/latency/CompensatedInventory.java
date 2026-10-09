@@ -56,6 +56,9 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     // Cult's compensated storage keeps the protocol offhand slot at 45.
     private static final int NMS_OFFHAND_SWAP_BUTTON = 40;
     public int openWindowID = 0;
+    private int lastClickServerTick;
+    private int clicksThisServerTick;
+    private int maxClicksPerTick = 3;
     public int stateID = 0; // Player inventory state ID. Don't mess up the last sent state ID by changing it.
     private List<MerchantOffer> merchantOffers = List.of();
     private int selectedMerchantOffer = 0;
@@ -67,6 +70,11 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
         inventory = new Inventory(playerData, storage);
 
         menu = inventory;
+    }
+
+    @Override
+    public void onReload(ac.grim.grimac.api.config.ConfigManager config) {
+        maxClicksPerTick = config.getIntElse("max-clicks-per-tick", 3);
     }
 
     private void setClientCarried(SimItemStack stack) {
@@ -337,15 +345,36 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
 
     @CultPacketHandler
     public void onContainerClick(PacketReceiveEvent<InventoryClick> event, CultPlayer player, InventoryClick packet) {
-        if (event.isCancelled()) {
-            return;
+        if (player.isBedrockMovement()) {
+            if (event.isCancelled()) return;
+        } else {
+            int currentTick = ac.cult.cultac.CultAPI.INSTANCE.getTickManager().currentTick;
+            if (lastClickServerTick != currentTick) {
+                clicksThisServerTick = 0;
+                lastClickServerTick = currentTick;
+            }
+            if (maxClicksPerTick > 0 && clicksThisServerTick >= maxClicksPerTick) {
+                event.setCancelled(true);
+            } else if (packet.clickType() != WindowClickType.PICKUP_ALL
+                    && packet.clickType() != WindowClickType.QUICK_CRAFT
+                    && (packet.clickType() != WindowClickType.QUICK_MOVE
+                            || menu.getCarried().isEmpty()
+                            || packet.button() != 0)) {
+                clicksThisServerTick++;
+            }
         }
+        // MultiPlayerGameMode#handleContainerInput applies the click before sending it.
+        // Cancelling server processing does not undo that local prediction. Keep validating
+        // and mirroring it until an authoritative clientbound inventory update arrives.
 
         // Only changes of item type can reset Player#attackStrengthTicker. Use the existing
         // validated inventory prediction, not the packet's unvalidated changed-slot claims.
         String[] hotbarBefore = new String[9];
         for (int slot = 0; slot < 9; slot++) {
-            hotbarBefore[slot] = inventory.getInventoryStorage().getItem(Inventory.HOTBAR_OFFSET + slot).itemKey();
+            hotbarBefore[slot] = inventory
+                    .getInventoryStorage()
+                    .getItem(Inventory.HOTBAR_OFFSET + slot)
+                    .itemKey();
         }
         boolean mirrored = applyContainerClick(packet);
         if (!player.isBedrockMovement()) {
@@ -353,8 +382,10 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
             // selected slot can trail the client by one tick, so compare every hotbar slot.
             boolean changed = !mirrored;
             for (int slot = 0; slot < 9 && !changed; slot++) {
-                changed = !hotbarBefore[slot].equals(
-                        inventory.getInventoryStorage().getItem(Inventory.HOTBAR_OFFSET + slot).itemKey());
+                changed = !hotbarBefore[slot].equals(inventory
+                        .getInventoryStorage()
+                        .getItem(Inventory.HOTBAR_OFFSET + slot)
+                        .itemKey());
             }
             if (!mirrored) {
                 for (int slot = 0; slot < 9; slot++) player.attackStrength.onUnconfirmedMainHandChange(slot);

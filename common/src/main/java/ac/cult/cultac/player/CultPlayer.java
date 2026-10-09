@@ -5,9 +5,9 @@ import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.bedrock.player.BedrockPlayerState;
 import ac.cult.cultac.checks.Check;
-import ac.cult.cultac.checks.impl.combat.KeepSprint;
 import ac.cult.cultac.checks.impl.aim.processor.AimProcessor;
 import ac.cult.cultac.checks.impl.combat.FairReach;
+import ac.cult.cultac.checks.impl.combat.KeepSprint;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
 import ac.cult.cultac.checks.impl.packetorder.PacketOrderProcessor;
 import ac.cult.cultac.checks.impl.ping.TransactionOrder;
@@ -201,6 +201,7 @@ public class CultPlayer implements GrimUser {
     public @NotNull SimpleCollisionBox boundingBox;
     public @NotNull Pose pose = Pose.STANDING;
     public boolean isInBed = false;
+    public final ac.cult.cultac.utils.latency.CompensatedOpenWindow openWindow;
     public boolean hasInventoryOpen = false;
     public long lastOpenedInventory;
     public int food = 20;
@@ -335,6 +336,7 @@ public class CultPlayer implements GrimUser {
         this.timeJoined = System.currentTimeMillis();
         onReload();
 
+        this.openWindow = new ac.cult.cultac.utils.latency.CompensatedOpenWindow(this);
         this.nettyScheduler = new NettyScheduler(this);
         this.packetEntityReplication = new PacketEntityReplication(this);
         this.ghostBlockMitigator = new GhostBlockMitigator(this);
