@@ -173,7 +173,7 @@
  
 --- /dev/null
 +++ b/src/main/java/ac/grim/movementvalidation/Pr2848InventoryScenarios.java
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,78 @@
 +package ac.grim.movementvalidation;
 +
 +import java.util.ArrayList;
@@ -221,6 +221,34 @@
 +                .openSmoketestInventory("generic:1").advanceTicks(1).containerClick(36, 0, "PICKUP").advanceTicks(11)
 +                .expectClientDoubleWithinTickRange(3, 7, ClientDoubleField.VEL_Y, 0.2D, 0.43D)
 +                .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        result.add(MovementScenarioBuilder.legitimate("inventory-pr2848-cancel-resync")
++                .description("Four rapid vanilla clicks exceed the cap; a full menu correction restores the cursor before the next click.")
++                .tags("inventory", "pr2848")
++                .fixture(resyncFixture("inventory-pr2848-cancel-resync"))
++                .serverCommandAfterJoin("item replace entity CodexClient hotbar.0 with minecraft:stone 8")
++                .advanceTicks(2).openSmoketestInventory("generic:1").advanceTicks(12)
++                .containerClick(36, 0, "PICKUP").containerClick(0, 0, "PICKUP")
++                .containerClick(0, 0, "PICKUP").containerClick(1, 0, "PICKUP")
++                .advanceTicks(12).containerClick(2, 0, "PICKUP").advanceTicks(12)
++                .expectClientOutboundPacketClassCountAtLeast(14, 38, "ServerboundContainerClickPacket", 5)
++                .expectClientInboundPacketClassCountAtLeast(14, 26, "ClientboundContainerSetContentPacket", 1)
++                .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        result.add(MovementScenarioBuilder.legitimate("inventory-pr2848-cancel-resync-reopen")
++                .description("A cancelled click is followed immediately by closing and replacing the menu before its correction runs.")
++                .tags("inventory", "pr2848")
++                .fixture(resyncFixture("inventory-pr2848-cancel-resync-reopen"))
++                .serverCommandAfterJoin("item replace entity CodexClient hotbar.0 with minecraft:stone 8")
++                .advanceTicks(2).openSmoketestInventory("generic:1").advanceTicks(12)
++                .containerClick(36, 0, "PICKUP").containerClick(0, 0, "PICKUP")
++                .containerClick(0, 0, "PICKUP").containerClick(1, 0, "PICKUP")
++                .advanceTicks(1).closeContainer().openSmoketestInventory("generic:2").advanceTicks(12)
++                .expectClientOutboundPacketClassCountAtLeast(14, 27, "ServerboundContainerClickPacket", 4)
++                .expectNoFlag().expectNoCorrection().expectNoSetback().build());
 +        return List.copyOf(result);
++    }
++
++    private static ScenarioWorldFixture resyncFixture(String name) {
++        return ScenarioWorldFixture.builder(name).defaultSpawn(0.5D, 64.0D, 0.5D).clientLevelFlat(true)
++                .fillRect(-12, 12, 63, -12, 12, "STONE").build();
 +    }
 +}

@@ -8,9 +8,13 @@ import ac.cult.cultac.checks.impl.badpackets.BadPacketsWindow;
 import ac.cult.cultac.checks.impl.multiactions.MultiActionsH;
 import ac.cult.cultac.checks.impl.multiactions.MultiActionsS;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerWindow;
+import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.packet.InventoryPackets;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
+import ac.cult.cultac.platform.api.scheduler.EntityScheduler;
+import ac.cult.cultac.platform.api.scheduler.PlatformScheduler;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.ProtocolVersion;
@@ -19,10 +23,14 @@ import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundOpenScreen;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSwing;
+import ac.cult.cultac.protocol.wire.Wire;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.inventory.InventoryClick;
 import ac.cult.cultac.utils.inventory.inventory.MenuType;
 import ac.cult.cultac.utils.inventory.inventory.WindowClickType;
+import io.netty.buffer.ByteBuf;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -165,6 +173,201 @@ class InventoryWindowChecksTest {
                     inventory.inventory.getInventoryStorage().getItem(38).itemKey());
             assertTrue(inventory.menu.getCarried().isEmpty());
         }
+    }
+
+    @Test
+    void cancelledWireClicksShareAResendAndKeepPredictionUntilTheCorrectionProof() throws Exception {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3);
+                var scheduler = new InventoryResyncScheduler()) {
+            var platform = mock(PlatformPlayer.class);
+            when(platform.hasServerAuthority()).thenReturn(true);
+            when(platform.isOnline()).thenReturn(true);
+            f.user.bind(platform);
+            f.player.platformPlayer = platform;
+            var inventory = f.player.getInventory();
+            var stone = ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap.item("minecraft:stone");
+            inventory.inventory.getInventoryStorage().setItem(36, stone.copy());
+            var type = clickEvent(f, click(0, 36, WindowClickType.PICKUP)).getPacketType();
+            f.registrar.register(
+                    routes -> routes.receive(type, PacketListenerPriority.NORMAL, (event, player, packet) -> {
+                        inventory.onContainerClick(event, player, packet);
+                        if (event.isCancelled()) inventory.resyncCancelledClick();
+                    }));
+            int[] slots = {36, 37, 37, 38, 38, 39};
+            for (int i = 0; i < slots.length; i++) {
+                boolean pickup = (i & 1) == 0;
+                var frame = f.id(type, "container_click");
+                Wire.writeVarInt(frame, 0);
+                Wire.writeVarInt(frame, 0);
+                frame.writeShort(slots[i]).writeByte(0);
+                Wire.writeVarInt(frame, WindowClickType.PICKUP.ordinal());
+                Wire.writeVarInt(frame, 1);
+                frame.writeShort(slots[i]);
+                writeClickItem(frame, pickup ? SimItemStack.EMPTY : stone);
+                writeClickItem(frame, pickup ? stone : SimItemStack.EMPTY);
+                if (i < 3) f.forward(frame);
+                else {
+                    assertFalse(f.channel.writeInbound(frame));
+                    assertNull(f.channel.readInbound());
+                    assertEquals(0, frame.refCnt());
+                }
+            }
+            assertEquals(1, scheduler.tasks.size());
+            verify(platform, never()).updateInventory();
+            assertEquals(
+                    "minecraft:stone",
+                    inventory.inventory.getInventoryStorage().getItem(39).itemKey());
+            assertTrue(inventory.menu.getCarried().isEmpty());
+
+            // The server accepted only the first three clicks: the stone is on its cursor.
+            var authoritative = new ArrayList<SimItemStack>();
+            for (int i = 0; i < inventory.menu.getSlots().size(); i++) authoritative.add(SimItemStack.EMPTY);
+            var content = new InventoryPackets.Content(0, 42, authoritative, stone.copy());
+            @SuppressWarnings("unchecked")
+            var contentType = (PacketType<InventoryPackets.Content>)
+                    f.registrar.scanner().runtime().typeForRecord(InventoryPackets.Content.class);
+            var correction = new PacketSendEvent<>(f.user, ConnectionPhase.PLAY, contentType, content, false);
+            doAnswer(ignored -> {
+                        inventory.onContainerSetContent(correction, f.player, content);
+                        return null;
+                    })
+                    .when(platform)
+                    .updateInventory();
+            scheduler.tasks.removeFirst().run();
+            verify(platform).updateInventory();
+            assertFalse(correction.getWritesAfterSend().isEmpty());
+            assertEquals(
+                    "minecraft:stone",
+                    inventory.inventory.getInventoryStorage().getItem(39).itemKey());
+            assertTrue(inventory.menu.getCarried().isEmpty());
+            assertEquals(0, inventory.stateID);
+            acknowledge(f, f.player.lastTransactionSent.get());
+            assertTrue(inventory.inventory.getInventoryStorage().getItem(39).isEmpty());
+            assertEquals("minecraft:stone", inventory.menu.getCarried().itemKey());
+            assertEquals(42, inventory.stateID);
+        }
+    }
+
+    @Test
+    void aCancellationDuringTheResendQueuesAnotherCorrectionAndRetirementReleasesIt() throws Exception {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3);
+                var scheduler = new InventoryResyncScheduler()) {
+            var platform = mock(PlatformPlayer.class);
+            when(platform.hasServerAuthority()).thenReturn(true);
+            when(platform.isOnline()).thenReturn(true);
+            f.player.platformPlayer = platform;
+            var inventory = f.player.getInventory();
+            doAnswer(ignored -> {
+                        inventory.resyncCancelledClick();
+                        return null;
+                    })
+                    .when(platform)
+                    .updateInventory();
+            inventory.resyncCancelledClick();
+            inventory.resyncCancelledClick();
+            assertEquals(1, scheduler.tasks.size());
+            scheduler.tasks.removeFirst().run();
+            assertEquals(1, scheduler.tasks.size());
+            scheduler.retired.getLast().run();
+            scheduler.tasks.clear();
+            inventory.resyncCancelledClick();
+            assertEquals(1, scheduler.tasks.size());
+        }
+    }
+
+    @Test
+    void aProxyCannotProduceAnAuthoritativeInventoryResend() throws Exception {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3);
+                var scheduler = new InventoryResyncScheduler()) {
+            var platform = mock(PlatformPlayer.class);
+            when(platform.hasServerAuthority()).thenReturn(false);
+            f.player.platformPlayer = platform;
+            f.player.getInventory().resyncCancelledClick();
+            assertTrue(scheduler.tasks.isEmpty());
+            verify(platform, never()).updateInventory();
+        }
+    }
+
+    @Test
+    void aSchedulerFailureCannotUndoCancellationAndTheNextClickRetries() throws Exception {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3);
+                var scheduler = new InventoryResyncScheduler()) {
+            var platform = mock(PlatformPlayer.class);
+            when(platform.hasServerAuthority()).thenReturn(true);
+            f.player.platformPlayer = platform;
+            var type = clickEvent(f, click(0, 36, WindowClickType.PICKUP)).getPacketType();
+            f.registrar.register(
+                    routes -> routes.receive(type, PacketListenerPriority.NORMAL, (event, player, packet) -> {
+                        event.setCancelled(true);
+                        player.getInventory().resyncCancelledClick();
+                    }));
+            scheduler.rejectNext = true;
+            for (int i = 0; i < 2; i++) {
+                var frame = f.id(type, "container_click");
+                Wire.writeVarInt(frame, 0);
+                Wire.writeVarInt(frame, 0);
+                frame.writeShort(36).writeByte(0);
+                Wire.writeVarInt(frame, WindowClickType.PICKUP.ordinal());
+                Wire.writeVarInt(frame, 0);
+                frame.writeBoolean(false);
+                assertFalse(f.channel.writeInbound(frame));
+                assertNull(f.channel.readInbound());
+                assertEquals(0, frame.refCnt());
+                assertEquals(i, scheduler.tasks.size());
+            }
+        }
+    }
+
+    private static final class InventoryResyncScheduler implements AutoCloseable {
+        final List<Runnable> tasks = new ArrayList<>();
+        final List<Runnable> retired = new ArrayList<>();
+        boolean rejectNext;
+        final java.lang.reflect.Field loader = ac.cult.cultac.CultAPI.class.getDeclaredField("loader");
+        final Object original;
+
+        InventoryResyncScheduler() throws Exception {
+            loader.setAccessible(true);
+            original = loader.get(ac.cult.cultac.CultAPI.INSTANCE);
+            var entity = mock(EntityScheduler.class);
+            var scheduler = mock(PlatformScheduler.class);
+            when(scheduler.getEntityScheduler()).thenReturn(entity);
+            doAnswer(call -> {
+                        if (rejectNext) {
+                            rejectNext = false;
+                            throw new IllegalStateException("test scheduler rejection");
+                        }
+                        tasks.add(call.getArgument(2));
+                        retired.add(call.getArgument(3));
+                        assertEquals(2L, (long) call.getArgument(4));
+                        return null;
+                    })
+                    .when(entity)
+                    .execute(any(), any(), any(), any(), anyLong());
+            loader.set(
+                    ac.cult.cultac.CultAPI.INSTANCE,
+                    java.lang.reflect.Proxy.newProxyInstance(
+                            getClass().getClassLoader(),
+                            new Class<?>[] {ac.cult.cultac.platform.api.PlatformLoader.class},
+                            (proxy, method, args) -> method.getName().equals("getScheduler")
+                                    ? scheduler
+                                    : method.invoke(original, args)));
+        }
+
+        @Override
+        public void close() throws Exception {
+            loader.set(ac.cult.cultac.CultAPI.INSTANCE, original);
+        }
+    }
+
+    private static void writeClickItem(ByteBuf output, SimItemStack item) {
+        output.writeBoolean(!item.isEmpty());
+        if (item.isEmpty()) return;
+        Wire.writeVarInt(
+                output,
+                ac.cult.cultac.network.codec.ModelRegistryNamesState.defaults().id("minecraft:item", item.itemKey()));
+        Wire.writeVarInt(output, item.count());
+        Wire.writeVarInt(output, 0); // Added component hashes.
+        Wire.writeVarInt(output, 0); // Removed components.
     }
 
     private static void serverOpen(RecordReceiveFixture f, int id) {

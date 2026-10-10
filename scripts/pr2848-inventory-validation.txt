@@ -166,3 +166,94 @@ versions. The detached untouched baseline has identical failure messages and
 counts. Details: final-build.log, baseline-velocity-tests.log and
 velocity-unit-comparison.json. The PR does not edit the Velocity adapter.
 The distributable shadow jar and private-codec packaging verification pass.
+
+Follow-up: authoritative correction for cancelled clicks (2026-10-09)
+-------------------------------------------------------------------
+The final click listener now requests a full authoritative resend after all
+click checks have run. Vanilla never receives cancelled clicks. The existing
+validated client prediction still follows the local click until the normal
+outbound inventory proof acknowledges the correction. No cap, check or
+inventory validation assertion was relaxed.
+
+CompensatedInventory coalesces requests into one pending entity task. Two
+scheduler heartbeats allow a complete owning tick to drain previously accepted
+clicks before reading the server inventory. The callback resends the currently
+active menu, so a close/reopen does not target a stale menu. A cancellation
+racing that snapshot queues a subsequent correction. Retirement releases the
+pending request. Scheduling exceptions are caught without undoing cancellation;
+otherwise the dispatcher's recovery would discard the cancellation itself.
+
+The resend uses PlatformPlayer.updateInventory on the player/region thread.
+CraftPlayer.updateInventory calls containerMenu.sendAllDataToRemote, which
+includes all slots and the carried stack. ServerPlayer's synchronizer sends
+ClientboundContainerSetContentPacket with incrementStateId. ClientPacketListener
+applies those contents to the matching menu. These source paths were inspected
+in MCP-Reborn, and the actual verified 26.2 client/Paper bytecode was checked:
+resync-client.javap, resync-craftplayer.javap and resync-server.javap. Paper
+drains its packet queue at tick start before its scheduler heartbeat.
+
+This needs an authoritative Bukkit/Paper adapter. The standalone Velocity
+adapter cannot ask an unmodified backend to resend its inventory; it remains
+explicitly excluded from this server-state operation. Bedrock is unchanged.
+A brief visible item rollback remains inherent in rejecting a predicted click.
+
+Four new regressions cover native wire discard and burst coalescing, slots/
+cursor/state-ID correction only after proof, a snapshot race and retirement,
+proxy authority, and preserving cancellation after scheduler rejection.
+The portable harness patch adds two legitimate real-client scenarios: a capped
+click followed by a corrected-cursor click, and closing/replacing the menu
+while correction is pending. Both require packet evidence and final inventory
+snapshot convergence. The first also requires a full contents packet after
+the four-click burst. The patch applies cleanly to its original harness base.
+
+The old prepared-toolchain paths disappeared between tasks. The follow-up
+recovered the official 26.2 client and all 68 selected libraries from Mojang
+metadata, verifying their SHA1s. Its client SHA256 equals the original value
+above. Paper 26.2 build 111 and its verified runtime hashes are unchanged.
+The runtime uses this official jar directly; cached local source jars are
+used only as source lookup paths, never as gameplay classes.
+
+The 11 focused InventoryWindowChecksTest cases and :bukkit:shadowJar pass;
+private codec packaging is verified (resync-final-build.log). The complete
+:common:test run has 825 cases: 808 passed, the same 10 baseline failures,
+7 skipped, and no new failures (resync-common-final.log and
+resync-unit-comparison.json).
+
+The final-source latency run passes 7/7 with 100 ms each way: corrected-cursor
+click, menu replacement, furnace, brewing, loom, smithing and wrong-window.
+Each legitimate case has zero flags and final inventory convergence.
+Evidence: resync-latency-final/ and resync-latency-final.log.
+
+One intermediate full run was 55/56: the unchanged BadPacketsR flagged the
+enchanting case during a 3.1-second controller wait, with zero position
+packets while pongs were serviced. That case contains no inventory click,
+so the new resend path is not invoked. The harness's menu-open wait pumps
+packet tasks without advancing game ticks. All its inventory snapshots
+passed; three isolated repeats passed (resync-enchant-repeat.log). Neither
+the check nor the harness assertions were changed to suppress this issue.
+The failed observation remains in resync-inventory-final/.
+
+To reproduce the follow-up inventory suite with the recovered local assets:
+
+  SMOKETEST_SUITE=inventory \
+  SMOKETEST_WORKSPACE_MANIFEST="$PWD/.ignored/pr-2848/workspace-resync.properties" \
+  scripts/run-local-pr2848-inventory-smoketests.sh
+
+The isolated final-source suite was 55/56. All 44 legitimate cases pass with
+zero flags, final slot/cursor convergence and maximum movement offset 0.0.
+All eight PR-specific impossible claims trigger their intended checks. The
+negative sprint case records SprintH correctly, but its measurement log window
+misses inventory snapshot evidence during disconnect; the server log contains
+passing setup snapshots before the measurement marker. The dedicated repeat
+passes sprint twice and reproduces this capture failure once. This remains
+reported as a harness failure, not an anticheat pass or an assertion exception.
+Both new resync cases pass all three repetitions (6/6). Every inventory case
+has a passing final-source execution across the suite and targeted reruns;
+the full final-source suite is not claimed to be unconditionally green.
+Evidence: resync-inventory-isolated/, resync-capture-repeat/, their adjacent
+logs, and resync-live-results.json. The initial resend implementation, before
+the scheduler-error guard, also passed the complete suite 56/56.
+
+The pinned final-source suite/latency binary SHA256 is
+ff9d2129e9bb1d24c959ad9145f95c10d7c88febb4c652b9190d41ff59022a86.
+The follow-up retains the original PR merge and all upstream author history.

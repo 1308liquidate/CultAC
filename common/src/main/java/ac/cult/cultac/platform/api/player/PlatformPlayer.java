@@ -31,6 +31,7 @@ public interface PlatformPlayer extends CultEntity, OfflinePlatformPlayer {
 
     void sendMessage(Component message);
 
+    /** Resends the authoritative active menu, including its cursor and state ID. Call on the owning thread. */
     void updateInventory();
 
     int getPing();

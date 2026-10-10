@@ -58,7 +58,6 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItemOn;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.protocol.value.Hand;
-import ac.cult.cultac.utils.nmsutil.IsUsingItem;
 import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
 import ac.cult.cultac.protocol.value.Vec3d;
@@ -224,6 +223,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
     @CultPacketHandler
     public void onContainerClick(PacketReceiveEvent<InventoryClick> event, CultPlayer player, InventoryClick packet) {
         processGenericReceive(event, player);
+        if (event.isCancelled()) player.getInventory().resyncCancelledClick();
     }
 
     @CultPacketHandler
