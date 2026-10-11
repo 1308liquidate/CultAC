@@ -1,3 +1,5 @@
 # Formatting-only commits. Enable with: git config blame.ignoreRevsFile .git-blame-ignore-revs
 # reformat java sources with palantir java format
 3ee6fedb08bbabb4a5e35014e6c4d85a8d022a66
+# reformat java sources
+7a5b5d285dc4442cf77ca2d477067f94f0be5510
