@@ -197,6 +197,13 @@ public class CompensatedEntities {
                             .setBlockInteractionRange(calculateAttribute(snapshot, 0.0, 64.0));
                 }
 
+                if (supportsAttributes(ClientVersion.V_1_20_5)
+                        && matchesAttribute(snapshot, "entity_interaction_range")) {
+                    player.compensatedEntities
+                            .getSelf()
+                            .setEntityInteractionRange(calculateAttribute(snapshot, 0.0, 64.0));
+                }
+
                 if (matchesAttribute(snapshot, "block_break_speed")) {
                     player.compensatedEntities.getSelf().blockBreakSpeed = calculateAttribute(snapshot, 0.0, 1024.0);
                 }

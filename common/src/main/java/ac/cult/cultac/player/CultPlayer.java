@@ -5,9 +5,9 @@ import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.bedrock.player.BedrockPlayerState;
 import ac.cult.cultac.checks.Check;
-import ac.cult.cultac.checks.impl.combat.KeepSprint;
 import ac.cult.cultac.checks.impl.aim.processor.AimProcessor;
 import ac.cult.cultac.checks.impl.combat.FairReach;
+import ac.cult.cultac.checks.impl.combat.KeepSprint;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
 import ac.cult.cultac.checks.impl.packetorder.PacketOrderProcessor;
 import ac.cult.cultac.checks.impl.ping.TransactionOrder;
@@ -37,7 +37,6 @@ import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.cultac.utils.anticheat.MessageUtil;
 import ac.cult.cultac.utils.anticheat.NettyScheduler;
-import ac.cult.cultac.utils.change.PlayerBlockHistory;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.BoatData;
 import ac.cult.cultac.utils.data.ClientAttackStrength;
@@ -62,6 +61,7 @@ import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
+import ac.cult.cultac.utils.visibility.VisibilityDebug;
 import ac.grim.grimac.api.AbstractCheck;
 import ac.grim.grimac.api.GrimUser;
 import ac.grim.grimac.api.PacketWorld;
@@ -164,6 +164,8 @@ public class CultPlayer implements GrimUser {
     public int riptideSpinAttackTicks;
     private @MonotonicNonNull PacketTracker packetTracker;
     public final @NotNull PacketOrderProcessor packetOrderProcessor = new PacketOrderProcessor(this);
+    public final ac.cult.cultac.utils.latency.BlockActionReconciler blockActionReconciler =
+            new ac.cult.cultac.utils.latency.BlockActionReconciler(this);
     public long rawTransactionPing = 0;
     public long lastTransSent = 0;
 
@@ -191,6 +193,7 @@ public class CultPlayer implements GrimUser {
     public final ClientSprintState sprintState = new ClientSprintState();
     public final ClientAttackStrength attackStrength = new ClientAttackStrength();
     public final ClientCombatAttributes combatAttributes = new ClientCombatAttributes();
+    public final VisibilityDebug visibilityDebug = new VisibilityDebug(this);
     public boolean isFlying;
     public boolean canFly;
     public boolean canInstabuild;
@@ -238,7 +241,6 @@ public class CultPlayer implements GrimUser {
 
     public long lastRotated;
     public final @NotNull VehicleData vehicleData = new VehicleData();
-    public final @NotNull PlayerBlockHistory blockHistory = new PlayerBlockHistory();
     public boolean wasEyeInWater;
     public boolean serverOpenedInventoryThisTick;
     // Whether this tick's movement intersected a nether portal block (see MultiActionsD)

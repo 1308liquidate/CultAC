@@ -109,6 +109,8 @@ Punishments:
     remove-violations-after: 300
     checks:
       - "Interact"
+      - "AttackPlayerVisibility"
+      - "AttackMobVisibility"
       - "Aim"
     commands:
       - "20:40 [alert]"
@@ -122,4 +124,4 @@ Punishments:
       - "20:40 [alert]"
       - "1:1 [log]"
 
-cult-config-version: 1
+cult-config-version: 2

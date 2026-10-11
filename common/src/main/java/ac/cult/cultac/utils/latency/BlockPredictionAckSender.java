@@ -1,6 +1,7 @@
 package ac.cult.cultac.utils.latency;
 
 import ac.cult.cultac.network.CultWrite;
+import ac.cult.cultac.network.packet.InventoryPackets;
 import ac.cult.cultac.network.packet.WorldPackets.BlockUpdate;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundBlockChangedAck;
@@ -19,12 +20,22 @@ public final class BlockPredictionAckSender {
     }
 
     public static void sendAck(CultPlayer player, int sequence, Collection<TrackedBlockUpdate> updates) {
+        sendCorrections(player, sequence, true, updates, List.of());
+    }
+
+    public static void sendCorrections(
+            CultPlayer player,
+            int sequence,
+            boolean acknowledge,
+            Collection<TrackedBlockUpdate> updates,
+            Collection<InventoryPackets.Slot> slots) {
         CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForBundle();
         if (transaction == null) {
             for (TrackedBlockUpdate update : updates) {
                 player.user.write(new BlockUpdate(update.pos(), update.state()));
             }
-            player.user.write(new CultWrite(new ClientboundBlockChangedAck(sequence), false));
+            for (var slot : slots) player.user.write(slot);
+            if (acknowledge) player.user.write(new CultWrite(new ClientboundBlockChangedAck(sequence), true));
             return;
         }
 
@@ -34,12 +45,19 @@ public final class BlockPredictionAckSender {
             player.compensatedWorld.handleServerBlockUpdate(update.pos(), update.state(), transaction);
         }
 
-        packets.add(new CultWrite(new ClientboundBlockChangedAck(sequence), true));
+        for (var slot : slots) {
+            packets.add(new CultWrite(slot, true));
+            player.latencyUtils.addRealTimeTask(
+                    transaction.transaction(), () -> player.getInventory().applySlotCorrection(slot));
+        }
+        if (acknowledge) {
+            packets.add(new CultWrite(new ClientboundBlockChangedAck(sequence), true));
+            player.compensatedWorld.handlePredictionConfirmation(sequence, transaction);
+        }
         packets.add(transaction.packet());
-        player.compensatedWorld.handlePredictionConfirmation(sequence, transaction);
 
         // Vanilla processes bundled sub-packets in order and only then replies to the ping.
         // This makes the pong an exact marker for the client applying the ack and updates.
-        player.user.write(packets, true);
+        player.user.write(packets, player.supportsBundles());
     }
 }

@@ -36,6 +36,18 @@ public final class ItemComponents {
     }
     public record BookPage(String raw, String filtered) {}
 
+    public record AttackRange(float minReach, float maxReach, float minCreativeReach,
+                              float maxCreativeReach, float hitboxMargin, float mobFactor) {}
+
+    /** AttackRange.CODEC fields, including omitted vanilla defaults. */
+    public static AttackRange attackRange(Components components) {
+        var value = object(components, "minecraft:attack_range");
+        return value == null ? null : new AttackRange(number(value, "min_reach", 0),
+                number(value, "max_reach", 3), number(value, "min_creative_reach", 0),
+                number(value, "max_creative_reach", 5), number(value, "hitbox_margin", .3F),
+                number(value, "mob_factor", 1));
+    }
+
     public static Tool tool(Components components) {
         var value = object(components, "minecraft:tool");
         if (value == null) return null;

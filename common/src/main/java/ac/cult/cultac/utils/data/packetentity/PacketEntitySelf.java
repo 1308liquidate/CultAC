@@ -34,6 +34,10 @@ public class PacketEntitySelf extends PacketEntity {
     @Getter
     private double blockInteractionRange = 4.5D;
 
+    @Getter
+    @Setter
+    private double entityInteractionRange = 3.0D;
+
     public PacketEntitySelf(CultPlayer player) {
         this(player, null);
     }
@@ -59,6 +63,7 @@ public class PacketEntitySelf extends PacketEntity {
         this.miningEfficiency = old.miningEfficiency;
         this.submergedMiningSpeed = old.submergedMiningSpeed;
         this.blockInteractionRange = old.blockInteractionRange;
+        this.entityInteractionRange = old.entityInteractionRange;
     }
 
     public boolean inVehicle() {
@@ -95,6 +100,7 @@ public class PacketEntitySelf extends PacketEntity {
 
     public void setDefaultBlockInteractionRange(boolean creative) {
         this.blockInteractionRange = creative ? 5.0D : 4.5D;
+        this.entityInteractionRange = creative ? 5.0D : 3.0D;
     }
 
     @Override

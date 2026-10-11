@@ -1,7 +1,6 @@
 package ac.cult.cultac.manager;
 
 import ac.cult.cultac.manager.tick.Tickable;
-import ac.cult.cultac.manager.tick.impl.ClearRecentlyUpdatedBlocks;
 import ac.cult.cultac.manager.tick.impl.ClientVersionSetter;
 import ac.cult.cultac.manager.tick.impl.ResetTick;
 import ac.cult.cultac.manager.tick.impl.TickInventory;
@@ -30,7 +29,6 @@ public class TickManager {
                         TickInventory.class,
                         new TickInventory()) // Async because I've never gotten an exception from this.  It's probably
                 // safe.
-                .put(ClearRecentlyUpdatedBlocks.class, new ClearRecentlyUpdatedBlocks())
                 .build();
     }
 

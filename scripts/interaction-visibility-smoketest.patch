@@ -1,0 +1,381 @@
+diff --git a/src/main/java/ac/grim/movementvalidation/ReflectionBackedHeadlessLocalPlayerRunner.java b/src/main/java/ac/grim/movementvalidation/ReflectionBackedHeadlessLocalPlayerRunner.java
+--- a/src/main/java/ac/grim/movementvalidation/ReflectionBackedHeadlessLocalPlayerRunner.java
++++ b/src/main/java/ac/grim/movementvalidation/ReflectionBackedHeadlessLocalPlayerRunner.java
+@@ -71,7 +71,7 @@
+     private static final boolean DISABLE_TRAFFIC_PROBE = Boolean.getBoolean("cult.validation.disableTrafficProbe")
+             || Boolean.parseBoolean(System.getenv().getOrDefault("CULT_VALIDATION_DISABLE_TRAFFIC_PROBE", "false"));
+     private static final int SMOKETEST_SNAPSHOT_MAGIC = 0x47534D31; // GSM1
+-    private static final int SMOKETEST_SNAPSHOT_VERSION = 4;
++    private static final int SMOKETEST_SNAPSHOT_VERSION = 6;
+     private static final int SMOKETEST_CONTROL_MAGIC = 0x47534D43; // GSMC
+     private static final int SMOKETEST_CONTROL_VERSION = 1;
+     private static final int SMOKETEST_PISTON_MAGIC = 0x47534D50; // GSMP
+@@ -8423,6 +8423,10 @@
+ 
+     private void sendRawPacketFuzz(String target) throws ReflectiveOperationException {
+         String normalized = target == null ? "" : target.trim().toLowerCase(java.util.Locale.ROOT);
++        if (normalized.startsWith("visibility:")) {
++            injectVisibilityClaim(normalized.split(":"));
++            return;
++        }
+         if ("truncated_custom_payload".equals(normalized)) {
+             Object rawBuffer = runtimeClass("io.netty.buffer.Unpooled")
+                     .getMethod("buffer", int.class)
+@@ -8435,6 +8439,54 @@
+             return;
+         }
+         throw new IllegalArgumentException("Unknown raw packet fuzz target " + target);
++    }
++
++    /** Valid native action packets with deliberately impossible claims, only for cheating scenarios. */
++    private void injectVisibilityClaim(String[] claim) throws ReflectiveOperationException {
++        Object packet;
++        if (claim[1].equals("attack") || claim[1].equals("interact")) {
++            boolean attack = claim[1].equals("attack");
++            String type = attack ? "cow" : claim[2];
++            Object entity = resolveEntity(new ClientEntitySelector.NearestEntityType("minecraft:" + type, 8));
++            if (entity == null) throw new IllegalStateException("Missing visibility entity target: " + type);
++            int id = ((Number) invoke(entity, "getId")).intValue();
++            if (attack) {
++                packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundAttackPacket")
++                        .getConstructor(int.class).newInstance(id);
++            } else {
++                Class<?> handClass = runtimeClass("net.minecraft.world.InteractionHand");
++                Class<?> vecClass = runtimeClass("net.minecraft.world.phys.Vec3");
++                packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundInteractPacket")
++                        .getConstructor(int.class, handClass, vecClass, boolean.class)
++                        .newInstance(id, handClass.getField("MAIN_HAND").get(null),
++                                vecClass.getConstructor(double.class, double.class, double.class)
++                                        .newInstance(0.0, .5, 0.0), false);
++            }
++        } else {
++            int x = Integer.parseInt(claim[2]), y = Integer.parseInt(claim[3]), z = Integer.parseInt(claim[4]);
++            Class<?> positionClass = runtimeClass("net.minecraft.core.BlockPos");
++            Class<?> directionClass = runtimeClass("net.minecraft.core.Direction");
++            Object position = positionClass.getConstructor(int.class, int.class, int.class).newInstance(x, y, z);
++            Object direction = directionClass.getField(claim[5].toUpperCase(java.util.Locale.ROOT)).get(null);
++            if (claim[1].equals("use")) {
++                Class<?> vecClass = runtimeClass("net.minecraft.world.phys.Vec3");
++                Class<?> hitClass = runtimeClass("net.minecraft.world.phys.BlockHitResult");
++                Object location = vecClass.getConstructor(double.class, double.class, double.class)
++                        .newInstance(x + .5, y + .5, (double) z);
++                Object hit = hitClass.getConstructor(vecClass, directionClass, positionClass, boolean.class)
++                        .newInstance(location, direction, position, false);
++                Class<?> handClass = runtimeClass("net.minecraft.world.InteractionHand");
++                packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundUseItemOnPacket")
++                        .getConstructor(handClass, hitClass, int.class)
++                        .newInstance(handClass.getField("MAIN_HAND").get(null), hit, 0);
++            } else {
++                Class<?> actionClass = runtimeClass("net.minecraft.network.protocol.game.ServerboundPlayerActionPacket$Action");
++                packet = runtimeClass("net.minecraft.network.protocol.game.ServerboundPlayerActionPacket")
++                        .getConstructor(actionClass, positionClass, directionClass, int.class)
++                        .newInstance(actionClass.getField(claim[1].toUpperCase(java.util.Locale.ROOT)).get(null), position, direction, 0);
++            }
++        }
++        pendingInjectedPackets.add(packet);
+     }
+ 
+     private void writeRawServerboundPacket(Object packetBuffer, String label) throws ReflectiveOperationException {
+@@ -8489,6 +8541,9 @@
+         DataOutputStream output = new DataOutputStream(bytes);
+         output.writeInt(SMOKETEST_SNAPSHOT_MAGIC);
+         output.writeInt(SMOKETEST_SNAPSHOT_VERSION);
++        Object version = Class.forName("net.minecraft.SharedConstants", true, classLoader)
++                .getMethod("getCurrentVersion").invoke(null);
++        output.writeInt(((Number) invoke(version, "protocolVersion")).intValue());
+         output.writeInt(tickIndex);
+         output.writeUTF(activeFixture == null ? "<unknown>" : activeFixture.name());
+         writeSmoketestSelectedSlot(output);
+@@ -8930,15 +8985,37 @@
+         return new SmoketestItemSignature(
+                 String.valueOf(invoke(itemRegistry, "getKey", item)),
+                 ((Number) invoke(itemStack, "getCount")).intValue(),
+-                String.valueOf(invoke(itemStack, "getComponentsPatch"))
++                java.util.Base64.getEncoder().encodeToString(encodeSnapshotItem(itemStack))
+         );
++    }
++
++    /** Serialize every component through the real client's native stream codec. */
++    private byte[] encodeSnapshotItem(Object itemStack) throws ReflectiveOperationException {
++        Class<?> byteBuf = Class.forName("io.netty.buffer.ByteBuf", true, classLoader);
++        Object storage = Class.forName("io.netty.buffer.Unpooled", true, classLoader)
++                .getMethod("buffer").invoke(null);
++        try {
++            Object buffer = Class.forName("net.minecraft.network.RegistryFriendlyByteBuf", true, classLoader)
++                    .getConstructor(byteBuf, Class.forName("net.minecraft.core.RegistryAccess", true, classLoader))
++                    .newInstance(storage, registryAccessInstance);
++            Object codec = Class.forName("net.minecraft.world.item.ItemStack", true, classLoader)
++                    .getField("OPTIONAL_STREAM_CODEC").get(null);
++            invoke(codec, "encode", buffer, itemStack);
++            byte[] bytes = new byte[((Number) invoke(storage, "readableBytes")).intValue()];
++            invoke(storage, "readBytes", bytes);
++            return bytes;
++        } finally {
++            invoke(storage, "release");
++        }
+     }
+ 
+     private void writeSmoketestItemSnapshot(DataOutputStream output, int slot, SmoketestItemSignature item) throws IOException {
+         output.writeInt(slot);
+         output.writeUTF(item.key());
+         output.writeInt(item.count());
+-        output.writeUTF(item.components());
++        byte[] nativeItem = item.count() == 0 ? new byte[] {0} : java.util.Base64.getDecoder().decode(item.components());
++        output.writeInt(nativeItem.length);
++        output.write(nativeItem);
+     }
+ 
+     private void resetSmoketestSnapshotState() {
+@@ -9518,9 +9595,13 @@
+                         + " pitch=" + invoke(packet, "getXRot");
+             }
+             if (className.equals("net.minecraft.network.protocol.game.ServerboundUseItemOnPacket")) {
++                Object hit = invoke(packet, "getHitResult");
+                 return "hand=" + invoke(packet, "getHand")
+                         + " sequence=" + invoke(packet, "getSequence")
+-                        + " hit=" + invoke(packet, "getHitResult");
++                        + " pos=" + debugBlockPos(invoke(hit, "getBlockPos"))
++                        + " face=" + invoke(hit, "getDirection")
++                        + " location=" + debugVec3(invoke(hit, "getLocation"))
++                        + " inside=" + invoke(hit, "isInside");
+             }
+             if (className.equals("net.minecraft.network.protocol.game.ServerboundSwingPacket")) {
+                 return "hand=" + invoke(packet, "getHand");
+diff --git a/src/main/java/ac/grim/movementvalidation/ScenarioCatalog.java b/src/main/java/ac/grim/movementvalidation/ScenarioCatalog.java
+--- a/src/main/java/ac/grim/movementvalidation/ScenarioCatalog.java
++++ b/src/main/java/ac/grim/movementvalidation/ScenarioCatalog.java
+@@ -5460,6 +5460,7 @@
+         combined.addAll(cheatingScenarios());
+         combined.addAll(experimentScenarios());
+         combined.addAll(PacketFuzzScenarios.catalog());
++        combined.addAll(InteractionVisibilityScenarios.scenarios());
+         return List.copyOf(combined);
+     }
+ 
+diff --git a/src/main/java/ac/grim/movementvalidation/InteractionVisibilityScenarios.java b/src/main/java/ac/grim/movementvalidation/InteractionVisibilityScenarios.java
+new file mode 100644
+--- /dev/null
++++ b/src/main/java/ac/grim/movementvalidation/InteractionVisibilityScenarios.java
+@@ -0,0 +1,222 @@
++package ac.grim.movementvalidation;
++
++import java.util.ArrayList;
++import java.util.List;
++
++/** Positive native picking and adversarial valid-protocol visibility claims. */
++public final class InteractionVisibilityScenarios {
++    private InteractionVisibilityScenarios() {}
++
++    public static List<MovementScenario> scenarios() {
++        List<MovementScenario> scenarios = new ArrayList<>();
++        for (String blocker : List.of("STONE", "GLASS")) {
++            for (String action : List.of("attack", "interact")) {
++                String name = "visibility-blocked-" + (action.equals("attack") ? "attack" : "interact-cow")
++                        + "-corner-" + blocker.toLowerCase();
++                scenarios.add(MovementScenarioBuilder.cheat(name)
++                        .description("An entity's real box is behind two touching block columns; reach padding must not expose it.")
++                        .fixture(cornerFixture(name, blocker, false))
++                        .advanceTicks(4)
++                        .injectRawPacketFuzz("visibility:" + action + (action.equals("attack") ? "" : ":cow"))
++                        .advanceTicks(4)
++                        .expectClientOutboundPacketClassCountAtLeast(4, 8,
++                                action.equals("attack") ? "ServerboundAttackPacket" : "ServerboundInteractPacket", 1)
++                        .expectMustFlag().build());
++            }
++            String name = "visibility-native-attack-corner-opening-" + blocker.toLowerCase();
++            scenarios.add(MovementScenarioBuilder.legitimate(name)
++                    .fixture(cornerFixture(name, blocker, true)).advanceTicks(4)
++                    .vanillaAttackTarget(new ClientEntitySelector.NearestEntityType("minecraft:cow", 8), 1)
++                    .advanceTicks(4)
++                    .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundAttackPacket", 1)
++                    .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        }
++        for (String blocker : List.of("STONE", "GLASS")) {
++            for (String action : List.of("use", "start_destroy_block", "stop_destroy_block", "attack")) {
++                String name = "visibility-blocked-" + action + "-" + blocker.toLowerCase();
++                scenarios.add(MovementScenarioBuilder.cheat(name)
++                        .description("An official client sends a valid action claiming a target entirely behind " + blocker + ".")
++                        .fixture(fixture(name, blocker, action.equals("attack")))
++                        .advanceTicks(4)
++                        .rotate(0, 0)
++                        .injectRawPacketFuzz("visibility:" + action + (action.equals("attack") ? "" : ":0:64:2:north"))
++                        .advanceTicks(4)
++                        .expectClientOutboundPacketClassCountAtLeast(4, 8,
++                                action.equals("attack") ? "ServerboundAttackPacket" :
++                                action.equals("use") ? "ServerboundUseItemOnPacket" : "ServerboundPlayerActionPacket", 1)
++                        .expectMustFlag()
++                        .build());
++            }
++        }
++        for (String face : List.of("south", "east", "west", "down")) {
++            String name = "visibility-impossible-face-" + face;
++            scenarios.add(MovementScenarioBuilder.cheat(name)
++                    .fixture(fixture(name, null, false))
++                    .advanceTicks(4)
++                    .injectRawPacketFuzz("visibility:use:0:64:2:" + face)
++                    .advanceTicks(4)
++                    .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundUseItemOnPacket", 1)
++                    .expectMustFlag()
++                    .build());
++        }
++        for (String blocker : List.of("STONE", "GLASS")) {
++            String name = "visibility-blocked-place-" + blocker.toLowerCase();
++            scenarios.add(MovementScenarioBuilder.cheat(name)
++                    .fixture(fixture(name, blocker, false))
++                    .givePlayer("stone").equipMainHand("stone").advanceTicks(4)
++                    .injectRawPacketFuzz("visibility:use:0:64:2:north").advanceTicks(4)
++                    .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundUseItemOnPacket", 1)
++                    .expectMustFlag().build());
++        }
++        for (String entity : List.of("cow", "oak_boat", "minecart")) {
++            for (String wall : List.of("STONE", "GLASS")) {
++                String name = "visibility-blocked-interact-" + entity + "-" + wall.toLowerCase();
++                scenarios.add(MovementScenarioBuilder.cheat(name)
++                        .fixture(fixture(name, wall, entity)).advanceTicks(4)
++                        .injectRawPacketFuzz("visibility:interact:" + entity).advanceTicks(4)
++                        .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundInteractPacket", 1)
++                        .expectMustFlag().build());
++            }
++            for (String variant : List.of("clear", "slab-opening", "crouch")) {
++                String name = "visibility-native-interact-" + entity + "-" + variant;
++                var builder = MovementScenarioBuilder.legitimate(name)
++                        .fixture(fixture(name, variant.equals("slab-opening") ? "OAK_SLAB" : null, entity));
++                if (variant.equals("crouch")) builder.pressShift();
++                builder.advanceTicks(4)
++                        .targetEntity(new ClientEntitySelector.NearestEntityType("minecraft:" + entity, 8))
++                        .startUseItem().advanceTicks(4)
++                        .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundInteractPacket", 1)
++                        .expectNoFlag().expectNoSetback();
++                if (!entity.equals("cow") && !variant.equals("crouch")) {
++                    // ServerPlayer#startRiding teleports to the rider attachment,
++                    // then sends SetPassengers. This is a required vanilla mount.
++                    builder.allowVanillaCorrection().expectVehiclePresentAtTick(7, true)
++                            .expectVehicleTypeContainsAtTick(7, entity).expectMaxOffset(1.0E-5);
++                } else {
++                    builder.expectNoCorrection();
++                }
++                scenarios.add(builder.build());
++            }
++        }
++        scenarios.add(MovementScenarioBuilder.cheat("visibility-blocked-interact-range")
++                .fixture(fixture("visibility-blocked-interact-range", null, true))
++                .runServerCommand("tp @e[type=minecraft:cow,limit=1] 0.5 64 4")
++                .runServerCommand("item replace entity CodexClient weapon.mainhand with minecraft:iron_sword[minecraft:attack_range={max_reach:10.0,hitbox_margin:2.0}]")
++                .advanceTicks(4).injectRawPacketFuzz("visibility:interact:cow").advanceTicks(4)
++                .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundInteractPacket", 1)
++                .expectMustFlag().build());
++        scenarios.add(MovementScenarioBuilder.legitimate("visibility-native-interact-custom-range")
++                .fixture(fixture("visibility-native-interact-custom-range", null, true))
++                .runServerCommand("item replace entity CodexClient weapon.mainhand with minecraft:iron_sword[minecraft:attack_range={max_reach:10.0,hitbox_margin:0.3}]")
++                .advanceTicks(4).targetEntity(new ClientEntitySelector.NearestEntityType("minecraft:cow", 8))
++                .startUseItem().advanceTicks(4)
++                .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundInteractPacket", 1)
++                .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        for (String material : List.of("STONE", "GLASS", "OAK_SLAB", "OAK_STAIRS", "OAK_FENCE", "CHEST")) {
++            String name = "visibility-native-use-" + material.toLowerCase();
++            // Replace the target through a server command, then let the real client pick its shape.
++            var builder = MovementScenarioBuilder.legitimate(name)
++                    .fixture(fixture(name, null, false))
++                    .runServerCommand("setblock 0 64 2 minecraft:" + material.toLowerCase())
++                    .advanceTicks(4)
++                    .targetBlockAt(0, 64, 2, ClientBlockFace.NORTH, .5, material.equals("OAK_SLAB") ? .25 : .5, 0)
++                    .startUseItem()
++                    .advanceTicks(4)
++                    .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundUseItemOnPacket", 1)
++                    .expectNoFlag().expectNoCorrection().expectNoSetback();
++            scenarios.add(builder.build());
++        }
++        for (boolean slab : List.of(false, true)) {
++            String name = "visibility-native-attack-" + (slab ? "slab-opening" : "clear");
++            scenarios.add(MovementScenarioBuilder.legitimate(name)
++                    .fixture(fixture(name, slab ? "OAK_SLAB" : null, true))
++                    .advanceTicks(4)
++                    .vanillaAttackTarget(new ClientEntitySelector.NearestEntityType("minecraft:cow", 8), 1)
++                    .advanceTicks(4)
++                    .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundAttackPacket", 1)
++                    .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        }
++        scenarios.add(MovementScenarioBuilder.legitimate("visibility-native-custom-attack-range")
++                .fixture(fixture("visibility-native-custom-attack-range", null, true))
++                .runServerCommand("item replace entity CodexClient weapon.mainhand with minecraft:iron_sword[minecraft:attack_range={max_reach:3.0,hitbox_margin:0.3}]")
++                .advanceTicks(4)
++                .vanillaAttackTarget(new ClientEntitySelector.NearestEntityType("minecraft:cow", 8), 1)
++                .advanceTicks(4)
++                .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundAttackPacket", 1)
++                .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        for (String material : List.of("STONE", "OAK_SLAB", "CHEST")) {
++            String name = "visibility-native-crouch-use-" + material.toLowerCase();
++            scenarios.add(MovementScenarioBuilder.legitimate(name)
++                    .fixture(fixture(name, null, false))
++                    .runServerCommand("setblock 0 64 2 minecraft:" + material.toLowerCase())
++                    .pressShift().advanceTicks(4)
++                    .targetBlockAt(0, 64, 2, ClientBlockFace.NORTH, .5, material.equals("OAK_SLAB") ? .25 : .5, 0)
++                    .startUseItem().advanceTicks(4)
++                    .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundUseItemOnPacket", 1)
++                    .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        }
++        for (String item : List.of("iron_sword", "iron_spear")) {
++            String name = "visibility-native-attack-with-" + item;
++            int readyTick = item.equals("iron_spear") ? 40 : 4;
++            scenarios.add(MovementScenarioBuilder.legitimate(name)
++                    .fixture(fixture(name, null, true))
++                    .givePlayer(item).equipMainHand(item).advanceTicks(readyTick)
++                    .vanillaAttackTarget(new ClientEntitySelector.NearestEntityType("minecraft:cow", 8), 1)
++                    .advanceTicks(4)
++                    // MultiPlayerGameMode#piercingAttack sends STAB without a target ID.
++                    .expectClientOutboundPacketClassCountAtLeast(readyTick, readyTick + 4,
++                            item.equals("iron_spear") ? "ServerboundPlayerActionPacket" : "ServerboundAttackPacket", 1)
++                    .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        }
++        scenarios.add(MovementScenarioBuilder.legitimate("visibility-native-crouch-attack")
++                .fixture(fixture("visibility-native-crouch-attack", null, true))
++                .pressShift().advanceTicks(4)
++                .vanillaAttackTarget(new ClientEntitySelector.NearestEntityType("minecraft:cow", 8), 1)
++                .advanceTicks(4)
++                .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundAttackPacket", 1)
++                .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        scenarios.add(MovementScenarioBuilder.legitimate("visibility-native-turn-use")
++                .fixture(fixture("visibility-native-turn-use", null, false))
++                .rotate(90, 0).advanceTicks(4)
++                .targetBlock(0, 64, 2, ClientBlockFace.NORTH).startUseItem().advanceTicks(4)
++                .expectClientOutboundPacketClassCountAtLeast(4, 8, "ServerboundUseItemOnPacket", 1)
++                .expectNoFlag().expectNoCorrection().expectNoSetback().build());
++        return List.copyOf(scenarios);
++    }
++
++    private static ScenarioWorldFixture cornerFixture(String name, String wall, boolean opening) {
++        var builder = ScenarioWorldFixture.builder(name)
++                .defaultSpawn(-.5, 64, -.5).clientLevelFlat(true)
++                .fillRect(-8, 8, 63, -8, 8, "STONE")
++                .serverCommandAfterJoin("gamemode survival CodexClient")
++                .serverCommandAfterJoin("clear CodexClient");
++        for (int y : new int[] {64, 65}) {
++            builder.placement(new FixtureBlockPlacement(0, y, -1, wall));
++            if (!opening) builder.placement(new FixtureBlockPlacement(-1, y, 0, wall));
++        }
++        builder.summonEntity("cow", .46, 64, opening ? .66 : .46,
++                "{NoAI:1b,Invulnerable:1b,Silent:1b,PersistenceRequired:1b}");
++        return builder.build();
++    }
++
++    private static ScenarioWorldFixture fixture(String name, String wall, boolean entity) {
++        return fixture(name, wall, entity ? "cow" : null);
++    }
++
++    private static ScenarioWorldFixture fixture(String name, String wall, String entity) {
++        var builder = ScenarioWorldFixture.builder(name)
++                .defaultSpawn(.5, 64, -1.5).clientLevelFlat(true)
++                .fillRect(-8, 8, 63, -8, 8, "STONE")
++                .serverCommandAfterJoin("gamemode survival CodexClient")
++                .serverCommandAfterJoin("clear CodexClient")
++                .placement(new FixtureBlockPlacement(0, 64, 2, "STONE"));
++        if (wall != null) {
++            builder.placement(new FixtureBlockPlacement(0, 64, 0, wall));
++            if (!wall.equals("OAK_SLAB")) builder.placement(new FixtureBlockPlacement(0, 65, 0, wall));
++        }
++        if (entity != null) builder.summonEntity(entity, .5, 64, 1.5,
++                entity.equals("cow") ? "{NoAI:1b,Invulnerable:1b,Silent:1b,PersistenceRequired:1b}"
++                        : "{NoGravity:1b,Invulnerable:1b,Silent:1b}");
++        return builder.build();
++    }
++}

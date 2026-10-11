@@ -7,7 +7,6 @@ import ac.cult.cultac.checks.impl.badpackets.BadPacketsVehicle;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
 import ac.cult.cultac.checks.impl.movement.SetbackBlocker;
 import ac.cult.cultac.checks.impl.movement.timer.VehicleTimer;
-import ac.cult.cultac.checks.impl.scaffolding.AirLiquidPlace;
 import ac.cult.cultac.events.packets.blockplace.PlaceHandler;
 import ac.cult.cultac.manager.player.CheckManager;
 import ac.cult.cultac.network.CultPacketHandler;
@@ -18,7 +17,6 @@ import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.InventoryPackets.CreativeSlot;
-import ac.cult.cultac.network.packet.InventoryPackets.Slot;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.network.protocol.util.SpigotConversionUtil;
 import ac.cult.cultac.player.CultPlayer;
@@ -58,7 +56,6 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItemOn;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.protocol.value.Hand;
-import ac.cult.cultac.utils.nmsutil.IsUsingItem;
 import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
 import ac.cult.cultac.protocol.value.Vec3d;
@@ -76,8 +73,6 @@ import ac.cult.cultac.utils.data.VehicleTeleportData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityRideable;
 import ac.cult.cultac.utils.inventory.InventoryClick;
-import ac.cult.cultac.utils.inventory.ItemUtil;
-import ac.cult.cultac.utils.latency.BlockPredictionAckSender;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.VectorUtils;
 import ac.cult.cultac.utils.nmsutil.BlockBreakSpeed;
@@ -994,7 +989,6 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             if (DataTables.defaults().registry().facts(block).destroyTime() != -1.0f) {
                 player.compensatedWorld.startPredicting();
                 applyClientBreakPrediction(player, blockPosition);
-                player.checkManager.getCheck(AirLiquidPlace.class).handleBlockBreak(blockPosition.immutable());
                 player.compensatedWorld.stopPredicting(packet.sequence());
             }
         }
@@ -1005,7 +999,6 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             // Instant breaking, no damage means it is unbreakable by creative players (with swords)
             if (damage >= 1) {
                 player.compensatedWorld.startPredicting();
-                player.checkManager.getListener(AirLiquidPlace.class).handleBlockBreak(blockPosition.immutable());
                 applyClientBreakPrediction(player, blockPosition);
                 player.compensatedWorld.stopPredicting(packet.sequence());
             } else if (player.debugBreaks) {
@@ -1014,6 +1007,10 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
 
         dispatchReceiveHandlers(event, player);
+        if (!event.isCancelled()
+                && (action == PlayerAction.START_DESTROY_BLOCK || action == PlayerAction.STOP_DESTROY_BLOCK)) {
+            player.blockActionReconciler.forwarded(packet.sequence());
+        }
         clearTransientPacketState(player);
     }
 
@@ -1038,7 +1035,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                 clickedBlock,
                 blockFace,
                 placedWith,
-                TraverseBlocks.getNearestHitResult(player, true),
+                player.compensatedWorld.withSelectionSnapshot(() -> TraverseBlocks.getNearestHitResult(player, true)),
                 packet.sequence());
         blockPlace.setCursor(cursor);
 
@@ -1060,16 +1057,6 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             player.checkManager.onBlockPlace(blockPlace);
             player.checkManager.queuePostFlyingBlockPlace(blockPlace);
         }
-        // Mark the two potentially changed blocks as ghost blocks
-        ghostBlockMitigator.handlePseudoPlace(new GhostBlock(placedAgainst, placedWith, blockPlace.isBlock()));
-        final ac.cult.cultac.utils.latency.CompensatedWorld compensatedWorld = player.compensatedWorld;
-        compensatedWorld.markForBlockPrediction(placedAgainst);
-
-        BlockPos normal = blockPlace.getNormalBlockFace();
-        BlockPos relative = placedAgainst.offset(normal.getX(), normal.getY(), normal.getZ());
-        ghostBlockMitigator.handlePseudoPlace(new GhostBlock(relative, placedWith, blockPlace.isBlock()));
-        compensatedWorld.markForBlockPrediction(relative);
-
         // The player tried placing blocks in air/water or failed other checks
         // Or the player tried playing blocks while pending a teleport
         if (blockPlace.isCancelled()
@@ -1083,28 +1070,20 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                 player.onPacketCancel();
             }
 
-            BlockPredictionAckSender.sendAck(player, packet.sequence());
-
-            // Stop inventory desync from cancelling place
-            if (player.platformPlayer != null) {
-                // TODO: Is this unsafe enough to have to run on the main thread?
-                if (hand == Hand.MAIN_HAND) {
-                    SimItemStack mainHand =
-                            ItemUtil.copy(player.platformPlayer.getInventory().getMainHand());
-                    player.user.write(new Slot(
-                            0, player.getInventory().stateID, 36 + player.packetStateData.lastSlotSelected, mainHand));
-                } else {
-                    SimItemStack offHand =
-                            ItemUtil.copy(player.platformPlayer.getInventory().getOffHand());
-                    player.user.write(new Slot(0, player.getInventory().stateID, 45, offHand));
-                }
-            }
+            player.blockActionReconciler.rejectPlace(packet);
 
         } else { // Legit place
+            ghostBlockMitigator.handlePseudoPlace(new GhostBlock(placedAgainst, placedWith, blockPlace.isBlock()));
+            player.compensatedWorld.markForBlockPrediction(placedAgainst);
+            BlockPos normal = blockPlace.getNormalBlockFace();
+            BlockPos relative = placedAgainst.offset(normal.getX(), normal.getY(), normal.getZ());
+            ghostBlockMitigator.handlePseudoPlace(new GhostBlock(relative, placedWith, blockPlace.isBlock()));
+            player.compensatedWorld.markForBlockPrediction(relative);
             PlaceHandler.handleQueuedUseItemOn(player, packet);
         }
 
         dispatchReceiveHandlers(event, player);
+        if (!event.isCancelled()) player.blockActionReconciler.forwarded(packet.sequence());
         clearTransientPacketState(player);
     }
 
@@ -1119,6 +1098,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         player.lastBlockPlaceUseItem = System.currentTimeMillis();
 
         dispatchReceiveHandlers(event, player);
+        if (!event.isCancelled()) player.blockActionReconciler.forwarded(packet.sequence());
         clearTransientPacketState(player);
     }
 
@@ -1366,6 +1346,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         public void handle(PacketReceiveEvent event, CultPlayer player, Object packet) {
             if (event.getPhase() == ConnectionPhase.PLAY) {
                 player.checkManager.dispatchEarlyReceive(event);
+                if (event.isCancelled()) player.blockActionReconciler.rejectEarly(packet);
             }
         }
     }

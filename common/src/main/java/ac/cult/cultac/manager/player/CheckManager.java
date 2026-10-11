@@ -52,6 +52,11 @@ import ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor;
 import ac.cult.cultac.checks.impl.scaffolding.*;
 import ac.cult.cultac.checks.impl.sprint.*;
 import ac.cult.cultac.checks.impl.vehicle.*;
+import ac.cult.cultac.checks.impl.visibility.AttackMobVisibility;
+import ac.cult.cultac.checks.impl.visibility.AttackPlayerVisibility;
+import ac.cult.cultac.checks.impl.visibility.BreakVisibility;
+import ac.cult.cultac.checks.impl.visibility.InteractEntityVisibility;
+import ac.cult.cultac.checks.impl.visibility.PlaceVisibility;
 import ac.cult.cultac.checks.type.*;
 import ac.cult.cultac.events.packets.*;
 import ac.cult.cultac.network.PacketHandlerScanner;
@@ -83,6 +88,7 @@ import ac.cult.cultac.utils.latency.KeepAliveProcessor;
 import ac.cult.cultac.utils.lists.EvictingQueue;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
+import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import com.google.common.collect.ClassToInstanceMap;
 import com.google.common.collect.ImmutableClassToInstanceMap;
 import java.util.ArrayList;
@@ -244,11 +250,18 @@ public class CheckManager {
     // Packet-dispatched listeners. SetbackBlocker must stay last in this map: while it
     // blocks packets, no check after it is allowed to observe the packet.
     private static ClassToInstanceMap<CheckListener> buildPacketChecks(CultPlayer player) {
+        var visibility = new ClientVisibilityProcessor(player);
         return listenerMap(List.<CheckListener>of(
                 new SimulationProcessor(player),
                 player.actionManager,
                 player.pluginChannelManager,
                 new Reach(player),
+                visibility,
+                new PlaceVisibility(player, visibility),
+                new BreakVisibility(player, visibility),
+                new AttackPlayerVisibility(player, visibility),
+                new AttackMobVisibility(player, visibility),
+                new InteractEntityVisibility(player, visibility),
                 new Hitboxes(player),
                 new FairReach(player),
                 player.packetEntityReplication,
@@ -404,7 +417,6 @@ public class CheckManager {
                 new CrashG(player),
                 new FarPlace(player),
                 new FabricatedPlace(player),
-                new PositionPlace(player),
                 new RotationPlace(player),
                 new PacketOrderN(player),
                 new DuplicateRotPlace(player),
@@ -489,6 +501,12 @@ public class CheckManager {
         registerPreReceive(registrations, prePredictionChecks.get(CrashI.class));
         registerPreReceive(registrations, prePredictionChecks.get(VehicleTimer.class));
         registerPreReceive(registrations, packetChecks.get(SetbackBlocker.class));
+        registerEarlyReceive(registrations, packetChecks.get(ClientVisibilityProcessor.class));
+        registerEarlyReceive(registrations, packetChecks.get(PlaceVisibility.class));
+        registerEarlyReceive(registrations, packetChecks.get(BreakVisibility.class));
+        registerEarlyReceive(registrations, packetChecks.get(AttackPlayerVisibility.class));
+        registerEarlyReceive(registrations, packetChecks.get(AttackMobVisibility.class));
+        registerEarlyReceive(registrations, packetChecks.get(InteractEntityVisibility.class));
 
         registerReceive(registrations, packetChecks.get(SimulationProcessor.class));
         registerReceive(registrations, packetChecks.get(ActionManager.class));
@@ -533,6 +551,7 @@ public class CheckManager {
 
         registerTickEnd(packetChecks.get(ActionManager.class));
         registerTickEnd(packetChecks.get(Reach.class));
+        registerTickEnd(packetChecks.get(ClientVisibilityProcessor.class));
         registerTickEnd(vehicleCheck.get(VehiclePredictionRunner.class));
         // MCP-Reborn Minecraft#tick computes the attack hit result before
         // ClientLevel#tickEntities interpolates remote entities, then sends
@@ -578,8 +597,8 @@ public class CheckManager {
                 ElytraI.class)) {
             registerReceive(registrations, postPredictionCheck.get(type));
         }
-        for (Class<? extends BlockPlaceCheck> type : List.of(
-                MultiPlace.class, MultiActionsF.class, MultiActionsG.class, PositionPlace.class, PacketOrderN.class)) {
+        for (Class<? extends BlockPlaceCheck> type :
+                List.of(MultiPlace.class, MultiActionsF.class, MultiActionsG.class, PacketOrderN.class)) {
             registerReceive(registrations, blockPlaceCheck.get(type));
         }
 
@@ -816,6 +835,7 @@ public class CheckManager {
             for (TickEndHandlerRegistration handler : tickEndHandlers) {
                 handler.handle(packet);
             }
+            player.visibilityDebug.update();
         }
     }
 
@@ -917,6 +937,7 @@ public class CheckManager {
             }
             check.onPositionUpdate(position);
         }
+        if (!player.supportsEndTick()) player.visibilityDebug.update();
     }
 
     public void onRotationUpdate(final RotationUpdate rotation) {
@@ -941,6 +962,7 @@ public class CheckManager {
             }
             check.process(update);
         }
+        if (!player.supportsEndTick()) player.visibilityDebug.update();
     }
 
     public void onPredictionFinish(final PredictionComplete complete) {
@@ -972,12 +994,16 @@ public class CheckManager {
     }
 
     public void onBlockPlace(final BlockPlace place) {
-        for (BlockPlaceCheck check : blockPlaceCheck.values()) {
-            if (!shouldDispatch(check)) {
-                continue;
+        // Minecraft#pick precedes handleKeybinds and all of this tick's local predictions.
+        player.compensatedWorld.withSelectionSnapshot(() -> {
+            for (BlockPlaceCheck check : blockPlaceCheck.values()) {
+                if (!shouldDispatch(check)) {
+                    continue;
+                }
+                check.onBlockPlace(place);
             }
-            check.onBlockPlace(place);
-        }
+            return null;
+        });
     }
 
     public void queuePostFlyingBlockPlace(final BlockPlace place) {

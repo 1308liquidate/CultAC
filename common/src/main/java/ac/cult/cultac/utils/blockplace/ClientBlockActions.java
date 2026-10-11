@@ -39,6 +39,13 @@ public final class ClientBlockActions {
     }
 
     public static void useOn(CultPlayer player, BlockPlace place) {
+        var prediction = predictUseOn(player, place);
+        apply(player, prediction, place);
+        debugPlacement(player, prediction, place.getItemStack(), place);
+    }
+
+    /** Identify client-side writes without installing an action rejected by packet checks. */
+    public static Prediction predictUseOn(CultPlayer player, BlockPlace place) {
         var pos = place.getPlacedAgainstBlockLocation();
         var cursor = place.getCursor();
         var hit = new Vec3(pos.getX() + cursor.x, pos.getY() + cursor.y, pos.getZ() + cursor.z);
@@ -57,7 +64,7 @@ public final class ClientBlockActions {
                                 place.getDirection().name()),
                         hit,
                         place.isInside()));
-        apply(player, predict(player, action, yaw, pitch), place);
+        return predict(player, action, yaw, pitch);
     }
 
     public static void use(CultPlayer player, Hand hand) {
@@ -67,7 +74,29 @@ public final class ClientBlockActions {
             // The existing ActionManager packet handler owns use-state inference.
             return;
         }
-        apply(player, predict(player, new SimAction.Use(hand(hand)), player.xRot, player.yRot), null);
+        var item = player.getInventory().getHandItem(hand);
+        var prediction = predict(player, new SimAction.Use(hand(hand)), player.xRot, player.yRot);
+        apply(player, prediction, null);
+        debugPlacement(player, prediction, item, null);
+    }
+
+    private static void debugPlacement(CultPlayer player, Prediction prediction, SimItemStack item, BlockPlace place) {
+        var result = prediction.result();
+        if (result.decline() != null
+                || !result.accepted()
+                || !result.interaction().itemInteraction()
+                || item.definition().block().isEmpty()
+                || prediction.writes().isEmpty()) return;
+        // BlockItem.placeBlock writes the placed cell before its neighbor/secondary writes.
+        var first = prediction.writes().getFirst();
+        // A non-replaceable clicked block is interacted with; placement targets the adjacent cell.
+        if (place != null && !place.isReplaceClicked() && first.getKey().equals(place.getPlacedAgainstBlockLocation()))
+            return;
+        var placed = DataTables.defaults().registry().block(first.getValue());
+        // Successful block interactions can also write state while a block item is held.
+        if (!item.definition().block().equals(placed.key())
+                && !item.definition().key().equals(placed.bindings().get("asItem"))) return;
+        player.visibilityDebug.onBlockPlaced(first.getKey());
     }
 
     /** The existing dig caller has already resolved instant/completed destruction. */

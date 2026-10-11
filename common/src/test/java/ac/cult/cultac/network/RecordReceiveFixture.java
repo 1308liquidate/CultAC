@@ -36,7 +36,10 @@ final class RecordReceiveFixture implements AutoCloseable {
     }
 
     RecordReceiveFixture(ProtocolVersion version, boolean createPlayer) {
-        this(version, ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap.platformConnection(), createPlayer);
+        this(
+                version,
+                ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap.platformConnection(),
+                createPlayer);
     }
 
     /**
@@ -44,6 +47,10 @@ final class RecordReceiveFixture implements AutoCloseable {
      * it: the dispatcher speaks the model and the connection owns model values.
      */
     static RecordReceiveFixture olderHost(ProtocolVersion observed) {
+        return olderHost(observed, true);
+    }
+
+    static RecordReceiveFixture olderHost(ProtocolVersion observed, boolean createPlayer) {
         var platform = ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap.platformConnection();
         var values = new ac.cult.cultac.network.codec.ConnectionModelValues(ProtocolCodecs.decoder());
         org.mockito.Mockito.when(platform.getObservedProtocol()).thenReturn(observed);
@@ -52,7 +59,7 @@ final class RecordReceiveFixture implements AutoCloseable {
         org.mockito.Mockito.when(platform.registryNames()).thenAnswer(ignored -> values.registryNames());
         org.mockito.Mockito.when(platform.packetValues(org.mockito.Mockito.any()))
                 .thenAnswer(invocation -> values.packetValues(observed, invocation.getArgument(0)));
-        return new RecordReceiveFixture(observed, platform, true);
+        return new RecordReceiveFixture(observed, platform, createPlayer);
     }
 
     private RecordReceiveFixture(ProtocolVersion version, PlatformConnection platform, boolean createPlayer) {
@@ -69,11 +76,7 @@ final class RecordReceiveFixture implements AutoCloseable {
         channel.pipeline().addLast("decoder", new ChannelInboundHandlerAdapter());
         channel.pipeline().addLast("prepender", new ChannelOutboundHandlerAdapter());
         channel.pipeline().addLast("encoder", new ChannelOutboundHandlerAdapter());
-        connection = new CultConnection(
-                platform,
-                channel,
-                routes,
-                ignored -> null);
+        connection = new CultConnection(platform, channel, routes, ignored -> null);
         CultDecoder.install(connection);
         CultEncoder.install(connection);
         phase(ConnectionPhase.PLAY);

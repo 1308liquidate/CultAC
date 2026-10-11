@@ -1,6 +1,7 @@
 package ac.cult.cultac.manager.config.update;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -112,13 +113,88 @@ public final class CultConfigSpecs {
     public static @NotNull ConfigUpdater.Spec cultConfig(String resourceDirectory) {
         ConfigUpdater.Spec.Builder builder = ConfigUpdater.Spec.builder(
                         resourceDirectory,
-                        resourceDirectory.equals("/punishments/") ? 1 : 0,
+                        resourceDirectory.equals("/punishments/") ? 2 : 0,
                         ConfigUpdater.ConfigFlavor.V2)
                 .cultVersioning();
         if (resourceDirectory.equals("/punishments/")) {
-            builder.migration(1, CultConfigSpecs::addBedrockPunishment);
+            builder.migration(1, CultConfigSpecs::addBedrockPunishment)
+                    .migration(2, CultConfigSpecs::addMissingCheckPunishments);
         }
         return builder.build();
+    }
+
+    private static void addMissingCheckPunishments(MigrationContext ctx) {
+        addPunishmentChecks(
+                ctx,
+                "Knockback",
+                List.of("Knockback", "Explosion"),
+                List.of("KeepSprint"),
+                List.of("5:5 [alert]", "1:1 [log]", "20:20 [webhook]", "20:20 [proxy]"));
+        addPunishmentChecks(
+                ctx,
+                "Combat",
+                List.of("Interact", "Aim"),
+                List.of("AttackPlayerVisibility", "AttackMobVisibility"),
+                List.of("20:40 [alert]", "1:1 [log]"));
+    }
+
+    private static void addPunishmentChecks(
+            MigrationContext ctx,
+            String defaultGroup,
+            List<String> selectors,
+            List<String> additions,
+            List<String> defaultCommands) {
+        Map<String, Object> groups = ctx.output().getMap("Punishments");
+        if (groups == null) return;
+        String target = groups.containsKey(defaultGroup) ? defaultGroup : null;
+        if (target == null) {
+            for (var entry : groups.entrySet()) {
+                if (!(entry.getValue() instanceof Map<?, ?> group) || !(group.get("checks") instanceof List<?> checks))
+                    continue;
+                if (checks.stream()
+                        .anyMatch(value -> selectors.stream()
+                                .anyMatch(selector -> selector.equalsIgnoreCase(String.valueOf(value))))) {
+                    target = entry.getKey();
+                    break;
+                }
+            }
+        }
+        List<Object> checks = new ArrayList<>();
+        if (target != null) {
+            List<?> existing = ctx.output().getList("Punishments." + target + ".checks");
+            if (existing != null) checks.addAll(existing);
+        }
+        boolean changed = false;
+        for (String addition : additions) {
+            String name = addition.toLowerCase(Locale.ROOT);
+            boolean excluded = groups.values().stream()
+                    .filter(Map.class::isInstance)
+                    .map(Map.class::cast)
+                    .map(group -> group.get("checks"))
+                    .filter(List.class::isInstance)
+                    .map(List.class::cast)
+                    .anyMatch(values -> values.stream()
+                            .anyMatch(value -> value instanceof String text
+                                    && text.startsWith("!")
+                                    && name.contains(text.substring(1).toLowerCase(Locale.ROOT))));
+            boolean covered = checks.stream()
+                    .anyMatch(value -> value instanceof String text
+                            && !text.startsWith("!")
+                            && name.contains(text.toLowerCase(Locale.ROOT)));
+            if (excluded || covered) continue;
+            checks.add(addition);
+            changed = true;
+        }
+        if (!changed) return;
+        if (target == null) {
+            Map<String, Object> group = new LinkedHashMap<>();
+            group.put("remove-violations-after", 300);
+            group.put("checks", checks);
+            group.put("commands", defaultCommands);
+            ctx.output().put("Punishments." + defaultGroup, group);
+        } else {
+            ctx.output().put("Punishments." + target + ".checks", checks);
+        }
     }
 
     private static void addBedrockPunishment(MigrationContext ctx) {

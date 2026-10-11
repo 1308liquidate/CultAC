@@ -46,6 +46,12 @@ public class CultDebug implements BuildableCommand {
                 .permission("cult.debug")
                 .handler(this::handleDebugPlaces));
 
+        commandManager.command(cultCommand
+                .literal("debug")
+                .literal("visibility", Description.of("Watch visibility changes of your next placed block"))
+                .permission("cult.debug")
+                .handler(this::handleDebugVisibility));
+
         // Register "consoledebug" subcommand
         Command.Builder<Sender> consoleDebugCommand = cultCommand
                 .literal("consoledebug", Description.of("Toggle console debug output for a player"))
@@ -120,6 +126,20 @@ public class CultDebug implements BuildableCommand {
             return;
         }
         player.runSafely(() -> player.compensatedWorld.toggleBlockChangeDebug());
+    }
+
+    private void handleDebugVisibility(@NotNull CommandContext<Sender> context) {
+        Sender sender = context.sender();
+        if (!sender.isPlayer()) {
+            sender.sendMessage(Component.text("Run /grim debug visibility in-game.", NamedTextColor.RED));
+            return;
+        }
+        CultPlayer player = CultAPI.INSTANCE.getPlayerDataManager().getPlayer(sender.getUniqueId());
+        if (player == null) {
+            sender.sendMessage(Component.text("Your player is exempt or not tracked by Cult.", NamedTextColor.RED));
+            return;
+        }
+        player.runSafely(() -> player.visibilityDebug.toggle());
     }
 
     private void handlePoolstats(@NotNull CommandContext<Sender> context) {

@@ -59,9 +59,11 @@ final class SmoketestSnapshotBridge {
         }
 
         int version = input.readInt();
-        if (version != VERSION) {
+        if (version != VERSION && version != 6) {
             throw new IOException("unsupported version " + version);
         }
+
+        int sourceProtocol = version == 6 ? input.readInt() : ac.cult.cultac.protocol.ProtocolVersion.V26_3.protocol();
 
         int tick = input.readInt();
         String scenario = input.readUTF();
@@ -80,7 +82,7 @@ final class SmoketestSnapshotBridge {
         List<ItemSnapshot> inventory = readItems(input, "inventory");
         List<ItemSnapshot> menu = readItems(input, "menu");
         ItemSnapshot carried = readItem(input);
-        return new Snapshot(tick, scenario, selectedSlot, blocks, inventory, menu, carried);
+        return new Snapshot(sourceProtocol, tick, scenario, selectedSlot, blocks, inventory, menu, carried);
     }
 
     private static List<ItemSnapshot> readItems(DataInputStream input, String name) throws IOException {
@@ -131,19 +133,28 @@ final class SmoketestSnapshotBridge {
         var modelNames = ac.cult.cultac.network.codec.ModelRegistryNamesState.defaults();
         var builtin =
                 ac.cult.blocksim.environment.ClientWorldDefaults.defaults().builtinRegistries();
+        var sourceVersion = ac.cult.cultac.protocol.ProtocolVersion.of(snapshot.sourceProtocol());
+        var sourceValues = player.user.getCultConnection().platform().packetValues(player.user.getCultConnection());
+        var nativeNames = sourceValues instanceof ac.cult.cultac.network.codec.ObservedPacketValues observed
+                ? observed.sourceRegistries()
+                : null;
         var values = new ac.cult.cultac.network.codec.ModelItemValues(
                 ac.cult.cultac.protocol.ProtocolCodecs.decoder(),
-                ac.cult.cultac.protocol.ProtocolVersion.V26_3,
+                sourceVersion,
                 new ac.cult.cultac.protocol.WireValueDecoder.Registries() {
-                    // The validation client writes the model schema. Host static
-                    // IDs may belong to an older backend; dynamic IDs are received.
+                    // Version 6 carries the real client's wire schema; version 5
+                    // carries the model schema. Dynamic IDs are received registries.
                     @Override
                     public String name(String registry, int id) {
+                        if (sourceVersion != ac.cult.cultac.protocol.ProtocolVersion.V26_3 && nativeNames != null)
+                            return nativeNames.name(registry, id);
                         return (builtin.contains(registry) ? modelNames : names).name(registry, id);
                     }
 
                     @Override
                     public int id(String registry, String name) {
+                        if (sourceVersion != ac.cult.cultac.protocol.ProtocolVersion.V26_3 && nativeNames != null)
+                            return nativeNames.id(registry, name);
                         return (builtin.contains(registry) ? modelNames : names).id(registry, name);
                     }
                 },
@@ -222,6 +233,7 @@ final class SmoketestSnapshotBridge {
     }
 
     private record Snapshot(
+            int sourceProtocol,
             int tick,
             String scenario,
             int selectedSlot,

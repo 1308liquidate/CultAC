@@ -13,6 +13,7 @@ import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.TraverseBlocks;
+import java.util.function.Supplier;
 
 public class PlaceHandler {
     public static void handleQueuedUseItem(CultPlayer player, ServerboundUseItem place) {
@@ -24,8 +25,35 @@ public class PlaceHandler {
         handleQueuedPlace(player, false, 0, 0, place.sequence(), () -> handleUseItemOn(player, place));
     }
 
+    public static ClientBlockActions.Prediction predictRejectedUseItemOn(
+            CultPlayer player, ServerboundUseItemOn place) {
+        return atClientPosition(
+                player,
+                false,
+                0,
+                0,
+                () -> ClientBlockActions.predictUseOn(
+                        player,
+                        createUseItemOnBlockPlace(
+                                player, place, player.getInventory().getHandItem(place.hand()))));
+    }
+
     private static void handleQueuedPlace(
             CultPlayer player, boolean updateRotation, float yaw, float pitch, int sequence, Runnable action) {
+        atClientPosition(player, updateRotation, yaw, pitch, () -> {
+            player.compensatedWorld.startPredicting();
+            try (SmoketestPredictionSafety.Scope ignored =
+                    SmoketestPredictionSafety.enter(player, updateRotation ? "use-item" : "use-item-on")) {
+                action.run();
+            } finally {
+                player.compensatedWorld.stopPredicting(sequence);
+            }
+            return null;
+        });
+    }
+
+    private static <T> T atClientPosition(
+            CultPlayer player, boolean updateRotation, float yaw, float pitch, Supplier<T> action) {
         double lastX = player.x;
         double lastY = player.y;
         double lastZ = player.z;
@@ -54,12 +82,9 @@ public class PlaceHandler {
             player.boundingBox = GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z);
         }
 
-        player.compensatedWorld.startPredicting();
-        try (SmoketestPredictionSafety.Scope ignored =
-                SmoketestPredictionSafety.enter(player, updateRotation ? "use-item" : "use-item-on")) {
-            action.run();
+        try {
+            return action.get();
         } finally {
-            player.compensatedWorld.stopPredicting(sequence);
             player.x = lastX;
             player.y = lastY;
             player.z = lastZ;
@@ -88,7 +113,7 @@ public class PlaceHandler {
                 place.blockPosition(),
                 place.blockFace(),
                 placedWith,
-                TraverseBlocks.getNearestHitResult(player, true),
+                player.compensatedWorld.withSelectionSnapshot(() -> TraverseBlocks.getNearestHitResult(player, true)),
                 place.sequence());
         blockPlace.setCursor(SpigotConversionUtil.fromProtocolVec(place.cursor()));
         blockPlace.setInside(place.insideBlock());

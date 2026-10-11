@@ -1,5 +1,6 @@
 package ac.cult.cultac.utils.nmsutil;
 
+import ac.cult.blocksim.data.BlockFamilies;
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.StateFacts;
@@ -45,9 +46,11 @@ public final class NativeBlockCollisionHelper {
         // Entity#collideWithShapes scans VoxelShape's cells, including internal
         // faces when a server update places the actor partly inside a shape.
         boolean voxelMovement = !player.isBedrockMovement()
-                && player.getClientVersion().isNewerThanOrEquals(ac.cult.cultac.network.protocol.ClientVersion.V_1_21_2);
-        if (voxelMovement && !shape.isEmpty()) return new ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox(
-                shape, shape == Shapes.block()).offset(x, y, z);
+                && player.getClientVersion()
+                        .isNewerThanOrEquals(ac.cult.cultac.network.protocol.ClientVersion.V_1_21_2);
+        if (voxelMovement && !shape.isEmpty())
+            return new ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox(shape, shape == Shapes.block())
+                    .offset(x, y, z);
         return fromShape(shape, x, y, z);
     }
 
@@ -100,6 +103,10 @@ public final class NativeBlockCollisionHelper {
             return Shapes.empty();
         }
 
+        // Selected-target checks deliberately use a closed shulker; movement retains the real lid.
+        if (player.compensatedWorld.isReadingSelectionSnapshot() && BlockFamilies.SHULKER_BOX.test(state))
+            return Shapes.block();
+
         return player.compensatedWorld
                 .geometry()
                 .outline(state, new BlockPos(x, y, z), entityContext(player, player.y));
@@ -145,6 +152,8 @@ public final class NativeBlockCollisionHelper {
     }
 
     private static String heldItem(CultPlayer player) {
+        String selectionItem = player.compensatedWorld.selectionHeldItemKey();
+        if (selectionItem != null) return selectionItem;
         try {
             var held = player.getInventory().getHeldItem();
             return held == null || held.isEmpty() ? "minecraft:air" : held.itemKey();

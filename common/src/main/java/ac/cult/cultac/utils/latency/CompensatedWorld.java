@@ -78,6 +78,10 @@ public class CompensatedWorld {
     private final Map<Integer, List<BlockPos>> serverIsCurrentlyProcessingThesePredictions = new HashMap<>();
     private int clientPredictionSequence;
     private boolean isCurrentlyPredicting = false;
+    private final Long2IntOpenHashMap selectionOriginalStates = new Long2IntOpenHashMap();
+    private boolean selectionSnapshotActive;
+    private boolean readingSelectionSnapshot;
+    private String selectionHeldItemKey;
     // Read and toggled only on this player's packet executor.
     private boolean debugBlockChanges;
     public boolean isRaining = false;
@@ -362,6 +366,49 @@ public class CompensatedWorld {
         this.isCurrentlyPredicting = true;
     }
 
+    /** Minecraft#pick precedes all local block predictions in handleKeybinds. */
+    public void beginSelectionSnapshot() {
+        if (!selectionSnapshotActive) {
+            var held = player.getInventory().getClientSelectedHeldItem();
+            selectionHeldItemKey = held == null || held.isEmpty() ? "minecraft:air" : held.itemKey();
+        }
+        selectionSnapshotActive = true;
+    }
+
+    public String selectionHeldItemKey() {
+        return readingSelectionSnapshot ? selectionHeldItemKey : null;
+    }
+
+    public boolean isReadingSelectionSnapshot() {
+        return readingSelectionSnapshot;
+    }
+
+    public <T> T withSelectionHeldItemKey(String key, java.util.function.Supplier<T> query) {
+        String previous = selectionHeldItemKey;
+        selectionHeldItemKey = key;
+        try {
+            return query.get();
+        } finally {
+            selectionHeldItemKey = previous;
+        }
+    }
+
+    public <T> T withSelectionSnapshot(java.util.function.Supplier<T> query) {
+        boolean previous = readingSelectionSnapshot;
+        readingSelectionSnapshot = true;
+        try {
+            return query.get();
+        } finally {
+            readingSelectionSnapshot = previous;
+        }
+    }
+
+    public void endSelectionSnapshot() {
+        selectionOriginalStates.clear();
+        selectionSnapshotActive = false;
+        selectionHeldItemKey = null;
+    }
+
     public void toggleBlockChangeDebug() {
         debugBlockChanges = !debugBlockChanges;
         player.sendMessage(Component.text("[places] ", NamedTextColor.AQUA)
@@ -375,6 +422,8 @@ public class CompensatedWorld {
     }
 
     public void resetClientPredictions() {
+        player.blockActionReconciler.reset();
+        endSelectionSnapshot();
         clientPredictionSequence = 0;
         isCurrentlyPredicting = false;
         currentlyChangedBlocks.clear();
@@ -533,6 +582,12 @@ public class CompensatedWorld {
 
     public boolean hasPendingBlockPrediction(BlockPos pos) {
         return originalServerBlocks.containsKey(pos.asLong());
+    }
+
+    /** Retained server state, excluding a locally predicted placement or destruction. */
+    public int getServerBlockStateIdAt(BlockPos pos) {
+        BlockPrediction pending = originalServerBlocks.get(pos.asLong());
+        return pending == null ? getBlockStateIdAt(pos) : pending.getOriginalBlockId();
     }
 
     public void applyLight(String dimension, int x, int z, ac.cult.cultac.network.packet.LightValues data) {
@@ -843,6 +898,9 @@ public class CompensatedWorld {
         BlockPos asVector = new BlockPos(x, y, z);
         BlockPrediction prediction = originalServerBlocks.get(asVector.asLong());
         int original = getBlockStateIdAt(asVector);
+        if (isCurrentlyPredicting && selectionSnapshotActive) {
+            selectionOriginalStates.putIfAbsent(asVector.asLong(), original);
+        }
 
         if (isCurrentlyPredicting && !player.isBedrockMovement()) {
             if (prediction == null) {
@@ -1142,6 +1200,10 @@ public class CompensatedWorld {
     }
 
     public int getBlockStateIdAt(int x, int y, int z) {
+        if (readingSelectionSnapshot) {
+            long position = new BlockPos(x, y, z).asLong();
+            if (selectionOriginalStates.containsKey(position)) return selectionOriginalStates.get(position);
+        }
         try {
             CachedChunk column = getChunk(x >> 4, z >> 4);
 
