@@ -21,6 +21,7 @@ import ac.cult.cultac.checks.impl.elytra.*;
 import ac.cult.cultac.checks.impl.exploit.ExploitA;
 import ac.cult.cultac.checks.impl.exploit.ExploitB;
 import ac.cult.cultac.checks.impl.exploit.ExploitC;
+import ac.cult.cultac.checks.impl.exploit.ExploitF;
 import ac.cult.cultac.checks.impl.groundspoof.NoFallExecutor;
 import ac.cult.cultac.checks.impl.misc.ClientBrand;
 import ac.cult.cultac.checks.impl.misc.GhostBlockMitigation;
@@ -340,7 +341,10 @@ public class CheckManager {
     private static ClassToInstanceMap<RotationListener> buildRotationChecks(CultPlayer player) {
         return listenerMap(List.<RotationListener>of(
                 // AimProcessor attaches itself to the update before dependent checks consume it.
-                new AimProcessor(player), new AimModulo360(player), new AimDuplicateLook(player)));
+                new AimProcessor(player),
+                new AimModulo360(player),
+                new AimDuplicateLook(player),
+                new ExploitF(player)));
     }
 
     private static ClassToInstanceMap<VehicleListener> buildVehicleChecks(CultPlayer player) {
