@@ -129,9 +129,10 @@ public class Phase extends Check implements PostPredictionListener {
         oldBox = historyBox;
     }
 
-    private static SimpleCollisionBox boxAt(Vec3 location, float height, boolean bedrock) {
-        SimpleCollisionBox box =
-                GetBoundingBox.getBoundingBoxFromPosAndSize(location.x, location.y, location.z, 0.6f, height);
+    private SimpleCollisionBox boxAt(Vec3 location, float height, boolean bedrock) {
+        float scale = player.isBedrockMovement() ? 1.0f : player.getScale();
+        SimpleCollisionBox box = GetBoundingBox.getBoundingBoxFromPosAndSize(
+                location.x, location.y, location.z, 0.6f * scale, height * scale);
         return bedrock ? box.expand(-BEDROCK_PENETRATION_INSET) : box;
     }
 
