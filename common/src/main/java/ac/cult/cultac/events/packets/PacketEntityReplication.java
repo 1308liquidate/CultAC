@@ -45,19 +45,19 @@ import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.anticheat.update.PositionUpdate;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
-import ac.cult.cultac.utils.data.ReachInterpolationData;
 import ac.cult.cultac.utils.data.ClientAttackStrength;
+import ac.cult.cultac.utils.data.ReachInterpolationData;
 import ac.cult.cultac.utils.data.TeleportAcceptData;
 import ac.cult.cultac.utils.data.TeleportData;
 import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.data.VehicleTeleportData;
-import ac.cult.cultac.utils.inventory.Inventory;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHook;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityTrackXRot;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityUtil;
+import ac.cult.cultac.utils.inventory.Inventory;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
 import java.util.ArrayList;
@@ -950,7 +950,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     player.attackStrength.onPossibleMainHandChange();
                 }
                 for (int slot = 0; slot < 9; slot++) {
-                    var stack = player.getInventory().inventory.getInventoryStorage()
+                    var stack = player.getInventory()
+                            .inventory
+                            .getInventoryStorage()
                             .getItem(Inventory.HOTBAR_OFFSET + slot);
                     // A hotbar selection can precede its claim by one tick. Do not assume the
                     // server's selected slot or live item-use state identifies the client hand.

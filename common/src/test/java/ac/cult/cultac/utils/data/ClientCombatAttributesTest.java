@@ -12,14 +12,17 @@ class ClientCombatAttributesTest {
     void serverSnapshotsReplaceWeaponAndEffectModifiersTogether() {
         ClientCombatAttributes attributes = new ClientCombatAttributes();
         attributes.onServerSnapshot(new AttributeSnapshot(
-                "minecraft:attack_speed", 4.0,
-                List.of(modifier("minecraft:base_attack_speed", -2.4000000953674316,
-                        AttributeModifier.Operation.ADD_VALUE))));
+                "minecraft:attack_speed",
+                4.0,
+                List.of(modifier(
+                        "minecraft:base_attack_speed", -2.4000000953674316, AttributeModifier.Operation.ADD_VALUE))));
         assertEquals(1.5999999046325684, attributes.attackSpeed(), 1e-9);
 
         attributes.onServerSnapshot(new AttributeSnapshot(
-                "minecraft:attack_speed", 4.0,
-                List.of(modifier("minecraft:base_attack_speed", -3.0, AttributeModifier.Operation.ADD_VALUE),
+                "minecraft:attack_speed",
+                4.0,
+                List.of(
+                        modifier("minecraft:base_attack_speed", -3.0, AttributeModifier.Operation.ADD_VALUE),
                         modifier("minecraft:effect.haste", 0.1, AttributeModifier.Operation.ADD_MULTIPLIED_BASE))));
         assertEquals(1.1, attributes.attackSpeed(), 1e-9);
         assertEquals((float) (20.0 / 1.1), ClientAttackStrength.delay(attributes.attackSpeed()));
@@ -43,7 +46,8 @@ class ClientCombatAttributesTest {
     void respawnKeepsBasesAndOnlyKeepsModifiersWhenRequested() {
         ClientCombatAttributes attributes = new ClientCombatAttributes();
         attributes.onServerSnapshot(new AttributeSnapshot(
-                "minecraft:attack_speed", 6.0,
+                "minecraft:attack_speed",
+                6.0,
                 List.of(modifier("plugin:weapon_speed", -2.0, AttributeModifier.Operation.ADD_VALUE))));
         attributes.onRespawn(true);
         assertEquals(4.0, attributes.attackSpeed(), 1e-9);

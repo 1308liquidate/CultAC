@@ -168,8 +168,10 @@ class SectionProjectionTest {
             truncated.writeByte(0);
             Wire.writeVarInt(truncated, 0);
             Wire.writeVarInt(truncated, 1000);
-            assertThrows(MalformedPacketException.class, () -> project(
-                    truncated, version, 1, IntUnaryOperator.identity(), 64, 64, IntUnaryOperator.identity()));
+            assertThrows(
+                    MalformedPacketException.class,
+                    () -> project(
+                            truncated, version, 1, IntUnaryOperator.identity(), 64, 64, IntUnaryOperator.identity()));
         } finally {
             truncated.release();
         }
@@ -219,8 +221,7 @@ class SectionProjectionTest {
         }
         int perWord = 64 / bits;
         long[] words = new long[(codes.length + perWord - 1) / perWord];
-        for (int i = 0; i < codes.length; i++)
-            words[i / perWord] |= (long) codes[i] << ((i % perWord) * bits);
+        for (int i = 0; i < codes.length; i++) words[i / perWord] |= (long) codes[i] << ((i % perWord) * bits);
         if (!version.atLeast(ProtocolVersion.V1_21_5)) Wire.writeVarInt(output, words.length);
         for (long word : words) output.writeLong(word);
     }

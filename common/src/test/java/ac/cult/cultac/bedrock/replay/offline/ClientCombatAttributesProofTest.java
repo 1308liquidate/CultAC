@@ -28,7 +28,8 @@ public final class ClientCombatAttributesProofTest {
         OfflineCultTestBootstrap.installConfig();
         for (boolean insideBundle : List.of(false, true)) {
             for (boolean mounted : List.of(false, true)) {
-                User user = TestUsers.create(new User.Profile(UUID.randomUUID(), "Combat_Proof"), new EmbeddedChannel());
+                User user =
+                        TestUsers.create(new User.Profile(UUID.randomUUID(), "Combat_Proof"), new EmbeddedChannel());
                 CultPlayer player = new CultPlayer(user);
                 user.bind(mock(PlatformPlayer.class));
                 try {
@@ -48,9 +49,14 @@ public final class ClientCombatAttributesProofTest {
 
                     // The held axe and subsequent swaps are visible before its attribute bundle is received.
                     var listener = new CheckManagerListener();
-                    for (String item : List.of("minecraft:diamond_axe", "minecraft:trident", "minecraft:diamond_pickaxe")) {
-                        player.getInventory().inventory.getInventoryStorage()
-                                .setItem(Inventory.HOTBAR_OFFSET + 1, ItemUtil.modelItems().stack(item, 1));
+                    for (String item :
+                            List.of("minecraft:diamond_axe", "minecraft:trident", "minecraft:diamond_pickaxe")) {
+                        player.getInventory()
+                                .inventory
+                                .getInventoryStorage()
+                                .setItem(
+                                        Inventory.HOTBAR_OFFSET + 1,
+                                        ItemUtil.modelItems().stack(item, 1));
                         player.getInventory().selectHotbarSlot(1);
                         listener.processClientTickEndReceive(RecordReceiveTestEvents.tickEnd(player), player);
                         assertEquals(1.5999999046325684, player.combatAttributes.attackSpeed(), 1e-9);
@@ -67,7 +73,10 @@ public final class ClientCombatAttributesProofTest {
     }
 
     private static AttributeSnapshot speed(double modifier) {
-        return new AttributeSnapshot("minecraft:attack_speed", 4.0,
-                List.of(new AttributeModifier("minecraft:base_attack_speed", modifier, AttributeModifier.Operation.ADD_VALUE)));
+        return new AttributeSnapshot(
+                "minecraft:attack_speed",
+                4.0,
+                List.of(new AttributeModifier(
+                        "minecraft:base_attack_speed", modifier, AttributeModifier.Operation.ADD_VALUE)));
     }
 }

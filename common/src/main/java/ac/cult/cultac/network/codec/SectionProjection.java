@@ -16,8 +16,12 @@ final class SectionProjection {
 
     /** Registry sizes and model IDs for one connection's received registries. */
     record Registries(
-            int sourceStates, int modelStates, int sourceBiomes, int modelBiomes,
-            IntUnaryOperator states, IntUnaryOperator biomes) {}
+            int sourceStates,
+            int modelStates,
+            int sourceBiomes,
+            int modelBiomes,
+            IntUnaryOperator states,
+            IntUnaryOperator biomes) {}
 
     static byte[] sections(ByteBuf input, ProtocolVersion version, int count, Registries registries) {
         ByteBuf output = Unpooled.buffer();

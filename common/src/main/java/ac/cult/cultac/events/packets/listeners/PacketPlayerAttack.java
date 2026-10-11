@@ -1,7 +1,9 @@
 package ac.cult.cultac.events.packets.listeners;
 
+import ac.cult.blocksim.data.ItemComponents;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
+import ac.cult.cultac.network.packet.InventoryPackets.CreativeSlot;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.Opaque;
@@ -10,11 +12,8 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerAction;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSwing;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItem;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItemOn;
-import ac.cult.cultac.network.packet.InventoryPackets.CreativeSlot;
 import ac.cult.cultac.protocol.value.Hand;
-import ac.cult.blocksim.data.ItemComponents;
 import ac.cult.cultac.protocol.value.InteractAction;
-import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.utils.data.ClientAttackStrength;
 import ac.cult.cultac.utils.data.ClientCombatAttributes;
 import ac.cult.cultac.utils.data.ClientSprintState.AttackReset;
@@ -62,7 +61,8 @@ public class PacketPlayerAttack {
             var consumable = ItemComponents.consumable(item.components());
             // Timed consumption only starts use; completion requires the server's entity event 9.
             // Blocking and kinetic weapon use also leave the held item unchanged.
-            if (consumable != null ? consumable.ticks() > 0
+            if (consumable != null
+                    ? consumable.ticks() > 0
                     : item.components().has("minecraft:blocks_attacks")
                             || item.components().has("minecraft:kinetic_weapon")) return;
             onMainHandUse(player);
@@ -78,8 +78,13 @@ public class PacketPlayerAttack {
     @CultPacketHandler
     public void onCreativeSlot(PacketReceiveEvent<CreativeSlot> event, CultPlayer player, CreativeSlot packet) {
         // Only hotbar edits can change the selected item; count/components alone cannot reset it.
-        if (packet.slot() >= 36 && packet.slot() <= 44
-                && !player.getInventory().inventory.getInventoryStorage().getItem(packet.slot()).itemKey()
+        if (packet.slot() >= 36
+                && packet.slot() <= 44
+                && !player.getInventory()
+                        .inventory
+                        .getInventoryStorage()
+                        .getItem(packet.slot())
+                        .itemKey()
                         .equals(packet.item().itemKey())) {
             player.attackStrength.onPossibleReset();
         }
@@ -117,8 +122,8 @@ public class PacketPlayerAttack {
         ClientCombatAttributes current = player.combatAttributes;
         float delay = ClientAttackStrength.delay(current.attackSpeed());
         // The sprint model holds while mounted, where LocalPlayer#tick does not send the flag.
-        boolean sprintKnown =
-                player.sprintState.flagKnown() && !player.compensatedEntities.getSelf().inVehicle();
+        boolean sprintKnown = player.sprintState.flagKnown()
+                && !player.compensatedEntities.getSelf().inVehicle();
         boolean sprinting = player.sprintState.flag() || !sprintKnown;
 
         boolean knockback = current.attackKnockback() > 0.0;
@@ -126,9 +131,8 @@ public class PacketPlayerAttack {
             return AttackReset.NONE;
         }
 
-        boolean sprintKnockbackCertain = sprintKnown
-                && player.sprintState.flag()
-                && player.attackStrength.isFullStrength(delay);
+        boolean sprintKnockbackCertain =
+                sprintKnown && player.sprintState.flag() && player.attackStrength.isFullStrength(delay);
         boolean damageCertain = current.attackDamage() > 0.0;
         return hurt == AttackReset.CERTAIN && damageCertain && (knockback || sprintKnockbackCertain)
                 ? AttackReset.CERTAIN

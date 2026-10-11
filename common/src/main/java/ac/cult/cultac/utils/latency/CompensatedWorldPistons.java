@@ -272,8 +272,10 @@ public final class CompensatedWorldPistons {
     }
 
     void receiveBlockEntityData(ac.cult.cultac.network.packet.WorldPackets.BlockEntityUpdate packet) {
-        if (player.isBedrockMovement() || player.getClientVersion().isOlderThan(ClientVersion.V_1_21_2)
-                || !packet.type().equals("minecraft:piston") || packet.tag() == null) return;
+        if (player.isBedrockMovement()
+                || player.getClientVersion().isOlderThan(ClientVersion.V_1_21_2)
+                || !packet.type().equals("minecraft:piston")
+                || packet.tag() == null) return;
         var state = movingPistonStates.get(packet.position().asLong());
         // MovingPistonBlock.newBlockEntity returns null. Updates and chunk tags
         // cannot create one; ClientPacketListener only loads an existing entity.

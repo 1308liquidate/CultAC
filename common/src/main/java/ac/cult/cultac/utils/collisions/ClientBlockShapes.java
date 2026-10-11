@@ -33,7 +33,8 @@ public final class ClientBlockShapes {
     /** Apply the shared Java version catalog to an already-observed local shape. */
     public static ac.cult.blocksim.engine.shapes.VoxelShape versionedMovementShape(
             CultPlayer player, int state, ac.cult.blocksim.engine.shapes.VoxelShape observed) {
-        if (player == null || player.isBedrockMovement()
+        if (player == null
+                || player.isBedrockMovement()
                 || player.getClientVersion().isOlderThan(ac.cult.cultac.network.protocol.ClientVersion.V_1_21_2))
             return observed;
         var alternative = VersionedJavaBlockShapes.movement(player, state, 0, 0, 0);
@@ -43,7 +44,8 @@ public final class ClientBlockShapes {
         var parts = new ArrayList<SimpleCollisionBox>();
         alternative.get().downCast(parts);
         return ac.cult.blocksim.engine.shapes.Shapes.fromBoxes(parts.stream()
-                .map(box -> new ac.cult.blocksim.data.Box(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ)).toList());
+                .map(box -> new ac.cult.blocksim.data.Box(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ))
+                .toList());
     }
 
     public static CollisionBox visual(CultPlayer player, int state, int x, int y, int z) {

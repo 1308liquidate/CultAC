@@ -38,12 +38,14 @@ public final class ClientAttackStrengthProofTest {
         try {
             // The client can select this slot after the last game-mode sync; event 9 carries neither
             // the selected slot nor the active hand. A server-observed offhand use cannot rule it out.
-            player.getInventory().inventory.getInventoryStorage().setItem(
-                    Inventory.HOTBAR_OFFSET + 1, ItemUtil.modelItems().stack("minecraft:honey_bottle", 1));
+            player.getInventory()
+                    .inventory
+                    .getInventoryStorage()
+                    .setItem(Inventory.HOTBAR_OFFSET + 1, ItemUtil.modelItems().stack("minecraft:honey_bottle", 1));
             player.packetStateData.itemInUseHand = Hand.OFF_HAND;
             var packet = new ClientboundEntityEvent(player.entityID, (byte) 9);
-            var event = new PacketSendEvent<>(player.user, ConnectionPhase.PLAY,
-                    ClientboundPackets.ENTITY_EVENT, packet, false);
+            var event = new PacketSendEvent<>(
+                    player.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_EVENT, packet, false);
             player.packetEntityReplication.onEntityEvent(event, player, packet);
             var ping = (ClientboundPing) event.writesAfter().getFirst().packet();
             event.tasksAfter().forEach(Runnable::run);
@@ -52,7 +54,9 @@ public final class ClientAttackStrengthProofTest {
             tick(player);
             assertFalse(player.attackStrength.isFullStrength(DELAY));
             assertTrue(player.attackStrength.canBeFullStrength(DELAY));
-            assertEquals("minecraft:diamond_sword", player.getInventory().getHeldItem().itemKey());
+            assertEquals(
+                    "minecraft:diamond_sword",
+                    player.getInventory().getHeldItem().itemKey());
         } finally {
             OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
         }
@@ -66,8 +70,8 @@ public final class ClientAttackStrengthProofTest {
                 player.gamemode = infiniteMaterials ? GameMode.SURVIVAL : GameMode.CREATIVE;
                 player.canInstabuild = infiniteMaterials;
                 var packet = new ClientboundEntityEvent(player.entityID, (byte) 9);
-                var event = new PacketSendEvent<>(player.user, ConnectionPhase.PLAY,
-                        ClientboundPackets.ENTITY_EVENT, packet, false);
+                var event = new PacketSendEvent<>(
+                        player.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_EVENT, packet, false);
                 player.packetEntityReplication.onEntityEvent(event, player, packet);
                 var ping = (ClientboundPing) event.writesAfter().getFirst().packet();
                 event.tasksAfter().forEach(Runnable::run);
@@ -90,12 +94,17 @@ public final class ClientAttackStrengthProofTest {
                         player.gamemode = creative ? GameMode.CREATIVE : GameMode.SURVIVAL;
                         player.canInstabuild = creative;
                         var packet = new ClientboundEntityEvent(player.entityID, (byte) 9);
-                        var event = new PacketSendEvent<>(player.user, ConnectionPhase.PLAY,
-                                ClientboundPackets.ENTITY_EVENT, packet, insideBundle);
+                        var event = new PacketSendEvent<>(
+                                player.user,
+                                ConnectionPhase.PLAY,
+                                ClientboundPackets.ENTITY_EVENT,
+                                packet,
+                                insideBundle);
                         player.packetEntityReplication.onEntityEvent(event, player, packet);
                         assertEquals(!insideBundle, event.isBundleRequested());
                         assertEquals(1, event.writesAfter().size());
-                        var ping = (ClientboundPing) event.writesAfter().getFirst().packet();
+                        var ping =
+                                (ClientboundPing) event.writesAfter().getFirst().packet();
                         event.tasksAfter().forEach(Runnable::run);
                         tick(player);
                         assertTrue(player.attackStrength.isFullStrength(DELAY));
@@ -119,8 +128,10 @@ public final class ClientAttackStrengthProofTest {
         try {
             var attack = new PacketPlayerAttack();
             var use = new ServerboundUseItem(Hand.MAIN_HAND, 0, 0, 0);
-            attack.onUseItem(new PacketReceiveEvent<>(player.user, ConnectionPhase.PLAY,
-                    ServerboundPackets.USE_ITEM, use), player, use);
+            attack.onUseItem(
+                    new PacketReceiveEvent<>(player.user, ConnectionPhase.PLAY, ServerboundPackets.USE_ITEM, use),
+                    player,
+                    use);
             for (int i = 0; i < 12; i++) tick(player);
             for (PlayerAction action : List.of(PlayerAction.RELEASE_USE_ITEM, PlayerAction.SWAP_ITEM_WITH_OFFHAND)) {
                 var packet = new ServerboundPlayerAction(action, new BlockPos(0, 0, 0), Direction.DOWN, 0);
@@ -138,18 +149,20 @@ public final class ClientAttackStrengthProofTest {
         try {
             var diamond = ItemUtil.modelItems().stack("minecraft:diamond", 1);
             player.getInventory().inventory.getInventoryStorage().setItem(10, diamond);
-            var click = new InventoryClick(0, 0, 10, 0, WindowClickType.PICKUP,
-                    Map.of(10, ItemUtil.empty()), diamond);
+            var click = new InventoryClick(0, 0, 10, 0, WindowClickType.PICKUP, Map.of(10, ItemUtil.empty()), diamond);
             @SuppressWarnings("unchecked")
             var type = (ac.cult.cultac.protocol.PacketType<InventoryClick>)
                     ac.cult.cultac.network.codec.ClientPacketCodecs.connectionCatalog().stream()
-                            .filter(candidate -> candidate.recordClass() == InventoryClick.class).findFirst().orElseThrow();
+                            .filter(candidate -> candidate.recordClass() == InventoryClick.class)
+                            .findFirst()
+                            .orElseThrow();
             var event = new PacketReceiveEvent<>(player.user, ConnectionPhase.PLAY, type, click);
             player.getInventory().onContainerClick(event, player, click);
             assertTrue(player.attackStrength.isFullStrength(DELAY));
             var failed = new InventoryClick(123, 0, 10, 0, WindowClickType.PICKUP, Map.of(), ItemUtil.empty());
-            player.getInventory().onContainerClick(
-                    new PacketReceiveEvent<>(player.user, ConnectionPhase.PLAY, type, failed), player, failed);
+            player.getInventory()
+                    .onContainerClick(
+                            new PacketReceiveEvent<>(player.user, ConnectionPhase.PLAY, type, failed), player, failed);
             assertFalse(player.attackStrength.isFullStrength(DELAY));
             // The unknown local result can leave a last consumable even though the model still has two.
             for (int i = 0; i < 20; i++) tick(player);
@@ -159,12 +172,16 @@ public final class ClientAttackStrengthProofTest {
             assertFalse(player.attackStrength.isFullStrength(DELAY));
 
             var items = player.getInventory().inventory.getSlots().stream()
-                    .map(slot -> ItemUtil.copy(slot.getItem())).toList();
+                    .map(slot -> ItemUtil.copy(slot.getItem()))
+                    .toList();
             var content = new ac.cult.cultac.network.packet.InventoryPackets.Content(0, 0, items, ItemUtil.empty());
             @SuppressWarnings("unchecked")
-            var contentType = (ac.cult.cultac.protocol.PacketType<ac.cult.cultac.network.packet.InventoryPackets.Content>)
-                    ac.cult.cultac.network.codec.ClientPacketCodecs.connectionCatalog().stream()
-                            .filter(candidate -> candidate.recordClass() == content.getClass()).findFirst().orElseThrow();
+            var contentType =
+                    (ac.cult.cultac.protocol.PacketType<ac.cult.cultac.network.packet.InventoryPackets.Content>)
+                            ac.cult.cultac.network.codec.ClientPacketCodecs.connectionCatalog().stream()
+                                    .filter(candidate -> candidate.recordClass() == content.getClass())
+                                    .findFirst()
+                                    .orElseThrow();
             var contentEvent = new PacketSendEvent<>(player.user, ConnectionPhase.PLAY, contentType, content, false);
             player.getInventory().onContainerSetContent(contentEvent, player, content);
             assertTrue(player.attackStrength.hasUnconfirmedHotbarChange());
@@ -192,7 +209,9 @@ public final class ClientAttackStrengthProofTest {
         player.entityID = 7;
         player.gamemode = GameMode.SURVIVAL;
         player.packetStateData.playerLoadedIntoLevel = true;
-        player.getInventory().inventory.getInventoryStorage()
+        player.getInventory()
+                .inventory
+                .getInventoryStorage()
                 .setItem(Inventory.HOTBAR_OFFSET, ItemUtil.modelItems().stack(item, count));
         tick(player);
         player.attackStrength.onReset();
@@ -207,8 +226,8 @@ public final class ClientAttackStrengthProofTest {
 
     private static void complete(CultPlayer player) {
         var packet = new ClientboundEntityEvent(player.entityID, (byte) 9);
-        var event = new PacketSendEvent<>(player.user, ConnectionPhase.PLAY,
-                ClientboundPackets.ENTITY_EVENT, packet, false);
+        var event = new PacketSendEvent<>(
+                player.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_EVENT, packet, false);
         player.packetEntityReplication.onEntityEvent(event, player, packet);
         var ping = (ClientboundPing) event.writesAfter().getFirst().packet();
         event.tasksAfter().forEach(Runnable::run);

@@ -79,19 +79,18 @@ public final class VelocityCandidates {
         boolean stepped = requiredPostCollisionY.isEmpty()
                 && result.getValidMovements().isCanStep()
                 && result.getInitialStartingVel() != null
-                && result.getRealities().stream().allMatch(r -> r.getValidMovements().isCanStep());
+                && result.getRealities().stream()
+                        .allMatch(r -> r.getValidMovements().isCanStep());
         if (stepped) {
             diff = new Vec3(
                     diff.x,
-                    applyPostVerticalCollisionBlockVelocity(
-                            result, preCollisionVelocity(result).y, collisionMovementY),
+                    applyPostVerticalCollisionBlockVelocity(result, preCollisionVelocity(result).y, collisionMovementY),
                     diff.z);
             isY = false;
         }
 
         addVelocityCandidates(validPlayerStartingVels, diff, isX, isY, isZ);
-        addPostMoveDeltaMovementCandidates(
-                validPlayerStartingVels, result, isX, isY, isZ, collisionMovementY, stepped);
+        addPostMoveDeltaMovementCandidates(validPlayerStartingVels, result, isX, isY, isZ, collisionMovementY, stepped);
 
         if (lastPrediction != null
                 && lastPrediction

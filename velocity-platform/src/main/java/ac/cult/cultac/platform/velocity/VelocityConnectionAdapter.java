@@ -48,7 +48,6 @@ final class VelocityConnectionAdapter implements PlatformConnection {
         return bedrockBridge;
     }
 
-
     void attach(CultConnection connection) {
         this.connection = connection;
         player.attach(connection);

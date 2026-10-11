@@ -26,8 +26,11 @@ final class ObservedWorldValues {
                 ModelWorldValues.sectionUpdates(input, values.mappings()::blockState);
             case "minecraft:block_entity_data" -> ModelWorldValues.blockEntity(input, types);
             case "minecraft:level_chunk_with_light" ->
-                ModelWorldValues.chunk(input, version, types, sections -> SectionProjection.sections(
-                        sections, version, sectionCount(), registries()));
+                ModelWorldValues.chunk(
+                        input,
+                        version,
+                        types,
+                        sections -> SectionProjection.sections(sections, version, sectionCount(), registries()));
             case "minecraft:chunks_biomes" -> {
                 int count = sectionCount();
                 var registries = registries();
@@ -53,7 +56,8 @@ final class ObservedWorldValues {
                 values.mappings()::blockState,
                 id -> {
                     int mapped = names.modelId(BIOME, names.name(BIOME, id));
-                    if (mapped < 0) throw new ProtocolResolutionException("Unavailable older biome " + names.name(BIOME, id));
+                    if (mapped < 0)
+                        throw new ProtocolResolutionException("Unavailable older biome " + names.name(BIOME, id));
                     return mapped;
                 });
     }

@@ -31,8 +31,11 @@ final class ModelWorldValues {
 
     /** The single update uses byIdOrThrow; section updates use nullable byId. */
     private static int modelState(int state) {
-        if (state < 0 || state >= ac.cult.blocksim.data.DataTables.defaults().registry().stateCount())
-            throw new IllegalArgumentException("No value with id " + state);
+        if (state < 0
+                || state
+                        >= ac.cult.blocksim.data.DataTables.defaults()
+                                .registry()
+                                .stateCount()) throw new IllegalArgumentException("No value with id " + state);
         return state;
     }
 
@@ -84,13 +87,7 @@ final class ModelWorldValues {
             entities.add(new WorldPackets.BlockEntityUpdate(pos, type, NbtValueCodec.readBlockEntity(input, type)));
         }
         return new WorldPackets.Chunk(
-                x,
-                z,
-                ByteBuffer.wrap(model),
-                tickers,
-                LightValueCodec.read(input, version),
-                entities,
-                motionBlocking);
+                x, z, ByteBuffer.wrap(model), tickers, LightValueCodec.read(input, version), entities, motionBlocking);
     }
 
     static WorldPackets.ChunkBiomes biomes(ByteBuf input) {

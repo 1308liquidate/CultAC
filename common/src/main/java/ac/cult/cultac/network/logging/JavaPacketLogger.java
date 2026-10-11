@@ -184,15 +184,15 @@ public final class JavaPacketLogger implements AutoCloseable {
                             connection,
                             type -> !type.isOpaque() || type.codec().readsEntirePayload());
             for (var value : values) {
-                capture.log.record(() ->
-                        JavaPacketLogFormatter.format(direction, phase, id, name, value.type(), value.packet()));
+                capture.log.record(
+                        () -> JavaPacketLogFormatter.format(direction, phase, id, name, value.type(), value.packet()));
             }
             if (values.isEmpty()) capture.skipped.incrementAndGet();
         } catch (UnsupportedOnVersionException unsupported) {
             capture.skipped.incrementAndGet();
         } catch (RuntimeException | LinkageError failure) {
-            capture.log.stop("INCOMPLETE: packet decoding failed: "
-                    + failure.getClass().getSimpleName());
+            capture.log.stop(
+                    "INCOMPLETE: packet decoding failed: " + failure.getClass().getSimpleName());
         }
     }
 

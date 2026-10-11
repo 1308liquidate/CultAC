@@ -60,12 +60,7 @@ public final class PalettedSection {
     }
 
     private static PalettedSection read(
-            ByteBuf input,
-            int size,
-            int minimumBits,
-            int maximumLocalBits,
-            int registrySize,
-            boolean lengthPrefixed) {
+            ByteBuf input, int size, int minimumBits, int maximumLocalBits, int registrySize, boolean lengthPrefixed) {
         var section = new PalettedSection(size, minimumBits, maximumLocalBits, registrySize, 0);
         int wireBits = input.readByte();
         section.configure(wireBits);
@@ -113,7 +108,11 @@ public final class PalettedSection {
     public PalettedSection remap(IntUnaryOperator mapper, int targetRegistrySize) {
         if (isGlobal()) {
             var result = new PalettedSection(
-                    size, minimumBits, maximumLocalBits, targetRegistrySize, mapped(mapper, get(0), targetRegistrySize));
+                    size,
+                    minimumBits,
+                    maximumLocalBits,
+                    targetRegistrySize,
+                    mapped(mapper, get(0), targetRegistrySize));
             int targetBits = 32 - Integer.numberOfLeadingZeros(targetRegistrySize - 1);
             if (targetBits > maximumLocalBits) result.configure(-1);
             // A smaller target registry is a local configuration on the wire; grow into it.

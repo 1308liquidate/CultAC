@@ -1,7 +1,7 @@
 package ac.cult.cultac.utils.data;
 
-import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.data.ItemComponents;
+import ac.cult.blocksim.engine.SimItemStack;
 
 /**
  * Bounds on the Java client's Player#attackStrengthTicker. Player#tick increments it once per client tick and resets
@@ -89,7 +89,9 @@ public final class ClientAttackStrength {
 
     /** Item#finishUsingItem -> Consumable#onConsume -> ItemStack's UseRemainder, on modern Java clients. */
     public static boolean changesItemOnUseCompletion(SimItemStack stack, boolean infiniteMaterials) {
-        if (infiniteMaterials || stack.isEmpty() || stack.getCount() != 1
+        if (infiniteMaterials
+                || stack.isEmpty()
+                || stack.getCount() != 1
                 || !stack.components().has("minecraft:consumable")) return false;
         var remainder = ItemComponents.useRemainder(stack.components());
         return remainder == null || !remainder.itemKey().equals(stack.itemKey());

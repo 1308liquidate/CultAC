@@ -20,23 +20,42 @@ import org.junit.jupiter.api.Test;
 class JavaVoxelCollisionTest {
     @Test
     void movingPistonsUseTheClientsPitcherCropCollisionEvenForPluginAuthoredStates() throws Exception {
-        try (var services = new RecordConsumerServices(); var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+        try (var services = new RecordConsumerServices();
+                var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
             var registry = DataTables.defaults().registry();
             int state = registry.block("minecraft:pitcher_crop").defaultState();
-            state = registry.with(state, "age", "0"); state = registry.with(state, "half", "upper");
-            var resolved = fixture.player.getClass().getDeclaredField("resolvedClientVersion"); resolved.setAccessible(true);
-            for (var client : List.of(ClientVersion.V_1_21_2, ClientVersion.V_1_21_4, ClientVersion.V_1_21_5, ClientVersion.V_26_3)) {
+            state = registry.with(state, "age", "0");
+            state = registry.with(state, "half", "upper");
+            var resolved = fixture.player.getClass().getDeclaredField("resolvedClientVersion");
+            resolved.setAccessible(true);
+            for (var client : List.of(
+                    ClientVersion.V_1_21_2, ClientVersion.V_1_21_4, ClientVersion.V_1_21_5, ClientVersion.V_26_3)) {
                 resolved.set(fixture.player, client);
-                var shape = fixture.player.compensatedWorld.geometry().movingPiston(state, new BlockPos(4, 64, 4),
-                        ac.cult.cultac.protocol.value.Direction.EAST, true, false, .5F);
+                var shape = fixture.player
+                        .compensatedWorld
+                        .geometry()
+                        .movingPiston(
+                                state,
+                                new BlockPos(4, 64, 4),
+                                ac.cult.cultac.protocol.value.Direction.EAST,
+                                true,
+                                false,
+                                .5F);
                 // Original PistonMovingBlockEntity shifts the client's bulb half a block west.
                 // Through 1.21.4, PitcherCropBlock tests age before half; later clients return empty.
                 if (client.isOlderThan(ClientVersion.V_1_21_5)) {
-                    assertEquals(List.of(new ac.cult.blocksim.data.Box(.3125, -.0625, .3125, .6875, .1875, .6875)),
-                            fixture.player.compensatedWorld.geometry().collision(state, new BlockPos(4, 64, 4)).boxes(),
+                    assertEquals(
+                            List.of(new ac.cult.blocksim.data.Box(.3125, -.0625, .3125, .6875, .1875, .6875)),
+                            fixture.player
+                                    .compensatedWorld
+                                    .geometry()
+                                    .collision(state, new BlockPos(4, 64, 4))
+                                    .boxes(),
                             client.toString());
-                    assertEquals(List.of(new ac.cult.blocksim.data.Box(-.1875, -.0625, .3125, .1875, .1875, .6875)),
-                            shape.boxes(), client.toString());
+                    assertEquals(
+                            List.of(new ac.cult.blocksim.data.Box(-.1875, -.0625, .3125, .1875, .1875, .6875)),
+                            shape.boxes(),
+                            client.toString());
                 } else assertTrue(shape.isEmpty(), client.toString());
             }
         }
@@ -44,13 +63,16 @@ class JavaVoxelCollisionTest {
 
     @Test
     void sweptColliderGatheringPreservesVanillasTinyMovementAndFullBlockContact() throws Exception {
-        try (var services = new RecordConsumerServices(); var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+        try (var services = new RecordConsumerServices();
+                var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
             var player = fixture.player;
             player.compensatedWorld.ensureValidationChunkLoaded(0, 0);
-            int stone = DataTables.defaults().registry().block("minecraft:stone").defaultState();
+            int stone =
+                    DataTables.defaults().registry().block("minecraft:stone").defaultState();
             player.compensatedWorld.updateBlock(new BlockPos(4, 64, 4), stone);
             player.compensatedEntities.getSelf().stepHeightAttribute = 0.0;
-            var version = player.getClass().getDeclaredField("resolvedClientVersion"); version.setAccessible(true);
+            var version = player.getClass().getDeclaredField("resolvedClientVersion");
+            version.setAccessible(true);
             for (var client : List.of(ClientVersion.V_1_21_2, ClientVersion.V_26_3)) {
                 version.set(player, client);
                 var fullCube = ClientBlockShapes.movement(player, stone, 4, 64, 4);
@@ -76,7 +98,8 @@ class JavaVoxelCollisionTest {
 
     @Test
     void pistonHeadClippingPreservesTheClientVersionsGrid() throws Exception {
-        try (var services = new RecordConsumerServices(); var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+        try (var services = new RecordConsumerServices();
+                var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
             var registry = DataTables.defaults().registry();
             int state = registry.block("minecraft:piston_head").defaultState();
             state = registry.with(state, "facing", "up");
@@ -86,14 +109,17 @@ class JavaVoxelCollisionTest {
             fixture.player.compensatedWorld.updateBlock(pos, state);
             var version = fixture.player.getClass().getDeclaredField("resolvedClientVersion");
             version.setAccessible(true);
-            for (var client : List.of(ClientVersion.V_1_21_2, ClientVersion.V_1_21_4, ClientVersion.V_1_21_5, ClientVersion.V_26_3)) {
+            for (var client : List.of(
+                    ClientVersion.V_1_21_2, ClientVersion.V_1_21_4, ClientVersion.V_1_21_5, ClientVersion.V_26_3)) {
                 version.set(fixture.player, client);
-                var collider = ClientBlockShapes.movement(fixture.player, state, 4, 64, 4, 64.1,
-                        new JavaCollisionState(0, false, false, false));
+                var collider = ClientBlockShapes.movement(
+                        fixture.player, state, 4, 64, 4, 64.1, new JavaCollisionState(0, false, false, false));
                 var boxes = new ArrayList<SimpleCollisionBox>();
                 collider.copy().offset(-4, -64, -4).downCastForMovement(boxes);
-                var result = Collisions.collideBoundingBoxLegacy(new Vec3(.25, -.2, .3),
-                        SimpleCollisionBox.between(.2, .1, .2, .8, 1.9, .8), boxes,
+                var result = Collisions.collideBoundingBoxLegacy(
+                        new Vec3(.25, -.2, .3),
+                        SimpleCollisionBox.between(.2, .1, .2, .8, 1.9, .8),
+                        boxes,
                         List.of(Collisions.Axis.Y, Collisions.Axis.Z, Collisions.Axis.X));
                 // Official clients: 1.21.2/1.21.4 clip on the internal 7/8 face;
                 // 1.21.5+ rotateAll produces no such face in the long upward head.

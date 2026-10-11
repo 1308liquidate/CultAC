@@ -96,7 +96,8 @@ public final class ClientEntityQueries {
 
     /** Brush's ProjectileUtil overload has zero margin and does not count containment as a ray hit. */
     public boolean hasPickableEntityHit(Vec3 from, Vec3 to, SimPlayer owner) {
-        var delta = BlockRaycast.viewVector(owner, clientVersion).scale(owner.sight().blockInteractionRange());
+        var delta = BlockRaycast.viewVector(owner, clientVersion)
+                .scale(owner.sight().blockInteractionRange());
         var search = localBox().expandTowards(delta).inflate(1.0);
         if (any(this::pickable, bounds -> search.intersects(bounds) && bounds.clip(from, to) != null)) return true;
         requireDragonParts();
