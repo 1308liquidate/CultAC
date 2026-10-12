@@ -16,7 +16,9 @@ import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientBlockGeometry;
 import ac.cult.cultac.utils.nmsutil.ClientBlockProperties;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
+import ac.cult.cultac.utils.nmsutil.ClientShapeBoxes;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
+import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
 import ac.cult.cultac.utils.nmsutil.NativeBlockCollisionHelper;
 import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
@@ -829,28 +831,19 @@ public class CompensatedWorld {
     }
 
     private boolean collisionShapesMatch(BlockPos pos, int oldState, int newState) {
-        List<SimpleCollisionBox> oldBoxes = NativeBlockCollisionHelper.toBoxes(
-                NativeBlockCollisionHelper.getCollisionShape(player, oldState, pos.getX(), pos.getY(), pos.getZ()));
-        List<SimpleCollisionBox> newBoxes = NativeBlockCollisionHelper.toBoxes(
-                NativeBlockCollisionHelper.getCollisionShape(player, newState, pos.getX(), pos.getY(), pos.getZ()));
-        if (oldBoxes.size() != newBoxes.size()) {
-            return false;
-        }
-
-        for (int i = 0; i < oldBoxes.size(); i++) {
-            SimpleCollisionBox oldBox = oldBoxes.get(i);
-            SimpleCollisionBox newBox = newBoxes.get(i);
-            if (Double.compare(oldBox.minX, newBox.minX) != 0
-                    || Double.compare(oldBox.minY, newBox.minY) != 0
-                    || Double.compare(oldBox.minZ, newBox.minZ) != 0
-                    || Double.compare(oldBox.maxX, newBox.maxX) != 0
-                    || Double.compare(oldBox.maxY, newBox.maxY) != 0
-                    || Double.compare(oldBox.maxZ, newBox.maxZ) != 0) {
-                return false;
-            }
-        }
-
-        return true;
+        if (oldState == newState) return true;
+        var oldFixed = geometry().staticCollision(oldState);
+        var newFixed = geometry().staticCollision(newState);
+        if (oldFixed != null && newFixed != null) return ClientShapeBoxes.sameCachedShape(oldFixed, newFixed);
+        var point = new ac.cult.blocksim.engine.BlockPos(pos.getX(), pos.getY(), pos.getZ());
+        var actor = BlockIds.is(oldState, BlockIds.POWDER_SNOW) || BlockIds.is(newState, BlockIds.POWDER_SNOW)
+                ? JavaCollisionState.current(player)
+                : null;
+        var context = NativeBlockCollisionHelper.entityContext(player, player.y);
+        var comparison = ClientShapeBoxes.comparison(
+                NativeBlockCollisionHelper.getCollisionShape(player, oldState, point, player.y, actor, context));
+        return comparison.matches(
+                NativeBlockCollisionHelper.getCollisionShape(player, newState, point, player.y, actor, context));
     }
 
     private byte recentFluidChangeKinds(int oldState, int newState) {

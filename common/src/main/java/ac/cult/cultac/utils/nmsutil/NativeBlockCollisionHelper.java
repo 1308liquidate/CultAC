@@ -24,7 +24,14 @@ public final class NativeBlockCollisionHelper {
     }
 
     public static CollisionBox getCollisionBox(CultPlayer player, int state, int x, int y, int z, double entityBottom) {
-        return getCollisionBox(player, state, x, y, z, entityBottom, JavaCollisionState.current(player));
+        return getCollisionBox(
+                player,
+                state,
+                x,
+                y,
+                z,
+                entityBottom,
+                BlockIds.is(state, BlockIds.POWDER_SNOW) ? JavaCollisionState.current(player) : null);
     }
 
     public static CollisionBox getCollisionBox(
@@ -70,7 +77,14 @@ public final class NativeBlockCollisionHelper {
     }
 
     public static VoxelShape getCollisionShape(CultPlayer player, int state, int x, int y, int z, double entityBottom) {
-        return getCollisionShape(player, state, x, y, z, entityBottom, JavaCollisionState.current(player));
+        return getCollisionShape(
+                player,
+                state,
+                x,
+                y,
+                z,
+                entityBottom,
+                BlockIds.is(state, BlockIds.POWDER_SNOW) ? JavaCollisionState.current(player) : null);
     }
 
     public static VoxelShape getCollisionShape(
@@ -90,9 +104,34 @@ public final class NativeBlockCollisionHelper {
             return player.compensatedWorld.pistons.getMovingPistonCollisionShape(new BlockPos(x, y, z));
         }
 
+        var fixed = player.compensatedWorld.geometry().staticCollision(state);
+        if (fixed != null) return fixed;
+
         return player.compensatedWorld
                 .geometry()
-                .collision(state, new BlockPos(x, y, z), entityContext(player, entityBottom));
+                .collision(state, new ac.cult.blocksim.engine.BlockPos(x, y, z), entityContext(player, entityBottom));
+    }
+
+    /** Inputs shared only by one synchronous old/new-state shape comparison. */
+    public static VoxelShape getCollisionShape(
+            CultPlayer player,
+            int state,
+            ac.cult.blocksim.engine.BlockPos pos,
+            double entityBottom,
+            JavaCollisionState actor,
+            EntityCollisionContext context) {
+        if (player == null
+                || player.compensatedWorld == null
+                || state < 0
+                || DataTables.defaults().registry().facts(state).has(StateFacts.AIR)) return Shapes.empty();
+        if (BlockIds.is(state, BlockIds.POWDER_SNOW) && actor != null)
+            return actor.powderSnowShape(pos.y(), entityBottom);
+        if (BlockIds.is(state, BlockIds.MOVING_PISTON))
+            return player.compensatedWorld.pistons.getMovingPistonCollisionShape(
+                    new BlockPos(pos.x(), pos.y(), pos.z()));
+        var fixed = player.compensatedWorld.geometry().staticCollision(state);
+        if (fixed != null) return fixed;
+        return player.compensatedWorld.geometry().collision(state, pos, context);
     }
 
     public static VoxelShape getSelectionShape(CultPlayer player, int state, int x, int y, int z) {
@@ -109,15 +148,16 @@ public final class NativeBlockCollisionHelper {
 
         return player.compensatedWorld
                 .geometry()
-                .outline(state, new BlockPos(x, y, z), entityContext(player, player.y));
+                .outline(state, new ac.cult.blocksim.engine.BlockPos(x, y, z), entityContext(player, player.y));
     }
 
     /** VoxelShape.toAabbs uses this same ordered callback, without needing native box objects. */
     public static List<SimpleCollisionBox> toBoxes(VoxelShape shape) {
         List<SimpleCollisionBox> boxes = new ArrayList<>();
-        for (var box : shape.boxes())
-            boxes.add(
-                    SimpleCollisionBox.between(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()));
+        ClientShapeBoxes.forEach(
+                shape,
+                (minX, minY, minZ, maxX, maxY, maxZ) ->
+                        boxes.add(SimpleCollisionBox.between(minX, minY, minZ, maxX, maxY, maxZ)));
         return boxes;
     }
 
@@ -126,23 +166,41 @@ public final class NativeBlockCollisionHelper {
             return NoCollisionBox.INSTANCE;
         }
 
-        return fromBoxes(toBoxes(shape), x, y, z);
+        var result = new ColliderBuilder(x, y, z);
+        ClientShapeBoxes.forEach(shape, result);
+        return result.complex != null ? result.complex : result.first == null ? NoCollisionBox.INSTANCE : result.first;
     }
 
-    private static CollisionBox fromBoxes(List<SimpleCollisionBox> boxes, int x, int y, int z) {
-        if (boxes.isEmpty()) {
-            return NoCollisionBox.INSTANCE;
+    private static final class ColliderBuilder implements VoxelShape.BoxConsumer {
+        final int x, y, z;
+        SimpleCollisionBox first;
+        ComplexCollisionBox complex;
+
+        ColliderBuilder(int x, int y, int z) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
         }
 
-        if (boxes.size() == 1) {
-            return boxes.get(0).move(x, y, z);
+        @Override
+        public void accept(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
+            // Normalize before adding offsets, then normalize again as between(...).move(...) does.
+            var box = SimpleCollisionBox.between(
+                    Math.min(minX, maxX) + x,
+                    Math.min(minY, maxY) + y,
+                    Math.min(minZ, maxZ) + z,
+                    Math.max(minX, maxX) + x,
+                    Math.max(minY, maxY) + y,
+                    Math.max(minZ, maxZ) + z);
+            if (first == null) first = box;
+            else {
+                if (complex == null) {
+                    complex = new ComplexCollisionBox();
+                    complex.add(first);
+                }
+                complex.add(box);
+            }
         }
-
-        SimpleCollisionBox[] collisionBoxes = new SimpleCollisionBox[boxes.size()];
-        for (int i = 0; i < boxes.size(); i++) {
-            collisionBoxes[i] = boxes.get(i).move(x, y, z);
-        }
-        return new ComplexCollisionBox(collisionBoxes);
     }
 
     public static EntityCollisionContext entityContext(CultPlayer player, double entityBottom) {

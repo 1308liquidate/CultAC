@@ -30,6 +30,14 @@ public final class ClientBlockShapes {
         return selectIfDifferent(latestJava, movementAlternative(player, state, x, y, z, entityBottom));
     }
 
+    /** Source-proven unit cube with no client mapping override; safe for a boolean-only scan. */
+    public static boolean hasStaticFullMovement(
+            CultPlayer player, int state, int x, int y, int z, double entityBottom) {
+        return player.compensatedWorld.geometry().staticCollision(state)
+                        == ac.cult.blocksim.engine.shapes.Shapes.block()
+                && movementAlternative(player, state, x, y, z, entityBottom).isEmpty();
+    }
+
     /** Apply the shared Java version catalog to an already-observed local shape. */
     public static ac.cult.blocksim.engine.shapes.VoxelShape versionedMovementShape(
             CultPlayer player, int state, ac.cult.blocksim.engine.shapes.VoxelShape observed) {

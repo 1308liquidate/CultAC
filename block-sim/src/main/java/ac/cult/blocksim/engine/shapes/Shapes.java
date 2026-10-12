@@ -7,9 +7,13 @@ import java.util.List;
 /** Placement's vanilla shape subset, including discrete snapping and Boolean index merging. */
 public final class Shapes {
     public static final double EPSILON = 1.0E-7;
-    private static final VoxelShape EMPTY = new VoxelShape(new double[][]{{0.0}, {0.0}, {0.0}}, new boolean[3], false, new BitSet());
+    private static final VoxelShape EMPTY = new VoxelShape(new double[][]{{0.0}, {0.0}, {0.0}}, 0, false, new BitSet());
     private static final VoxelShape BLOCK;
-    static { var cells = new BitSet(); cells.set(0); BLOCK = new VoxelShape(new double[][]{{0.0, 1.0}, {0.0, 1.0}, {0.0, 1.0}}, new boolean[]{true, true, true}, true, cells); }
+    static { var cells = new BitSet(); cells.set(0); BLOCK = new VoxelShape(new double[][]{{0.0, 1.0}, {0.0, 1.0}, {0.0, 1.0}}, 7, true, cells); }
+    // Paper's four immutable dyadic coordinate tables; no world/player entries or growth.
+    private static final double[][] CUBE_COORDINATES = {
+        createCubeCoords(1), createCubeCoords(2), createCubeCoords(4), createCubeCoords(8)
+    };
     private Shapes() { }
     public static VoxelShape empty() { return EMPTY; }
     public static VoxelShape block() { return BLOCK; }
@@ -34,7 +38,7 @@ public final class Shapes {
                 && java.util.Arrays.equals(copy[0], new double[]{0, 1})
                 && java.util.Arrays.equals(copy[1], new double[]{0, 1})
                 && java.util.Arrays.equals(copy[2], new double[]{0, 1})) return BLOCK;
-        return new VoxelShape(copy, new boolean[]{cube, cube, cube}, cube, (BitSet) cells.clone());
+        return new VoxelShape(copy, cube ? 7 : 0, cube, (BitSet) cells.clone());
     }
 
     public static VoxelShape create(Box box) { return create(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()); }
@@ -44,7 +48,7 @@ public final class Shapes {
         int xb = findBits(minX, maxX), yb = findBits(minY, maxY), zb = findBits(minZ, maxZ);
         if (xb < 0 || yb < 0 || zb < 0) {
             var cells = new BitSet(); cells.set(0);
-            return new VoxelShape(new double[][]{{minX, maxX}, {minY, maxY}, {minZ, maxZ}}, new boolean[3], false, cells);
+            return new VoxelShape(new double[][]{{minX, maxX}, {minY, maxY}, {minZ, maxZ}}, 0, false, cells);
         }
         if (xb == 0 && yb == 0 && zb == 0) return BLOCK;
         int xs = 1 << xb, ys = 1 << yb, zs = 1 << zb;
@@ -52,7 +56,7 @@ public final class Shapes {
         int x1 = (int) Math.round(maxX * xs), y1 = (int) Math.round(maxY * ys), z1 = (int) Math.round(maxZ * zs);
         var cells = new BitSet();
         for (int x = x0; x < x1; x++) for (int y = y0; y < y1; y++) cells.set((x * ys + y) * zs + z0, (x * ys + y) * zs + z1);
-        return new VoxelShape(new double[][]{cubeCoords(xs), cubeCoords(ys), cubeCoords(zs)}, new boolean[]{true, true, true}, true, cells);
+        return new VoxelShape(new double[][]{cubeCoords(xs), cubeCoords(ys), cubeCoords(zs)}, 7, true, cells);
     }
 
     static int findBits(double min, double max) {
@@ -64,7 +68,21 @@ public final class Shapes {
         return -1;
     }
 
-    static double[] cubeCoords(int size) { var coords = new double[size + 1]; for (int i = 0; i <= size; i++) coords[i] = (double) i / size; return coords; }
+    static double[] cubeCoords(int size) {
+        return switch (size) {
+            case 1 -> CUBE_COORDINATES[0];
+            case 2 -> CUBE_COORDINATES[1];
+            case 4 -> CUBE_COORDINATES[2];
+            case 8 -> CUBE_COORDINATES[3];
+            default -> createCubeCoords(size);
+        };
+    }
+
+    private static double[] createCubeCoords(int size) {
+        var coords = new double[size + 1];
+        for (int i = 0; i <= size; i++) coords[i] = (double) i / size;
+        return coords;
+    }
 
     public static VoxelShape fromBoxes(List<Box> boxes) {
         VoxelShape result = EMPTY;
@@ -86,7 +104,7 @@ public final class Shapes {
         }
         boolean cube = mergers[0].discrete && mergers[1].discrete && mergers[2].discrete;
         return new VoxelShape(new double[][]{mergers[0].coords, mergers[1].coords, mergers[2].coords},
-                new boolean[]{mergers[0].cube, mergers[1].cube, mergers[2].cube}, cube, cells);
+                (mergers[0].cube ? 1 : 0) | (mergers[1].cube ? 2 : 0) | (mergers[2].cube ? 4 : 0), cube, cells);
     }
 
     public static boolean joinIsNotEmpty(VoxelShape first, VoxelShape second, BooleanOp op) {

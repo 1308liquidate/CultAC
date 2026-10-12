@@ -22,12 +22,13 @@ import ac.cult.cultac.utils.math.Vector3dm;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
 public class Collisions {
     private static final double COLLISION_EPSILON = 1.0E-7;
+    private static final List<Axis> Y_X_Z = List.of(Axis.Y, Axis.X, Axis.Z);
+    private static final List<Axis> Y_Z_X = List.of(Axis.Y, Axis.Z, Axis.X);
     private static final Vec3 COBWEB_STUCK_SPEED = new Vec3(0.25, 0.05000000074505806, 0.25);
     private static final Vec3 WEAVING_COBWEB_STUCK_SPEED = new Vec3(0.5, 0.25, 0.5);
     private static final Vec3 SWEET_BERRY_BUSH_STUCK_SPEED = new Vec3(0.800000011920929, 0.75, 0.800000011920929);
@@ -287,60 +288,70 @@ public class Collisions {
     }
 
     private static List<Axis> getAxisStepOrder(CultPlayer player, Vec3 movement) {
-        if (player.getClientVersion().isOlderThan(ClientVersion.V_1_14)) return Arrays.asList(Axis.Y, Axis.X, Axis.Z);
+        if (player.getClientVersion().isOlderThan(ClientVersion.V_1_14)) return Y_X_Z;
         return getAxisStepOrder(movement);
     }
 
     private static List<Axis> getAxisStepOrder(Vec3 movement) {
-        return Math.abs(movement.x) < Math.abs(movement.z)
-                ? Arrays.asList(Axis.Y, Axis.Z, Axis.X)
-                : Arrays.asList(Axis.Y, Axis.X, Axis.Z);
+        return Math.abs(movement.x) < Math.abs(movement.z) ? Y_Z_X : Y_X_Z;
     }
 
-    private static List<Double> collectCandidateStepUpHeights(
+    private static float[] collectCandidateStepUpHeights(
             SimpleCollisionBox boundingBox,
             List<SimpleCollisionBox> colliders,
             double maxStepHeight,
             double stepHeightToSkip) {
-        List<Float> heights = new ArrayList<>(4);
+        StepHeights heights = new StepHeights();
         float maxStepHeightFloat = (float) maxStepHeight;
         float stepHeightToSkipFloat = (float) stepHeightToSkip;
         for (SimpleCollisionBox collider : colliders) {
             if (collider instanceof ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox voxel) {
-                for (double coordinate : voxel.stepCoordinates())
-                    addStepCandidate(
-                            heights,
-                            (float) (coordinate - boundingBox.minY),
+                for (int i = 0; i < voxel.stepCoordinateCount(); i++)
+                    heights.add(
+                            (float) (voxel.stepCoordinateAt(i) - boundingBox.minY),
                             maxStepHeightFloat,
                             stepHeightToSkipFloat);
                 continue;
             }
-            addStepCandidate(
-                    heights, (float) (collider.minY - boundingBox.minY), maxStepHeightFloat, stepHeightToSkipFloat);
-            addStepCandidate(
-                    heights, (float) (collider.maxY - boundingBox.minY), maxStepHeightFloat, stepHeightToSkipFloat);
+            heights.add((float) (collider.minY - boundingBox.minY), maxStepHeightFloat, stepHeightToSkipFloat);
+            heights.add((float) (collider.maxY - boundingBox.minY), maxStepHeightFloat, stepHeightToSkipFloat);
         }
-        heights.sort(Float::compare);
-
-        List<Double> result = new ArrayList<>(heights.size());
-        for (float height : heights) {
-            result.add((double) height);
-        }
-        return result;
+        return heights.sorted();
     }
 
-    private static void addStepCandidate(
-            List<Float> heights, float height, float maxStepHeight, float stepHeightToSkip) {
-        if (height < 0.0F || height > maxStepHeight || height == stepHeightToSkip) {
-            return;
+    private static final class StepHeights {
+        private float[] values = new float[4];
+        private int size;
+
+        void add(float height, float maxStepHeight, float stepHeightToSkip) {
+            if (height < 0.0F || height > maxStepHeight || height == stepHeightToSkip) return;
+            for (int i = 0; i < size; i++) if (values[i] == height) return;
+            if (size == values.length) values = java.util.Arrays.copyOf(values, size * 2);
+            values[size++] = height;
         }
 
-        for (float existing : heights) {
-            if (existing == height) {
-                return;
-            }
+        float[] sorted() {
+            java.util.Arrays.sort(values, 0, size);
+            return size == values.length ? values : java.util.Arrays.copyOf(values, size);
         }
-        heights.add(height);
+    }
+
+    /** Read-only single-axis clip: no copied actor box, singleton order list, or result vector. */
+    public static double collideAxis(
+            double distance,
+            SimpleCollisionBox actor,
+            List<SimpleCollisionBox> colliders,
+            Axis axis,
+            SimpleCollisionBox.AxisEpsilon epsilon) {
+        for (int i = 0; i < colliders.size(); i++) {
+            var collider = colliders.get(i);
+            distance = switch (axis) {
+                case X -> collider.collideX(actor, distance, epsilon);
+                case Y -> collider.collideY(actor, distance, epsilon);
+                case Z -> collider.collideZ(actor, distance, epsilon);
+            };
+        }
+        return distance;
     }
 
     public static boolean addWorldBorder(
@@ -432,23 +443,22 @@ public class Collisions {
             boolean onlyCheckCollide,
             double entityBottom,
             JavaCollisionState actor) {
-        SimpleCollisionBox expandedBB = wantedBB.copy();
         boolean modernJava =
                 !player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2);
-        var queryShape = modernJava
-                ? ac.cult.blocksim.engine.shapes.Shapes.create(new ac.cult.blocksim.data.Box(
-                        wantedBB.minX, wantedBB.minY, wantedBB.minZ, wantedBB.maxX, wantedBB.maxY, wantedBB.maxZ))
-                : null;
+        if (modernJava)
+            ac.cult.blocksim.data.Box.validateBounds(
+                    wantedBB.minX, wantedBB.minY, wantedBB.minZ, wantedBB.maxX, wantedBB.maxY, wantedBB.maxZ);
+        ac.cult.blocksim.engine.shapes.VoxelShape queryShape = null;
 
         boolean collided = addWorldBorder(player, wantedBB, listOfBlocks, onlyCheckCollide);
         if (onlyCheckCollide && collided) return true;
 
-        int minBlockX = (int) Math.floor(expandedBB.minX - COLLISION_EPSILON) - 1;
-        int maxBlockX = (int) Math.floor(expandedBB.maxX + COLLISION_EPSILON) + 1;
-        int minBlockY = (int) Math.floor(expandedBB.minY - COLLISION_EPSILON) - 1;
-        int maxBlockY = (int) Math.floor(expandedBB.maxY + COLLISION_EPSILON) + 1;
-        int minBlockZ = (int) Math.floor(expandedBB.minZ - COLLISION_EPSILON) - 1;
-        int maxBlockZ = (int) Math.floor(expandedBB.maxZ + COLLISION_EPSILON) + 1;
+        int minBlockX = (int) Math.floor(wantedBB.minX - COLLISION_EPSILON) - 1;
+        int maxBlockX = (int) Math.floor(wantedBB.maxX + COLLISION_EPSILON) + 1;
+        int minBlockY = (int) Math.floor(wantedBB.minY - COLLISION_EPSILON) - 1;
+        int maxBlockY = (int) Math.floor(wantedBB.maxY + COLLISION_EPSILON) + 1;
+        int minBlockZ = (int) Math.floor(wantedBB.minZ - COLLISION_EPSILON) - 1;
+        int maxBlockZ = (int) Math.floor(wantedBB.maxZ + COLLISION_EPSILON) + 1;
 
         final int minSection = player.compensatedWorld.getMinHeight() >> 4;
         final int minBlock = minSection << 4;
@@ -499,9 +509,6 @@ public class Collisions {
                                     .registry()
                                     .facts(data);
                             if (facts.has(ac.cult.blocksim.data.StateFacts.AIR)) continue;
-                            CollisionBox collisionBox =
-                                    ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor);
-                            if (collisionBox.isNull()) continue;
                             // Thanks SpottedLeaf for this optimization, I took edgeCount from Tuinity
                             int edgeCount = ((x == minBlockX || x == maxBlockX) ? 1 : 0)
                                     + ((y == minBlockY || y == maxBlockY) ? 1 : 0)
@@ -515,6 +522,36 @@ public class Collisions {
                                                     modernJava
                                                             ? ac.cult.blocksim.data.BlockIds.MOVING_PISTON
                                                             : ac.cult.blocksim.data.BlockIds.PISTON_HEAD))) {
+                                if (modernJava
+                                        && onlyCheckCollide
+                                        && ClientBlockShapes.hasStaticFullMovement(
+                                                player, data, x, y, z, entityBottom)) {
+                                    // Paper's check-only scan: no collider, translation or query shape is needed.
+                                    if (wantedBB.minX < x + 1.0
+                                            && wantedBB.maxX > x
+                                            && wantedBB.minY < y + 1.0
+                                            && wantedBB.maxY > y
+                                            && wantedBB.minZ < z + 1.0
+                                            && wantedBB.maxZ > z) return true;
+                                    continue;
+                                }
+                                CollisionBox collisionBox =
+                                        ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor);
+                                if (collisionBox.isNull()) continue;
+                                if (modernJava
+                                        && queryShape == null
+                                        && collisionBox
+                                                instanceof
+                                                ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox voxel
+                                        && !voxel.usesStrictFullBlockIntersection()) {
+                                    queryShape = ac.cult.blocksim.engine.shapes.Shapes.create(
+                                            wantedBB.minX,
+                                            wantedBB.minY,
+                                            wantedBB.minZ,
+                                            wantedBB.maxX,
+                                            wantedBB.maxY,
+                                            wantedBB.maxZ);
+                                }
                                 // Vanilla BlockCollisions filters the swept query before axis clipping
                                 // or collecting step heights. The full-block path deliberately uses
                                 // strict AABB intersection; other voxel shapes use Shapes AND.
@@ -821,6 +858,7 @@ public class Collisions {
             SimpleCollisionBox toAabb,
             Vec3 axisOrderMovement,
             boolean powderSnowCanApply) {
+        if (!InsideBlockEffectScan.mayHaveEffects(player, fromAabb, toAabb, true)) return null;
         SimpleCollisionBox sweptCandidates = fromAabb.copy().union(toAabb);
         int minX = CultMath.floor(sweptCandidates.minX + COLLISION_EPSILON);
         int minY = CultMath.floor(sweptCandidates.minY + COLLISION_EPSILON);

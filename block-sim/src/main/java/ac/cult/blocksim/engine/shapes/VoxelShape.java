@@ -12,33 +12,80 @@ import java.util.List;
 /** Immutable discrete occupancy and exact coordinate lists for geometry and axis clipping. */
 public final class VoxelShape {
     final double[][] coords;
-    final boolean[] cubeCoords;
+    private final int cubeCoordinateAxes;
     private final boolean cubeShape;
     private final BitSet cells;
     private final int xSize, ySize, zSize;
 
-    VoxelShape(double[][] coords, boolean[] cubeCoords, boolean cubeShape, BitSet cells) {
-        this.coords = coords; this.cubeCoords = cubeCoords; this.cubeShape = cubeShape; this.cells = cells;
+    VoxelShape(double[][] coords, int cubeCoordinateAxes, boolean cubeShape, BitSet cells) {
+        this.coords = coords; this.cubeCoordinateAxes = cubeCoordinateAxes; this.cubeShape = cubeShape; this.cells = cells;
         xSize = coords[0].length - 1; ySize = coords[1].length - 1; zSize = coords[2].length - 1;
     }
     public boolean isEmpty() { return cells.isEmpty(); }
     public double[] coordinates(int axis) { return coords[axis].clone(); }
+    /** Read-only scalar access, including every internal grid face used by stepping. */
+    public int coordinateCount(int axis) { return coords[axis].length; }
+    public double coordinateAt(int axis, int index) { return coords[axis][index]; }
+    boolean cubeCoordinates(int axis) { return (cubeCoordinateAxes & (1 << axis)) != 0; }
+    public boolean sameGrid(VoxelShape other) {
+        for (int axis = 0; axis < 3; axis++) if (!java.util.Arrays.equals(coords[axis], other.coords[axis])) return false;
+        return true;
+    }
+
+    /** Used to retain eager box validation before tests of potentially invalid moved geometry. */
+    public boolean hasFiniteCoordinates() {
+        for (double[] axis : coords) for (double coordinate : axis) if (!Double.isFinite(coordinate)) return false;
+        return true;
+    }
 
     /** Vanilla VoxelShape.collideX scans occupied cells past the actor's leading face. */
     public double collide(int axis, Box moving, double distance) {
         if (isEmpty()) return distance;
         if (Math.abs(distance) < Shapes.EPSILON) return 0.0;
+        return collide(axis, moving.minX(), moving.minY(), moving.minZ(), moving.maxX(), moving.maxY(), moving.maxZ(), distance);
+    }
+
+    public double collide(int axis, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double distance) {
+        return collide(axis, minX, minY, minZ, maxX, maxY, maxZ, distance, 0, 0, 0, false);
+    }
+
+    /**
+     * Moonrise-style shared local grid with one translation evaluated on read.
+     * Compare against coordinate + offset, as vanilla OffsetDoubleList does;
+     * subtracting the offset from the actor can change epsilon decisions.
+     */
+    public double collideTranslated(int axis, double minX, double minY, double minZ, double maxX, double maxY,
+                                    double maxZ, double distance, double offsetX, double offsetY, double offsetZ) {
+        return collide(axis, minX, minY, minZ, maxX, maxY, maxZ, distance, offsetX, offsetY, offsetZ, true);
+    }
+
+    private double collide(int axis, double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
+                           double distance, double offsetX, double offsetY, double offsetZ, boolean translated) {
+        Box.validateBounds(minX, minY, minZ, maxX, maxY, maxZ);
+        if (isEmpty()) return distance;
+        if (Math.abs(distance) < Shapes.EPSILON) return 0.0;
+        if (translated && xSize == 1 && ySize == 1 && zSize == 1
+                && Double.isFinite(offsetX) && Double.isFinite(offsetY) && Double.isFinite(offsetZ)) {
+            return collideSingleCell(axis, minX, minY, minZ, maxX, maxY, maxZ, distance, offsetX, offsetY, offsetZ);
+        }
         int b = (axis + 1) % 3, c = (axis + 2) % 3;
-        double[] min = {moving.minX(), moving.minY(), moving.minZ()};
-        double[] max = {moving.maxX(), moving.maxY(), moving.maxZ()};
-        int fromB = Math.max(0, findIndex(b, min[b] + Shapes.EPSILON));
-        int toB = Math.min(size(b), findIndex(b, max[b] - Shapes.EPSILON) + 1);
-        int fromC = Math.max(0, findIndex(c, min[c] + Shapes.EPSILON));
-        int toC = Math.min(size(c), findIndex(c, max[c] - Shapes.EPSILON) + 1);
-        int start = distance > 0 ? findIndex(axis, max[axis] - Shapes.EPSILON) + 1
-                : findIndex(axis, min[axis] + Shapes.EPSILON) - 1;
+        double offsetA = coordinate(axis, offsetX, offsetY, offsetZ);
+        double offsetB = coordinate(b, offsetX, offsetY, offsetZ);
+        double offsetC = coordinate(c, offsetX, offsetY, offsetZ);
+        int fromB = Math.max(0, collisionIndex(b, coordinate(b, minX, minY, minZ) + Shapes.EPSILON, offsetB, translated));
+        int toB = Math.min(size(b), collisionIndex(b, coordinate(b, maxX, maxY, maxZ) - Shapes.EPSILON, offsetB, translated) + 1);
+        int fromC = Math.max(0, collisionIndex(c, coordinate(c, minX, minY, minZ) + Shapes.EPSILON, offsetC, translated));
+        int toC = Math.min(size(c), collisionIndex(c, coordinate(c, maxX, maxY, maxZ) - Shapes.EPSILON, offsetC, translated) + 1);
+        if (fromB >= toB || fromC >= toC) return distance;
+        double min = coordinate(axis, minX, minY, minZ), max = coordinate(axis, maxX, maxY, maxZ);
+        int start = distance > 0 ? collisionIndex(axis, max - Shapes.EPSILON, offsetA, translated) + 1
+                : collisionIndex(axis, min + Shapes.EPSILON, offsetA, translated) - 1;
         int step = distance > 0 ? 1 : -1;
         for (int a = start; a >= 0 && a < size(axis); a += step) {
+            double face = coords[axis][distance > 0 ? a : a + 1];
+            double gap = (translated ? face + offsetA : face) - (distance > 0 ? max : min);
+            // Moonrise: later faces cannot clip a movement that stops before this face.
+            if (distance > 0 ? gap >= distance : gap <= distance) return distance;
             for (int ib = fromB; ib < toB; ib++) for (int ic = fromC; ic < toC; ic++) {
                 boolean occupied = switch (axis) {
                     case 0 -> full(a, ib, ic);
@@ -47,7 +94,6 @@ public final class VoxelShape {
                     default -> throw new IllegalArgumentException("Invalid collision axis");
                 };
                 if (occupied) {
-                    double gap = distance > 0 ? coords[axis][a] - max[axis] : coords[axis][a + 1] - min[axis];
                     if (distance > 0 && gap >= -Shapes.EPSILON) return Math.min(distance, gap);
                     if (distance < 0 && gap <= Shapes.EPSILON) return Math.max(distance, gap);
                     return distance;
@@ -56,20 +102,71 @@ public final class VoxelShape {
         }
         return distance;
     }
+
+    /** Paper's single-AABB shortcut, using vanilla's exact grid-index comparisons at epsilon ties. */
+    private double collideSingleCell(int axis, double minX, double minY, double minZ, double maxX, double maxY,
+                                     double maxZ, double distance, double offsetX, double offsetY, double offsetZ) {
+        int b = (axis + 1) % 3, c = (axis + 2) % 3;
+        double offsetB = coordinate(b, offsetX, offsetY, offsetZ), offsetC = coordinate(c, offsetX, offsetY, offsetZ);
+        if (coordinate(b, minX, minY, minZ) + Shapes.EPSILON >= coords[b][1] + offsetB
+                || coordinate(b, maxX, maxY, maxZ) - Shapes.EPSILON < coords[b][0] + offsetB
+                || coordinate(c, minX, minY, minZ) + Shapes.EPSILON >= coords[c][1] + offsetC
+                || coordinate(c, maxX, maxY, maxZ) - Shapes.EPSILON < coords[c][0] + offsetC) return distance;
+        double offsetA = coordinate(axis, offsetX, offsetY, offsetZ);
+        double min = coordinate(axis, minX, minY, minZ), max = coordinate(axis, maxX, maxY, maxZ);
+        if (distance > 0) {
+            double face = coords[axis][0] + offsetA;
+            if (!(max - Shapes.EPSILON < face)) return distance;
+            double gap = face - max;
+            return gap >= -Shapes.EPSILON ? Math.min(distance, gap) : distance;
+        } else if (distance < 0) {
+            double face = coords[axis][1] + offsetA;
+            if (!(min + Shapes.EPSILON >= face)) return distance;
+            double gap = face - min;
+            return gap <= Shapes.EPSILON ? Math.max(distance, gap) : distance;
+        }
+        return distance;
+    }
+
+    private int collisionIndex(int axis, double value, double offset, boolean translated) {
+        if (!translated) return findIndex(axis, value);
+        // move() produces an ArrayVoxelShape even for a cube grid.
+        int low = 0, high = coords[axis].length;
+        while (low < high) {
+            int middle = (low + high) >>> 1;
+            if (value < coords[axis][middle] + offset) high = middle;
+            else low = middle + 1;
+        }
+        return low - 1;
+    }
+    private static double coordinate(int axis, double x, double y, double z) {
+        return switch (axis) { case 0 -> x; case 1 -> y; case 2 -> z; default -> throw new ArrayIndexOutOfBoundsException(axis); };
+    }
     int size(int axis) { return coords[axis].length - 1; }
     boolean full(int x, int y, int z) {
         return x >= 0 && y >= 0 && z >= 0 && x < xSize && y < ySize && z < zSize && cells.get(index(x, y, z));
     }
     private int index(int x, int y, int z) { return (x * ySize + y) * zSize + z; }
 
+    boolean anyFullZ(int x, int y, int minZ, int maxZ) {
+        int first = cells.nextSetBit(index(x, y, minZ));
+        return first >= 0 && first < index(x, y, maxZ);
+    }
+
+    /** Direct occupancy intersection, with the original Boolean join for ambiguous inputs. */
+    public boolean intersectsAabb(VoxelShape query, double offsetX, double offsetY, double offsetZ, boolean translated) {
+        return AabbVoxelIntersection.intersects(this, query, offsetX, offsetY, offsetZ, translated);
+    }
+
     public VoxelShape move(double x, double y, double z) {
         if (isEmpty()) return Shapes.empty();
-        var moved = new double[3][]; var offset = new double[]{x, y, z};
+        var moved = new double[3][];
         for (int axis = 0; axis < 3; axis++) {
             moved[axis] = coords[axis].clone();
-            for (int i = 0; i < moved[axis].length; i++) moved[axis][i] += offset[axis];
+            double offset = coordinate(axis, x, y, z);
+            for (int i = 0; i < moved[axis].length; i++) moved[axis][i] += offset;
         }
-        return new VoxelShape(moved, new boolean[3], false, cells);
+        return new VoxelShape(moved, 0, false, cells);
     }
 
     public VoxelShape optimize() {
@@ -90,7 +187,7 @@ public final class VoxelShape {
         int slice = findIndex(axis, positive ? 0.9999999 : Shapes.EPSILON);
         var dimensions = new int[]{xSize, ySize, zSize}; dimensions[axis] = 1;
         var sliceCoords = coords.clone(); sliceCoords[axis] = new double[]{0.0, 1.0};
-        var flags = cubeCoords.clone(); flags[axis] = true;
+        int flags = cubeCoordinateAxes | (1 << axis);
         var occupancy = new BitSet();
         for (int x = 0; x < dimensions[0]; x++) for (int y = 0; y < dimensions[1]; y++) for (int z = 0; z < dimensions[2]; z++) {
             if (full(axis == 0 ? slice : x, axis == 1 ? slice : y, axis == 2 ? slice : z)) {
@@ -150,7 +247,26 @@ public final class VoxelShape {
 
     /** BitSetDiscreteVoxelShape.forAllBoxes: z strip, then x rectangle, then y prism. */
     public List<Box> boxes() {
-        var remaining = (BitSet) cells.clone(); var result = new ArrayList<Box>();
+        var result = new ArrayList<Box>();
+        forEachBox((minX, minY, minZ, maxX, maxY, maxZ) -> result.add(new Box(minX, minY, minZ, maxX, maxY, maxZ)));
+        return List.copyOf(result);
+    }
+
+    @FunctionalInterface
+    public interface BoxConsumer {
+        void accept(double minX, double minY, double minZ, double maxX, double maxY, double maxZ);
+    }
+
+    /** Same ordered decomposition, with call-local scratch and no materialized box records. */
+    public void forEachBox(BoxConsumer consumer) {
+        int first = cells.nextSetBit(0);
+        if (first < 0) return;
+        if (cells.nextSetBit(first + 1) < 0) {
+            int z = first % zSize, xy = first / zSize, y = xy % ySize, x = xy / ySize;
+            emit(consumer, x, y, z, x + 1, y + 1, z + 1);
+            return;
+        }
+        var remaining = (BitSet) cells.clone();
         for (int y = 0; y < ySize; y++) for (int x = 0; x < xSize; x++) {
             int startZ = -1;
             for (int z = 0; z <= zSize; z++) {
@@ -162,12 +278,18 @@ public final class VoxelShape {
                         for (int cx = x; cx <= endX; cx++) clearStrip(remaining, startZ, z, cx, endY + 1);
                         endY++;
                     }
-                    result.add(new Box(coords[0][x], coords[1][y], coords[2][startZ], coords[0][endX + 1], coords[1][endY + 1], coords[2][z]));
+                    emit(consumer, x, y, startZ, endX + 1, endY + 1, z);
                     startZ = -1;
                 }
             }
         }
-        return List.copyOf(result);
+    }
+
+    private void emit(BoxConsumer consumer, int x1, int y1, int z1, int x2, int y2, int z2) {
+        double minX = coords[0][x1], minY = coords[1][y1], minZ = coords[2][z1];
+        double maxX = coords[0][x2], maxY = coords[1][y2], maxZ = coords[2][z2];
+        Box.validateBounds(minX, minY, minZ, maxX, maxY, maxZ);
+        consumer.accept(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
     private boolean stripFull(BitSet remaining, int startZ, int endZ, int x, int y) {

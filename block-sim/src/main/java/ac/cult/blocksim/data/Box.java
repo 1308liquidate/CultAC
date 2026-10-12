@@ -2,6 +2,10 @@ package ac.cult.blocksim.data;
 
 public record Box(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
     public Box {
+        validateBounds(minX, minY, minZ, maxX, maxY, maxZ);
+    }
+    /** The same validation for scalar geometry adapters that do not need a Box object. */
+    public static void validateBounds(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
         if (!(minX <= maxX && minY <= maxY && minZ <= maxZ)) {
             throw new IllegalArgumentException("Invalid box bounds");
         }

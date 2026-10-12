@@ -16,7 +16,7 @@ final class IndexMerge {
         double[] first = a.coords[axis], second = b.coords[axis];
         int as = first.length - 1, bs = second.length - 1;
         // Shapes.createIndexMerger: CubePointRange uses a common discrete grid under cost 256.
-        if (a.cubeCoords[axis] && b.cubeCoords[axis]) {
+        if (a.cubeCoordinates(axis) && b.cubeCoordinates(axis)) {
             int gcd = gcd(as, bs); long size = (long) as * (bs / gcd);
             if ((long) cost * size <= 256L) {
                 int count = (int) size; var ai = new int[count]; var bi = new int[count];
@@ -28,7 +28,7 @@ final class IndexMerge {
         if (second[bs] < first[0] - Shapes.EPSILON) return separated(second, first, true);
         if (Arrays.equals(first, second)) {
             var ai = new int[as]; for (int i = 0; i < as; i++) ai[i] = i;
-            return new IndexMerge(first, ai, ai, false, a.cubeCoords[axis]);
+            return new IndexMerge(first, ai, ai, false, a.cubeCoordinates(axis));
         }
         // IndirectMerger constructor: ordering and endpoint coalescing deliberately differ.
         double last = Double.NaN;

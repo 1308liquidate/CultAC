@@ -16,13 +16,17 @@ import com.viaversion.viaversion.api.data.Mappings;
 import com.viaversion.viaversion.api.protocol.Protocol;
 import com.viaversion.viaversion.api.protocol.ProtocolPathEntry;
 import com.viaversion.viaversion.protocols.v1_12_2to1_13.Protocol1_12_2To1_13;
+import it.unimi.dsi.fastutil.ints.Int2BooleanMap;
+import it.unimi.dsi.fastutil.ints.Int2BooleanMaps;
+import it.unimi.dsi.fastutil.ints.Int2BooleanOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMaps;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import java.lang.reflect.Method;
 import java.util.BitSet;
 import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -167,7 +171,7 @@ public final class ViaClientBlockShapeMappings {
                     .completeMappingDataLoading(entry.protocol().getClass());
         }
         BitSet representedCurrentStates = representedCurrentStates(version, toServer, toClient);
-        Map<Integer, Replacement> replacements = new HashMap<>();
+        var replacements = new Int2ObjectOpenHashMap<Replacement>();
         Set<Integer> needsReplacementByMaterial = new HashSet<>();
 
         for (int currentId = 0; currentId < DataTables.defaults().registry().stateCount(); currentId++) {
@@ -203,7 +207,7 @@ public final class ViaClientBlockShapeMappings {
             replacements.put(currentId, new Replacement(replacementState, replacementState));
         }
 
-        Map<Integer, Boolean> legacyMaterialSolidity = new HashMap<>();
+        var legacyMaterialSolidity = new Int2BooleanOpenHashMap();
         if (version == ClientVersion.V_1_8) {
             for (int legacyState = 0; legacyState < 198 * 16; legacyState++) {
                 int currentState = mapStateId(legacyState, toServer);
@@ -223,7 +227,9 @@ public final class ViaClientBlockShapeMappings {
             }
         }
         return new VersionMappings(
-                replacements, Set.copyOf(needsReplacementByMaterial), Map.copyOf(legacyMaterialSolidity));
+                Int2ObjectMaps.unmodifiable(replacements),
+                Set.copyOf(needsReplacementByMaterial),
+                Int2BooleanMaps.unmodifiable(legacyMaterialSolidity));
     }
 
     static BitSet representedCurrentStates(
@@ -356,9 +362,9 @@ public final class ViaClientBlockShapeMappings {
     }
 
     private record VersionMappings(
-            Map<Integer, Replacement> replacements,
+            Int2ObjectMap<Replacement> replacements,
             Set<Integer> needsReplacementMaterials,
-            Map<Integer, Boolean> legacyMaterialSolidity) {
+            Int2BooleanMap legacyMaterialSolidity) {
         boolean isEmpty() {
             return replacements.isEmpty() && needsReplacementMaterials.isEmpty();
         }

@@ -19,6 +19,21 @@ public final class ClientBlockGeometry {
     private static final class Rules {
         static final DataTables DATA = DataTables.defaults();
         static final BehaviorRegistry BEHAVIORS = new BehaviorRegistry(DATA);
+        static final ac.cult.blocksim.engine.Direction[] DIRECTIONS = ac.cult.blocksim.engine.Direction.values();
+        static final boolean[] STATE_ONLY_COLLISION = stateOnlyCollision();
+
+        private static boolean[] stateOnlyCollision() {
+            var blocks = DATA.registry().blocks();
+            var result = new boolean[blocks.size()];
+            // Resolve dispatch once, including overrides of either overload. This is
+            // fixed registry metadata; no world or actor result is retained.
+            var classes = new java.util.IdentityHashMap<Class<?>, Boolean>();
+            for (int index = 0; index < blocks.size(); index++) {
+                var type = BEHAVIORS.apply(blocks.get(index).defaultState()).getClass();
+                result[index] = classes.computeIfAbsent(type, ClientBlockGeometry::inheritsStateOnlyCollision);
+            }
+            return result;
+        }
     }
 
     private final SimLevel level;
@@ -30,7 +45,37 @@ public final class ClientBlockGeometry {
     }
 
     public VoxelShape collision(int state, ac.cult.cultac.protocol.value.BlockPos pos, EntityCollisionContext context) {
-        return level.behavior(state).collisionShape(level, state, position(pos), context);
+        return collision(state, position(pos), context);
+    }
+
+    public VoxelShape collision(int state, BlockPos pos, EntityCollisionContext context) {
+        return level.behavior(state).collisionShape(level, state, pos, context);
+    }
+
+    /** Both inherited base methods read only the immutable state shape. */
+    public VoxelShape staticCollision(int state) {
+        return Rules.STATE_ONLY_COLLISION[Rules.DATA.registry().blockIndex(state)]
+                ? Rules.DATA.registry().shapes().collision(state)
+                : null;
+    }
+
+    static boolean inheritsStateOnlyCollision(Class<?> type) {
+        try {
+            var base = ac.cult.blocksim.behavior.BlockBehavior.class;
+            return type.getMethod("collisionShape", SimLevel.class, int.class, BlockPos.class)
+                                    .getDeclaringClass()
+                            == base
+                    && type.getMethod(
+                                            "collisionShape",
+                                            SimLevel.class,
+                                            int.class,
+                                            BlockPos.class,
+                                            EntityCollisionContext.class)
+                                    .getDeclaringClass()
+                            == base;
+        } catch (NoSuchMethodException exception) {
+            throw new IllegalStateException("Missing block collision dispatch", exception);
+        }
     }
 
     public VoxelShape collision(int state, ac.cult.cultac.protocol.value.BlockPos pos) {
@@ -49,7 +94,7 @@ public final class ClientBlockGeometry {
             float progress) {
         return ac.cult.blocksim.engine.MovingPistonShape.collision(
                 movedState,
-                ac.cult.blocksim.engine.Direction.values()[facing.ordinal()],
+                Rules.DIRECTIONS[facing.ordinal()],
                 extending,
                 source,
                 progress,
@@ -65,7 +110,11 @@ public final class ClientBlockGeometry {
     }
 
     public VoxelShape outline(int state, ac.cult.cultac.protocol.value.BlockPos pos, EntityCollisionContext context) {
-        return level.behavior(state).outlineShape(level, state, position(pos), context);
+        return outline(state, position(pos), context);
+    }
+
+    public VoxelShape outline(int state, BlockPos pos, EntityCollisionContext context) {
+        return level.behavior(state).outlineShape(level, state, pos, context);
     }
 
     public VoxelShape support(int state, ac.cult.cultac.protocol.value.BlockPos pos) {
@@ -74,7 +123,7 @@ public final class ClientBlockGeometry {
 
     public boolean isFaceSturdy(
             int state, ac.cult.cultac.protocol.value.BlockPos pos, ac.cult.cultac.protocol.value.Direction face) {
-        return level.isFaceSturdy(state, position(pos), ac.cult.blocksim.engine.Direction.values()[face.ordinal()]);
+        return level.isFaceSturdy(state, position(pos), Rules.DIRECTIONS[face.ordinal()]);
     }
 
     public VoxelShape interaction(int state, ac.cult.cultac.protocol.value.BlockPos pos) {
