@@ -362,12 +362,28 @@ public class ReachInterpolationData {
     //
     // Designed around being unsure of minimum interp, maximum interp, and target location on 1.9 clients
     public SimpleCollisionBox getPossibleMovementLocationCombined() {
-        List<SimpleCollisionBox> locations = getPossibleMovementLocations();
-        SimpleCollisionBox combined = locations.get(0);
-        for (int i = 1; i < locations.size(); i++) {
-            combined = combineCollisionBox(combined, locations.get(i));
-        }
-        return combined;
+        if (interpolationQueue != null) return steppedBox(steppedCurrent.position());
+        return combinedInterpolatedBounds(
+                startingLocation, targetLocation, getInterpolationSteps(),
+                interpolationStepsLowBound, interpolationStepsHighBound);
+    }
+
+    /** Grim 2.0's endpoint union: every corner is monotone over the interpolation range. */
+    static SimpleCollisionBox combinedInterpolatedBounds(
+            SimpleCollisionBox start, SimpleCollisionBox target, int steps, int low, int high) {
+        double minStepX = (target.minX - start.minX) / steps;
+        double minStepY = (target.minY - start.minY) / steps;
+        double minStepZ = (target.minZ - start.minZ) / steps;
+        double maxStepX = (target.maxX - start.maxX) / steps;
+        double maxStepY = (target.maxY - start.maxY) / steps;
+        double maxStepZ = (target.maxZ - start.maxZ) / steps;
+        return new SimpleCollisionBox(
+                Math.min(start.minX + low * minStepX, start.minX + high * minStepX),
+                Math.min(start.minY + low * minStepY, start.minY + high * minStepY),
+                Math.min(start.minZ + low * minStepZ, start.minZ + high * minStepZ),
+                Math.max(start.maxX + low * maxStepX, start.maxX + high * maxStepX),
+                Math.max(start.maxY + low * maxStepY, start.maxY + high * maxStepY),
+                Math.max(start.maxZ + low * maxStepZ, start.maxZ + high * maxStepZ));
     }
 
     public List<SimpleCollisionBox> getPossibleMovementLocations() {

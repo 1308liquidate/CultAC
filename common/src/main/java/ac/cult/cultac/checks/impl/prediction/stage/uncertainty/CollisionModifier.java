@@ -13,13 +13,24 @@ import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
 public class CollisionModifier implements UncertaintyHandler {
+    // Fixed global iteration orders, preserving the existing candidate order without per-probe lists.
+    private static final Collisions.Axis[][] PROBE_ORDERS = {
+        {Collisions.Axis.Y, Collisions.Axis.X, Collisions.Axis.Z},
+        {Collisions.Axis.Y, Collisions.Axis.Z, Collisions.Axis.X},
+        {Collisions.Axis.X, Collisions.Axis.Z, Collisions.Axis.Y},
+        {Collisions.Axis.Z, Collisions.Axis.X, Collisions.Axis.Y}
+    };
+    private static final Collisions.Axis[][] REPORTING_EXPAND_ORDERS = {
+        {Collisions.Axis.Y, Collisions.Axis.Z, Collisions.Axis.X},
+        {Collisions.Axis.X, Collisions.Axis.Z, Collisions.Axis.Y},
+        {Collisions.Axis.X, Collisions.Axis.Y, Collisions.Axis.Z}
+    };
+
     @Override
     public MovementTrace handleMovementTrace(
             CultPlayer player,
@@ -110,12 +121,13 @@ public class CollisionModifier implements UncertaintyHandler {
 
     private static Vec3 applyEntityMovePositionCommitGuard(
             Vec3 attemptedMovement, Vec3 clippedMovement, Vec3 stuckSpeed) {
-        Vec3 multiplier = stuckSpeed == null ? new Vec3(1.0D, 1.0D, 1.0D) : stuckSpeed;
-        Vec3 vanillaAttempted = attemptedMovement.multiply(multiplier.x, multiplier.y, multiplier.z);
-        Vec3 vanillaClipped = clippedMovement.multiply(multiplier.x, multiplier.y, multiplier.z);
-
-        double clippedLengthSqr = vanillaClipped.lengthSqr();
-        if (clippedLengthSqr <= 1.0E-7D && vanillaAttempted.lengthSqr() - clippedLengthSqr >= 1.0E-7D) {
+        double mx = stuckSpeed == null ? 1.0D : stuckSpeed.x;
+        double my = stuckSpeed == null ? 1.0D : stuckSpeed.y;
+        double mz = stuckSpeed == null ? 1.0D : stuckSpeed.z;
+        double ax = attemptedMovement.x * mx, ay = attemptedMovement.y * my, az = attemptedMovement.z * mz;
+        double cx = clippedMovement.x * mx, cy = clippedMovement.y * my, cz = clippedMovement.z * mz;
+        double clippedLengthSqr = cx * cx + cy * cy + cz * cz;
+        if (clippedLengthSqr <= 1.0E-7D && ax * ax + ay * ay + az * az - clippedLengthSqr >= 1.0E-7D) {
             return Vec3.ZERO;
         }
 
@@ -254,21 +266,13 @@ public class CollisionModifier implements UncertaintyHandler {
             });
         }
 
-        List<List<Collisions.Axis>> orderPossibilities = new ArrayList<>();
-        orderPossibilities.add(Arrays.asList(Collisions.Axis.Y, Collisions.Axis.X, Collisions.Axis.Z));
-        if (context.getVersion().isNewerThanOrEquals(ClientVersion.V_1_14)) {
-            orderPossibilities.add(Arrays.asList(Collisions.Axis.Y, Collisions.Axis.Z, Collisions.Axis.X));
-        }
-
-        if (context.getLastOnGround().determineOptimistically()) {
-            orderPossibilities.add(Arrays.asList(Collisions.Axis.X, Collisions.Axis.Z, Collisions.Axis.Y));
-            if (context.getVersion().isNewerThanOrEquals(ClientVersion.V_1_14)) {
-                orderPossibilities.add(Arrays.asList(Collisions.Axis.Z, Collisions.Axis.X, Collisions.Axis.Y));
-            }
-        }
+        boolean modernOrder = context.getVersion().isNewerThanOrEquals(ClientVersion.V_1_14);
+        boolean groundedOrder = context.getLastOnGround().determineOptimistically();
 
         // Brute force the current-client axis order possibilities exposed by the server-observable movement envelope.
-        for (List<Collisions.Axis> order : orderPossibilities) {
+        for (int orderIndex = 0; orderIndex < PROBE_ORDERS.length; orderIndex++) {
+            if (((orderIndex & 1) != 0 && !modernOrder) || (orderIndex >= 2 && !groundedOrder)) continue;
+            var order = PROBE_ORDERS[orderIndex];
             Vec3 iterPos = playerPos;
             for (Collisions.Axis axis : order) {
                 double movement = getAxisOfVector(target, axis);
@@ -427,14 +431,15 @@ public class CollisionModifier implements UncertaintyHandler {
         // Move the position for the next axis (with the smallest bounding box possible)
         // This is needed to stop people from slightly clipping into walls to avoid taking knockback (Clip AntiKB)
         if (amount == 0) return playerPos; // Nothing to do
-        Vec3 movementVector = transformToOnlyHaveAxis(new Vec3(amount, amount, amount), axis);
         float width = context.getVehicle() == null ? dimensions.width() : context.getMaxWidth();
         float height = context.getVehicle() == null ? dimensions.initialHeight() : context.getMaxHeight();
         SimpleCollisionBox oldBox =
                 GetBoundingBox.getBoundingBoxFromPosAndSize(playerPos.x, playerPos.y, playerPos.z, width, height);
-        Vec3 result = Collisions.collideBoundingBoxLegacy(
-                movementVector, oldBox, collisions, Collections.singletonList(axis), dimensions.epsilon());
-        return playerPos.add(result);
+        double result = Collisions.collideAxis(amount, oldBox, collisions, axis, dimensions.epsilon());
+        return playerPos.add(
+                axis == Collisions.Axis.X ? result : 0,
+                axis == Collisions.Axis.Y ? result : 0,
+                axis == Collisions.Axis.Z ? result : 0);
     }
 
     private double getAxisOfVector(Vec3 vec, Collisions.Axis axis) {
@@ -489,8 +494,6 @@ public class CollisionModifier implements UncertaintyHandler {
         double epsilon = isPositive ? axisEpsilon : -axisEpsilon;
         amount += epsilon;
 
-        List<Collisions.Axis> axisAsList = Collections.singletonList(axis);
-
         // Restore Grim 3.0's collision-constrained reporting extent. Old clients
         // can be up to 0.03 from their last reported coordinates; collision
         // clipping, rather than proximity, bounds where that body can be.
@@ -499,10 +502,7 @@ public class CollisionModifier implements UncertaintyHandler {
                 pos.x, pos.y, pos.z, (float) (dimensions.width() - reportingExtent), (float)
                         (dimensions.initialHeight() - reportingExtent));
         if (reportingExtent > 0) {
-            List<Collisions.Axis> expandOrder = new ArrayList<>(Arrays.asList(Collisions.Axis.values()));
-            expandOrder.remove(axis);
-            expandOrder.add(axis);
-            Vec3 extent = new Vec3(reportingExtent * 2, reportingExtent * 2, reportingExtent * 2);
+            var expandOrder = REPORTING_EXPAND_ORDERS[axis.ordinal()];
             for (Collisions.Axis expandAxis : expandOrder) {
                 if (expandAxis == axis) {
                     expandUpwards(
@@ -513,14 +513,12 @@ public class CollisionModifier implements UncertaintyHandler {
                             dimensions.maxHeight() - dimensions.initialHeight(),
                             dimensions.epsilon());
                 }
-                Vec3 expansion = transformToOnlyHaveAxis(extent, expandAxis);
-                List<Collisions.Axis> oneAxis = Collections.singletonList(expandAxis);
-                Vec3 positive = Collisions.collideBoundingBoxLegacy(
-                        expansion, playerBox, collisions, oneAxis, dimensions.epsilon());
-                Vec3 negative = Collisions.collideBoundingBoxLegacy(
-                        expansion.scale(-1), playerBox, collisions, oneAxis, dimensions.epsilon());
-                playerBox.expandToCoordinate(positive);
-                playerBox.expandToCoordinate(negative);
+                double positive = Collisions.collideAxis(
+                        reportingExtent * 2, playerBox, collisions, expandAxis, dimensions.epsilon());
+                double negative = Collisions.collideAxis(
+                        -reportingExtent * 2, playerBox, collisions, expandAxis, dimensions.epsilon());
+                expandInAxis(playerBox, expandAxis, positive);
+                expandInAxis(playerBox, expandAxis, negative);
             }
         } else if (!isVehicle) {
             expandUpwards(
@@ -537,17 +535,14 @@ public class CollisionModifier implements UncertaintyHandler {
         }
 
         // Now, after all of this bounding box fuckery is done, we can finally test for a collision!
-        Vec3 amountAsVector = transformToOnlyHaveAxis(new Vec3(amount, amount, amount), axis);
-        Vec3 result = Collisions.collideBoundingBoxLegacy(
-                amountAsVector, playerBox, collisions, axisAsList, dimensions.epsilon());
-        boolean collided = !result.equals(amountAsVector);
+        double result = Collisions.collideAxis(amount, playerBox, collisions, axis, dimensions.epsilon());
+        boolean collided = Double.compare(result, amount) != 0;
 
         if (!collided) { // We didn't collide in this axis, reduce by epsilon // TODO: DRY YOU FUCKING DONKEY
-            Vec3 epsilonAsVector = transformToOnlyHaveAxis(new Vec3(epsilon, epsilon, epsilon), axis);
-            result = result.subtract(epsilonAsVector);
+            result -= epsilon;
         }
 
-        return new AxisResult(getAxisOfVector(result, axis), collided);
+        return new AxisResult(result, collided);
     }
 
     private void expandUpwards(
@@ -559,16 +554,27 @@ public class CollisionModifier implements UncertaintyHandler {
             SimpleCollisionBox.AxisEpsilon collisionEpsilon) {
         // TODO: Define minimum bounding box extent (for 1.8 players and such to not by 0.6)
         // Expand the player box upwards by their unknown hitbox amount
-        Vec3 unknownPlayerBoxAmount = new Vec3(0, amount, 0);
-        Vec3 thisAxisResult = Collisions.collideBoundingBoxLegacy(
-                unknownPlayerBoxAmount, playerBox, collisions, Collections.singletonList(axis), collisionEpsilon);
-
-        boolean collided = !thisAxisResult.equals(unknownPlayerBoxAmount);
+        double axisAmount = axis == Collisions.Axis.Y ? amount : 0;
+        double result = Collisions.collideAxis(axisAmount, playerBox, collisions, axis, collisionEpsilon);
+        boolean collided = Double.compare(result, axisAmount) != 0;
+        double x = axis == Collisions.Axis.X ? result : 0;
+        double y = axis == Collisions.Axis.Y ? result : amount;
+        double z = axis == Collisions.Axis.Z ? result : 0;
         if (!collided) { // We didn't collide in this axis, reduce by epsilon
-            Vec3 epsilonAsVector = transformToOnlyHaveAxis(new Vec3(epsilon, epsilon, epsilon), axis);
-            thisAxisResult = thisAxisResult.subtract(epsilonAsVector);
+            switch (axis) {
+                case X -> x -= epsilon;
+                case Y -> y -= epsilon;
+                case Z -> z -= epsilon;
+            }
         }
-        playerBox.expandToCoordinate(thisAxisResult); // Height uncertainty for bounding box
+        playerBox.expandToCoordinate(x, y, z); // Height uncertainty for bounding box
+    }
+
+    private static void expandInAxis(SimpleCollisionBox box, Collisions.Axis axis, double amount) {
+        box.expandToCoordinate(
+                axis == Collisions.Axis.X ? amount : 0,
+                axis == Collisions.Axis.Y ? amount : 0,
+                axis == Collisions.Axis.Z ? amount : 0);
     }
 
     @AllArgsConstructor
@@ -598,17 +604,5 @@ public class CollisionModifier implements UncertaintyHandler {
             }
             epsilon = java.util.Objects.requireNonNull(epsilon, "epsilon");
         }
-    }
-
-    private Vec3 transformToOnlyHaveAxis(Vec3 vector, Collisions.Axis axis) {
-        switch (axis) {
-            case X:
-                return new Vec3(vector.x, 0, 0);
-            case Y:
-                return new Vec3(0, vector.y, 0);
-            case Z:
-                return new Vec3(0, 0, vector.z);
-        }
-        throw new IllegalStateException("Unknown axis " + axis);
     }
 }

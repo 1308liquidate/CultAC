@@ -37,7 +37,11 @@ public class PredVector extends Vec3 {
     List<TransactionVel> packetModifiers = null;
 
     public PredVector(Vec3 vec, PredVector lastVector, String reason) {
-        this(vec);
+        this(vec.x, vec.y, vec.z, lastVector, reason);
+    }
+
+    private PredVector(double x, double y, double z, PredVector lastVector, String reason) {
+        super(x, y, z);
         this.lastVector = lastVector;
         this.isJump = lastVector.isJump;
         this.isKnockback = lastVector.isKnockback;
@@ -224,15 +228,15 @@ public class PredVector extends Vec3 {
 
     @Override
     public PredVector clone() {
-        return new PredVector(new Vec3(x, y, z), lastVector, "clone");
+        return new PredVector(x, y, z, lastVector, "clone");
     }
 
     public PredVector withXYZ(double x, double y, double z, String reason) {
-        return new PredVector(new Vec3(x, y, z), this, reason);
+        return new PredVector(x, y, z, this, reason);
     }
 
     public PredVector withX(double x, String reason) {
-        return new PredVector(super.with(Direction.Axis.X, x), this, reason);
+        return new PredVector(x, y, z, this, reason);
     }
 
     public Vec3 withX(double x) {
@@ -240,7 +244,7 @@ public class PredVector extends Vec3 {
     }
 
     public PredVector withY(double y, String reason) {
-        return new PredVector(super.with(Direction.Axis.Y, y), this, reason);
+        return new PredVector(x, y, z, this, reason);
     }
 
     public Vec3 withY(double y) {
@@ -248,7 +252,7 @@ public class PredVector extends Vec3 {
     }
 
     public PredVector withZ(double z, String reason) {
-        return new PredVector(super.with(Direction.Axis.Z, z), this, reason);
+        return new PredVector(x, y, z, this, reason);
     }
 
     public Vec3 withZ(double z) {
@@ -256,11 +260,11 @@ public class PredVector extends Vec3 {
     }
 
     public PredVector add(Vec3 jumpBonus, String reason) {
-        return new PredVector(super.add(jumpBonus), this, reason);
+        return new PredVector(x + jumpBonus.x, y + jumpBonus.y, z + jumpBonus.z, this, reason);
     }
 
     public PredVector add(double x, double y, double z, String reason) {
-        return new PredVector(super.add(x, y, z), this, reason);
+        return new PredVector(this.x + x, this.y + y, this.z + z, this, reason);
     }
 
     public PredVector with(Vec3 vector, String reason) {
@@ -268,7 +272,7 @@ public class PredVector extends Vec3 {
     }
 
     public PredVector multiply(double v, String reason) {
-        return new PredVector(super.scale(v), this, reason);
+        return new PredVector(x * v, y * v, z * v, this, reason);
     }
 
     public Vec3 multiply(double v) {

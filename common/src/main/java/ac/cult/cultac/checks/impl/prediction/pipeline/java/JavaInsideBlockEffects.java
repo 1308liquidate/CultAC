@@ -1,6 +1,5 @@
 package ac.cult.cultac.checks.impl.prediction.pipeline.java;
 
-import ac.cult.blocksim.data.BlockFamilies;
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.BlockProps;
 import ac.cult.blocksim.engine.shapes.Shapes;
@@ -14,6 +13,7 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
+import ac.cult.cultac.utils.nmsutil.InsideBlockEffectScan;
 import ac.cult.cultac.utils.nmsutil.NativeBlockCollisionHelper;
 
 /** 26.1/26.2 Entity#checkInsideBlocks and the movement-affecting block callbacks. */
@@ -33,6 +33,7 @@ public final class JavaInsideBlockEffects {
         Vec3 end = context.getStart().add(movement);
         SimpleCollisionBox to = context.getToActualPose().copy().offset(end.subtract(context.getEnd()));
         SimpleCollisionBox from = to.copy().offset(movement.scale(-1));
+        if (!InsideBlockEffectScan.mayHaveEffects(player, from, to, false)) return current[0];
         boolean living = actor.isLivingEntity();
         boolean stuckAllowed = context.getVehicle() != null || !player.isFlying;
         boolean powderAllowed = !living
@@ -46,12 +47,13 @@ public final class JavaInsideBlockEffects {
             Collisions.visitInsideBlocks26Dot2(
                     from, to, pass == 0 ? originalMovement : null, (segmentFrom, segmentTo, pos, precise) -> {
                         int block = player.compensatedWorld.getBlockStateIdAt(pos);
-                        boolean powder = BlockFamilies.POWDER_SNOW.test(block);
-                        boolean web = BlockFamilies.WEB.test(block);
-                        boolean berry = BlockFamilies.SWEET_BERRY_BUSH.test(block);
-                        boolean honey = BlockFamilies.HONEY.test(block);
-                        boolean bubble = BlockFamilies.BUBBLE_COLUMN.test(block);
-                        if (!powder && !web && !berry && !honey && !bubble) return false;
+                        int effects = InsideBlockEffectScan.effects(block);
+                        if (effects == 0) return false;
+                        boolean powder = (effects & InsideBlockEffectScan.POWDER) != 0;
+                        boolean web = (effects & InsideBlockEffectScan.WEB) != 0;
+                        boolean berry = (effects & InsideBlockEffectScan.BERRY) != 0;
+                        boolean honey = (effects & InsideBlockEffectScan.HONEY) != 0;
+                        boolean bubble = (effects & InsideBlockEffectScan.BUBBLE) != 0;
                         VoxelShape shape = powder
                                 ? JavaCollisionState.of(player, actor, current[0].fallDistance())
                                         .powderSnowShape(pos.getY(), end.y)

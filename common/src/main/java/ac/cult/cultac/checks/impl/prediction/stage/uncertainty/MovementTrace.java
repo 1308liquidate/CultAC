@@ -14,15 +14,18 @@ public record MovementTrace(
     }
 
     public MovementTrace withPosition(PredVector position) {
+        if (position == this.position) return this;
         return new MovementTrace(
                 position, positionOnlyDelta, collisionBaseOffset, preCollisionVelocity, preCollisionMovement);
     }
 
     public MovementTrace withPreCollisionVelocity(Vec3 velocity) {
+        if (velocity == preCollisionVelocity) return this;
         return new MovementTrace(position, positionOnlyDelta, collisionBaseOffset, velocity, preCollisionMovement);
     }
 
     public MovementTrace withPreCollisionMovement(Vec3 movement) {
+        if (movement == preCollisionMovement) return this;
         return new MovementTrace(position, positionOnlyDelta, collisionBaseOffset, preCollisionVelocity, movement);
     }
 
