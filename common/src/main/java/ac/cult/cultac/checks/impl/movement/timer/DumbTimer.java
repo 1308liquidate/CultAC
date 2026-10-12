@@ -71,6 +71,11 @@ public class DumbTimer extends CultProcessor implements PositionListener {
                 if (!player.checkManager.getSimulationProcessor().isExempt()) {
                     debug(() -> "balance=" + this.balance + " cur=" + curTime);
                     player.getSetbackTeleportUtil().executeNonSimulatingSetback();
+                    if (!player.isDisabled()
+                            && player.shouldEnforceMovementSetbacks()
+                            && player.getSetbackTeleportUtil().shouldBlockMovement()) {
+                        event.setCancelled(true);
+                    }
                 }
                 // Try to avoid excessive setbacks while maintaining security.
                 this.balance -= 45e6;

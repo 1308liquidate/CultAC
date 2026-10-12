@@ -72,7 +72,7 @@ public abstract class AbstractTimerCheck extends Check implements CheckListener 
         movePacketsSinceLastClientTickEnd = 0;
     }
 
-    protected void recordModernMovePlayerPacket(boolean countClientTickMovement) {
+    protected void recordModernMovePlayerPacket(PacketReceiveEvent event, boolean countClientTickMovement) {
         if (!usesClientTickEndBoundary()) return;
         if (!countClientTickMovement) return;
 
@@ -82,10 +82,14 @@ public abstract class AbstractTimerCheck extends Check implements CheckListener 
         // produced by the vanilla client and is therefore provably invalid.
         // Set back immediately: the VL window was a renewable speed budget
         // (cadence-split bypass) — each extra packet is a full free physics
-        // tick. The pending setback makes SetbackBlocker cancel this packet
-        // later in the same dispatch flow, before prediction/application.
+        // tick. Reject this packet here: ordinary setback blocking runs after
+        // Java prediction, but a timer rejection must never advance prediction.
         if (++movePacketsSinceLastClientTickEnd > 1 && flag()) {
             player.getSetbackTeleportUtil().executeNonSimulatingSetback();
+            if (player.shouldEnforceMovementSetbacks()
+                    && player.getSetbackTeleportUtil().shouldBlockMovement()) {
+                event.setCancelled(true);
+            }
         }
     }
 

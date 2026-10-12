@@ -37,6 +37,10 @@ public final class TickTimer extends Check implements CheckListener {
 
         if (!receivedTickEnd && flagWithSetback(V.write(verbose()).bool(false).uint(flyingPackets))) {
             player.onPacketCancel();
+            if (player.shouldEnforceMovementSetbacks()
+                    && player.getSetbackTeleportUtil().shouldBlockMovement()) {
+                event.setCancelled(true);
+            }
         }
         receivedTickEnd = false;
         flyingPackets++;

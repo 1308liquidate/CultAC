@@ -613,9 +613,9 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
 
         // While a violation setback is pending, forward nothing but teleport confirms.
-        // SetbackBlocker already cancels position packets in this window pre-prediction;
-        // this also catches the packet that caused the setback (which arrives before the
-        // setback is pending) and non-position packets the blocker never cancels.
+        // Prediction and packet checks still observe Java movement before the deferred
+        // SetbackBlocker runs. Also cancel non-position packets and the packet that
+        // caused the setback, so none of them can reach Paper in this window.
         // Paper adopting any of these lets the setback echo register as an upward move
         // and wipe fallDistance (fall-overshoot-wipe bypass).
         if (player.getSetbackTeleportUtil().isPendingSetback() && !player.packetStateData.lastPacketWasTeleport) {
@@ -623,6 +623,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
 
         dispatchReceiveHandlers(event, player);
+        player.checkManager.getListener(SetbackBlocker.class).onJavaMovePlayerAfterChecks(event);
         clearTransientPacketState(player);
     }
 

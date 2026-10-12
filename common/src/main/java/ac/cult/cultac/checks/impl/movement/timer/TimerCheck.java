@@ -34,7 +34,7 @@ public class TimerCheck extends AbstractTimerCheck {
         boolean mountedPassengerRotation = !packet.hasPosition()
                 && (player.compensatedEntities.vehicles.serverPlayerVehicle != null
                         || player.compensatedEntities.getSelf().inVehicle());
-        recordModernMovePlayerPacket(!player.packetStateData.lastPacketWasTeleport && !mountedPassengerRotation);
+        recordModernMovePlayerPacket(event, !player.packetStateData.lastPacketWasTeleport && !mountedPassengerRotation);
         recordTimerEvent(event, false, shouldCountMovePlayerForTimer());
     }
 

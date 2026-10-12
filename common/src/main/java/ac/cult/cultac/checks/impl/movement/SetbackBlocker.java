@@ -55,11 +55,24 @@ public class SetbackBlocker extends CultProcessor implements CheckListener {
             event.setCancelled(true);
         }
 
+        // Java must be checked before setback blocking, as in Grim 3.0.
+        // Bedrock's projection has already been predicted by its auth-input path.
+        if (player.isBedrockMovement()) {
+            blockMovePlayer(event, movePacket, translatedBedrockMovement);
+        }
+        blockInactiveMovePlayer(event, movePacket);
+    }
+
+    private void blockMovePlayer(
+            PacketReceiveEvent<ServerboundMovePlayer> event,
+            ServerboundMovePlayer movePacket,
+            boolean translatedBedrockMovement) {
         if (player.isDisabled()) {
             return;
         } // Let's avoid letting people disable cult with cult.nomodifypackets
         if (!player.shouldEnforceMovementSetbacks()) return;
 
+        boolean teleport = player.packetStateData.lastPacketWasTeleport;
         ServerboundMovePlayer wrapper = movePacket;
         // The player must obey setbacks
         if (!teleport
@@ -71,12 +84,18 @@ public class SetbackBlocker extends CultProcessor implements CheckListener {
             }
             event.setCancelled(true);
         }
+    }
 
-        if (!teleport && player.isInBed && wrapper.hasPosition()) {
+    private void blockInactiveMovePlayer(
+            PacketReceiveEvent<ServerboundMovePlayer> event, ServerboundMovePlayer packet) {
+        if (player.isDisabled() || !player.shouldEnforceMovementSetbacks()) return;
+        boolean teleport = player.packetStateData.lastPacketWasTeleport;
+        // Invalid sleeping/dead movement must not change the simulation's position anchor.
+        if (!teleport && player.isInBed && packet.hasPosition()) {
             Vec3 bedPosition = player.bedPosition;
             if (bedPosition == null
-                    || Math.max(Math.abs(wrapper.x() - bedPosition.x), Math.abs(wrapper.z() - bedPosition.z)) > 0.5D
-                    || Math.abs(wrapper.y() - bedPosition.y) >= 0.1D) {
+                    || Math.max(Math.abs(packet.x() - bedPosition.x), Math.abs(packet.z() - bedPosition.z)) > 0.5D
+                    || Math.abs(packet.y() - bedPosition.y) >= 0.1D) {
                 event.setCancelled(true);
             }
         }
@@ -136,6 +155,13 @@ public class SetbackBlocker extends CultProcessor implements CheckListener {
     public void onMovePlayer(
             PacketReceiveEvent<ServerboundMovePlayer> event, CultPlayer player, ServerboundMovePlayer packet) {
         handleMovePlayer(event, packet, false);
+    }
+
+    /** Runs after Java prediction and packet checks, while teleport classification is still available. */
+    public void onJavaMovePlayerAfterChecks(PacketReceiveEvent<ServerboundMovePlayer> event) {
+        if (!player.isBedrockMovement()) {
+            blockMovePlayer(event, event.getPacket(), false);
+        }
     }
 
     /**
