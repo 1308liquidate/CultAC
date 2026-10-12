@@ -54,12 +54,55 @@ public record ComponentPatch(Components added, Set<String> removed) {
     }
 
     public static ComponentPatch between(Components prototype, Components effective) {
-        var added = new HashSet<String>(); var removed = new HashSet<String>();
-        for (String key : effective.keys()) if (!effective.sameValue(key, prototype)) added.add(key);
-        for (String key : prototype.keys()) if (!effective.has(key)) removed.add(key);
-        return new ComponentPatch(effective.subset(added), removed);
+        if (prototype != null && prototype == effective) return EMPTY;
+        Set<String> added = null, removed = null;
+        for (String key : effective.keys()) if (!effective.sameValue(key, prototype)) {
+            if (added == null) added = new HashSet<>();
+            added.add(key);
+        }
+        for (String key : prototype.keys()) if (!effective.has(key)) {
+            if (removed == null) removed = new HashSet<>();
+            removed.add(key);
+        }
+        if (added == null && removed == null) return EMPTY;
+        return new ComponentPatch(added == null ? Components.EMPTY : effective.subset(added), removed == null ? Set.of() : removed);
     }
     public Components apply(Components prototype) { return prototype.overlay(added, removed); }
+    /** Sharing is safe only when the enclosing stack also keeps these immutable inputs. */
+    public Components applyToCapturedPrototype(Components prototype) {
+        return prototype.overlayCapturedPrototype(added, removed);
+    }
+    /** PatchedDataComponentMap.fromPatch sanitizes only the patch against its captured prototype. */
+    public ComponentPatch sanitized(Components prototype) {
+        if (this == EMPTY) return this;
+        if (added.keys().isEmpty() && removed.isEmpty()) return EMPTY;
+        // PatchedDataComponentMap.fromPatch shares a patch which is already
+        // sanitized. Immutable captured maps need no second set of subsets.
+        boolean alreadySanitized = true;
+        for (String key : added.keys()) if (added.sameValue(key, prototype)) {
+            alreadySanitized = false;
+            break;
+        }
+        if (alreadySanitized) for (String key : removed) if (!prototype.has(key) || added.has(key)) {
+            alreadySanitized = false;
+            break;
+        }
+        if (alreadySanitized && added.hasOnlyValueMetadata()) return this;
+        Set<String> keptAdded = null, keptRemoved = null;
+        for (String key : added.keys()) if (!added.sameValue(key, prototype)) {
+            if (keptAdded == null) keptAdded = new HashSet<>();
+            keptAdded.add(key);
+        }
+        for (String key : removed) if (prototype.has(key) && !added.has(key)) {
+            if (keptRemoved == null) keptRemoved = new HashSet<>();
+            keptRemoved.add(key);
+        }
+        if (keptAdded == null && keptRemoved == null) return EMPTY;
+        // Keep the same typed/layout/wire subset as between(prototype, apply(prototype)),
+        // including dropping metadata which did not belong to a surviving value.
+        return new ComponentPatch(keptAdded == null ? Components.EMPTY : added.subset(keptAdded),
+                keptRemoved == null ? Set.of() : keptRemoved);
+    }
     public ComponentPatch forget(Set<String> consumed) {
         var kept = new HashSet<>(added.keys()); kept.removeAll(consumed);
         var keptRemoved = new HashSet<>(removed); keptRemoved.removeAll(consumed);

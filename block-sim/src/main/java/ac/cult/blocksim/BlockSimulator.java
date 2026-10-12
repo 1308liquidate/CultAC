@@ -39,7 +39,8 @@ public final class BlockSimulator {
                                         PlacementObstruction obstruction, ConsumableBehavior consumables) {
         return create(data, items, registries, obstruction, consumables, HolderSets.Overlay.EMPTY);
     }
-    private static BlockSimulator create(DataTables defaults, ItemRegistry items, InteractionRegistries registries,
+    /** Build the final received-tag binding directly, without an unused default binding first. */
+    public static BlockSimulator create(DataTables defaults, ItemRegistry items, InteractionRegistries registries,
                                          PlacementObstruction obstruction, ConsumableBehavior consumables, HolderSets.Overlay tags) {
         var data = tags.apply(defaults);
         var templates = new ItemTemplates(items);

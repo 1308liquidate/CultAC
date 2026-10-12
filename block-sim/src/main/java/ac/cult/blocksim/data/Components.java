@@ -33,12 +33,20 @@ public final class Components {
     private Components(Map<String, JsonElement> values, Map<String, NbtValue> encodedNbt,
                        Map<String, NbtValue.Compound> layouts, BundleContents bundle,
                        Map<String, ComponentWireEncoding> wireEncodings) {
-        var copy = new HashMap<String, JsonElement>();
-        values.forEach((key, value) -> {
-            var layout = layouts.get(key);
-            copy.put(key, ComponentNumbers.restore(value.deepCopy(), layout == null ? null : layout.values().get("negative_zero")));
-        });
-        this.values = Map.copyOf(copy);
+        this(values, encodedNbt, layouts, bundle, wireEncodings, true);
+    }
+    /** Only this class can assemble trees it already owns; public boundaries always copy. */
+    private Components(Map<String, JsonElement> values, Map<String, NbtValue> encodedNbt,
+                       Map<String, NbtValue.Compound> layouts, BundleContents bundle,
+                       Map<String, ComponentWireEncoding> wireEncodings, boolean copyJson) {
+        if (copyJson) {
+            var copy = new HashMap<String, JsonElement>();
+            values.forEach((key, value) -> {
+                var layout = layouts.get(key);
+                copy.put(key, ComponentNumbers.restore(value.deepCopy(), layout == null ? null : layout.values().get("negative_zero")));
+            });
+            this.values = Map.copyOf(copy);
+        } else this.values = Map.copyOf(values);
         this.encodedNbt = Map.copyOf(encodedNbt);
         this.layouts = Map.copyOf(layouts);
         this.wireEncodings = Map.copyOf(wireEncodings);
@@ -51,7 +59,7 @@ public final class Components {
         encodings.forEach((key, value) -> { if (has(key)) retained.put(key, value); });
         var encoding = retained.get(BundleContents.COMPONENT);
         var contents = bundle != null && encoding != null ? bundle.withItemEncodings(encoding) : bundle;
-        return new Components(values, encodedNbt, layouts, contents, retained);
+        return new Components(values, encodedNbt, layouts, contents, retained, false);
     }
     public BundleContents bundle() { return bundle; }
     /** Source-defined slot layouts; absent details mean the persistent codec's canonical layout. */
@@ -64,12 +72,19 @@ public final class Components {
         return result;
     }
     public boolean hasEncodedNbt(String key) { return encodedNbt.containsKey(key); }
+    /** A full subset would preserve every metadata entry as well as every value. */
+    boolean hasOnlyValueMetadata() {
+        return values.keySet().containsAll(encodedNbt.keySet())
+                && values.keySet().containsAll(layouts.keySet())
+                && values.keySet().containsAll(wireEncodings.keySet());
+    }
     public NbtValue.Compound encodedNbt() {
         var result = new HashMap<String, NbtValue>();
         keys().forEach(key -> result.put(key, encodedNbt(key)));
         return new NbtValue.Compound(result);
     }
     public Components subset(Set<String> keys) {
+        if (keys.isEmpty()) return EMPTY;
         var selected = new HashMap<String, JsonElement>();
         var nbt = new HashMap<String, NbtValue>();
         var details = new HashMap<String, NbtValue.Compound>();
@@ -80,10 +95,24 @@ public final class Components {
             if (encodedNbt.containsKey(key)) nbt.put(key, encodedNbt.get(key));
             if (layouts.containsKey(key)) details.put(key, layouts.get(key));
         }
-        return new Components(selected, nbt, details, selected.containsKey(BundleContents.COMPONENT) ? bundle : null, wire);
+        return new Components(selected, nbt, details, selected.containsKey(BundleContents.COMPONENT) ? bundle : null, wire, false);
     }
     /** Apply a patch while retaining typed encodings for unchanged components. */
     public Components overlay(Components added, Set<String> removed) {
+        return overlay(added, removed, false);
+    }
+    /** The enclosing stack already retains both its captured prototype and patch. */
+    Components overlayCapturedPrototype(Components added, Set<String> removed) {
+        return overlay(added, removed, true);
+    }
+    private Components overlay(Components added, Set<String> removed, boolean prototypeRetained) {
+        if (added.values.isEmpty() && removed.isEmpty()) return this;
+        // Most stacks apply one small received patch to a shared prototype. Keep
+        // those immutable inputs instead of copying all four complete maps.
+        // Repatching a view takes the existing materializing path, so lookup
+        // depth and the retained object graph never grow with edit history.
+        if (prototypeRetained && !hasOverlayMaps() && !added.hasOverlayMaps())
+            return new Components(this, added, Set.copyOf(removed));
         var result = new HashMap<>(values); var nbt = new HashMap<>(encodedNbt);
         var details = new HashMap<>(layouts);
         var wire = new HashMap<>(wireEncodings);
@@ -97,7 +126,95 @@ public final class Components {
             if (added.layouts.containsKey(key)) details.put(key, added.layouts.get(key));
         });
         return new Components(result, nbt, details, added.has(BundleContents.COMPONENT) ? added.bundle
-                : removed.contains(BundleContents.COMPONENT) ? null : bundle, wire);
+                : removed.contains(BundleContents.COMPONENT) ? null : bundle, wire, false);
+    }
+
+    private boolean hasOverlayMaps() {
+        return values instanceof OverlayMap<?> || encodedNbt instanceof OverlayMap<?>
+                || layouts instanceof OverlayMap<?> || wireEncodings instanceof OverlayMap<?>;
+    }
+
+    private Components(Components prototype, Components added, Set<String> removed) {
+        var overridden = added.values.keySet();
+        values = OverlayMap.of(prototype.values, added.values, overridden, removed);
+        encodedNbt = OverlayMap.of(prototype.encodedNbt, added.encodedNbt, overridden, removed);
+        layouts = OverlayMap.of(prototype.layouts, added.layouts, overridden, removed);
+        wireEncodings = OverlayMap.of(prototype.wireEncodings, added.wireEncodings, overridden, removed);
+        bundle = added.has(BundleContents.COMPONENT) ? added.bundle
+                : removed.contains(BundleContents.COMPONENT) ? null : prototype.bundle;
+    }
+
+    /** A single immutable overlay; metadata absent from an override hides the prototype's metadata too. */
+    private static final class OverlayMap<V> extends java.util.AbstractMap<String, V> {
+        private final Map<String, V> prototype, added;
+        private final Set<String> overridden, removed;
+        private final int size;
+
+        private OverlayMap(Map<String, V> prototype, Map<String, V> added,
+                           Set<String> overridden, Set<String> removed) {
+            this.prototype = prototype;
+            this.added = added;
+            this.overridden = overridden;
+            this.removed = removed;
+            int count = 0;
+            for (String key : prototype.keySet()) if (retains(key)) count++;
+            for (String key : added.keySet()) if (overridden.contains(key)) count++;
+            size = count;
+        }
+
+        static <V> Map<String, V> of(Map<String, V> prototype, Map<String, V> added,
+                                    Set<String> overridden, Set<String> removed) {
+            if (prototype.isEmpty() && added.isEmpty()) return Map.of();
+            if (overridden.isEmpty() && removed.isEmpty()) return prototype;
+            return new OverlayMap<>(prototype, added, overridden, removed);
+        }
+
+        private boolean retains(String key) { return !overridden.contains(key) && !removed.contains(key); }
+
+        @Override public V get(Object key) {
+            java.util.Objects.requireNonNull(key);
+            return overridden.contains(key) ? added.get(key) : removed.contains(key) ? null : prototype.get(key);
+        }
+
+        @Override public boolean containsKey(Object key) { return get(key) != null; }
+        @Override public int size() { return size; }
+        @Override public Set<String> keySet() { return java.util.Collections.unmodifiableSet(super.keySet()); }
+
+        @Override public void forEach(java.util.function.BiConsumer<? super String, ? super V> action) {
+            java.util.Objects.requireNonNull(action);
+            prototype.forEach((key, value) -> { if (retains(key)) action.accept(key, value); });
+            added.forEach((key, value) -> { if (overridden.contains(key)) action.accept(key, value); });
+        }
+
+        @Override public Set<Entry<String, V>> entrySet() {
+            return java.util.Collections.unmodifiableSet(new java.util.AbstractSet<>() {
+                @Override public int size() { return size; }
+                @Override public java.util.Iterator<Entry<String, V>> iterator() {
+                    return new java.util.Iterator<>() {
+                        private final java.util.Iterator<Entry<String, V>> defaults = prototype.entrySet().iterator();
+                        private final java.util.Iterator<Entry<String, V>> overrides = added.entrySet().iterator();
+                        private Entry<String, V> next;
+                        @Override public boolean hasNext() {
+                            while (next == null && defaults.hasNext()) {
+                                var entry = defaults.next();
+                                if (retains(entry.getKey())) next = entry;
+                            }
+                            while (next == null && overrides.hasNext()) {
+                                var entry = overrides.next();
+                                if (overridden.contains(entry.getKey())) next = entry;
+                            }
+                            return next != null;
+                        }
+                        @Override public Entry<String, V> next() {
+                            if (!hasNext()) throw new java.util.NoSuchElementException();
+                            var result = next;
+                            next = null;
+                            return result;
+                        }
+                    };
+                }
+            });
+        }
     }
 
     public static Components parse(String json) {
@@ -135,11 +252,11 @@ public final class Components {
         var details = new HashMap<>(layouts);
         nbt.remove(key);
         if (value == null) copy.remove(key);
-        else copy.put(key, value);
+        else copy.put(key, value.deepCopy());
         if (value != null && encoding != null) nbt.put(key, encoding);
         details.remove(key);
         var wire = new HashMap<>(wireEncodings); wire.remove(key);
-        return new Components(copy, nbt, details, key.equals(BundleContents.COMPONENT) ? null : bundle, wire);
+        return new Components(copy, nbt, details, key.equals(BundleContents.COMPONENT) ? null : bundle, wire, false);
     }
     /** Preserve local selection/cache while exposing the ordinary persistent encoding at boundaries. */
     public Components withBundle(BundleContents value) {
@@ -160,7 +277,7 @@ public final class Components {
         var details = new HashMap<>(layouts); details.remove(BundleContents.COMPONENT);
         if (!children.isEmpty()) details.put(BundleContents.COMPONENT, new NbtValue.Compound(Map.of("items", new NbtValue.Compound(children))));
         var wire = new HashMap<>(wireEncodings); wire.remove(BundleContents.COMPONENT);
-        return new Components(copy, nbt, details, value, wire);
+        return new Components(copy, nbt, details, value, wire, false);
     }
     public Map<String, String> stringMap(String key) {
         JsonElement value = values.get(key);
@@ -191,8 +308,14 @@ public final class Components {
         return true;
     }
     @Override public int hashCode() {
-        int hash = 0;
-        for (String key : values.keySet()) hash += key.hashCode() ^ identity(key).hashCode();
-        return hash;
+        var hash = new IdentityHash();
+        values.forEach(hash);
+        return hash.value;
+    }
+    private final class IdentityHash implements java.util.function.BiConsumer<String, JsonElement> {
+        private int value;
+        @Override public void accept(String key, JsonElement ignored) {
+            value += key.hashCode() ^ identity(key).hashCode();
+        }
     }
 }

@@ -36,8 +36,17 @@ public final class SimItemStack {
         this.count = count;
         this.prototype = java.util.Objects.requireNonNull(capturedPrototype);
         this.componentPatch = java.util.Objects.requireNonNull(patch);
-        this.components = patch.apply(capturedPrototype);
+        this.components = patch.applyToCapturedPrototype(capturedPrototype);
         this.visiblePrototype = java.util.Objects.requireNonNull(visiblePrototype);
+    }
+    private SimItemStack(SimItemStack source) {
+        item = source.item;
+        count = source.count;
+        prototype = source.prototype;
+        componentPatch = source.componentPatch;
+        components = source.components;
+        visiblePrototype = source.visiblePrototype;
+        wirePatch = source.wirePatch;
     }
     public ItemDefinition definition() { return item; }
     /** Inventory API names preserve the existing menu algorithms during the type migration. */
@@ -58,7 +67,7 @@ public final class SimItemStack {
     public void components(Components components) {
         wirePatch = null;
         componentPatch = ComponentPatch.between(prototype, java.util.Objects.requireNonNull(components));
-        this.components = componentPatch.apply(prototype);
+        this.components = componentPatch.applyToCapturedPrototype(prototype);
     }
     public Components prototype() { return isEmpty() ? Components.EMPTY : java.util.Objects.requireNonNull(visiblePrototype.get()); }
     public Components capturedPrototype() { return isEmpty() ? Components.EMPTY : prototype; }
@@ -115,8 +124,6 @@ public final class SimItemStack {
     public SimItemStack copyAndClear() { if (isEmpty()) return empty(); var copy = copy(); count(0); return copy; }
     public SimItemStack copy() {
         if (isEmpty()) return empty();
-        var copy = new SimItemStack(item, count(), prototype, componentPatch, visiblePrototype);
-        copy.wirePatch(wirePatch());
-        return copy;
+        return new SimItemStack(this);
     }
 }

@@ -51,7 +51,7 @@ public final class ItemRegistry {
     /** New stacks sanitize received patches against the prototype captured at construction. */
     public SimItemStack stack(String key, int count, ComponentPatch patch) {
         var prototype = defaults(key);
-        var sanitized = ComponentPatch.between(prototype, patch.apply(prototype));
+        var sanitized = patch.sanitized(prototype);
         return new SimItemStack(item(key), count, prototype, sanitized, () -> defaults(key));
     }
     public SimItemStack empty() { return SimItemStack.empty(); }
