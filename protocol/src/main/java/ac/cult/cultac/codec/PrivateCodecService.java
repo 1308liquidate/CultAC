@@ -202,10 +202,12 @@ public final class PrivateCodecService implements WireValueDecoder {
     public ItemValue item(ProtocolVersion version, ByteBuf input, boolean creative, Registries registries) {
         checkOpen();
         var type = types(version);
+        boolean lengthPrefixed = creative && version.atLeast(ProtocolVersion.V1_21_5);
+        // The structure budget runs on a view: an oversized item must never reach the readers below.
+        ItemStructureGuard.scanItemStack(type, version, input.duplicate(), lengthPrefixed);
         int start = input.readerIndex();
         // 1.21.5 introduced the length-prefixed creative component codec.
-        Item item = (creative && version.atLeast(ProtocolVersion.V1_21_5) ? type.lengthPrefixedItem() : type.item())
-                .read(input);
+        Item item = (lengthPrefixed ? type.lengthPrefixedItem() : type.item()).read(input);
         // Keep the creative count domain used by the inventory view. The backend
         // validates persistent fields of unused components on the original frame.
         if (creative && item != null && !item.isEmpty() && item.amount() > 99)
@@ -277,10 +279,12 @@ public final class PrivateCodecService implements WireValueDecoder {
     public ItemValue itemCost(ProtocolVersion version, ByteBuf input, boolean optional, Registries registries) {
         checkOpen();
         var types = types(version);
+        ItemStructureGuard.scanItemCost(types, version, input.duplicate(), optional);
         return item((optional ? types.optionalItemCost() : types.itemCost()).read(input), registries, version);
     }
 
-    private record MetadataTypes(int floatingPoint, int pose, int optionalInt, int painting) {}
+    private record MetadataTypes(
+            int floatingPoint, int pose, int optionalInt, int painting, int particle, int particles) {}
 
     private static MetadataTypes metadataTypes(VersionedTypesHolder types) {
         return switch (types.entityDataTypes()) {
@@ -289,37 +293,49 @@ public final class PrivateCodecService implements WireValueDecoder {
                         values.floatType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
-                        values.paintingVariantType.typeId());
+                        values.paintingVariantType.typeId(),
+                        values.particleType.typeId(),
+                        values.particlesType.typeId());
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes1_21_5 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
-                        values.paintingVariantType.typeId());
+                        values.paintingVariantType.typeId(),
+                        values.particleType.typeId(),
+                        values.particlesType.typeId());
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes1_21_9 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
-                        values.paintingVariantType.typeId());
+                        values.paintingVariantType.typeId(),
+                        values.particleType.typeId(),
+                        values.particlesType.typeId());
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes1_21_11 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
-                        values.paintingVariantType.typeId());
+                        values.paintingVariantType.typeId(),
+                        values.particleType.typeId(),
+                        values.particlesType.typeId());
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes26_1 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
-                        values.paintingVariantType.typeId());
+                        values.paintingVariantType.typeId(),
+                        values.particleType.typeId(),
+                        values.particlesType.typeId());
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes26_3 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
-                        values.paintingVariantType.typeId());
+                        values.paintingVariantType.typeId(),
+                        values.particleType.typeId(),
+                        values.particlesType.typeId());
             default -> throw new IllegalStateException("Unsupported entity metadata schema");
         };
     }
@@ -336,6 +352,7 @@ public final class PrivateCodecService implements WireValueDecoder {
         var serializers = metadataTypes(types);
         int pose = serializers.pose(), optional = serializers.optionalInt();
         int painting = serializers.painting();
+        int particle = serializers.particle(), particles = serializers.particles();
         var result = new ArrayList<MetadataValue>();
         for (int index; (index = input.readUnsignedByte()) != 255; ) {
             int start = input.readerIndex() - 1;
@@ -350,9 +367,15 @@ public final class PrivateCodecService implements WireValueDecoder {
             else if (id == 12) kind = "direction";
             else if (id == painting) kind = "painting_variant";
             else if (id == 11) kind = "optional_position";
+            else if (id == particle) kind = "particle";
+            else if (id == particles) kind = "particles";
             Object value = null;
             if (kind.equals("unused")) {
                 skipUnusedMetadata(input, values[id].type());
+            } else if (kind.equals("particle")) {
+                skipParticle(version, types, input);
+            } else if (kind.equals("particles")) {
+                skipParticles(version, types, input);
             } else if (kind.equals("painting_variant")) {
                 // Via's PaintingVariant.TYPE1_21_2 framing is shared by all supported versions.
                 int reference = Types.VAR_INT.readPrimitive(input) - 1;
@@ -364,6 +387,8 @@ public final class PrivateCodecService implements WireValueDecoder {
                     skipUnusedMetadata(input, Types.TRUSTED_OPTIONAL_TAG); // Author.
                 }
             } else {
+                if (kind.equals("item"))
+                    ItemStructureGuard.scanItemStack(types, version, input.duplicate(), false);
                 value = values[id].type().read(input);
                 if (kind.equals("item")) value = item((Item) value, registries, version);
                 else if (kind.equals("optional_position") && value != null) {
@@ -375,6 +400,40 @@ public final class PrivateCodecService implements WireValueDecoder {
                     index, kind, value, ByteBufUtil.getBytes(input, start, input.readerIndex() - start)));
         }
         return List.copyOf(result);
+    }
+
+    /** Metadata batches may hold this many particles; vanilla sends a handful. */
+    private static final int MAX_METADATA_PARTICLES = 1024;
+
+    private static final Map<ProtocolVersion, Integer> ITEM_PARTICLES = new ConcurrentHashMap<>();
+
+    private static int itemParticle(ProtocolVersion version) {
+        return ITEM_PARTICLES.computeIfAbsent(
+                version,
+                value -> ModelRegistryData.load(value).registry("minecraft:particle_type").id("minecraft:item"));
+    }
+
+    /**
+     * The item particle embeds a full stack, so it is consumed by the structure budget instead
+     * of the particle reader. Every other particle consumes bounded arguments through that reader.
+     */
+    private static void skipParticle(ProtocolVersion version, VersionedTypesHolder types, ByteBuf input) {
+        var probe = input.duplicate();
+        if (Wire.readVarInt(probe) == itemParticle(version)) {
+            Wire.readVarInt(input); // Consume the type the probe matched.
+            ItemStructureGuard.scanItemStack(types, version, input, false);
+        } else {
+            types.particle().read(input);
+        }
+    }
+
+    private static void skipParticles(ProtocolVersion version, VersionedTypesHolder types, ByteBuf input) {
+        int count = Wire.readVarInt(input);
+        if (count < 0) throw new MalformedPacketException("Negative metadata particle count");
+        if (count > MAX_METADATA_PARTICLES)
+            throw new PacketResourceLimitException(
+                    "Metadata particle count " + count + " exceeds " + MAX_METADATA_PARTICLES);
+        for (int index = 0; index < count; index++) skipParticle(version, types, input);
     }
 
     /** Only traverse unused fields; retain their bytes for the health/hand metadata rewrites. */

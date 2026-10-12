@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import ac.cult.cultac.protocol.*;
 import ac.cult.cultac.protocol.data.*;
+import ac.cult.cultac.protocol.wire.Wire;
 import ac.cult.shaded.vialib.api.minecraft.*;
 import ac.cult.shaded.vialib.api.minecraft.data.*;
 import ac.cult.shaded.vialib.api.minecraft.entitydata.EntityData;
@@ -15,6 +16,8 @@ import ac.cult.shaded.vialib.api.type.Types;
 import ac.cult.shaded.vialib.nbt.tag.*;
 import ac.cult.shaded.vialib.util.Unit;
 import io.netty.buffer.*;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.*;
 import org.junit.jupiter.api.*;
@@ -47,6 +50,10 @@ class WireValueDecoderTest {
                 if (registry.equals("minecraft:block_transformer")) {
                     assertEquals(0, id);
                     return "minecraft:axe";
+                }
+                if (registry.equals("minecraft:painting_variant")) {
+                    assertEquals(0, id);
+                    return "test:wide";
                 }
                 return data.registry(registry).name(id);
             }
@@ -614,6 +621,371 @@ class WireValueDecoderTest {
 
     private static EntityDataType field(Object value, String field) throws Exception {
         return (EntityDataType) value.getClass().getField(field).get(value);
+    }
+
+    private static byte[] varInt(int value) {
+        var buffer = Unpooled.buffer();
+        try {
+            Wire.writeVarInt(buffer, value);
+            return ByteBufUtil.getBytes(buffer);
+        } finally {
+            buffer.release();
+        }
+    }
+
+    private static byte[] concat(byte[]... parts) {
+        var output = new ByteArrayOutputStream();
+        for (byte[] part : parts) output.writeBytes(part);
+        return output.toByteArray();
+    }
+
+    private static byte[] repeat(byte[] bytes, int times) {
+        var output = new ByteArrayOutputStream();
+        for (int index = 0; index < times; index++) output.writeBytes(bytes);
+        return output.toByteArray();
+    }
+
+    private static int itemId(ProtocolVersion version, String name) {
+        return ModelRegistryData.load(version).registry("minecraft:item").id(name);
+    }
+
+    private static int componentId(ProtocolVersion version, String name) {
+        return ModelRegistryData.load(version).registry("minecraft:data_component_type").id(name);
+    }
+
+    /** Packet-level stack framing: amount, id, value components, removal markers. */
+    private static byte[] stackItem(ProtocolVersion version, int component, byte[] payload, boolean lengthPrefixed) {
+        byte[] value = lengthPrefixed
+                ? concat(varInt(component), varInt(payload.length), payload)
+                : concat(varInt(component), payload);
+        return concat(varInt(1), varInt(itemId(version, "minecraft:stone")), varInt(1), varInt(0), value);
+    }
+
+    /** A chain of {@code levels} nested container stack items around an empty item. */
+    private static byte[] containerChain(ProtocolVersion version, boolean lengthPrefixed, int levels) {
+        var types = PrivateCodecService.types(version);
+        int container = componentId(version, "minecraft:container");
+        int stone = itemId(version, "minecraft:stone");
+        boolean template = types.itemTemplate() != types.item();
+        boolean optional = types.optionalItemTemplate() != types.itemTemplate();
+        byte[] chain = template
+                ? concat(varInt(stone), varInt(0), varInt(0), varInt(0)) // Empty 26.x sub-item template.
+                : varInt(0); // Empty 1.20.5+ stack.
+        for (int level = 1; level < levels; level++) {
+            byte[] contents = concat(varInt(1), optional ? concat(varInt(1), chain) : chain);
+            chain = template
+                    ? concat(varInt(stone), varInt(1), varInt(1), varInt(0), varInt(container), contents)
+                    : concat(varInt(1), varInt(stone), varInt(1), varInt(0), varInt(container), contents);
+        }
+        byte[] rootContents = concat(varInt(1), optional ? concat(varInt(1), chain) : chain);
+        return stackItem(version, container, rootContents, lengthPrefixed);
+    }
+
+    /** One container of {@code slots} items, each a container of {@code children} empty items. */
+    private static byte[] containerBreadth(ProtocolVersion version, boolean lengthPrefixed, int slots, int children) {
+        var types = PrivateCodecService.types(version);
+        int container = componentId(version, "minecraft:container");
+        int stone = itemId(version, "minecraft:stone");
+        boolean template = types.itemTemplate() != types.item();
+        boolean optional = types.optionalItemTemplate() != types.itemTemplate();
+        byte[] empty = template
+                ? concat(varInt(stone), varInt(0), varInt(0), varInt(0))
+                : varInt(0);
+        byte[] childContents = concat(
+                varInt(children), repeat(optional ? concat(varInt(1), empty) : empty, children));
+        byte[] child = template
+                ? concat(varInt(stone), varInt(1), varInt(1), varInt(0), varInt(container), childContents)
+                : concat(varInt(1), varInt(stone), varInt(1), varInt(0), varInt(container), childContents);
+        byte[] rootContents = concat(
+                varInt(slots), repeat(optional ? concat(varInt(1), child) : child, slots));
+        return stackItem(version, container, rootContents, lengthPrefixed);
+    }
+
+    /** A chain of nested can_place_on exact predicates around one repair_cost value. */
+    private static byte[] predicateChain(ProtocolVersion version, int levels) {
+        int canPlaceOn = componentId(version, "minecraft:can_place_on");
+        int repairCost = componentId(version, "minecraft:repair_cost");
+        byte[] predicate;
+        var innermost = Unpooled.buffer();
+        try {
+            Wire.writeVarInt(innermost, 1); // One block predicate.
+            Types.OPTIONAL_HOLDER_SET.write(innermost, null);
+            innermost.writeBoolean(false); // No property matchers.
+            Types.OPTIONAL_COMPOUND_TAG.write(innermost, null);
+            Wire.writeVarInt(innermost, 1); // One exact predicate.
+            Wire.writeVarInt(innermost, repairCost);
+            Wire.writeVarInt(innermost, 19);
+            Wire.writeVarInt(innermost, 0); // No partial predicates.
+            predicate = ByteBufUtil.getBytes(innermost);
+        } finally {
+            innermost.release();
+        }
+        for (int level = 0; level < levels; level++) {
+            var buffer = Unpooled.buffer();
+            try {
+                Wire.writeVarInt(buffer, 1); // One block predicate.
+                Types.OPTIONAL_HOLDER_SET.write(buffer, null);
+                buffer.writeBoolean(false); // No property matchers.
+                Types.OPTIONAL_COMPOUND_TAG.write(buffer, null);
+                Wire.writeVarInt(buffer, 1); // One exact predicate.
+                Wire.writeVarInt(buffer, canPlaceOn);
+                buffer.writeBytes(predicate);
+                Wire.writeVarInt(buffer, 0); // No partial predicates.
+                predicate = ByteBufUtil.getBytes(buffer);
+            } finally {
+                buffer.release();
+            }
+        }
+        return stackItem(version, canPlaceOn, predicate, false);
+    }
+
+    @Test
+    void structureGuardWalksBenignNestingExactly() {
+        for (var version : ProtocolVersion.values()) {
+            for (boolean creative : List.of(false, true)) {
+                boolean lengthPrefixed = creative && version.atLeast(ProtocolVersion.V1_21_5);
+                if (creative && !lengthPrefixed) continue;
+                byte[] wire = containerChain(version, lengthPrefixed, 4);
+                var guarded = Unpooled.wrappedBuffer(wire);
+                try {
+                    ItemStructureGuard.scanItemStack(PrivateCodecService.types(version), version, guarded, lengthPrefixed);
+                    assertEquals(wire.length, guarded.readerIndex(), version + " creative=" + creative);
+                } finally {
+                    guarded.release();
+                }
+                var input = Unpooled.wrappedBuffer(wire);
+                try {
+                    decoder.item(version, input, creative, names(version));
+                    assertFalse(input.isReadable(), version + " creative=" + creative);
+                } finally {
+                    input.release();
+                }
+            }
+        }
+    }
+
+    @Test
+    void deepContainerChainsAreRejectedBeforeMaterialization() {
+        for (var version : ProtocolVersion.values()) {
+            for (boolean creative : List.of(false, true)) {
+                boolean lengthPrefixed = creative && version.atLeast(ProtocolVersion.V1_21_5);
+                if (creative && !lengthPrefixed) continue;
+                var input = Unpooled.wrappedBuffer(containerChain(version, lengthPrefixed, 6000));
+                try {
+                    assertThrows(
+                            PacketResourceLimitException.class,
+                            () -> decoder.item(version, input, creative, names(version)),
+                            version + " creative=" + creative);
+                } finally {
+                    input.release();
+                }
+            }
+        }
+    }
+
+    @Test
+    void wideContainerNestingIsRejectedBeforeMaterialization() {
+        for (var version : ProtocolVersion.values()) {
+            for (boolean creative : List.of(false, true)) {
+                boolean lengthPrefixed = creative && version.atLeast(ProtocolVersion.V1_21_5);
+                if (creative && !lengthPrefixed) continue;
+                var input = Unpooled.wrappedBuffer(containerBreadth(version, lengthPrefixed, 256, 38));
+                try {
+                    assertThrows(
+                            PacketResourceLimitException.class,
+                            () -> decoder.item(version, input, creative, names(version)),
+                            version + " creative=" + creative);
+                } finally {
+                    input.release();
+                }
+            }
+        }
+    }
+
+    @Test
+    void adventurePredicateNestingIsBounded() {
+        for (var version : ProtocolVersion.values()) {
+            if (!version.atLeast(ProtocolVersion.V1_21_5)) continue;
+            var input = Unpooled.wrappedBuffer(predicateChain(version, 64));
+            try {
+                assertThrows(
+                        PacketResourceLimitException.class,
+                        () -> decoder.item(version, input, false, names(version)),
+                        version.toString());
+            } finally {
+                input.release();
+            }
+            byte[] small = predicateChain(version, 2);
+            var guarded = Unpooled.wrappedBuffer(small);
+            try {
+                ItemStructureGuard.scanItemStack(PrivateCodecService.types(version), version, guarded, false);
+                assertEquals(small.length, guarded.readerIndex(), version.toString());
+            } finally {
+                guarded.release();
+            }
+        }
+    }
+
+    /** Direct-holder painting variant whose title is one optional tag entry. */
+    private static byte[] paintingVariantWithTitle(byte[] title) {
+        return concat(
+                varInt(0), // Inline holder.
+                varInt(4), // Width.
+                varInt(3), // Height.
+                varInt(10), "test:asset".getBytes(StandardCharsets.UTF_8),
+                concat(new byte[] {1}, title));
+    }
+
+    /** One root-level array tag: type byte, big-endian element count (root tags carry no name). */
+    private static byte[] arrayTag(int type, int count) {
+        return concat(
+                new byte[] {
+                    (byte) type, (byte) (count >>> 24), (byte) (count >>> 16), (byte) (count >>> 8), (byte) count
+                });
+    }
+
+    @Test
+    void paintingVariantTitleArrayClaimsAreRejectedBeforeAllocation() {
+        // PaintingVariant.TYPE1_21_2 reads the inline title/author through the unbounded
+        // TRUSTED_OPTIONAL_TAG limiter. These counts stay just below its Integer.MAX_VALUE
+        // cap, so a trusted reader allocates ~2 GiB and only then hits the absent payload;
+        // the guard must reject the claim before any allocation.
+        for (var version : ProtocolVersion.values()) {
+            int painting = componentId(version, "minecraft:painting/variant");
+            if (painting < 0) continue;
+            for (int[] claim : List.of(
+                    new int[] {11, 0x1FFFFFFE}, // TAG_Int_Array
+                    new int[] {12, 0x0FFFFFFF}, // TAG_Long_Array
+                    new int[] {7, 0x7FFFFFFA})) { // TAG_Byte_Array
+                for (boolean creative : List.of(false, true)) {
+                    boolean lengthPrefixed = creative && version.atLeast(ProtocolVersion.V1_21_5);
+                    if (creative && !lengthPrefixed) continue;
+                    byte[] payload = paintingVariantWithTitle(arrayTag(claim[0], claim[1]));
+                    var input = Unpooled.wrappedBuffer(stackItem(version, painting, payload, lengthPrefixed));
+                    try {
+                        assertThrows(
+                                MalformedPacketException.class,
+                                () -> decoder.item(version, input, creative, names(version)),
+                                version + " creative=" + creative + " tag=" + claim[0]);
+                        // The rejection happens on the scan's view: no reader ever touched the frame.
+                        assertEquals(0, input.readerIndex(), version + " creative=" + creative);
+                    } finally {
+                        input.release();
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void benignPaintingVariantsConsumeExactly() {
+        for (var version : ProtocolVersion.values()) {
+            int painting = componentId(version, "minecraft:painting/variant");
+            if (painting < 0) continue;
+            for (boolean creative : List.of(false, true)) {
+                boolean lengthPrefixed = creative && version.atLeast(ProtocolVersion.V1_21_5);
+                if (creative && !lengthPrefixed) continue;
+                byte[] inline = concat(
+                        varInt(0), // Inline holder.
+                        varInt(4),
+                        varInt(3),
+                        varInt(10), "test:asset".getBytes(StandardCharsets.UTF_8),
+                        new byte[] {0, 0}); // No title or author.
+                for (byte[] payload : List.of(inline, varInt(1))) { // Inline and registry reference.
+                    var input = Unpooled.wrappedBuffer(stackItem(version, painting, payload, lengthPrefixed));
+                    try {
+                        decoder.item(version, input, creative, names(version));
+                        assertFalse(input.isReadable(), version + " creative=" + creative);
+                    } finally {
+                        input.release();
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void itemCostComponentsBeyondBudgetAreRejected() {
+        for (var version : ProtocolVersion.values()) {
+            var bomb = Unpooled.buffer();
+            try {
+                Wire.writeVarInt(bomb, itemId(version, "minecraft:stone"));
+                Wire.writeVarInt(bomb, 1); // Costs allow non-positive amounts.
+                Wire.writeVarInt(bomb, 100_000); // Component count beyond the per-item budget.
+                assertThrows(
+                        PacketResourceLimitException.class,
+                        () -> decoder.itemCost(version, bomb, false, names(version)),
+                        version.toString());
+            } finally {
+                bomb.release();
+            }
+            var benign = Unpooled.buffer();
+            try {
+                Wire.writeVarInt(benign, itemId(version, "minecraft:stone"));
+                Wire.writeVarInt(benign, 1);
+                Wire.writeVarInt(benign, 1);
+                Wire.writeVarInt(benign, componentId(version, "minecraft:repair_cost"));
+                Wire.writeVarInt(benign, 19);
+                decoder.itemCost(version, benign, false, names(version));
+                assertFalse(benign.isReadable(), version.toString());
+            } finally {
+                benign.release();
+            }
+        }
+    }
+
+    @Test
+    void metadataItemParticlesAreStructureChecked() throws Exception {
+        for (var version : ProtocolVersion.values()) {
+            var types = PrivateCodecService.types(version);
+            var particle = field(types.entityDataTypes(), "particleType");
+            var particles = field(types.entityDataTypes(), "particlesType");
+            int itemParticle = ModelRegistryData.load(version)
+                    .registry("minecraft:particle_type")
+                    .id("minecraft:item");
+            var input = Unpooled.buffer();
+            try {
+                input.writeByte(0); // Metadata index.
+                Wire.writeVarInt(input, particle.typeId());
+                Wire.writeVarInt(input, itemParticle);
+                input.writeBytes(concat(
+                        varInt(1), varInt(itemId(version, "minecraft:stone")), varInt(0), varInt(0)));
+                input.writeByte(255);
+                var decoded = decoder.metadata(version, input, names(version));
+                assertEquals(1, decoded.size());
+                assertEquals("particle", decoded.getFirst().kind());
+                assertFalse(input.isReadable(), version.toString());
+            } finally {
+                input.release();
+            }
+            var bomb = Unpooled.buffer();
+            try {
+                bomb.writeByte(0);
+                Wire.writeVarInt(bomb, particle.typeId());
+                Wire.writeVarInt(bomb, itemParticle);
+                bomb.writeBytes(containerChain(version, false, 6000));
+                bomb.writeByte(255);
+                assertThrows(
+                        PacketResourceLimitException.class,
+                        () -> decoder.metadata(version, bomb, names(version)),
+                        version.toString());
+            } finally {
+                bomb.release();
+            }
+            var many = Unpooled.buffer();
+            try {
+                many.writeByte(0);
+                Wire.writeVarInt(many, particles.typeId());
+                Wire.writeVarInt(many, 100_000); // Particle list beyond the metadata budget.
+                many.writeByte(255);
+                assertThrows(
+                        PacketResourceLimitException.class,
+                        () -> decoder.metadata(version, many, names(version)),
+                        version.toString());
+            } finally {
+                many.release();
+            }
+        }
     }
 
     @Test

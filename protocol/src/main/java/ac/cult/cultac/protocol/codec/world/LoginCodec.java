@@ -18,7 +18,8 @@ public final class LoginCodec implements PacketCodec<ClientboundLogin> {
     public ClientboundLogin read(ByteBuf input, ProtocolContext context) {
         int playerId = input.readInt();
         input.readBoolean(); // Hardcore
-        int levels = Wire.readLength(input, Integer.MAX_VALUE);
+        // Every level is an identifier with at least a one-byte length prefix.
+        int levels = Wire.readLength(input, input.readableBytes());
         for (int i = 0; i < levels; i++) Wire.readIdentifier(input);
         Wire.readVarInt(input); // Maximum players
         Wire.readVarInt(input); // View distance
