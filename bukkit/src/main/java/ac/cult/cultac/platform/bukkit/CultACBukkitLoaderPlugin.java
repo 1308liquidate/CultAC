@@ -32,10 +32,17 @@ import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.cultac.utils.lazy.LazyHolder;
 import ac.grim.grimac.api.plugin.GrimPlugin;
 import ac.grim.grimac.internal.platform.bukkit.resolver.BukkitResolverRegistrar;
+import java.util.concurrent.Executor;
 import lombok.Getter;
+import org.bukkit.command.BlockCommandSender;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.incendo.cloud.CommandManager;
+import org.incendo.cloud.brigadier.parser.WrappedBrigadierParser;
+import org.incendo.cloud.bukkit.BukkitCommandContextKeys;
+import org.incendo.cloud.bukkit.internal.BukkitBackwardsBrigadierSenderMapper;
+import org.incendo.cloud.bukkit.internal.BukkitHelper;
 
 public final class CultACBukkitLoaderPlugin implements PlatformLoader {
     public static JavaPlugin LOADER;
@@ -172,7 +179,35 @@ public final class CultACBukkitLoaderPlugin implements PlatformLoader {
     }
 
     private CommandManager<Sender> createCloudCommandManager() {
-        return new ac.cult.cultac.command.IsolatedCommandManager();
+        var manager = new ac.cult.cultac.command.IsolatedCommandManager();
+        var nativeSenderMapper = new BukkitBackwardsBrigadierSenderMapper<>(senderFactory.get());
+        // Preserve the selector context normally supplied by LegacyPaperCommandManager.
+        manager.registerCommandPreProcessor(context -> {
+            var commandContext = context.commandContext();
+            var sender = commandContext.sender();
+            var nativeSender = senderFactory.get().reverse(sender);
+            commandContext.store(BukkitCommandContextKeys.BUKKIT_COMMAND_SENDER, nativeSender);
+            commandContext.store(
+                    WrappedBrigadierParser.COMMAND_CONTEXT_BRIGADIER_NATIVE_SENDER, nativeSenderMapper.apply(sender));
+            commandContext.store(BukkitCommandContextKeys.SENDER_SCHEDULER_EXECUTOR, commandExecutor(nativeSender));
+        });
+        return manager;
+    }
+
+    private Executor commandExecutor(CommandSender sender) {
+        if (CultAPI.INSTANCE.getPlatform() != Platform.FOLIA) {
+            return BukkitHelper.mainThreadExecutor(() -> LOADER);
+        }
+        if (sender instanceof Entity entity) {
+            return task -> entity.getScheduler().run(LOADER, handle -> task.run(), null);
+        }
+        if (sender instanceof BlockCommandSender blockSender) {
+            return task -> blockSender
+                    .getServer()
+                    .getRegionScheduler()
+                    .run(LOADER, blockSender.getBlock().getLocation(), handle -> task.run());
+        }
+        return task -> LOADER.getServer().getGlobalRegionScheduler().run(LOADER, handle -> task.run());
     }
 
     public BukkitSenderFactory getBukkitSenderFactory() {
