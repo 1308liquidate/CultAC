@@ -75,9 +75,9 @@ public final class BukkitItemCapture {
             Wire.writeVarInt(buffer, BuiltInRegistries.ITEM.getId(Items.STONE));
             DataComponentPatch.STREAM_CODEC.encode(
                     buffer, DataComponentPatch.builder().set(components).build());
-            var value = decoder.item(version, buffer, false, names);
+            var patch = ModelItemValues.readPatch(decoder, version, buffer, false, names);
             if (buffer.isReadable()) throw new IllegalStateException("Unread host component bytes");
-            return ModelItemValues.patch(value).added();
+            return patch.added();
         } finally {
             buffer.release();
         }

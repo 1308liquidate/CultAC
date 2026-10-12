@@ -198,8 +198,22 @@ public final class PrivateCodecService implements WireValueDecoder {
         }
     }
 
+    private record ItemInput(Item item, byte[] patch) {}
+
     @Override
     public ItemValue item(ProtocolVersion version, ByteBuf input, boolean creative, Registries registries) {
+        var decoded = readItem(version, input, creative);
+        return item(decoded.item(), registries, version, decoded.patch());
+    }
+
+    @Override
+    public <T> DecodedItem<T> item(ProtocolVersion version, ByteBuf input, boolean creative,
+            Registries registries, NbtFactory<T> factory) {
+        var decoded = readItem(version, input, creative);
+        return item(decoded.item(), registries, version, decoded.patch(), factory);
+    }
+
+    private ItemInput readItem(ProtocolVersion version, ByteBuf input, boolean creative) {
         checkOpen();
         var type = types(version);
         boolean lengthPrefixed = creative && version.atLeast(ProtocolVersion.V1_21_5);
@@ -212,17 +226,15 @@ public final class PrivateCodecService implements WireValueDecoder {
         // validates persistent fields of unused components on the original frame.
         if (creative && item != null && !item.isEmpty() && item.amount() > 99)
             throw new MalformedPacketException("Creative item count exceeds 99");
-        if (creative || item == null || item.isEmpty()) return item(item, registries, version);
+        if (creative || item == null || item.isEmpty()) return new ItemInput(item, null);
         // Trusted stacks frame count and item ID separately from the component patch.
         // Slot corrections can change the count and resend this patch untouched.
         var header = input.duplicate();
         header.readerIndex(start);
         Types.VAR_INT.readPrimitive(header);
         Types.VAR_INT.readPrimitive(header);
-        return item(
+        return new ItemInput(
                 item,
-                registries,
-                version,
                 ByteBufUtil.getBytes(input, header.readerIndex(), input.readerIndex() - header.readerIndex()));
     }
 
@@ -267,6 +279,22 @@ public final class PrivateCodecService implements WireValueDecoder {
         }
     }
 
+    private <T> DecodedItem<T> item(Item item, Registries registries, ProtocolVersion version,
+            byte[] wirePatch, NbtFactory<T> factory) {
+        if (item == null || item.isEmpty()) return new DecodedItem<>(0, 0, null, null, Map.of(), null);
+        var context = new ValueContext(registries, version, mappings(version, ProtocolVersion.V26_3));
+        var patch = ComponentValues.patch(item, context);
+        var layouts = ComponentValues.layouts(item, patch, context);
+        var encodings = new HashMap<String, ComponentEncoding>();
+        for (var data : item.dataContainer().data().values()) {
+            if (!data.isEmpty()) encodings.put(Key.namespaced(data.key().identifier()),
+                    ComponentValues.wireEncoding(data, context));
+        }
+        return new DecodedItem<>(item.identifier(), item.amount(), PortableNbt.read(patch, factory),
+                layouts.isEmpty() ? null : PortableNbt.read(layouts, factory), encodings,
+                wirePatch == null ? null : new ComponentEncoding(version.protocol(), wirePatch, context.references()));
+    }
+
     @Override
     public ItemValue hashedItem(ProtocolVersion version, ByteBuf input) {
         checkOpen();
@@ -281,6 +309,16 @@ public final class PrivateCodecService implements WireValueDecoder {
         var types = types(version);
         ItemStructureGuard.scanItemCost(types, version, input.duplicate(), optional);
         return item((optional ? types.optionalItemCost() : types.itemCost()).read(input), registries, version);
+    }
+
+    @Override
+    public <T> DecodedItem<T> itemCost(ProtocolVersion version, ByteBuf input, boolean optional,
+            Registries registries, NbtFactory<T> factory) {
+        checkOpen();
+        var types = types(version);
+        ItemStructureGuard.scanItemCost(types, version, input.duplicate(), optional);
+        return item((optional ? types.optionalItemCost() : types.itemCost()).read(input),
+                registries, version, null, factory);
     }
 
     private record MetadataTypes(
@@ -347,6 +385,12 @@ public final class PrivateCodecService implements WireValueDecoder {
 
     @Override
     public List<MetadataValue> metadata(ProtocolVersion version, ByteBuf input, Registries registries) {
+        return metadata(version, input, registries, null);
+    }
+
+    @Override
+    public <T> List<MetadataValue> metadata(ProtocolVersion version, ByteBuf input,
+            Registries registries, NbtFactory<T> factory) {
         checkOpen();
         var types = types(version);
         var serializers = metadataTypes(types);
@@ -387,10 +431,10 @@ public final class PrivateCodecService implements WireValueDecoder {
                     skipUnusedMetadata(input, Types.TRUSTED_OPTIONAL_TAG); // Author.
                 }
             } else {
-                if (kind.equals("item"))
-                    ItemStructureGuard.scanItemStack(types, version, input.duplicate(), false);
+                if (kind.equals("item")) ItemStructureGuard.scanItemStack(types, version, input.duplicate(), false);
                 value = values[id].type().read(input);
-                if (kind.equals("item")) value = item((Item) value, registries, version);
+                if (kind.equals("item")) value = factory == null ? item((Item) value, registries, version)
+                        : item((Item) value, registries, version, null, factory);
                 else if (kind.equals("optional_position") && value != null) {
                     var position = (ac.cult.shaded.vialib.api.minecraft.BlockPosition) value;
                     value = new int[] {position.x(), position.y(), position.z()};
@@ -410,7 +454,9 @@ public final class PrivateCodecService implements WireValueDecoder {
     private static int itemParticle(ProtocolVersion version) {
         return ITEM_PARTICLES.computeIfAbsent(
                 version,
-                value -> ModelRegistryData.load(value).registry("minecraft:particle_type").id("minecraft:item"));
+                value -> ModelRegistryData.load(value)
+                        .registry("minecraft:particle_type")
+                        .id("minecraft:item"));
     }
 
     /**

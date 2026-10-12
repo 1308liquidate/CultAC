@@ -30,11 +30,11 @@ public final class ModelItemValues {
     }
 
     public SimItemStack item(ByteBuf input, boolean creative) {
-        return item(decoder.item(version, input, creative, registries));
+        return item(decoder.item(version, input, creative, registries, ModelNbtFactory.INSTANCE));
     }
 
     public SimItemStack itemCost(ByteBuf input, boolean optional) {
-        return item(decoder.itemCost(version, input, optional, registries));
+        return item(decoder.itemCost(version, input, optional, registries, ModelNbtFactory.INSTANCE));
     }
 
     /** Click claims expose item/count only; hashes cannot reconstruct component values. */
@@ -110,6 +110,23 @@ public final class ModelItemValues {
         return new ComponentPatch(patch.added().withWireEncodings(encodings), patch.removed());
     }
 
+    /** Host item capture uses the same direct component bridge as packet decoding. */
+    public static ComponentPatch readPatch(WireValueDecoder decoder, ProtocolVersion version, ByteBuf input,
+            boolean creative, WireValueDecoder.Registries registries) {
+        return patch(decoder.item(version, input, creative, registries, ModelNbtFactory.INSTANCE));
+    }
+
+    private static ComponentPatch patch(WireValueDecoder.DecodedItem<ac.cult.blocksim.data.nbt.NbtValue> value) {
+        var patch = value.components() == null ? ComponentPatch.EMPTY
+                : ComponentPatch.fromNbt((ac.cult.blocksim.data.nbt.NbtValue.Compound) value.components(),
+                        value.componentLayouts() == null ? new ac.cult.blocksim.data.nbt.NbtValue.Compound(java.util.Map.of())
+                                : (ac.cult.blocksim.data.nbt.NbtValue.Compound) value.componentLayouts());
+        if (value.componentEncodings().isEmpty()) return patch;
+        var encodings = new java.util.HashMap<String, ac.cult.blocksim.data.ComponentWireEncoding>();
+        value.componentEncodings().forEach((key, encoding) -> encodings.put(key, encoding(encoding)));
+        return new ComponentPatch(patch.added().withWireEncodings(encodings), patch.removed());
+    }
+
     private static ac.cult.blocksim.data.ComponentWireEncoding encoding(WireValueDecoder.ComponentEncoding value) {
         var children =
                 new java.util.HashMap<String, java.util.Map<String, ac.cult.blocksim.data.ComponentWireEncoding>>();
@@ -122,15 +139,21 @@ public final class ModelItemValues {
                 value.protocol(), value.bytes(), value.references(), children);
     }
 
+    public SimItemStack item(WireValueDecoder.DecodedItem<ac.cult.blocksim.data.nbt.NbtValue> value) {
+        return stack(value.id(), value.count(), patch(value), value.wirePatch());
+    }
+
     public SimItemStack item(WireValueDecoder.ItemValue value) {
-        if (value.count() <= 0) return items.empty();
+        return stack(value.id(), value.count(), patch(value), value.wirePatch());
+    }
+
+    private SimItemStack stack(int id, int count, ComponentPatch patch, WireValueDecoder.ComponentEncoding wirePatch) {
+        if (count <= 0) return items.empty();
         String key = registries.preserveIdentifiers()
-                ? registries.name("minecraft:item", value.id())
-                : ModelRegistryData.load(ProtocolVersion.V26_3)
-                        .registry("minecraft:item")
-                        .name(mappings.item(value.id()));
-        var stack = items.stack(key, value.count(), patch(value));
-        if (value.wirePatch() != null) stack.wirePatch(encoding(value.wirePatch()));
+                ? registries.name("minecraft:item", id)
+                : ModelRegistryData.load(ProtocolVersion.V26_3).registry("minecraft:item").name(mappings.item(id));
+        var stack = items.stack(key, count, patch);
+        if (wirePatch != null) stack.wirePatch(encoding(wirePatch));
         return stack;
     }
 }

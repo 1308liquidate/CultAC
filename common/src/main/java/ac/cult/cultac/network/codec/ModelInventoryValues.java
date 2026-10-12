@@ -14,14 +14,10 @@ import java.util.*;
 /** Versioned inventory framing around the isolated item value readers. */
 final class ModelInventoryValues {
     private final ModelItemValues values;
-    private final WireValueDecoder decoder;
     private final ProtocolVersion version;
-    private final WireValueDecoder.Registries registries;
 
     ModelInventoryValues(WireValueDecoder decoder, ProtocolVersion version, WireValueDecoder.Registries registries) {
-        this.decoder = decoder;
         this.version = version;
-        this.registries = registries;
         values =
                 new ModelItemValues(decoder, version, registries, ac.cult.cultac.utils.inventory.ItemUtil.modelItems());
     }
@@ -81,7 +77,7 @@ final class ModelInventoryValues {
 
     private SimItemStack clickItem(ByteBuf input) {
         return version.atLeast(ProtocolVersion.V1_21_5)
-                ? values.item(decoder.hashedItem(version, input))
+                ? values.hashedItem(input)
                 : values.item(input, false);
     }
 
@@ -89,9 +85,9 @@ final class ModelInventoryValues {
         int window = Wire.readVarInt(input), count = Wire.readLength(input, input.readableBytes());
         var offers = new ArrayList<InventoryPackets.MerchantOffer>(count);
         for (int index = 0; index < count; index++) {
-            var costA = values.item(decoder.itemCost(version, input, false, registries));
+            var costA = values.itemCost(input, false);
             var result = values.item(input, false);
-            var costB = values.item(decoder.itemCost(version, input, true, registries));
+            var costB = values.itemCost(input, true);
             boolean exhausted = input.readBoolean();
             int uses = input.readInt(), maxUses = input.readInt();
             input.readInt(); // XP

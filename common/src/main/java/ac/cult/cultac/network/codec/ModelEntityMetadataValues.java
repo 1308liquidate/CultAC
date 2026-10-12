@@ -41,12 +41,13 @@ final class ModelEntityMetadataValues {
         this.paintings = paintings;
     }
 
+    @SuppressWarnings("unchecked") // The metadata call uses the same NBT factory as item conversion.
     EntityMetadata read(ByteBuf input) {
         int id = Wire.readVarInt(input);
         var entries = new ArrayList<EntityMetadata.Entry>();
-        for (var value : decoder.metadata(version, input, registries)) {
+        for (var value : decoder.metadata(version, input, registries, ModelNbtFactory.INSTANCE)) {
             Object converted = switch (value.kind()) {
-                case "item" -> items.item((WireValueDecoder.ItemValue) value.value());
+                case "item" -> items.item((WireValueDecoder.DecodedItem<ac.cult.blocksim.data.nbt.NbtValue>) value.value());
                 case "painting_variant" ->
                     value.value() instanceof int[] size
                             ? new PaintingSize(size[0], size[1])

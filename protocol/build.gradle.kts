@@ -29,6 +29,7 @@ dependencies {
     // Exercise coexistence with the installed translator's original API/resources.
     testImplementation(libs.via.codecs.core) { isTransitive = false }
     testImplementation(testlibs.junitJupiter)
+    testImplementation(project(":block-sim")) // Verify direct trees against the existing model NBT reader.
     testRuntimeOnly(testlibs.junitPlatformLauncher)
 }
 

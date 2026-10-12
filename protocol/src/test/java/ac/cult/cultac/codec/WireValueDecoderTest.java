@@ -129,7 +129,7 @@ class WireValueDecoderTest {
                             new StructuredDataContainer(outer.toArray(StructuredData[]::new)));
                     (creative && version.atLeast(ProtocolVersion.V1_21_5) ? types.lengthPrefixedItem() : types.item())
                             .write(input, item);
-                    var result = decoder.item(version, input, creative, names);
+                    var result = checkedItem(version, input, creative, names);
                     assertFalse(input.isReadable());
                     var layoutBytes = result.componentLayouts();
                     assertNotNull(layoutBytes);
@@ -239,7 +239,7 @@ class WireValueDecoderTest {
                                         ? types.lengthPrefixedItem()
                                         : types.item())
                                 .write(input, item);
-                        var result = decoder.item(version, input, creative, names);
+                        var result = checkedItem(version, input, creative, names);
                         assertFalse(input.isReadable());
                         boolean negative = Float.floatToRawIntBits(number) == Integer.MIN_VALUE;
                         assertEquals(negative, result.componentLayouts() != null);
@@ -308,7 +308,7 @@ class WireValueDecoderTest {
                                         ? types.lengthPrefixedItem()
                                         : types.item())
                                 .write(input, item);
-                        var decoded = decoder.item(version, input, creative, names);
+                        var decoded = checkedItem(version, input, creative, names);
                         assertFalse(input.isReadable());
                         var detail = Unpooled.wrappedBuffer(decoded.componentLayouts());
                         try {
@@ -464,7 +464,7 @@ class WireValueDecoderTest {
                                             ? types.lengthPrefixedItem()
                                             : types.item())
                                     .write(input, stack);
-                            var decoded = decoder.item(version, input, creative, names);
+                            var decoded = checkedItem(version, input, creative, names);
                             if (!creative) {
                                 var fixture = Path.of(
                                         System.getProperty("wireValueFixtures"), version.name(), component + ".nbt");
@@ -650,7 +650,9 @@ class WireValueDecoderTest {
     }
 
     private static int componentId(ProtocolVersion version, String name) {
-        return ModelRegistryData.load(version).registry("minecraft:data_component_type").id(name);
+        return ModelRegistryData.load(version)
+                .registry("minecraft:data_component_type")
+                .id(name);
     }
 
     /** Packet-level stack framing: amount, id, value components, removal markers. */
@@ -688,16 +690,12 @@ class WireValueDecoderTest {
         int stone = itemId(version, "minecraft:stone");
         boolean template = types.itemTemplate() != types.item();
         boolean optional = types.optionalItemTemplate() != types.itemTemplate();
-        byte[] empty = template
-                ? concat(varInt(stone), varInt(0), varInt(0), varInt(0))
-                : varInt(0);
-        byte[] childContents = concat(
-                varInt(children), repeat(optional ? concat(varInt(1), empty) : empty, children));
+        byte[] empty = template ? concat(varInt(stone), varInt(0), varInt(0), varInt(0)) : varInt(0);
+        byte[] childContents = concat(varInt(children), repeat(optional ? concat(varInt(1), empty) : empty, children));
         byte[] child = template
                 ? concat(varInt(stone), varInt(1), varInt(1), varInt(0), varInt(container), childContents)
                 : concat(varInt(1), varInt(stone), varInt(1), varInt(0), varInt(container), childContents);
-        byte[] rootContents = concat(
-                varInt(slots), repeat(optional ? concat(varInt(1), child) : child, slots));
+        byte[] rootContents = concat(varInt(slots), repeat(optional ? concat(varInt(1), child) : child, slots));
         return stackItem(version, container, rootContents, lengthPrefixed);
     }
 
@@ -748,7 +746,8 @@ class WireValueDecoderTest {
                 byte[] wire = containerChain(version, lengthPrefixed, 4);
                 var guarded = Unpooled.wrappedBuffer(wire);
                 try {
-                    ItemStructureGuard.scanItemStack(PrivateCodecService.types(version), version, guarded, lengthPrefixed);
+                    ItemStructureGuard.scanItemStack(
+                            PrivateCodecService.types(version), version, guarded, lengthPrefixed);
                     assertEquals(wire.length, guarded.readerIndex(), version + " creative=" + creative);
                 } finally {
                     guarded.release();
@@ -832,16 +831,16 @@ class WireValueDecoderTest {
                 varInt(0), // Inline holder.
                 varInt(4), // Width.
                 varInt(3), // Height.
-                varInt(10), "test:asset".getBytes(StandardCharsets.UTF_8),
+                varInt(10),
+                "test:asset".getBytes(StandardCharsets.UTF_8),
                 concat(new byte[] {1}, title));
     }
 
     /** One root-level array tag: type byte, big-endian element count (root tags carry no name). */
     private static byte[] arrayTag(int type, int count) {
-        return concat(
-                new byte[] {
-                    (byte) type, (byte) (count >>> 24), (byte) (count >>> 16), (byte) (count >>> 8), (byte) count
-                });
+        return concat(new byte[] {
+            (byte) type, (byte) (count >>> 24), (byte) (count >>> 16), (byte) (count >>> 8), (byte) count
+        });
     }
 
     @Test
@@ -889,7 +888,8 @@ class WireValueDecoderTest {
                         varInt(0), // Inline holder.
                         varInt(4),
                         varInt(3),
-                        varInt(10), "test:asset".getBytes(StandardCharsets.UTF_8),
+                        varInt(10),
+                        "test:asset".getBytes(StandardCharsets.UTF_8),
                         new byte[] {0, 0}); // No title or author.
                 for (byte[] payload : List.of(inline, varInt(1))) { // Inline and registry reference.
                     var input = Unpooled.wrappedBuffer(stackItem(version, painting, payload, lengthPrefixed));
@@ -948,8 +948,7 @@ class WireValueDecoderTest {
                 input.writeByte(0); // Metadata index.
                 Wire.writeVarInt(input, particle.typeId());
                 Wire.writeVarInt(input, itemParticle);
-                input.writeBytes(concat(
-                        varInt(1), varInt(itemId(version, "minecraft:stone")), varInt(0), varInt(0)));
+                input.writeBytes(concat(varInt(1), varInt(itemId(version, "minecraft:stone")), varInt(0), varInt(0)));
                 input.writeByte(255);
                 var decoded = decoder.metadata(version, input, names(version));
                 assertEquals(1, decoded.size());
@@ -1024,4 +1023,24 @@ class WireValueDecoderTest {
             }
         }
     }
+    private static WireValueDecoder.ItemValue checkedItem(ProtocolVersion version, ByteBuf input,
+            boolean creative, WireValueDecoder.Registries names) {
+        int start = input.readerIndex();
+        var original = decoder.item(version, input, creative, names);
+        int end = input.readerIndex();
+        input.readerIndex(start);
+        var direct = decoder.item(version, input, creative, names, PortableNbtTest.MODEL);
+        assertEquals(end, input.readerIndex());
+        assertEquals(original.id(), direct.id());
+        assertEquals(original.count(), direct.count());
+        assertEquals(original.components() == null ? null : ac.cult.blocksim.data.nbt.BinaryNbt.read(original.components()),
+                direct.components(), version + "/components");
+        assertEquals(original.componentLayouts() == null ? null
+                : ac.cult.blocksim.data.nbt.BinaryNbt.read(original.componentLayouts()), direct.componentLayouts(), version + "/layouts");
+        for (var entry : original.componentEncodings().entrySet())
+            assertArrayEquals(entry.getValue().bytes(), direct.componentEncodings().get(entry.getKey()).bytes());
+        if (original.wirePatch() != null) assertArrayEquals(original.wirePatch().bytes(), direct.wirePatch().bytes());
+        return original;
+    }
+
 }
