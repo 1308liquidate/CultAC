@@ -17,6 +17,7 @@ public enum ProtocolVersion {
     V26_2(776, "26.2"),
     V26_3(777, "26.3");
 
+    private static final ProtocolVersion[] LOOKUP = values();
     private final int protocol;
     private final String minecraftVersion;
 
@@ -38,7 +39,7 @@ public enum ProtocolVersion {
     }
 
     public static ProtocolVersion of(int protocol) {
-        for (ProtocolVersion version : values()) {
+        for (ProtocolVersion version : LOOKUP) {
             if (version.protocol == protocol) {
                 return version;
             }

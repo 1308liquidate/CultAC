@@ -60,32 +60,39 @@ public final class ProjectedPackets implements AutoCloseable {
             Predicate<PacketType<?>> consumed,
             boolean observation) {
         if (closed) throw new IllegalStateException("Packet values are closed");
-        var input = physical.duplicate();
-        int id = Wire.readVarInt(input);
-        var bound = observed.binding(phase, direction, id);
-        PacketType<?> type = bound == null
-                ? model.typeForKey(direction.name().toLowerCase(java.util.Locale.ROOT) + "."
-                        + observed.data().packets(phase, direction).name(id).replace("minecraft:", ""))
-                : bound.type();
-        if (type == null || !consumed.test(type)) return List.of();
-        Object packet;
-        if (translated() && type.codec().requiresModelValues()) {
-            var context = new ProtocolContext(
-                    type,
-                    observed.data(),
-                    phase,
-                    observed.data().packets(phase, direction).name(id),
-                    32767,
-                    0,
-                    state);
-            var values = Objects.requireNonNull(adapter.get(), "Missing observed value decoder");
-            packet = observation ? values.readForObservation(input, context) : values.read(input, context);
-            if (!type.recordClass().isInstance(packet))
-                throw new ProtocolResolutionException("Wrong observed value record for " + type);
-            if (type.codec().readsEntirePayload() && input.isReadable())
-                throw new MalformedPacketException("Trailing bytes on " + type);
-        } else packet = observed.decode(phase, direction, id, input, state);
-        return List.of(new Value(type, packet));
+        int readerIndex = physical.readerIndex();
+        try {
+            var input = physical;
+            int id = Wire.readVarInt(input);
+            var bound = observed.binding(phase, direction, id);
+            PacketType<?> type = bound == null
+                    ? model.typeForKey(direction.name().toLowerCase(java.util.Locale.ROOT) + "."
+                            + observed.data().packets(phase, direction).name(id).replace("minecraft:", ""))
+                    : bound.type();
+            if (type == null || !consumed.test(type)) return List.of();
+            Object packet;
+            if (translated() && type.codec().requiresModelValues()) {
+                var context = new ProtocolContext(
+                        type,
+                        observed.data(),
+                        phase,
+                        observed.data().packets(phase, direction).name(id),
+                        32767,
+                        0,
+                        state);
+                var values = Objects.requireNonNull(adapter.get(), "Missing observed value decoder");
+                packet = observation ? values.readForObservation(input, context) : values.read(input, context);
+                if (!type.recordClass().isInstance(packet))
+                    throw new ProtocolResolutionException("Wrong observed value record for " + type);
+                if (type.codec().readsEntirePayload() && input.isReadable())
+                    throw new MalformedPacketException("Trailing bytes on " + type);
+            } else packet = observed.decode(phase, direction, id, input, state);
+            return List.of(new Value(type, packet));
+        } finally {
+            // Codec reads are synchronous and do not mutate bytes or index marks.
+            // Restore even when the codec, adapter, or consumed predicate throws.
+            physical.readerIndex(readerIndex);
+        }
     }
 
     public <R> Encoded encode(

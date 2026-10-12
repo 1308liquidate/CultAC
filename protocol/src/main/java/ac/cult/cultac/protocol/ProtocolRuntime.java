@@ -180,12 +180,27 @@ public final class ProtocolRuntime {
     public <R> void encode(ConnectionPhase phase, PacketType<R> type, R packet, ByteBuf output, CodecState state) {
         if (!supports(type)) throw new UnsupportedOnVersionException("Unsupported type " + type);
         if (!type.writable()) throw new UnsupportedOnVersionException("Read-only packet " + type);
-        // A variant family names its own variant; a renamed family has one name on this version.
-        String name = type.codec() instanceof VariantCodec<R> variants
-                ? type.wireNames().get(variants.variantOf(packet))
-                : type.wireNames(data).get(0);
-        int id = data.packets(phase, type.direction()).id(name);
-        var bound = binding(phase, type.direction(), id);
+        int id = -1;
+        ResolvedPacket<?> bound = null;
+        if (type.codec() instanceof VariantCodec<R> variants) {
+            String name = type.wireNames().get(variants.variantOf(packet));
+            id = data.packets(phase, type.direction()).id(name);
+            bound = binding(phase, type.direction(), id);
+        } else {
+            // Eager validation permits exactly one present name for a non-variant family.
+            // Reuse its existing binding; neither a filtered list nor another routing cache is needed.
+            var names = type.wireNames();
+            var packets = data.packets(phase, type.direction());
+            for (int i = 0; i < names.size(); i++) {
+                int candidateId = packets.id(names.get(i));
+                var candidate = binding(phase, type.direction(), candidateId);
+                if (candidate != null && candidate.type() == type) {
+                    id = candidateId;
+                    bound = candidate;
+                    break;
+                }
+            }
+        }
         if (bound == null || bound.type() != type) {
             throw new UnsupportedOnVersionException(type + " is unavailable in " + phase);
         }

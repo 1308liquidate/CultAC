@@ -133,7 +133,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     @Override
     public void flush(ChannelHandlerContext ctx) {
         if (emission == null) ctx.flush();
-        else emission.frames.addLast(new Frame(null, null, null));
+        else emission.addLast(new Frame(null, null, null));
     }
 
     /** A host callback runs after all preceding synchronous writes and their proofs. */
@@ -145,7 +145,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
     private Output process(ChannelHandlerContext ctx, Pending pending) {
         var output = new Output();
-        var activeFamilies = new ArrayDeque<PacketType<?>>();
+        var activeFamilies = new Families();
         // Recursive callbacks finish first and append their complete groups here.
         // The enclosing group's frames have not been appended yet, so these writes
         // precede even its opening delimiter. No retained expansion tree is needed.
@@ -163,30 +163,30 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     }
 
     private void prepare(
-            ChannelHandlerContext ctx, Pending pending, ArrayDeque<PacketType<?>> activeFamilies, Output output) {
+            ChannelHandlerContext ctx, Pending pending, Families activeFamilies, Output output) {
         // Reentrant writes observe the emitted wire state, not an enclosing
         // group's planned delimiters. I/O cannot emit while this dispatch runs.
         var batch = new Batch(insideBundle);
-        ByteBuf fallback = pending.message instanceof ByteBuf frame ? frame.retainedDuplicate() : null;
+        ByteBuf fallback = pending.message instanceof ByteBuf frame ? frame.retain() : null;
         try {
             if (pending.message instanceof CultConnection.WriteTask task) {
                 // The active writer captures callback-generated packets at this exact
                 // queue position, before packets that arrived after the callback.
                 task.action().run();
-                output.flush |= !output.frames.isEmpty();
+                output.flush |= !output.isEmpty();
                 pending.promise.trySuccess();
             } else if (pending.message instanceof CultConnection.WriteGroup group) {
                 prepareGroup(ctx, group, pending.promise, activeFamilies, batch);
             } else {
                 boolean requested = expandPacket(ctx, pending, activeFamilies, batch);
-                if (!insideBundle && (requested || batch.output.frames.size() > 1)) wrap(ctx, batch.output);
+                if (!insideBundle && (requested || batch.output.size() > 1)) wrap(ctx, batch.output);
             }
             output.append(batch.output);
         } catch (Throwable failure) {
             batch.output.discard(failure, fallback == null ? null : pending.promise);
             CultNetworkManager.reportFailure("outbound packet expansion", failure);
             if (fallback != null) {
-                output.frames.addLast(new Frame(fallback, pending.promise, fallbackType(fallback)));
+                output.addLast(new Frame(fallback, pending.promise, fallbackType(fallback)));
                 fallback = null;
             } else pending.promise.tryFailure(failure);
         } finally {
@@ -213,7 +213,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             ChannelHandlerContext ctx,
             CultConnection.WriteGroup group,
             ChannelPromise promise,
-            ArrayDeque<PacketType<?>> activeFamilies,
+            Families activeFamilies,
             Batch batch) {
         boolean wrapGroup = group.bundle() && !batch.inside;
         var parts = new LinkedHashSet<ChannelPromise>();
@@ -229,7 +229,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 var entry = new Batch(batch.inside);
                 try {
                     boolean requested = expandPacket(ctx, pending, activeFamilies, entry);
-                    if (!batch.inside && (requested || entry.output.frames.size() > 1)) wrap(ctx, entry.output);
+                    if (!batch.inside && (requested || entry.output.size() > 1)) wrap(ctx, entry.output);
                     batch.inside = entry.inside;
                     batch.output.append(entry.output);
                 } catch (Throwable failure) {
@@ -239,13 +239,13 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             }
         }
         if (wrapGroup) batch.add(delimiter(ctx));
-        for (Frame frame : batch.output.frames) parts.add(frame.promise);
-        batch.output.groups.add(new GroupCompletion(List.copyOf(parts), promise));
+        batch.output.collectPromises(parts);
+        batch.output.addGroup(new GroupCompletion(List.copyOf(parts), promise));
     }
 
     /** Expands only packets. The caller decides whether this expansion needs a bundle. */
     private boolean expandPacket(
-            ChannelHandlerContext ctx, Pending pending, ArrayDeque<PacketType<?>> activeFamilies, Batch batch) {
+            ChannelHandlerContext ctx, Pending pending, Families activeFamilies, Batch batch) {
         if (!(pending.message instanceof CultWrite write)) {
             return expandFrame(ctx, (ByteBuf) pending.message, pending.promise, false, activeFamilies, batch);
         }
@@ -266,18 +266,20 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             pending.promise.trySuccess();
             return false;
         }
-        var parts = new ArrayList<ChannelPromise>();
+        var parts = encoded.frames().size() > 1
+                ? new ArrayList<ChannelPromise>(encoded.frames().size())
+                : null;
         boolean requested = false;
         int transferred = 0;
         try {
             for (ByteBuf frame : encoded.frames()) {
                 var part = encoded.frames().size() == 1 ? pending.promise : ctx.newPromise();
-                parts.add(part);
+                if (parts != null) parts.add(part);
                 transferred++;
                 requested |= expandFrame(ctx, frame, part, write.silent(), activeFamilies, batch);
             }
             if (encoded.frames().size() > 1)
-                batch.output.groups.add(new GroupCompletion(List.copyOf(parts), pending.promise));
+                batch.output.addGroup(new GroupCompletion(List.copyOf(parts), pending.promise));
             return requested;
         } catch (Throwable failure) {
             for (int i = transferred; i < encoded.frames().size(); i++)
@@ -294,7 +296,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             ByteBuf bytes,
             ChannelPromise promise,
             boolean silent,
-            ArrayDeque<PacketType<?>> activeFamilies,
+            Families activeFamilies,
             Batch batch) {
         var phase = connection.phase(PacketDirection.CLIENTBOUND);
         boolean requested = false;
@@ -343,7 +345,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                     for (CultWrite write : event.writesAfter()) {
                         expandPacket(ctx, new Pending(write, ctx.newPromise()), activeFamilies, batch);
                     }
-                    batch.output.tasks.addAll(event.tasksAfter());
+                    batch.output.addTasks(event.tasksAfter());
                     requested |= event.isBundleRequested();
                 } finally {
                     activeFamilies.removeLast();
@@ -370,17 +372,19 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             promise.trySuccess();
             return;
         }
-        var parts = new ArrayList<ChannelPromise>();
+        var parts = replacement.frames().size() > 1
+                ? new ArrayList<ChannelPromise>(replacement.frames().size())
+                : null;
         int transferred = 0;
         try {
             for (ByteBuf frame : replacement.frames()) {
                 var part = replacement.frames().size() == 1 ? promise : ctx.newPromise();
-                parts.add(part);
+                if (parts != null) parts.add(part);
                 batch.add(new Frame(frame, part, transferred == 0 ? type : null));
                 transferred++;
             }
             if (replacement.frames().size() > 1)
-                batch.output.groups.add(new GroupCompletion(List.copyOf(parts), promise));
+                batch.output.addGroup(new GroupCompletion(List.copyOf(parts), promise));
         } catch (Throwable failure) {
             for (int i = transferred; i < replacement.frames().size(); i++)
                 replacement.frames().get(i).release();
@@ -389,8 +393,8 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     }
 
     private void wrap(ChannelHandlerContext ctx, Output output) {
-        output.frames.addFirst(delimiter(ctx));
-        output.frames.addLast(delimiter(ctx));
+        output.addFirst(delimiter(ctx));
+        output.addLast(delimiter(ctx));
     }
 
     private Frame delimiter(ChannelHandlerContext ctx) {
@@ -420,9 +424,9 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         try {
             do {
                 settleGroups(ctx, output);
-                while (!output.frames.isEmpty()) {
+                while (!output.isEmpty()) {
                     settleGroups(ctx, output);
-                    Frame frame = output.frames.removeFirst();
+                    Frame frame = output.removeFirst();
                     if (frame.bytes == null) {
                         ctx.flush();
                         continue;
@@ -443,16 +447,17 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                     output.flush = false;
                     ctx.flush();
                 }
-                if (!output.frames.isEmpty()) continue;
-                while (!output.tasks.isEmpty() && output.frames.isEmpty())
+                if (!output.isEmpty()) continue;
+                while (output.hasTasks() && output.isEmpty())
                     CultNetworkManager.runDeferredPacketTask("tasksAfterSend", output.tasks.removeFirst());
-            } while (!output.frames.isEmpty() || !output.tasks.isEmpty() || output.flush);
+            } while (!output.isEmpty() || output.hasTasks() || output.flush);
         } finally {
             emission = null;
         }
     }
 
     private void settleGroups(ChannelHandlerContext ctx, Output output) {
+        if (output.groups == null) return;
         for (GroupCompletion group : output.groups) {
             var combiner = new PromiseCombiner(ctx.executor());
             for (ChannelPromise part : group.parts) combiner.add((Future<?>) part);
@@ -477,6 +482,29 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
     private record GroupCompletion(List<ChannelPromise> parts, ChannelPromise promise) {}
 
+    /** Inline recursion guard for the ordinary one-family dispatch. */
+    private static final class Families {
+        PacketType<?> first;
+        ArrayDeque<PacketType<?>> nested;
+
+        boolean contains(PacketType<?> type) {
+            return first == type || nested != null && nested.contains(type);
+        }
+
+        void addLast(PacketType<?> type) {
+            if (first == null) first = type;
+            else {
+                if (nested == null) nested = new ArrayDeque<>(2);
+                nested.addLast(type);
+            }
+        }
+
+        void removeLast() {
+            if (nested == null || nested.isEmpty()) first = null;
+            else nested.removeLast();
+        }
+    }
+
     /** Local bundle cursor during expansion; it never changes the emitted wire state. */
     private static final class Batch {
         final Output output = new Output();
@@ -487,26 +515,85 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
 
         void add(Frame frame) {
-            output.frames.addLast(frame);
+            output.addLast(frame);
             if (frame.type == ClientboundPackets.BUNDLE_DELIMITER) inside = !inside;
         }
     }
 
     /** Owns only un-emitted frames. Appending transfers ownership without retaining a tree. */
     private static final class Output {
-        final ArrayDeque<Frame> frames = new ArrayDeque<>();
-        final ArrayDeque<Runnable> tasks = new ArrayDeque<>();
-        final List<GroupCompletion> groups = new ArrayList<>();
+        // Most expansions contain exactly one frame. Allocate a queue only for a second one.
+        Frame first;
+        ArrayDeque<Frame> tail;
+
+        boolean isEmpty() { return first == null; }
+        int size() { return first == null ? 0 : 1 + (tail == null ? 0 : tail.size()); }
+
+        void addLast(Frame frame) {
+            if (first == null) first = frame;
+            else {
+                if (tail == null) tail = new ArrayDeque<>(4);
+                tail.addLast(frame);
+            }
+        }
+
+        void addFirst(Frame frame) {
+            if (first != null) {
+                if (tail == null) tail = new ArrayDeque<>(4);
+                tail.addFirst(first);
+            }
+            first = frame;
+        }
+
+        Frame removeFirst() {
+            Frame result = first;
+            first = tail == null ? null : tail.pollFirst();
+            return result;
+        }
+
+        void collectPromises(java.util.Set<ChannelPromise> parts) {
+            if (first != null) parts.add(first.promise);
+            if (tail != null) for (Frame frame : tail) parts.add(frame.promise);
+        }
+        ArrayDeque<Runnable> tasks;
+        List<GroupCompletion> groups;
         boolean flush;
 
+        boolean hasTasks() {
+            return tasks != null && !tasks.isEmpty();
+        }
+
+        void addTasks(List<Runnable> actions) {
+            if (actions.isEmpty()) return;
+            if (tasks == null) tasks = new ArrayDeque<>(actions.size());
+            tasks.addAll(actions);
+        }
+
+        void addGroup(GroupCompletion group) {
+            if (groups == null) groups = new ArrayList<>(1);
+            groups.add(group);
+        }
+
         void append(Output source) {
-            frames.addAll(source.frames);
-            tasks.addAll(source.tasks);
-            groups.addAll(source.groups);
+            if (!source.isEmpty()) {
+                if (isEmpty()) {
+                    first = source.first;
+                    tail = source.tail;
+                    source.first = null;
+                    source.tail = null;
+                } else while (!source.isEmpty()) addLast(source.removeFirst());
+            }
+            if (source.hasTasks()) {
+                if (tasks == null) tasks = source.tasks;
+                else tasks.addAll(source.tasks);
+            }
+            if (source.groups != null && !source.groups.isEmpty()) {
+                if (groups == null) groups = source.groups;
+                else for (int i = 0; i < source.groups.size(); i++) groups.add(source.groups.get(i));
+            }
             flush |= source.flush;
-            source.frames.clear();
-            source.tasks.clear();
-            source.groups.clear();
+            source.tasks = null;
+            source.groups = null;
             source.flush = false;
         }
 
@@ -515,18 +602,20 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
 
         void discard(Throwable failure, ChannelPromise preserved) {
-            while (!frames.isEmpty()) {
-                Frame frame = frames.removeFirst();
+            while (!isEmpty()) {
+                Frame frame = removeFirst();
                 if (frame.bytes != null) {
                     frame.bytes.release();
                     if (frame.promise != preserved) frame.promise.tryFailure(failure);
                 }
             }
-            for (GroupCompletion group : groups) {
-                if (group.promise != preserved) group.promise.tryFailure(failure);
+            if (groups != null) {
+                for (GroupCompletion group : groups) {
+                    if (group.promise != preserved) group.promise.tryFailure(failure);
+                }
+                groups.clear();
             }
-            groups.clear();
-            tasks.clear();
+            if (tasks != null) tasks.clear();
         }
     }
 }
