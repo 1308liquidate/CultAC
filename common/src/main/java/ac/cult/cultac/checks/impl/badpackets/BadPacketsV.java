@@ -22,6 +22,16 @@ public class BadPacketsV extends Check implements CheckListener {
     private static final Verbose V = Verbose.of("delta={f64}");
 
     private int noReminderTicks;
+    // LocalPlayer#sendPosition's cache is independent of its position after teleport packets.
+    // A new LocalPlayer starts at zero; ClientPacketListener#handleMovePlayer does not write it.
+    private double sentX;
+    private double sentY;
+    private double sentZ;
+
+    public void onNewLocalPlayer() {
+        sentX = sentY = sentZ = 0.0;
+        noReminderTicks = 0;
+    }
 
     private final LastInstance lastTeleportTicks;
 
@@ -33,7 +43,7 @@ public class BadPacketsV extends Check implements CheckListener {
     @CultPacketHandler
     public void onMovePlayer(
             PacketReceiveEvent<ServerboundMovePlayer> event, CultPlayer player, ServerboundMovePlayer packet) {
-        if (player.canSkipTicks()) return;
+        if (player.canSkipTicks() || player.packetStateData.lastPacketWasOnePointSeventeenDuplicate) return;
 
         // isTickPacket: movement packets count unless they answered a teleport
         if (player.packetStateData.lastPacketWasTeleport) {
@@ -49,15 +59,17 @@ public class BadPacketsV extends Check implements CheckListener {
                 final double x = packet.xOr(player.x);
                 final double y = packet.yOr(player.y);
                 final double z = packet.zOr(player.z);
-                final double deltaSq = CultMath.square(player.lastX - x)
-                        + CultMath.square(player.lastY - y)
-                        + CultMath.square(player.lastZ - z);
+                final double deltaSq =
+                        CultMath.square(sentX - x) + CultMath.square(sentY - y) + CultMath.square(sentZ - z);
                 if (deltaSq <= player.getMovementThreshold() * player.getMovementThreshold()) {
                     double delta = Math.sqrt(deltaSq);
                     flag(V.write(verbose()).f64(delta));
                 }
             }
 
+            sentX = packet.xOr(player.x);
+            sentY = packet.yOr(player.y);
+            sentZ = packet.zOr(player.z);
             noReminderTicks = 0;
         } else {
             noReminderTicks++;

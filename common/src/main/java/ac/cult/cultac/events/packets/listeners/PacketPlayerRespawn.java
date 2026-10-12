@@ -202,6 +202,15 @@ public class PacketPlayerRespawn {
             // Same self-instance replacement as login: re-seed the identity-compared camera
             // deque from the new self or isSelf() is permanently false after respawn.
             player.cameraEntity.reset();
+            if (!player.isBedrockMovement()) {
+                player.openWindow.closeFromRespawn();
+                player.checkManager
+                        .getListener(ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump.class)
+                        .reset();
+                player.checkManager
+                        .getCheck(ac.cult.cultac.checks.impl.badpackets.BadPacketsV.class)
+                        .onNewLocalPlayer();
+            }
             player.compensatedEntities.resetClientTickOrder();
             player.compensatedEntities.selfTrackedEntity =
                     new TrackerData(0, 0, 0, 0, 0, EntityTypeIds.PLAYER, player.lastTransactionSent.get());

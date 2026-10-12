@@ -219,6 +219,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
     @CultPacketHandler
     public void onContainerClick(PacketReceiveEvent<InventoryClick> event, CultPlayer player, InventoryClick packet) {
         processGenericReceive(event, player);
+        if (event.isCancelled()) player.getInventory().resyncCancelledClick();
     }
 
     @CultPacketHandler

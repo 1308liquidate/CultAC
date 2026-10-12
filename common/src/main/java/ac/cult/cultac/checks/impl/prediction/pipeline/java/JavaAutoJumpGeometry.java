@@ -1,0 +1,65 @@
+package ac.cult.cultac.checks.impl.prediction.pipeline.java;
+
+import ac.cult.blocksim.data.BlockIds;
+import ac.cult.blocksim.data.Box;
+import ac.cult.blocksim.data.DataTables;
+import ac.cult.blocksim.data.StateFacts;
+import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.blockplace.ClientEntityQueries;
+import ac.cult.cultac.utils.collisions.ClientBlockShapes;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.math.Vec3;
+import java.util.ArrayList;
+import java.util.List;
+
+/** LocalPlayer#updateAutoJump's ordered CollisionGetter/BlockCollisions look-ahead queries. */
+final class JavaAutoJumpGeometry {
+    private JavaAutoJumpGeometry() {}
+
+    static List<SimpleCollisionBox> collisions(CultPlayer player, SimpleCollisionBox query) {
+        var result = new ArrayList<SimpleCollisionBox>();
+        for (Box box : new ClientEntityQueries(player)
+                .playerCollisionBoxes(new Box(query.minX, query.minY, query.minZ, query.maxX, query.maxY, query.maxZ)))
+            result.add(
+                    SimpleCollisionBox.between(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()));
+        int x0 = (int) Math.floor(query.minX - 1.0E-7) - 1, x1 = (int) Math.floor(query.maxX + 1.0E-7) + 1;
+        int y0 = (int) Math.floor(query.minY - 1.0E-7) - 1, y1 = (int) Math.floor(query.maxY + 1.0E-7) + 1;
+        int z0 = (int) Math.floor(query.minZ - 1.0E-7) - 1, z1 = (int) Math.floor(query.maxZ + 1.0E-7) + 1;
+        // Cursor3D advances X, then Y, then Z. The first obstacle controls the jump height.
+        for (int z = z0; z <= z1; z++)
+            for (int y = y0; y <= y1; y++)
+                for (int x = x0; x <= x1; x++) {
+                    if (player.compensatedWorld.getChunk(x >> 4, z >> 4) == null) continue;
+                    int edge =
+                            (x == x0 || x == x1 ? 1 : 0) + (y == y0 || y == y1 ? 1 : 0) + (z == z0 || z == z1 ? 1 : 0);
+                    if (edge == 3) continue;
+                    int state = player.compensatedWorld.getBlockStateIdAt(x, y, z);
+                    var facts = DataTables.defaults().registry().facts(state);
+                    if (edge == 1 && !facts.has(StateFacts.LARGE_COLLISION)
+                            || edge == 2 && !BlockIds.is(state, BlockIds.MOVING_PISTON)) continue;
+                    var shape = ClientBlockShapes.movement(player, state, x, y, z, player.y);
+                    var boxes = new ArrayList<SimpleCollisionBox>();
+                    shape.downCast(boxes);
+                    if (boxes.stream().anyMatch(query::isIntersected)) result.addAll(boxes);
+                }
+        return result;
+    }
+
+    static List<SimpleCollisionBox> block(CultPlayer player, int x, int y, int z) {
+        var result = new ArrayList<SimpleCollisionBox>();
+        ClientBlockShapes.movement(player, player.compensatedWorld.getBlockStateIdAt(x, y, z), x, y, z, player.y)
+                .downCast(result);
+        return result;
+    }
+
+    static boolean intersects(SimpleCollisionBox box, Vec3 from, Vec3 to) {
+        // AABB.intersects(Vec3, Vec3) tests the two-point bounds, not a ray clip.
+        return box.intersects(
+                Math.min(from.x, to.x),
+                Math.min(from.y, to.y),
+                Math.min(from.z, to.z),
+                Math.max(from.x, to.x),
+                Math.max(from.y, to.y),
+                Math.max(from.z, to.z));
+    }
+}

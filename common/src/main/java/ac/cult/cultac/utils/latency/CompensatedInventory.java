@@ -5,6 +5,7 @@ import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.CultProcessor;
 import ac.cult.cultac.checks.type.CheckListener;
+import ac.cult.cultac.network.CultNetworkManager;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -12,6 +13,7 @@ import ac.cult.cultac.network.packet.InventoryPackets;
 import ac.cult.cultac.network.packet.InventoryPackets.Content;
 import ac.cult.cultac.network.packet.InventoryPackets.CreativeSlot;
 import ac.cult.cultac.network.packet.InventoryPackets.MerchantOffer;
+import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMountScreenOpen;
@@ -44,6 +46,7 @@ import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.Getter;
 
 // Updated to support modern 1.17 protocol
@@ -56,6 +59,11 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     // Cult's compensated storage keeps the protocol offhand slot at 45.
     private static final int NMS_OFFHAND_SWAP_BUTTON = 40;
     public int openWindowID = 0;
+    private int lastClickServerTick;
+    private int clicksThisServerTick;
+    private int maxClicksPerTick = 3;
+    private final AtomicBoolean inventoryResyncRequested = new AtomicBoolean();
+    private final AtomicBoolean inventoryResyncQueued = new AtomicBoolean();
     public int stateID = 0; // Player inventory state ID. Don't mess up the last sent state ID by changing it.
     private final SimItemStack[] serverSlots = new SimItemStack[Inventory.STORAGE_SIZE];
     private int observedServerStateId;
@@ -96,6 +104,56 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     private void observeServerSlot(Slot slot, SimItemStack item) {
         if (slot != null && slot.isBackedBy(inventory.getInventoryStorage())) {
             serverSlots[slot.getContainerSlot()] = ItemUtil.copy(item);
+        }
+    }
+
+    @Override
+    public void onReload(ac.grim.grimac.api.config.ConfigManager config) {
+        maxClicksPerTick = config.getIntElse("max-clicks-per-tick", 3);
+    }
+
+    /** Called after all click checks, while the cancelled packet still belongs to Netty. */
+    public void resyncCancelledClick() {
+        PlatformPlayer platform = player.platformPlayer;
+        if (player.isBedrockMovement() || platform == null || !platform.hasServerAuthority()) return;
+        inventoryResyncRequested.set(true);
+        scheduleInventoryResync(platform);
+    }
+
+    private void scheduleInventoryResync(PlatformPlayer platform) {
+        if (!inventoryResyncQueued.compareAndSet(false, true)) return;
+        try {
+            ac.cult.cultac.CultAPI.INSTANCE
+                    .getScheduler()
+                    .getEntityScheduler()
+                    .execute(
+                            platform,
+                            ac.cult.cultac.CultAPI.INSTANCE.getGrimPlugin(),
+                            () -> {
+                                inventoryResyncRequested.set(false);
+                                try {
+                                    if (platform.isOnline()) platform.updateInventory();
+                                } finally {
+                                    inventoryResyncQueued.set(false);
+                                    // A cancellation racing the snapshot still needs its own correction.
+                                    if (inventoryResyncRequested.get()) scheduleInventoryResync(platform);
+                                }
+                            },
+                            () -> {
+                                inventoryResyncRequested.set(false);
+                                inventoryResyncQueued.set(false);
+                            },
+                            // A task queued just before the scheduler heartbeat can run in that tick.
+                            // Waiting two heartbeats leaves a complete owner tick for earlier accepted
+                            // clicks to drain first. The full resend includes the current menu's slots,
+                            // cursor and incremented state ID; its normal outbound proof updates our
+                            // client model, never this server-thread callback.
+                            2);
+        } catch (RuntimeException failure) {
+            inventoryResyncQueued.set(false);
+            // A scheduler failure must not reach dispatch recovery, which discards
+            // event changes and would forward the cancelled click to vanilla.
+            CultNetworkManager.reportFailure("inventory resync scheduling", failure);
         }
     }
 
@@ -367,9 +425,27 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
 
     @CultPacketHandler
     public void onContainerClick(PacketReceiveEvent<InventoryClick> event, CultPlayer player, InventoryClick packet) {
-        if (event.isCancelled()) {
-            return;
+        if (player.isBedrockMovement()) {
+            if (event.isCancelled()) return;
+        } else {
+            int currentTick = ac.cult.cultac.CultAPI.INSTANCE.getTickManager().currentTick;
+            if (lastClickServerTick != currentTick) {
+                clicksThisServerTick = 0;
+                lastClickServerTick = currentTick;
+            }
+            if (maxClicksPerTick > 0 && clicksThisServerTick >= maxClicksPerTick) {
+                event.setCancelled(true);
+            } else if (packet.clickType() != WindowClickType.PICKUP_ALL
+                    && packet.clickType() != WindowClickType.QUICK_CRAFT
+                    && (packet.clickType() != WindowClickType.QUICK_MOVE
+                            || menu.getCarried().isEmpty()
+                            || packet.button() != 0)) {
+                clicksThisServerTick++;
+            }
         }
+        // MultiPlayerGameMode#handleContainerInput applies the click before sending it.
+        // Cancelling server processing does not undo that local prediction. Keep validating
+        // and mirroring it until an authoritative clientbound inventory update arrives.
 
         // Only changes of item type can reset Player#attackStrengthTicker. Use the existing
         // validated inventory prediction, not the packet's unvalidated changed-slot claims.

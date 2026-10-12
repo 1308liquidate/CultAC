@@ -38,7 +38,10 @@ public class MultiActionsC extends Check implements CheckListener {
 
     @Contract(pure = true)
     public static boolean isVerboseInput(@NotNull CultPlayer player) {
-        return supportsEndTick(player) && player.packetStateData.knownInput.moving();
+        return supportsEndTick(player)
+                && player.checkManager
+                        .getListener(ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump.class)
+                        .hasManualMovementInput();
     }
 
     static boolean supportsEndTick(@NotNull CultPlayer player) {

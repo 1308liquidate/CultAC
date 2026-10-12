@@ -276,6 +276,7 @@ public class CheckManager {
                 new ChatB(player),
                 new ChatC(player),
                 new ChatD(player),
+                new ChatE(player),
                 new ClientBrand(player),
                 new NoFallExecutor(player),
                 new PingA(player),
@@ -304,6 +305,7 @@ public class CheckManager {
                 new BadPacketsV(player),
                 new BadPacketsW(player),
                 new BadPacketsY(player),
+                new BadPacketsWindow(player),
                 new BadPacketsZ(player),
                 player.packetOrderProcessor,
                 new PacketOrderB(player),
@@ -316,6 +318,16 @@ public class CheckManager {
                 new MultiActionsC(player),
                 new MultiActionsD(player),
                 new MultiActionsE(player),
+                new MultiActionsI(player),
+                new MultiActionsJ(player),
+                new MultiActionsL(player),
+                new MultiActionsM(player),
+                new MultiActionsN(player),
+                new MultiActionsP(player),
+                new MultiActionsQ(player),
+                new MultiActionsR(player),
+                new MultiActionsS(player),
+                player.openWindow,
                 new VehicleA(player),
                 new VehicleB(player),
                 new VehicleD(player),
@@ -344,7 +356,8 @@ public class CheckManager {
                 new AimProcessor(player),
                 new AimModulo360(player),
                 new AimDuplicateLook(player),
-                new ExploitF(player)));
+                new ExploitF(player),
+                new MultiActionsO(player)));
     }
 
     private static ClassToInstanceMap<VehicleListener> buildVehicleChecks(CultPlayer player) {
@@ -395,6 +408,9 @@ public class CheckManager {
                 new SprintE(player),
                 new SprintF(player),
                 new SprintG(player),
+                new SprintH(player),
+                new ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump(player),
+                new MultiActionsH(player),
                 new MultiInteractA(player),
                 new MultiInteractB(player),
                 new ElytraA(player),
@@ -406,6 +422,7 @@ public class CheckManager {
                 new ElytraG(player),
                 new ElytraH(player),
                 new ElytraI(player),
+                new ElytraJ(player),
                 new MultiBreak(player)));
     }
 
@@ -418,6 +435,7 @@ public class CheckManager {
                 new MultiPlace(player),
                 new MultiActionsF(player),
                 new MultiActionsG(player),
+                new MultiActionsK(player),
                 new CrashG(player),
                 new FarPlace(player),
                 new FabricatedPlace(player),
@@ -471,6 +489,18 @@ public class CheckManager {
         registerEarlyReceive(registrations, packetChecks.get(ChatB.class));
         registerEarlyReceive(registrations, packetChecks.get(ChatC.class));
         registerEarlyReceive(registrations, packetChecks.get(ChatD.class));
+        registerEarlyReceive(registrations, packetChecks.get(ChatE.class));
+        for (Class<? extends CheckListener> type : List.of(
+                MultiActionsI.class,
+                MultiActionsJ.class,
+                MultiActionsM.class,
+                MultiActionsN.class,
+                MultiActionsP.class,
+                MultiActionsQ.class,
+                MultiActionsR.class)) {
+            registerEarlyReceive(registrations, packetChecks.get(type));
+        }
+        registerEarlyReceive(registrations, postPredictionCheck.get(SprintH.class));
         registerEarlyReceive(registrations, packetChecks.get(BadPacketsA.class));
         registerEarlyReceive(registrations, packetChecks.get(BadPacketsC.class));
         registerEarlyReceive(registrations, packetChecks.get(BadPacketsF.class));
@@ -493,6 +523,7 @@ public class CheckManager {
 
         var packetOrder = packetChecks.getInstance(PacketOrderO.class);
         registerNonAsyncReceive(packetOrder, packetOrder::onNonAsyncPacket);
+        registerDecodedReceive(packetChecks.get(MultiActionsS.class));
         registerDecodedReceive(packetChecks.get(BadPacketsJ.class));
         registerDecodedReceive(postPredictionCheck.get(BadPacketsX.class));
         registerDecodedReceive(postPredictionCheck.get(ElytraC.class));
@@ -517,7 +548,9 @@ public class CheckManager {
         registerReceive(registrations, packetChecks.get(PluginChannelManager.class));
         registerReceive(registrations, packetChecks.get(Reach.class));
         registerReceive(registrations, packetChecks.get(FairReach.class));
+        registerReceive(registrations, packetChecks.get(BadPacketsWindow.class));
         registerReceive(registrations, packetChecks.get(CompensatedInventory.class));
+        registerReceive(registrations, player.openWindow);
         registerReceive(registrations, packetChecks.get(PacketPlayerAbilities.class));
         registerReceive(registrations, packetChecks.get(KeepAliveProcessor.class));
         registerReceive(registrations, packetChecks.get(BadPacketsO.class));
@@ -566,6 +599,10 @@ public class CheckManager {
         registerTickEnd(packetChecks.get(AutoclickerLimit.class));
         registerTickEnd(packetChecks.get(PacketWorldBorder.class));
         registerTickEnd(positionCheck.get(CompensatedCooldown.class));
+        registerTickEnd(postPredictionCheck.get(MultiActionsH.class));
+        registerTickEnd(postPredictionCheck.get(SprintH.class));
+        registerTickEnd(packetChecks.get(MultiActionsM.class));
+        registerTickEnd(player.openWindow);
 
         registerReceive(registrations, postPredictionCheck.get(NoSlow.class));
         registerReceive(registrations, postPredictionCheck.get(ServerStateNoSlow.class));
@@ -598,7 +635,8 @@ public class CheckManager {
                 ElytraF.class,
                 ElytraG.class,
                 ElytraH.class,
-                ElytraI.class)) {
+                ElytraI.class,
+                ElytraJ.class)) {
             registerReceive(registrations, postPredictionCheck.get(type));
         }
         for (Class<? extends BlockPlaceCheck> type :

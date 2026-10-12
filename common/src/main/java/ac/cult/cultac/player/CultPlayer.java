@@ -204,6 +204,7 @@ public class CultPlayer implements GrimUser {
     public @NotNull SimpleCollisionBox boundingBox;
     public @NotNull Pose pose = Pose.STANDING;
     public boolean isInBed = false;
+    public final ac.cult.cultac.utils.latency.CompensatedOpenWindow openWindow;
     public boolean hasInventoryOpen = false;
     public long lastOpenedInventory;
     public int food = 20;
@@ -337,6 +338,7 @@ public class CultPlayer implements GrimUser {
         this.timeJoined = System.currentTimeMillis();
         onReload();
 
+        this.openWindow = new ac.cult.cultac.utils.latency.CompensatedOpenWindow(this);
         this.nettyScheduler = new NettyScheduler(this);
         this.packetEntityReplication = new PacketEntityReplication(this);
         this.ghostBlockMitigator = new GhostBlockMitigator(this);

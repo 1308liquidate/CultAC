@@ -50,7 +50,8 @@ class VerboseTemplateAuditTest {
             "PacketOrderC.java", "writeKind passes the shape selector as a variable",
             "MultiActionsF.java", "writeAction passes the shape selector as a variable",
             "MultiActionsG.java", "writeAction passes the shape selector as a variable",
-            "PacketOrderK.java", "writer extended conditionally after write(buf, kind)");
+            "PacketOrderK.java", "writer extended conditionally after write(buf, kind)",
+            "MultiActionsM.java", "shape passed as a ternary");
 
     private static final Map<String, List<VerboseSchema.TypeTag>> WRITER_METHODS = writerMethods();
 

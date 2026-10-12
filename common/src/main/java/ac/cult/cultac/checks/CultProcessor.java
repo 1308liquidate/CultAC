@@ -18,6 +18,18 @@ public abstract class CultProcessor implements AbstractProcessor, ConfigReloadab
         this.player = player;
     }
 
+    public static boolean isDrop(ac.cult.cultac.protocol.value.PlayerAction action) {
+        return action == ac.cult.cultac.protocol.value.PlayerAction.DROP_ITEM
+                || action == ac.cult.cultac.protocol.value.PlayerAction.DROP_ALL_ITEMS;
+    }
+
+    protected final boolean canCancelInventoryAction(ac.cult.cultac.protocol.value.PlayerAction action) {
+        return action != ac.cult.cultac.protocol.value.PlayerAction.RELEASE_USE_ITEM
+                && (!isDrop(action)
+                        || player.getClientVersion()
+                                .isOlderThanOrEquals(ac.cult.cultac.network.protocol.ClientVersion.V_1_8));
+    }
+
     public CultPlayer getPlayer() {
         return player;
     }
