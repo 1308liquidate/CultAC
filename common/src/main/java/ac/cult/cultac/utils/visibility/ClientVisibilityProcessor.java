@@ -15,6 +15,7 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItemOn;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import java.util.List;
 
 /** One selection lifecycle: Minecraft#pick precedes every action in handleKeybinds. */
 public final class ClientVisibilityProcessor extends CultProcessor implements CheckListener, ClientTickEndListener {
@@ -77,6 +78,10 @@ public final class ClientVisibilityProcessor extends CultProcessor implements Ch
 
     public boolean entityHidden(PacketEntity entity) {
         return player.compensatedWorld.withSelectionSnapshot(() -> visibility.entityHidden(entity, positionError()));
+    }
+
+    public List<ClientVisibility.ItemPick> attackItemPicks() {
+        return player.isBedrockMovement() ? List.of() : visibility.attackItemPicks();
     }
 
     public boolean entityInteractionHidden(PacketEntity entity) {

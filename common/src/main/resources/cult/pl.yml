@@ -26,9 +26,9 @@ cult:
       # Aktualizacje potwierdzone przez klienta są stosowane wcześniej.
       max-ping-compensation-ms: 300
 
-      # Anuluje ataki na graczy, których najbliższy możliwy hitbox
-      # znajduje się dalej niż ta odległość, w blokach.
-      max-reach: 3.1
+      # Anuluje ataki na graczy, których najbliższy możliwy hitbox znajduje się dalej niż zasięg
+      # vanilla atakującego (entity_interaction_range) powiększony o tę odległość, w blokach.
+      reach-leniency: 0.1
 
     autoclicker-limit:
       # Średnia liczba kliknięć na sekundę, powyżej której rośnie bufor wykrywania autoclickera.
@@ -119,4 +119,4 @@ cult:
 
 # Znaczniki schematu. Nie edytuj.
 config-flavor: V2
-config-version: 2
+config-version: 3

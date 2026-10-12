@@ -3,9 +3,12 @@ package ac.cult.cultac.utils.data.packetentity;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.sprint.SprintD;
 import ac.cult.cultac.network.packet.EntityPositionPath;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.ClientAttributeInstance;
 import java.util.Collections;
 import java.util.List;
 import lombok.Getter;
@@ -31,12 +34,10 @@ public class PacketEntitySelf extends PacketEntity {
     @Setter
     double health;
 
-    @Getter
-    private double blockInteractionRange = 4.5D;
-
-    @Getter
-    @Setter
-    private double entityInteractionRange = 3.0D;
+    // Player#blockInteractionRange and #entityInteractionRange read these attributes. Only server
+    // attribute packets change them: ServerPlayer#updatePlayerAttributes owns the creative modifiers.
+    public final ClientAttributeInstance blockInteractionRange = new ClientAttributeInstance(4.5D, 0.0D, 64.0D);
+    public final ClientAttributeInstance entityInteractionRange = new ClientAttributeInstance(3.0D, 0.0D, 64.0D);
 
     public PacketEntitySelf(CultPlayer player) {
         this(player, null);
@@ -62,8 +63,8 @@ public class PacketEntitySelf extends PacketEntity {
         this.blockBreakSpeed = old.blockBreakSpeed;
         this.miningEfficiency = old.miningEfficiency;
         this.submergedMiningSpeed = old.submergedMiningSpeed;
-        this.blockInteractionRange = old.blockInteractionRange;
-        this.entityInteractionRange = old.entityInteractionRange;
+        this.blockInteractionRange.copyFrom(old.blockInteractionRange);
+        this.entityInteractionRange.copyFrom(old.entityInteractionRange);
     }
 
     public boolean inVehicle() {
@@ -94,13 +95,41 @@ public class PacketEntitySelf extends PacketEntity {
         super.addPotionEffect(effect, amplifier);
     }
 
-    public void setBlockInteractionRange(double blockInteractionRange) {
-        this.blockInteractionRange = blockInteractionRange;
+    public double getBlockInteractionRange() {
+        // Pre-1.20.5 MultiPlayerGameMode#getPickRange: 5.0 in creative, otherwise 4.5.
+        if (hasLegacyInteractionRanges()) return player.gamemode == GameMode.CREATIVE ? 5.0D : 4.5D;
+        return blockInteractionRange.value();
     }
 
-    public void setDefaultBlockInteractionRange(boolean creative) {
-        this.blockInteractionRange = creative ? 5.0D : 4.5D;
-        this.entityInteractionRange = creative ? 5.0D : 3.0D;
+    public double getEntityInteractionRange() {
+        // Pre-1.20.5 GameRenderer#pick: 6.0 with MultiPlayerGameMode#hasFarPickRange (creative), otherwise 3.0.
+        if (hasLegacyInteractionRanges()) return player.gamemode == GameMode.CREATIVE ? 6.0D : 3.0D;
+        return entityInteractionRange.value();
+    }
+
+    // Via drops the interaction range attributes for clients that predate them.
+    private boolean hasLegacyInteractionRanges() {
+        return !player.isBedrockMovement() && player.getClientVersion().isOlderThan(ClientVersion.V_1_20_5);
+    }
+
+    /**
+     * MultiPlayerGameMode#setLocalMode leaves Java range attributes untouched. Bedrock keeps the
+     * existing game-mode defaults, which attribute packets may then replace.
+     */
+    public void onGameModeChange(boolean creative) {
+        if (!player.isBedrockMovement()) return;
+        blockInteractionRange.replace(creative ? 5.0D : 4.5D, List.of());
+        entityInteractionRange.replace(creative ? 5.0D : 3.0D, List.of());
+    }
+
+    /** ClientPacketListener#handleRespawn: KEEP_ATTRIBUTE_MODIFIERS copies modifiers, otherwise only bases. */
+    public void onRespawn(boolean keepAttributeModifiers, boolean creative) {
+        if (player.isBedrockMovement()) {
+            onGameModeChange(creative);
+        } else if (!keepAttributeModifiers) {
+            blockInteractionRange.clearModifiers();
+            entityInteractionRange.clearModifiers();
+        }
     }
 
     @Override

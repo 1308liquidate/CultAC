@@ -31,6 +31,7 @@ import ac.cult.cultac.utils.latency.ClientComponentRegistries;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.visibility.ClientVisibility;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -220,7 +221,12 @@ class InteractionVisibilityTest {
         try (var setup = new Setup()) {
             var target = new SimpleCollisionBox(.2, 64, 2, .8, 65.8, 2.5);
             assertTrue(setup.visibility.entityHidden(target, 0));
-            setup.fixture.player.compensatedEntities.getSelf().setEntityInteractionRange(4);
+            setup.fixture
+                    .player
+                    .compensatedEntities
+                    .getSelf()
+                    .entityInteractionRange
+                    .replace(4, List.of());
             assertFalse(setup.visibility.entityHidden(target, 0));
             setup.wall("stone");
             assertTrue(setup.visibility.entityHidden(target, 0));

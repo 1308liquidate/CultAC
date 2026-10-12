@@ -27,25 +27,48 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.Vector3dm;
+import ac.cult.cultac.utils.math.VectorUtils;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.ReachUtils;
+import ac.cult.cultac.utils.visibility.ClientVisibility;
+import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import java.util.*;
 
 // You may not copy the check unless you are licensed under GPL
-// @CheckData(name = "Reach", configName = "Reach", setback = 10)
-public class Reach extends Check implements CheckListener, ClientTickEndListener {
+// PlayerReach and EntityReach each run this check for their own attack targets.
+public abstract class ReachCheck extends Check implements CheckListener, ClientTickEndListener {
     private record QueuedAttack(
             int entityId,
             List<Vec3> fromCandidates,
             SimpleCollisionBox targetBox,
             int type,
             boolean livingEntity,
-            boolean exempt) {}
+            boolean exempt,
+            AttackReach reach) {}
 
+    // A measured distance against the bound vanilla allows it.
+    private record Measure(double distance, double limit) {
+        private static final Measure NONE = new Measure(Double.POSITIVE_INFINITY, 0);
+
+        double excess() {
+            return distance - limit;
+        }
+
+        Measure worse(Measure other) {
+            return other.excess() > excess() ? other : this;
+        }
+
+        Measure better(Measure other) {
+            return other.excess() < excess() ? other : this;
+        }
+    }
+
+    private final ClientVisibilityProcessor visibility;
     private final List<QueuedAttack> playerAttackQueue = new ArrayList<>();
     private static final List<Integer> blacklisted = Arrays.asList(EntityTypeIds.SHULKER);
 
@@ -53,18 +76,27 @@ public class Reach extends Check implements CheckListener, ClientTickEndListener
     private double threshold;
     private double cancelBuffer; // For the next 4 hits after using reach, we aggressively cancel reach
 
-    public Reach(CultPlayer player) {
-        super(
-                player,
-                CheckInfo.builder()
-                        .name("Reach")
-                        .stableKey("cult.combat.reach")
-                        .description("Attacked an entity from too far away")
-                        .build());
+    protected ReachCheck(CultPlayer player, ClientVisibilityProcessor visibility, CheckInfo info) {
+        super(player, info);
+        this.visibility = visibility;
     }
+
+    /** Whether this check owns attacks on this entity type; -1 is an entity Cult does not track. */
+    protected abstract boolean targets(int type);
+
+    private int targetType(int entityId, PacketEntity entity) {
+        if (entity != null) return entity.type;
+        TrackerData tracked = player.compensatedEntities.serverPositionsMap.get(entityId);
+        return tracked == null ? -1 : tracked.getEntityType();
+    }
+
+    /** The check that owns this check's attacks whose look misses the target. */
+    protected abstract Class<? extends Check> hitboxes();
 
     private void handleInteract(final PacketReceiveEvent event, ServerboundInteract action) {
         if (!player.isDisabled() && action != null && action.action() == InteractAction.ATTACK) {
+            PacketEntity entity = player.compensatedEntities.entityMap.get(action.entityId());
+            if (!targets(targetType(action.entityId(), entity))) return;
 
             // Don't let the player teleport to bypass reach
             if (player.getSetbackTeleportUtil().shouldBlockMovement()) {
@@ -75,8 +107,6 @@ public class Reach extends Check implements CheckListener, ClientTickEndListener
                 player.onPacketCancel();
                 return;
             }
-
-            PacketEntity entity = player.compensatedEntities.entityMap.get(action.entityId());
 
             // Stop people from freezing transactions before an entity spawns to bypass reach
             if (entity == null) {
@@ -98,8 +128,9 @@ public class Reach extends Check implements CheckListener, ClientTickEndListener
 
             if (entity.type == EntityTypeIds.ARMOR_STAND) return;
 
-            if (player.gamemode == GameMode.SPECTATOR || player.gamemode == GameMode.CREATIVE) return;
+            if (player.gamemode == GameMode.SPECTATOR) return;
 
+            AttackReach reach = AttackReach.capture(player, visibility);
             boolean tooManyAttacks = playerAttackQueue.size() > 10;
             if (!tooManyAttacks) {
                 // Queue for next tick for a precise post-rotation check. Vanilla computes
@@ -111,10 +142,11 @@ public class Reach extends Check implements CheckListener, ClientTickEndListener
                         getReachBox(entity),
                         entity.type,
                         entity.isLivingEntity(),
-                        isReachExempt(entity)));
+                        isReachExempt(entity),
+                        reach));
             }
 
-            final boolean knownInvalid = isKnownInvalid(entity);
+            final boolean knownInvalid = isKnownInvalid(entity, reach);
 
             if ((shouldModifyPackets() && cancelImpossibleHits && knownInvalid) || tooManyAttacks) {
                 debug(() -> {
@@ -145,19 +177,17 @@ public class Reach extends Check implements CheckListener, ClientTickEndListener
     // than this method.  If this method flags, the other method WILL flag.
     //
     // Meaning that the other check should be the only one that flags.
-    private boolean isKnownInvalid(PacketEntity reachEntity) {
+    private boolean isKnownInvalid(PacketEntity reachEntity, AttackReach reach) {
         // If the entity doesn't exist, or if it is exempt, or if it is dead
         if ((isReachExempt(reachEntity) || !reachEntity.isLivingEntity())
                 && reachEntity.type != EntityTypeIds.END_CRYSTAL) return false; // exempt
 
-        if (player.gamemode == GameMode.SPECTATOR || player.gamemode == GameMode.CREATIVE) return false;
-
         // Filter out what we assume to be cheats
         if (cancelBuffer != 0) {
-            return checkReach(reachEntity, getAttackOrigins(), true) != null; // If they flagged
+            return checkReach(reachEntity, getAttackOrigins(), reach, true) != null; // If they flagged
         } else {
             SimpleCollisionBox targetBox = getReachBox(reachEntity);
-            return ReachUtils.getMinReachToBox(player, targetBox) > 3;
+            return ReachUtils.getMinReachToBox(player, targetBox) > reach.maxClosestDistance();
         }
     }
 
@@ -169,24 +199,21 @@ public class Reach extends Check implements CheckListener, ClientTickEndListener
                     attack.livingEntity(),
                     attack.exempt(),
                     attack.fromCandidates(),
+                    attack.reach(),
                     false);
             if (result != null) {
-                if ("Missed hitbox".equals(result)) {
-                    player.checkManager.getCheck(Hitboxes.class).flag(result);
-                } else if (attack.type() == EntityTypeIds.PLAYER) {
-                    flag(result);
+                if (attack.type() != EntityTypeIds.PLAYER) {
+                    result += " type=" + EntityTypeUtil.getKey(attack.type()).getPath();
+                }
+                if (result.startsWith("Missed hitbox")) {
+                    player.checkManager.getCheck(hitboxes()).flag(result);
                 } else {
-                    flag(result + " type="
-                            + EntityTypeUtil.getKey(attack.type()).getPath());
+                    flag(result);
                 }
             }
         }
 
         playerAttackQueue.clear();
-    }
-
-    private String checkReach(PacketEntity reachEntity, Vec3 from, boolean isPrediction) {
-        return checkReach(reachEntity, List.of(from), isPrediction);
     }
 
     private List<Vec3> getAttackOrigins() {
@@ -216,13 +243,15 @@ public class Reach extends Check implements CheckListener, ClientTickEndListener
         return candidates;
     }
 
-    private String checkReach(PacketEntity reachEntity, Collection<Vec3> fromCandidates, boolean isPrediction) {
+    private String checkReach(
+            PacketEntity reachEntity, Collection<Vec3> fromCandidates, AttackReach reach, boolean isPrediction) {
         return checkReach(
                 getReachBox(reachEntity),
                 reachEntity.type,
                 reachEntity.isLivingEntity(),
                 isReachExempt(reachEntity),
                 fromCandidates,
+                reach,
                 isPrediction);
     }
 
@@ -251,12 +280,13 @@ public class Reach extends Check implements CheckListener, ClientTickEndListener
             boolean livingEntity,
             boolean exempt,
             Collection<Vec3> fromCandidates,
+            AttackReach reach,
             boolean isPrediction) {
         targetBox = targetBox.copy();
         targetBox.expand(threshold);
         targetBox.expand(player.getMovementThreshold());
 
-        double minDistance = Double.MAX_VALUE;
+        Measure best = Measure.NONE;
 
         List<Vector3dm> possibleLookDirs = new ArrayList<>();
         possibleLookDirs.add(ReachUtils.getLook(player, player.xRot, player.yRot));
@@ -273,44 +303,64 @@ public class Reach extends Check implements CheckListener, ClientTickEndListener
                 }
                 for (double eye : player.getPossibleEyeHeights()) {
                     Vector3dm eyePos = new Vector3dm(from.x, from.y + eye, from.z);
-                    Vector3dm endReachPos = eyePos.clone()
-                            .add(new Vector3dm(lookVec.getX() * 6, lookVec.getY() * 6, lookVec.getZ() * 6));
-
-                    Vector3dm intercept = ReachUtils.calculateIntercept(targetBox, eyePos, endReachPos)
-                            .getFirst();
-
-                    if (ReachUtils.isVecInside(targetBox, eyePos)) {
-                        minDistance = 0;
-                        break;
-                    }
-
-                    if (intercept != null) {
-                        minDistance = Math.min(eyePos.distance(intercept), minDistance);
-                    }
+                    best = best.better(measure(targetBox, eyePos, lookVec, reach));
+                    if (best.distance() == 0) break;
                 }
-                if (minDistance == 0) {
-                    break;
-                }
+                if (best.distance() == 0) break;
             }
-            if (minDistance == 0) {
-                break;
-            }
+            if (best.distance() == 0) break;
         }
 
         // if the entity is not exempt and the entity is alive
         if ((!exempt && livingEntity) || type == EntityTypeIds.END_CRYSTAL) {
-            if (minDistance == Double.MAX_VALUE) {
+            if (best.distance() == Double.POSITIVE_INFINITY) {
                 cancelBuffer = 1;
                 return "Missed hitbox";
-            } else if (minDistance > 3) {
+            } else if (best.excess() > 0) {
                 cancelBuffer = 1;
-                return String.format("%.5f", minDistance) + " blocks";
+                return String.format("%.5f blocks, max=%.5f", best.distance(), best.limit());
             } else {
                 cancelBuffer = Math.max(0, cancelBuffer - 0.25);
             }
         }
 
         return null;
+    }
+
+    // The least-flagging vanilla selection from one eye and look: Minecraft#pick, then Minecraft#startAttack.
+    private Measure measure(SimpleCollisionBox targetBox, Vector3dm eyePos, Vector3dm lookVec, AttackReach reach) {
+        // AttackRange#isInRange measures to a point on the target box, never nearer than its closest point.
+        Measure itemLimit = Measure.NONE;
+        if (reach.hasItemLimit()) {
+            Vector3dm closest = VectorUtils.cutBoxToVector(eyePos, targetBox);
+            itemLimit = new Measure(eyePos.distance(closest), reach.itemLimit());
+        }
+
+        // LocalPlayer#pick: the entity_interaction_range ray against the target box.
+        Measure best = Measure.NONE;
+        double rawHit = intercept(targetBox, eyePos, lookVec, reach.entityRange() + 3);
+        if (rawHit != Double.POSITIVE_INFINITY) {
+            Measure pick = new Measure(rawHit, reach.entityRange());
+            best = reach.hasItemLimit() ? pick.worse(itemLimit) : pick;
+        }
+
+        // AttackRange#getClosesetHit: the item ray against the box inflated by its hitbox margin.
+        for (ClientVisibility.ItemPick itemPick : reach.picks()) {
+            double rayLength = lookVec.length() * itemPick.rayScale();
+            SimpleCollisionBox marginBox = targetBox.copy().expand(itemPick.hitboxMargin());
+            double itemHit = intercept(marginBox, eyePos, lookVec, rayLength + 3);
+            if (itemHit == Double.POSITIVE_INFINITY) continue;
+            Measure pick = new Measure(itemHit, rayLength);
+            best = best.better(reach.hasItemLimit() ? pick.worse(itemLimit) : pick);
+        }
+        return best;
+    }
+
+    private static double intercept(SimpleCollisionBox box, Vector3dm eyePos, Vector3dm lookVec, double length) {
+        if (ReachUtils.isVecInside(box, eyePos)) return 0;
+        Vector3dm end = eyePos.clone().add(lookVec.clone().multiply(length / lookVec.length()));
+        Vector3dm intercept = ReachUtils.calculateIntercept(box, eyePos, end).getFirst();
+        return intercept == null ? Double.POSITIVE_INFINITY : eyePos.distance(intercept);
     }
 
     private boolean isReachExempt(PacketEntity reachEntity) {

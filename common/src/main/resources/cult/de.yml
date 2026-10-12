@@ -26,9 +26,9 @@ cult:
       # Vom Client bestätigte Änderungen werden früher übernommen.
       max-ping-compensation-ms: 300
 
-      # Bricht Angriffe auf Spieler ab, wenn deren nächstmögliche Hitbox
-      # weiter als diese Entfernung entfernt ist, in Blöcken.
-      max-reach: 3.1
+      # Bricht Angriffe auf Spieler ab, deren nächstmögliche Hitbox weiter entfernt ist als die
+      # Vanilla-Reichweite des Angreifers (entity_interaction_range) plus diese Entfernung, in Blöcken.
+      reach-leniency: 0.1
 
     autoclicker-limit:
       # Durchschnittliche Klicks pro Sekunde, oberhalb derer der Autoclicker-Puffer steigt.
@@ -119,4 +119,4 @@ cult:
 
 # Schemamarkierungen. Nicht bearbeiten.
 config-flavor: V2
-config-version: 2
+config-version: 3

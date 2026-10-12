@@ -18,6 +18,7 @@ import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.ReachUtils;
+import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import io.netty.util.concurrent.ScheduledFuture;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import java.util.Map;
@@ -39,18 +40,21 @@ public class FairReach extends Check implements CheckListener {
 
     int max_position_packet_jitter = 15;
     int max_ping_compensation = 300;
-    double max_reach = 3.1;
+    double reach_leniency = 0.1;
 
     ScheduledFuture<?> tickStartTask = null;
     ScheduledFuture<?> tickEndTask = null;
 
-    public FairReach(CultPlayer player) {
+    private final ClientVisibilityProcessor visibility;
+
+    public FairReach(CultPlayer player, ClientVisibilityProcessor visibility) {
         super(
                 player,
                 CheckInfo.builder()
                         .name("FairReach")
                         .stableKey("cult.combat.fair_reach")
                         .build());
+        this.visibility = visibility;
     }
 
     @CultPacketHandler
@@ -91,7 +95,8 @@ public class FairReach extends Check implements CheckListener {
 
     private void handleInteract(final PacketReceiveEvent event, ServerboundInteract attack) {
         // The server entity position will temporarily desync from the player
-        // If it exceeds the defined limit, 3.1, from the optimal reach angle, we will cancel the hit
+        // If it exceeds the player's vanilla reach plus the configured leniency from the optimal
+        // reach angle, we will cancel the hit
         if (!player.isDisabled() && attack != null) {
 
             FairReachEntity target = targetPlayers.get(attack.entityId());
@@ -102,7 +107,8 @@ public class FairReach extends Check implements CheckListener {
             if (target == null) return;
             if (attack.action() != InteractAction.ATTACK) return;
 
-            if (target.getMinDistanceForReach() > max_reach) {
+            double maxReach = AttackReach.capture(player, visibility).maxClosestDistance() + reach_leniency;
+            if (target.getMinDistanceForReach() > maxReach) {
                 player.onPacketCancel();
                 event.setCancelled(true);
             }
@@ -186,7 +192,7 @@ public class FairReach extends Check implements CheckListener {
         super.reload();
         max_position_packet_jitter = getConfig().getIntElse("cult.checks.fair-reach.max-position-packet-jitter-ms", 15);
         max_ping_compensation = getConfig().getIntElse("cult.checks.fair-reach.max-ping-compensation-ms", 300);
-        max_reach = getConfig().getDoubleElse("cult.checks.fair-reach.max-reach", 3.1);
+        reach_leniency = getConfig().getDoubleElse("cult.checks.fair-reach.reach-leniency", 0.1);
     }
 
     enum TickingStatus {

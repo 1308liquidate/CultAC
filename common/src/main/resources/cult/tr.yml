@@ -26,9 +26,9 @@ cult:
       # İstemcinin onayladığı güncellemeler daha erken uygulanır.
       max-ping-compensation-ms: 300
 
-      # Oyuncuların mümkün olan en yakın vuruş kutusuna uzaklık bu değeri aştığında
-      # saldırıları iptal eder. Birimi bloktur.
-      max-reach: 3.1
+      # Oyuncuların mümkün olan en yakın vuruş kutusuna uzaklık, saldıranın vanilla menzilini
+      # (entity_interaction_range) bu değer kadar aştığında saldırıları iptal eder. Birimi bloktur.
+      reach-leniency: 0.1
 
     autoclicker-limit:
       # Aşıldığında otomatik tıklayıcı tespit birikimini artıran ortalama saniyelik tıklama sayısı.
@@ -119,4 +119,4 @@ cult:
 
 # Şema işaretçileri. Değiştirmeyin.
 config-flavor: V2
-config-version: 2
+config-version: 3

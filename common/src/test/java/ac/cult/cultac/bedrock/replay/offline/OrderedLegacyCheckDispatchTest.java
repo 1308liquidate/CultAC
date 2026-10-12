@@ -10,7 +10,8 @@ import ac.cult.cultac.checks.impl.badpackets.BadPacketsB;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsH;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsO;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsV;
-import ac.cult.cultac.checks.impl.combat.Hitboxes;
+import ac.cult.cultac.checks.impl.combat.EntityHitboxes;
+import ac.cult.cultac.checks.impl.combat.PlayerHitboxes;
 import ac.cult.cultac.checks.impl.movement.timer.DumbTimer;
 import ac.cult.cultac.checks.impl.movement.timer.NegativeTimerCheck;
 import ac.cult.cultac.checks.impl.movement.timer.TickTimer;
@@ -426,10 +427,12 @@ public final class OrderedLegacyCheckDispatchTest {
         CultPlayer player = offlineJavaPlayer();
         try {
             assertTrue(player.checkManager.getListener(BadPacketsB.class) != null);
-            assertTrue(player.checkManager.getListener(Hitboxes.class) != null);
+            assertTrue(player.checkManager.getListener(PlayerHitboxes.class) != null);
+            assertTrue(player.checkManager.getListener(EntityHitboxes.class) != null);
             assertTrue(player.checkManager.getListener(VehicleC.class) != null);
             assertFalse(BadPacketsB.class.isAnnotationPresent(DeadCheck.class));
-            assertFalse(Hitboxes.class.isAnnotationPresent(DeadCheck.class));
+            assertFalse(PlayerHitboxes.class.isAnnotationPresent(DeadCheck.class));
+            assertFalse(EntityHitboxes.class.isAnnotationPresent(DeadCheck.class));
             assertFalse(VehicleC.class.isAnnotationPresent(DeadCheck.class));
             assertFalse(player.checkManager.getListener(VehicleC.class) instanceof PostPredictionListener);
         } finally {

@@ -10,11 +10,13 @@ import ac.cult.cultac.checks.impl.badpackets.*;
 import ac.cult.cultac.checks.impl.bedrock.BedrockMovement;
 import ac.cult.cultac.checks.impl.breaking.*;
 import ac.cult.cultac.checks.impl.chat.*;
+import ac.cult.cultac.checks.impl.combat.EntityHitboxes;
+import ac.cult.cultac.checks.impl.combat.EntityReach;
 import ac.cult.cultac.checks.impl.combat.FairReach;
-import ac.cult.cultac.checks.impl.combat.Hitboxes;
 import ac.cult.cultac.checks.impl.combat.MultiInteractA;
 import ac.cult.cultac.checks.impl.combat.MultiInteractB;
-import ac.cult.cultac.checks.impl.combat.Reach;
+import ac.cult.cultac.checks.impl.combat.PlayerHitboxes;
+import ac.cult.cultac.checks.impl.combat.PlayerReach;
 import ac.cult.cultac.checks.impl.combat.SelfInteract;
 import ac.cult.cultac.checks.impl.crash.*;
 import ac.cult.cultac.checks.impl.elytra.*;
@@ -256,15 +258,17 @@ public class CheckManager {
                 new SimulationProcessor(player),
                 player.actionManager,
                 player.pluginChannelManager,
-                new Reach(player),
+                new PlayerReach(player, visibility),
+                new EntityReach(player, visibility),
                 visibility,
                 new PlaceVisibility(player, visibility),
                 new BreakVisibility(player, visibility),
                 new AttackPlayerVisibility(player, visibility),
                 new AttackMobVisibility(player, visibility),
                 new InteractEntityVisibility(player, visibility),
-                new Hitboxes(player),
-                new FairReach(player),
+                new PlayerHitboxes(player),
+                new EntityHitboxes(player),
+                new FairReach(player, visibility),
                 player.packetEntityReplication,
                 new PacketChangeGameState(player),
                 new CompensatedInventory(player),
@@ -546,7 +550,8 @@ public class CheckManager {
         registerReceive(registrations, packetChecks.get(SimulationProcessor.class));
         registerReceive(registrations, packetChecks.get(ActionManager.class));
         registerReceive(registrations, packetChecks.get(PluginChannelManager.class));
-        registerReceive(registrations, packetChecks.get(Reach.class));
+        registerReceive(registrations, packetChecks.get(PlayerReach.class));
+        registerReceive(registrations, packetChecks.get(EntityReach.class));
         registerReceive(registrations, packetChecks.get(FairReach.class));
         registerReceive(registrations, packetChecks.get(BadPacketsWindow.class));
         registerReceive(registrations, packetChecks.get(CompensatedInventory.class));
@@ -587,12 +592,13 @@ public class CheckManager {
         registerReceive(registrations, prePredictionChecks.get(CrashH.class));
 
         registerTickEnd(packetChecks.get(ActionManager.class));
-        registerTickEnd(packetChecks.get(Reach.class));
+        registerTickEnd(packetChecks.get(PlayerReach.class));
+        registerTickEnd(packetChecks.get(EntityReach.class));
         registerTickEnd(packetChecks.get(ClientVisibilityProcessor.class));
         registerTickEnd(vehicleCheck.get(VehiclePredictionRunner.class));
         // MCP-Reborn Minecraft#tick computes the attack hit result before
         // ClientLevel#tickEntities interpolates remote entities, then sends
-        // ServerboundClientTickEndPacket. Reach consumes queued attacks first;
+        // ServerboundClientTickEndPacket. The reach checks consume queued attacks first;
         // entity interpolation advances afterward for the next client tick.
         registerTickEnd(packetChecks.get(PacketEntityReplication.class));
         registerTickEnd(packetChecks.get(SimulationProcessor.class));

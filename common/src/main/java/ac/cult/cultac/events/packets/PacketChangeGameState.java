@@ -36,7 +36,7 @@ public class PacketChangeGameState extends CultProcessor implements CheckListene
             // abilities packet can subsequently overwrite instabuild independently of game mode.
             player.canInstabuild = player.gamemode == GameMode.CREATIVE;
             player.isInvulnerable = player.gamemode == GameMode.CREATIVE || player.gamemode == GameMode.SPECTATOR;
-            player.compensatedEntities.getSelf().setDefaultBlockInteractionRange(player.gamemode == GameMode.CREATIVE);
+            player.compensatedEntities.getSelf().onGameModeChange(player.gamemode == GameMode.CREATIVE);
 
             if (previous == GameMode.SPECTATOR && player.gamemode != GameMode.SPECTATOR) {
                 CultAPI.INSTANCE.getSpectateManager().handlePlayerStopSpectating(player.playerUUID);

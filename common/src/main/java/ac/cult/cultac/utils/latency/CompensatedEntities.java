@@ -191,17 +191,14 @@ public class CompensatedEntities {
                     player.compensatedEntities.getSelf().airDragModifier = calculateAttribute(snapshot, 0.0, 2048.0);
                 }
 
-                if (matchesAttribute(snapshot, "block_interaction_range")) {
-                    player.compensatedEntities
-                            .getSelf()
-                            .setBlockInteractionRange(calculateAttribute(snapshot, 0.0, 64.0));
+                if (supportsAttributes(ClientVersion.V_1_20_5)
+                        && matchesAttribute(snapshot, "block_interaction_range")) {
+                    player.compensatedEntities.getSelf().blockInteractionRange.onServerSnapshot(snapshot);
                 }
 
                 if (supportsAttributes(ClientVersion.V_1_20_5)
                         && matchesAttribute(snapshot, "entity_interaction_range")) {
-                    player.compensatedEntities
-                            .getSelf()
-                            .setEntityInteractionRange(calculateAttribute(snapshot, 0.0, 64.0));
+                    player.compensatedEntities.getSelf().entityInteractionRange.onServerSnapshot(snapshot);
                 }
 
                 if (matchesAttribute(snapshot, "block_break_speed")) {

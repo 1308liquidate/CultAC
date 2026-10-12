@@ -98,7 +98,7 @@ public class PacketPlayerRespawn {
         player.compensatedEntities.resetClientTickOrder();
         player.compensatedEntities
                 .getSelf()
-                .setDefaultBlockInteractionRange(player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE);
+                .onGameModeChange(player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE);
         player.compensatedEntities.selfTrackedEntity =
                 new TrackerData(0, 0, 0, 0, 0, EntityTypeIds.PLAYER, player.lastTransactionSent.get());
         player.dimension = HolderSets.identifier(spawnInfo.dimension());
@@ -231,10 +231,8 @@ public class PacketPlayerRespawn {
             player.canInstabuild = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE;
             player.isInvulnerable = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE
                     || player.gamemode == ac.cult.cultac.protocol.value.GameMode.SPECTATOR;
-            player.compensatedEntities
-                    .getSelf()
-                    .setDefaultBlockInteractionRange(
-                            player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE);
+            respawnedSelf.onRespawn(
+                    keepAttributeModifiers, player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE);
             player.compensatedWorld.setDimension(worldName, dimensionType);
             // ClientPacketListener creates a new ClientLevel only when the dimension key changes.
             if (worldChange) {

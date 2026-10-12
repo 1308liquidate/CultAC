@@ -133,9 +133,9 @@ class EntityInteractionVisibilityTest {
             var visibility = new ClientVisibility(setup.player);
             assertFalse(visibility.entityHidden(setup.player.compensatedEntities.getEntity(42), 0));
             assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
-            setup.player.compensatedEntities.getSelf().setEntityInteractionRange(4.5);
+            setup.player.compensatedEntities.getSelf().entityInteractionRange.replace(4.5, List.of());
             assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
-            setup.player.compensatedEntities.getSelf().setEntityInteractionRange(0);
+            setup.player.compensatedEntities.getSelf().entityInteractionRange.replace(0, List.of());
             assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
         }
     }

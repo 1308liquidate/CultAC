@@ -26,9 +26,9 @@ cult:
       # 客户端已确认接收的更新会提前应用。
       max-ping-compensation-ms: 300
 
-      # 攻击目标为玩家时，若其最近可能的命中箱距离超过此值，则取消攻击。
-      # 单位为方块。
-      max-reach: 3.1
+      # 攻击目标为玩家时，若其最近可能的命中箱距离超过攻击者的原版触及距离
+      # (entity_interaction_range) 加上此值，则取消攻击。单位为方块。
+      reach-leniency: 0.1
 
     autoclicker-limit:
       # 平均每秒点击次数超过此值时，自动点击检测的累计值会增加。
@@ -115,4 +115,4 @@ cult:
 
 # 配置架构标记。请勿修改。
 config-flavor: V2
-config-version: 2
+config-version: 3

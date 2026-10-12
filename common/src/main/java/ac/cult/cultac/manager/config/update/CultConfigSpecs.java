@@ -1,5 +1,6 @@
 package ac.cult.cultac.manager.config.update;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,10 +43,23 @@ import org.jetbrains.annotations.Nullable;
 @UtilityClass
 public final class CultConfigSpecs {
 
-    /** Cult-only settings in {@code cult.yml}; v2 adds Bedrock position reconciliation. */
+    /**
+     * Cult-only settings in {@code cult.yml}; v2 adds Bedrock position reconciliation.
+     *
+     * <p>v2 → v3: FairReach's absolute {@code max-reach} becomes {@code reach-leniency} on top of
+     * the player's own reach, so an old limit becomes its distance past the 3-block default.
+     */
     public static @NotNull ConfigUpdater.Spec cultSettings() {
-        return ConfigUpdater.Spec.builder("/cult/", 2, ConfigUpdater.ConfigFlavor.V2)
+        return ConfigUpdater.Spec.builder("/cult/", 3, ConfigUpdater.ConfigFlavor.V2)
+                .migration(3, CultConfigSpecs::fairReachLeniency)
                 .build();
+    }
+
+    private static void fairReachLeniency(MigrationContext ctx) {
+        Object maxReach = ctx.input().get("cult.checks.fair-reach.max-reach");
+        if (!(maxReach instanceof Number number)) return;
+        BigDecimal leniency = new BigDecimal(number.toString()).subtract(BigDecimal.valueOf(3));
+        ctx.output().put("cult.checks.fair-reach.reach-leniency", leniency.doubleValue());
     }
 
     /**

@@ -49,6 +49,20 @@ public final class ClientVisibility {
         if (!selections.contains(candidate)) selections.add(candidate);
     }
 
+    /** An item AttackRange LocalPlayer#raycastHitResult may have picked with, and its ray scale bound. */
+    public record ItemPick(float hitboxMargin, double rayScale) {}
+
+    /** The item picks Minecraft#pick may have made before this tick's attack. */
+    public List<ItemPick> attackItemPicks() {
+        beginSelection();
+        List<ItemPick> picks = new ArrayList<>();
+        for (Selection selection : selections) {
+            var attack = selection.attackRange();
+            if (attack != null) picks.add(new ItemPick(attack.hitboxMargin(), nativeItemRayScale(attack)));
+        }
+        return picks;
+    }
+
     private boolean hiddenForEverySelection(java.util.function.Supplier<Boolean> query) {
         if (selections.isEmpty()) return query.get();
         Selection previous = activeSelection;

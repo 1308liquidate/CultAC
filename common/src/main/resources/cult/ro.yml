@@ -26,9 +26,9 @@ cult:
       # Actualizările confirmate de client sunt aplicate mai devreme.
       max-ping-compensation-ms: 300
 
-      # Anulează atacurile asupra jucătorilor al căror cel mai apropiat hitbox posibil
-      # se află dincolo de această distanță, în blocuri.
-      max-reach: 3.1
+      # Anulează atacurile asupra jucătorilor al căror cel mai apropiat hitbox posibil se află dincolo de
+      # raza vanilla a atacatorului (entity_interaction_range) plus această distanță, în blocuri.
+      reach-leniency: 0.1
 
     autoclicker-limit:
       # Media de clicuri pe secundă peste care crește contorul de detectare a autoclickerului.
@@ -119,4 +119,4 @@ cult:
 
 # Marcaje ale schemei. Nu modifica.
 config-flavor: V2
-config-version: 2
+config-version: 3
