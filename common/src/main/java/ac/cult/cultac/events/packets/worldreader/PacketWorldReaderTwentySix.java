@@ -19,16 +19,26 @@ public class PacketWorldReaderTwentySix extends BasePacketWorldReader {
         CachedSection[] chunks = new CachedSection[dimension.sectionCount()];
         int[][] biomes = new int[chunks.length][];
         int biomeSize = biomeRegistrySize(player);
-        var bytes = Unpooled.wrappedBuffer(packet.sections());
-        try {
+        if (packet.decodedSections() != null) {
+            if (packet.decodedSections().size() != chunks.length)
+                throw new IllegalArgumentException("Chunk section count differs from the received dimension");
             for (int i = 0; i < chunks.length; i++) {
-                bytes.readShort(); // Existing cache recalculates block/fluid counts from the decoded states.
-                bytes.readShort();
-                chunks[i] = new CachedSection(PalettedSection.readBlocks(bytes));
-                biomes[i] = PalettedSection.readBiomes(bytes, biomeSize);
+                var section = packet.decodedSections().get(i);
+                chunks[i] = new CachedSection(section.copyBlocks());
+                biomes[i] = section.copyBiomes();
             }
-        } finally {
-            bytes.release();
+        } else {
+            var bytes = Unpooled.wrappedBuffer(packet.sections());
+            try {
+                for (int i = 0; i < chunks.length; i++) {
+                    bytes.readShort(); // Existing cache recalculates block/fluid counts from the decoded states.
+                    bytes.readShort();
+                    chunks[i] = new CachedSection(PalettedSection.readBlocks(bytes));
+                    biomes[i] = PalettedSection.readBiomes(bytes, biomeSize);
+                }
+            } finally {
+                bytes.release();
+            }
         }
         var tickers = packet.tickerCandidates().stream()
                 .filter(position -> hasGeyserTicker(chunks, dimension.minHeight(), position))
@@ -70,13 +80,19 @@ public class PacketWorldReaderTwentySix extends BasePacketWorldReader {
         int biomeSize = biomeRegistrySize(player);
         for (var chunk : packet.chunks()) {
             int[][] values = new int[dimension.sectionCount()][];
-            var bytes = Unpooled.wrappedBuffer(chunk.sections());
-            try {
-                for (int index = 0; index < values.length; index++) {
-                    values[index] = PalettedSection.readBiomes(bytes, biomeSize);
+            if (chunk.decodedSections() != null) {
+                if (chunk.decodedSections().size() != values.length)
+                    throw new IllegalArgumentException("Biome section count differs from the received dimension");
+                for (int i = 0; i < values.length; i++) values[i] = chunk.decodedSections().get(i).copyBiomes();
+            } else {
+                var bytes = Unpooled.wrappedBuffer(chunk.sections());
+                try {
+                    for (int index = 0; index < values.length; index++) {
+                        values[index] = PalettedSection.readBiomes(bytes, biomeSize);
+                    }
+                } finally {
+                    bytes.release();
                 }
-            } finally {
-                bytes.release();
             }
             decoded.add(values);
         }

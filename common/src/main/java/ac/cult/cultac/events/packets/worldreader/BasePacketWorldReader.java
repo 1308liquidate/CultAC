@@ -323,11 +323,18 @@ public class BasePacketWorldReader {
     public void handleMultiBlockChange(
             CultPlayer player, PacketSendEvent<SectionBlocksUpdate> event, SectionBlocksUpdate multiBlockChange) {
         int range = 16;
-        List<BlockUpdate> updates = multiBlockChange.updates();
-        boolean nearPlayer = updates.stream().anyMatch(update -> isNearPlayer(player, update.position(), range));
-
-        if (updates.isEmpty()) {
+        if (multiBlockChange.size() == 0) {
             return;
+        }
+
+        boolean nearPlayer = false;
+        for (int i = 0; i < multiBlockChange.size(); i++) {
+            if (Math.abs(multiBlockChange.x(i) - player.x) < range
+                    && Math.abs(multiBlockChange.y(i) - player.y) < range
+                    && Math.abs(multiBlockChange.z(i) - player.z) < range) {
+                nearPlayer = true;
+                break;
+            }
         }
 
         if (nearPlayer) {
@@ -335,15 +342,15 @@ public class BasePacketWorldReader {
             if (transaction != null) {
                 player.latencyUtils.addRealTimeTask(
                         transaction.transaction(),
-                        () -> updates.forEach(update -> player.compensatedWorld.handleServerBlockUpdate(
-                                update.position(), update.state(), transaction.transaction())));
+                        () -> multiBlockChange.runUpdates(
+                                (x, y, z, state) -> player.compensatedWorld.handleServerBlockUpdate(
+                                        x, y, z, state, transaction.transaction())));
                 return;
             }
         }
 
-        player.latencyUtils.addRealTimeTaskNow(
-                () -> updates.forEach(update -> player.compensatedWorld.handleServerBlockUpdate(
-                        update.position(), update.state(), player.lastTransactionSent.get())));
+        player.latencyUtils.addRealTimeTaskNow(() -> multiBlockChange.runUpdates((x, y, z, state) ->
+                player.compensatedWorld.handleServerBlockUpdate(x, y, z, state, player.lastTransactionSent.get())));
     }
 
     private boolean isNearPlayer(CultPlayer player, BlockPos pos, int range) {

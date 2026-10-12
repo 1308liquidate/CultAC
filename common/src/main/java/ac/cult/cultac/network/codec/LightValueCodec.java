@@ -26,16 +26,14 @@ final class LightValueCodec {
                 masks[index] = BitSet.valueOf(words);
             }
         }
-        return new LightValues(masks[0], masks[1], masks[2], masks[3], arrays(input), arrays(input));
+        return LightValues.ofLayers(masks[0], masks[1], masks[2], masks[3], arrays(input), arrays(input));
     }
 
-    private static List<byte[]> arrays(ByteBuf input) {
+    private static List<LightValues.Layer> arrays(ByteBuf input) {
         int count = Wire.readLength(input, input.readableBytes());
-        var arrays = new ArrayList<byte[]>(count);
+        var arrays = new ArrayList<LightValues.Layer>(count);
         for (int index = 0; index < count; index++) {
-            byte[] bytes = new byte[Wire.readLength(input, 2048)];
-            input.readBytes(bytes);
-            arrays.add(bytes);
+            arrays.add(LightValues.Layer.read(input, Wire.readLength(input, 2048)));
         }
         return arrays;
     }

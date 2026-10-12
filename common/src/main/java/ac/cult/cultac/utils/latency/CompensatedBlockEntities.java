@@ -9,8 +9,8 @@ import ac.cult.cultac.network.packet.WorldPackets.BlockEntityUpdate;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.data.ModelBlockStates;
 import ac.cult.cultac.protocol.value.BlockPos;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.function.Supplier;
 
 /** Sparse packet inputs applied at the existing compensated transaction boundary. */
@@ -27,7 +27,8 @@ public final class CompensatedBlockEntities {
         }
     }
 
-    private final Map<Long, Entry> entries = new HashMap<>();
+    // Ordinary block writes need lookups but hold no block entity. Allocate storage on the first retained entry.
+    private Long2ObjectOpenHashMap<Entry> entries;
     private final Supplier<ac.cult.blocksim.data.InteractionRegistries> registries;
     private final ModelBlockStates states;
 
@@ -49,23 +50,23 @@ public final class CompensatedBlockEntities {
     }
 
     private Entry entry(BlockPos pos, int state) {
-        Entry entry = entries.get(pos.asLong());
+        Entry entry = get(pos.asLong());
         var block = Rules.DATA.registry().block(state);
         String type = block.bindings().get("blockEntity.type");
         if (entry != null && !entry.data().type().equals(type)) {
-            entries.remove(pos.asLong());
+            remove(pos.asLong());
             entry = null;
         }
         if (entry == null) {
             var data = BlockEntityPrototypes.create(block, state);
             if (data != null) {
                 entry = new Entry(data, state);
-                if (!data.data().keys().isEmpty()) entries.put(pos.asLong(), entry);
+                if (!data.data().keys().isEmpty()) put(pos.asLong(), entry);
             }
         }
         if (entry != null && entry.state() != state) {
             entry = new Entry(entry.data(), state);
-            entries.put(pos.asLong(), entry);
+            put(pos.asLong(), entry);
         }
         return entry;
     }
@@ -92,7 +93,7 @@ public final class CompensatedBlockEntities {
                 ? ClientJukeboxFields.load(tag, entry.data(), registries.get())
                 : ClientBlockEntityFields.load(packet.type(), tag, states.toModel(stateId));
         if (loaded.data().keys().isEmpty()) return;
-        entries.put(
+        put(
                 packet.position().asLong(),
                 new Entry(retainShulkerAnimation(loaded, entry.data()), states.toModel(stateId)));
     }
@@ -111,7 +112,7 @@ public final class CompensatedBlockEntities {
     public void blockEvent(BlockPos pos, int state, int action, int parameter) {
         var entry = entry(pos, states.toModel(state));
         if (entry != null)
-            entries.put(
+            put(
                     pos.asLong(),
                     new Entry(
                             ac.cult.blocksim.engine.ShulkerAnimation.event(entry.data(), action, parameter),
@@ -119,13 +120,17 @@ public final class CompensatedBlockEntities {
     }
 
     public void tick() {
-        entries.replaceAll((pos, entry) -> {
+        if (entries == null) return;
+        var iterator = entries.long2ObjectEntrySet().fastIterator();
+        while (iterator.hasNext()) {
+            var slot = iterator.next();
+            var entry = slot.getValue();
             var next = ac.cult.blocksim.engine.ShulkerAnimation.tick(entry.data());
             if (next.type().equals("minecraft:jukebox")
                     && Rules.DATA.registry().value(entry.state(), "has_record").equals("true"))
                 next = ac.cult.blocksim.engine.JukeboxPlayback.tick(next);
-            return next == entry.data() ? entry : new Entry(next, entry.state());
-        });
+            if (next != entry.data()) slot.setValue(new Entry(next, entry.state()));
+        }
     }
 
     /** Preserve same-block and copper-family entities exactly as LevelChunk does. */
@@ -133,7 +138,7 @@ public final class CompensatedBlockEntities {
         int oldId = states.toModel(oldState), newId = states.toModel(newState);
         if (!Rules.DATA.registry().sameBlock(oldId, newId)
                 && !Rules.BEHAVIORS.apply(newId).shouldKeepBlockEntity(Rules.DATA.registry(), newId, oldId))
-            entries.remove(pos.asLong());
+            remove(pos.asLong());
         entry(pos, newId);
     }
 
@@ -145,28 +150,43 @@ public final class CompensatedBlockEntities {
     /** Local action overlay after its ordered block writes, without running native callbacks. */
     public void predict(BlockPos pos, int state, BlockEntityData data) {
         if (data == null) {
-            entries.remove(pos.asLong());
+            remove(pos.asLong());
             return;
         }
         if (data.data().keys().isEmpty()) {
-            entries.remove(pos.asLong());
+            remove(pos.asLong());
             return;
         }
         int model = states.toModel(state);
         String expectedType = Rules.DATA.registry().block(model).bindings().get("blockEntity.type");
         if (expectedType == null || expectedType.equals("none") || !expectedType.equals(data.type()))
             throw new IllegalArgumentException("Predicted block entity does not match client state at " + pos);
-        entries.put(pos.asLong(), new Entry(data, model));
+        put(pos.asLong(), new Entry(data, model));
     }
 
     public void forgetChunk(int x, int z) {
-        entries.keySet().removeIf(key -> {
-            var pos = BlockPos.of(key);
-            return pos.getX() >> 4 == x && pos.getZ() >> 4 == z;
-        });
+        if (entries == null) return;
+        var iterator = entries.long2ObjectEntrySet().fastIterator();
+        while (iterator.hasNext()) {
+            long key = iterator.next().getLongKey();
+            if (((int) (key >> 38) >> 4) == x && ((int) (key << 26 >> 38) >> 4) == z) iterator.remove();
+        }
     }
 
     public void clear() {
-        entries.clear();
+        entries = null;
+    }
+
+    private Entry get(long key) {
+        return entries == null ? null : entries.get(key);
+    }
+
+    private void remove(long key) {
+        if (entries != null) entries.remove(key);
+    }
+
+    private void put(long key, Entry entry) {
+        if (entries == null) entries = new Long2ObjectOpenHashMap<>(2);
+        entries.put(key, entry);
     }
 }

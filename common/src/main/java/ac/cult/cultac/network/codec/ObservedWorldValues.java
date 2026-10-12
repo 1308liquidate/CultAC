@@ -26,16 +26,16 @@ final class ObservedWorldValues {
                 ModelWorldValues.sectionUpdates(input, values.mappings()::blockState);
             case "minecraft:block_entity_data" -> ModelWorldValues.blockEntity(input, types);
             case "minecraft:level_chunk_with_light" ->
-                ModelWorldValues.chunk(
+                ModelWorldValues.chunkDecoded(
                         input,
                         version,
                         types,
-                        sections -> SectionProjection.sections(sections, version, sectionCount(), registries()));
+                        sections -> SectionProjection.decodedSections(sections, version, sectionCount(), registries()));
             case "minecraft:chunks_biomes" -> {
                 int count = sectionCount();
                 var registries = registries();
-                yield ModelWorldValues.biomes(
-                        input, sections -> SectionProjection.biomes(sections, version, count, registries));
+                yield ModelWorldValues.biomesDecoded(
+                        input, sections -> SectionProjection.decodedBiomes(sections, version, count, registries));
             }
             case "minecraft:light_update" -> ModelWorldValues.light(input, version);
             default -> throw new IllegalArgumentException(name);

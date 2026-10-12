@@ -18,14 +18,70 @@ public final class WorldPackets {
             position = position.immutable();
             // Section updates use nullable IdMap.byId; Block.getId(null) is air.
             // Single-block decoding retains its separate byIdOrThrow contract.
-            if (state < 0 || state >= STATE_COUNT) state = 0;
+            state = normalizeState(state);
+        }
+
+        static int normalizeState(int state) {
+            return state < 0 || state >= STATE_COUNT ? 0 : state;
+        }
+
+        static boolean hasCompactStateIds() {
+            return STATE_COUNT <= (1 << 20);
         }
     }
 
     public record SectionBlocksUpdate(List<BlockUpdate> updates) implements ClientboundPacket {
         public SectionBlocksUpdate {
-            updates = List.copyOf(updates);
+            updates = updates instanceof PackedSectionUpdates ? updates : List.copyOf(updates);
         }
+
+        /** ClientboundSectionBlocksUpdatePacket retains local coordinates and states until application. */
+        public static SectionBlocksUpdate readSection(
+                long section,
+                int count,
+                java.util.function.LongSupplier input,
+                java.util.function.IntUnaryOperator states) {
+            return new SectionBlocksUpdate(PackedSectionUpdates.read(section, count, input, states));
+        }
+
+        public int size() {
+            return updates.size();
+        }
+
+        public int x(int index) {
+            return updates instanceof PackedSectionUpdates packed
+                    ? packed.x(index)
+                    : updates.get(index).position().getX();
+        }
+
+        public int y(int index) {
+            return updates instanceof PackedSectionUpdates packed
+                    ? packed.y(index)
+                    : updates.get(index).position().getY();
+        }
+
+        public int z(int index) {
+            return updates instanceof PackedSectionUpdates packed
+                    ? packed.z(index)
+                    : updates.get(index).position().getZ();
+        }
+
+        public void runUpdates(BlockUpdateConsumer consumer) {
+            java.util.Objects.requireNonNull(consumer);
+            if (updates instanceof PackedSectionUpdates packed) packed.runUpdates(consumer);
+            else
+                for (var update : updates)
+                    consumer.accept(
+                            update.position().getX(),
+                            update.position().getY(),
+                            update.position().getZ(),
+                            update.state());
+        }
+    }
+
+    @FunctionalInterface
+    public interface BlockUpdateConsumer {
+        void accept(int x, int y, int z, int state);
     }
 
     public record TimeUpdate(long gameTime, java.util.Map<String, ac.cult.blocksim.engine.ClientClocks.State> clocks)
@@ -53,14 +109,17 @@ public final class WorldPackets {
         }
     }
 
-    public record BiomeChunk(int x, int z, ByteBuffer sections) {
+    public record BiomeChunk(int x, int z, ByteBuffer sections, List<SectionSnapshot> decodedSections) {
+        public BiomeChunk(int x, int z, ByteBuffer sections) { this(x, z, sections, null); }
         public BiomeChunk {
-            sections = sections.asReadOnlyBuffer();
+            sections = sections == null ? null : sections.asReadOnlyBuffer();
+            decodedSections = decodedSections == null ? null : List.copyOf(decodedSections);
+            if ((sections == null) == (decodedSections == null)) throw new IllegalArgumentException("One section representation required");
         }
 
         @Override
         public ByteBuffer sections() {
-            return sections.asReadOnlyBuffer();
+            return sections == null ? SectionSnapshot.encode(decodedSections) : sections.asReadOnlyBuffer();
         }
     }
 
@@ -90,8 +149,13 @@ public final class WorldPackets {
             List<BlockPos> tickerCandidates,
             LightValues light,
             List<BlockEntityUpdate> blockEntities,
-            long[] motionBlocking)
+            long[] motionBlocking,
+            List<SectionSnapshot> decodedSections)
             implements ClientboundPacket {
+        public Chunk(int x, int z, ByteBuffer sections, List<BlockPos> tickerCandidates, LightValues light,
+                List<BlockEntityUpdate> blockEntities, long[] motionBlocking) {
+            this(x, z, sections, tickerCandidates, light, blockEntities, motionBlocking, null);
+        }
         public Chunk(int x, int z, ByteBuffer sections, List<BlockPos> tickerCandidates) {
             this(x, z, sections, tickerCandidates, null);
         }
@@ -111,7 +175,9 @@ public final class WorldPackets {
         }
 
         public Chunk {
-            sections = sections.asReadOnlyBuffer();
+            sections = sections == null ? null : sections.asReadOnlyBuffer();
+            decodedSections = decodedSections == null ? null : List.copyOf(decodedSections);
+            if ((sections == null) == (decodedSections == null)) throw new IllegalArgumentException("One section representation required");
             tickerCandidates = List.copyOf(tickerCandidates);
             blockEntities = List.copyOf(blockEntities);
             motionBlocking = motionBlocking == null ? null : motionBlocking.clone();
@@ -119,7 +185,7 @@ public final class WorldPackets {
 
         @Override
         public ByteBuffer sections() {
-            return sections.asReadOnlyBuffer();
+            return sections == null ? SectionSnapshot.encode(decodedSections) : sections.asReadOnlyBuffer();
         }
 
         @Override

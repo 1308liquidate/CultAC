@@ -177,6 +177,31 @@ class SectionProjectionTest {
         }
     }
 
+    @Test
+    void directBiomeSnapshotsPreserveFramingAndOwnershipAcrossVersions() {
+        for (var version : ProtocolVersion.values()) {
+            var input = Unpooled.buffer();
+            try {
+                single(input, version, 3);
+                int[] codes = new int[64];
+                for (int i = 0; i < codes.length; i++) codes[i] = i % 4;
+                palette(input, version, bits(70), null, codes);
+                var registries = new SectionProjection.Registries(MODEL_STATES, MODEL_STATES,
+                        70, 8, IntUnaryOperator.identity(), id -> id + 1);
+                byte[] original = SectionProjection.biomes(input, version, 2, registries);
+                input.readerIndex(0);
+                var snapshots = SectionProjection.decodedBiomes(input, version, 2, registries);
+                assertFalse(input.isReadable());
+                var encoded = ac.cult.cultac.network.packet.SectionSnapshot.encode(snapshots);
+                byte[] bytes = new byte[encoded.remaining()]; encoded.get(bytes);
+                assertArrayEquals(original, bytes);
+                assertArrayEquals(filled(64, 4), snapshots.getFirst().copyBiomes());
+                snapshots.getFirst().copyBiomes()[0] = 0;
+                assertEquals(4, snapshots.getFirst().copyBiomes()[0]);
+            } finally { input.release(); }
+        }
+    }
+
     private static ByteBuf project(
             ByteBuf input,
             ProtocolVersion version,
@@ -192,7 +217,29 @@ class SectionProjectionTest {
                 modelBiomes,
                 states,
                 biomes);
-        return Unpooled.wrappedBuffer(SectionProjection.sections(input, version, count, registries));
+        int start = input.readerIndex();
+        byte[] original = SectionProjection.sections(input, version, count, registries);
+        int end = input.readerIndex();
+        input.readerIndex(start);
+        var decoded = SectionProjection.decodedSections(input, version, count, registries);
+        assertEquals(end, input.readerIndex());
+        var encoded = ac.cult.cultac.network.packet.SectionSnapshot.encode(decoded);
+        byte[] bytes = new byte[encoded.remaining()]; encoded.get(bytes);
+        assertArrayEquals(original, bytes);
+        var verification = Unpooled.wrappedBuffer(original);
+        try {
+            for (var section : decoded) {
+                verification.skipBytes(4);
+                var oldBlocks = PalettedSection.readBlocks(verification);
+                var directBlocks = section.copyBlocks();
+                for (int i = 0; i < 4096; i++) assertEquals(oldBlocks.get(i), directBlocks.get(i));
+                assertArrayEquals(PalettedSection.readBiomes(verification, modelBiomes), section.copyBiomes());
+                int before = section.copyBlocks().get(0);
+                directBlocks.getAndSet(0, before == 0 ? 1 : 0);
+                assertEquals(before, section.copyBlocks().get(0), "Cache mutation cannot alter the packet snapshot");
+            }
+        } finally { verification.release(); }
+        return Unpooled.wrappedBuffer(original);
     }
 
     /** Model sections always carry both counts, which the model reader recalculates. */

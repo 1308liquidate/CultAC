@@ -23,6 +23,23 @@ final class SectionProjection {
             IntUnaryOperator states,
             IntUnaryOperator biomes) {}
 
+    static java.util.List<ac.cult.cultac.network.packet.SectionSnapshot> decodedSections(
+            ByteBuf input, ProtocolVersion version, int count, Registries registries) {
+        var sections = new java.util.ArrayList<ac.cult.cultac.network.packet.SectionSnapshot>(count);
+        for (int i = 0; i < count; i++) sections.add(ac.cult.cultac.network.packet.SectionSnapshot.read(
+                input, version, registries.sourceStates(), registries.modelStates(), registries.sourceBiomes(),
+                registries.modelBiomes(), registries.states(), registries.biomes()));
+        return java.util.List.copyOf(sections);
+    }
+
+    static java.util.List<ac.cult.cultac.network.packet.SectionSnapshot> decodedBiomes(
+            ByteBuf input, ProtocolVersion version, int count, Registries registries) {
+        var sections = new java.util.ArrayList<ac.cult.cultac.network.packet.SectionSnapshot>(count);
+        for (int i = 0; i < count; i++) sections.add(ac.cult.cultac.network.packet.SectionSnapshot.readBiomes(
+                input, version, registries.sourceBiomes(), registries.modelBiomes(), registries.biomes()));
+        return java.util.List.copyOf(sections);
+    }
+
     static byte[] sections(ByteBuf input, ProtocolVersion version, int count, Registries registries) {
         ByteBuf output = Unpooled.buffer();
         try {

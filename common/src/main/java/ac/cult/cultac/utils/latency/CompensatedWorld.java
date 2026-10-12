@@ -468,7 +468,11 @@ public class CompensatedWorld {
     }
 
     public void handleServerBlockUpdate(BlockPos pos, int state, int transaction) {
-        updateBlock(pos.getX(), pos.getY(), pos.getZ(), state);
+        handleServerBlockUpdate(pos.getX(), pos.getY(), pos.getZ(), state, transaction);
+    }
+
+    public void handleServerBlockUpdate(int x, int y, int z, int state, int transaction) {
+        updateBlock(x, y, z, state);
     }
 
     private void applyBlockChanges(List<BlockPos> toApplyBlocks, int transaction) {
@@ -864,26 +868,25 @@ public class CompensatedWorld {
     }
 
     private void tickRecentClientCollisionChanges() {
-        recentClientCollisionChanges.long2IntEntrySet().removeIf(entry -> {
+        var iterator = recentClientCollisionChanges.long2IntEntrySet().fastIterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
             int ticks = entry.getIntValue() - 1;
-            if (ticks <= 0) {
-                return true;
-            }
-            entry.setValue(ticks);
-            return false;
-        });
+            if (ticks <= 0) iterator.remove();
+            else entry.setValue(ticks);
+        }
     }
 
     private void tickRecentClientFluidChanges() {
-        recentClientFluidChanges.long2IntEntrySet().removeIf(entry -> {
+        var iterator = recentClientFluidChanges.long2IntEntrySet().fastIterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
             int ticks = entry.getIntValue() - 1;
             if (ticks <= 0) {
                 recentClientFluidChangeKinds.remove(entry.getLongKey());
-                return true;
-            }
-            entry.setValue(ticks);
-            return false;
-        });
+                iterator.remove();
+            } else entry.setValue(ticks);
+        }
     }
 
     public int updateBlock(int x, int y, int z, int newState) {
@@ -940,7 +943,7 @@ public class CompensatedWorld {
         markRecentClientCollisionChange(asVector, original, newState);
         markRecentClientFluidChange(asVector, original, newState);
 
-        applyBlockChangeRawDANGER(x, y, z, newState);
+        applyBlockChangeRawDANGER(x, y, z, newState, asVector);
         geysers.updateBlock(asVector, original, newState);
         if (debugBlockChanges && isCurrentlyPredicting && getBlockStateIdAt(asVector) == newState) {
             String state =
@@ -955,6 +958,11 @@ public class CompensatedWorld {
     }
 
     public void applyBlockChangeRawDANGER(int x, int y, int z, int combinedState) {
+        applyBlockChangeRawDANGER(x, y, z, combinedState, null);
+    }
+
+    /** Reuse updateBlock's owned immutable position; standalone writes still create their own callback input. */
+    private void applyBlockChangeRawDANGER(int x, int y, int z, int combinedState, BlockPos position) {
         combinedState = ViaClientBlockShapeMappings.clientBlockStateId(player, stateIdOrAir(combinedState));
         int chunkX = x >> 4;
         int chunkZ = z >> 4;
@@ -980,7 +988,8 @@ public class CompensatedWorld {
                                     .registry()
                                     .facts(combinedState)
                                     .has(ac.cult.blocksim.data.StateFacts.AIR));
-            clientBlockEntities.stateChanged(new BlockPos(x, y, z), previous, combinedState);
+            if (position == null) position = new BlockPos(x, y, z);
+            clientBlockEntities.stateChanged(position, previous, combinedState);
             section.setStateId(index, combinedState);
             if (heightmapChange)
                 column.motionHeightmap()
@@ -991,7 +1000,7 @@ public class CompensatedWorld {
                                 column::stateAtIndex,
                                 motionBlockingPredicate());
             queuePendingReintern(chunkX, sectionIndex, chunkZ, section);
-            pistons.handleBlockStateApplied(new BlockPos(x, y, z), combinedState);
+            pistons.handleBlockStateApplied(position, combinedState);
         }
     }
 
@@ -1061,8 +1070,7 @@ public class CompensatedWorld {
             SectionPool.ReinternResult result =
                     pool.tryReinternRetained(section, candidate.state().nextComparisonIndex(), comparisonBudget);
             if (!result.complete()) {
-                pendingReinternSections.put(
-                        candidate.key(), new PendingReinternState(section, result.nextComparisonIndex()));
+                candidate.state().nextComparisonIndex = result.nextComparisonIndex();
                 break;
             }
 
@@ -1075,8 +1083,13 @@ public class CompensatedWorld {
     }
 
     private void queuePendingReintern(int chunkX, int sectionIndex, int chunkZ, CachedSection section) {
-        pendingReinternSections.put(
-                new PendingReinternSection(chunkX, sectionIndex, chunkZ), new PendingReinternState(section, 0));
+        var key = new PendingReinternSection(chunkX, sectionIndex, chunkZ);
+        var pending = pendingReinternSections.get(key);
+        if (pending == null) pendingReinternSections.put(key, new PendingReinternState(section, 0));
+        else {
+            pending.section = section;
+            pending.nextComparisonIndex = 0;
+        }
     }
 
     private CachedSection prepareSectionForWrite(int chunkX, int sectionIndex, int chunkZ, CachedSection section) {
@@ -1106,7 +1119,23 @@ public class CompensatedWorld {
 
     private record PendingReinternSection(int chunkX, int sectionIndex, int chunkZ) {}
 
-    private record PendingReinternState(CachedSection section, int nextComparisonIndex) {}
+    private static final class PendingReinternState {
+        private CachedSection section;
+        private int nextComparisonIndex;
+
+        PendingReinternState(CachedSection section, int nextComparisonIndex) {
+            this.section = section;
+            this.nextComparisonIndex = nextComparisonIndex;
+        }
+
+        CachedSection section() {
+            return section;
+        }
+
+        int nextComparisonIndex() {
+            return nextComparisonIndex;
+        }
+    }
 
     private record PendingReinternCandidate(
             PendingReinternSection key,

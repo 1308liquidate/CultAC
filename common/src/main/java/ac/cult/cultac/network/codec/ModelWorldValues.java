@@ -47,13 +47,7 @@ final class ModelWorldValues {
     static WorldPackets.SectionBlocksUpdate sectionUpdates(ByteBuf input, IntUnaryOperator states) {
         long section = input.readLong();
         int count = Wire.readLength(input, input.readableBytes());
-        var updates = new ArrayList<WorldPackets.BlockUpdate>(count);
-        for (int i = 0; i < count; i++) {
-            long entry = Wire.readVarLong(input);
-            updates.add(new WorldPackets.BlockUpdate(
-                    BlockPos.fromSection(section, (int) (entry & 4095)), states.applyAsInt((int) (entry >>> 12))));
-        }
-        return new WorldPackets.SectionBlocksUpdate(updates);
+        return WorldPackets.SectionBlocksUpdate.readSection(section, count, () -> Wire.readVarLong(input), states);
     }
 
     static WorldPackets.BlockEntityUpdate blockEntity(ByteBuf input, RegistryNames names) {
@@ -76,6 +70,20 @@ final class ModelWorldValues {
         int x = input.readInt(), z = input.readInt();
         long[] motionBlocking = MotionHeightmapValues.read(input, version);
         byte[] model = sections.apply(input.readSlice(Wire.readLength(input, 2097152)));
+        return finishChunk(input, version, types, x, z, motionBlocking, model, null);
+    }
+
+    static WorldPackets.Chunk chunkDecoded(ByteBuf input, ProtocolVersion version, IntFunction<String> types,
+            Function<ByteBuf, java.util.List<ac.cult.cultac.network.packet.SectionSnapshot>> sections) {
+        int x = input.readInt(), z = input.readInt();
+        long[] motionBlocking = MotionHeightmapValues.read(input, version);
+        var model = sections.apply(input.readSlice(Wire.readLength(input, 2097152)));
+        return finishChunk(input, version, types, x, z, motionBlocking, null, model);
+    }
+
+    private static WorldPackets.Chunk finishChunk(ByteBuf input, ProtocolVersion version, IntFunction<String> types,
+            int x, int z, long[] motionBlocking, byte[] model,
+            java.util.List<ac.cult.cultac.network.packet.SectionSnapshot> decoded) {
         int count = Wire.readLength(input, input.readableBytes());
         var tickers = new ArrayList<BlockPos>();
         var entities = new ArrayList<WorldPackets.BlockEntityUpdate>(count);
@@ -87,7 +95,8 @@ final class ModelWorldValues {
             entities.add(new WorldPackets.BlockEntityUpdate(pos, type, NbtValueCodec.readBlockEntity(input, type)));
         }
         return new WorldPackets.Chunk(
-                x, z, ByteBuffer.wrap(model), tickers, LightValueCodec.read(input, version), entities, motionBlocking);
+                x, z, model == null ? null : ByteBuffer.wrap(model), tickers,
+                LightValueCodec.read(input, version), entities, motionBlocking, decoded);
     }
 
     static WorldPackets.ChunkBiomes biomes(ByteBuf input) {
@@ -101,6 +110,18 @@ final class ModelWorldValues {
             long pos = input.readLong();
             byte[] model = sections.apply(input.readSlice(Wire.readLength(input, 2097152)));
             chunks.add(new WorldPackets.BiomeChunk((int) pos, (int) (pos >>> 32), ByteBuffer.wrap(model)));
+        }
+        return new WorldPackets.ChunkBiomes(chunks);
+    }
+
+    static WorldPackets.ChunkBiomes biomesDecoded(ByteBuf input,
+            Function<ByteBuf, java.util.List<ac.cult.cultac.network.packet.SectionSnapshot>> sections) {
+        int count = Wire.readLength(input, input.readableBytes());
+        var chunks = new ArrayList<WorldPackets.BiomeChunk>(count);
+        for (int i = 0; i < count; i++) {
+            long pos = input.readLong();
+            var model = sections.apply(input.readSlice(Wire.readLength(input, 2097152)));
+            chunks.add(new WorldPackets.BiomeChunk((int) pos, (int) (pos >>> 32), null, model));
         }
         return new WorldPackets.ChunkBiomes(chunks);
     }
