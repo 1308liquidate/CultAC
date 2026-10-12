@@ -1,0 +1,37 @@
+{
+  "schema": "cultac-bedrock-replay-runtime/v1",
+  "javaMajor": 25,
+  "protocol": 2193,
+  "javaVersion": "26.3",
+  "artifacts": {
+    "paper": {
+      "url": "https://fill-data.papermc.io/v1/objects/580c266b6526bb34752e9c2c274be025f763af1ce5b3fa662fa2b3006f966c13/paper-26.3-177.jar",
+      "sha256": "580c266b6526bb34752e9c2c274be025f763af1ce5b3fa662fa2b3006f966c13",
+      "version": "26.3",
+      "build": 177
+    },
+    "geyser": {
+      "url": "https://download.geysermc.org/v2/projects/geyserpreview/versions/pr.6712/builds/3057/downloads/spigot",
+      "sha256": "d7fcfb9a2ad46980efef2e6a5f6837921b945fe2bbec34efd8c8ca552963c3e1",
+      "version": "pr.6712",
+      "build": 3057
+    },
+    "floodgate": {
+      "sha256": "21570aff9ce17d6983928e8552777760e1ede5050026b04c686b0ae112e6fd7e",
+      "version": "2.2.5",
+      "build": 141,
+      "url": "https://download.geysermc.org/v2/projects/floodgate/versions/2.2.5/builds/141/downloads/spigot"
+    },
+    "viaversion": {
+      "version": "5.12.1",
+      "url": "https://github.com/ViaVersion/ViaVersion/releases/download/5.12.1/ViaVersion-5.12.1.jar",
+      "sha256": "b8033807e7182c35003a45962352dd642c1e91880ca281da3a43cb6f481a95a2"
+    },
+    "viabackwards": {
+      "version": "5.12.1",
+      "url": "https://github.com/ViaVersion/ViaBackwards/releases/download/5.12.1/ViaBackwards-5.12.1.jar",
+      "sha256": "29d94d3a26c85c8a327574b2322db4078992ae457f0173325431a12aac384911"
+    }
+  },
+  "note": "Native Paper 26.3 replay target. The separate capture runtime lock continues to verify historical 26.2 captures. Geyser pr.6712 build 3057 supports Java 26.3 and retains the Cloudburst wrapper API used by Cult."
+}

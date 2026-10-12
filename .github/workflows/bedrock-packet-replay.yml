@@ -75,10 +75,11 @@ jobs:
           git -C cult rev-parse HEAD > artifacts/cult-revision.txt
           python3 - <<'PYRUN'
           import os, pathlib, subprocess
-          jars = [p for p in pathlib.Path('cult/bukkit/build/libs').glob('cultac-bukkit-*.jar') if not any(s in p.name for s in ('-sources', '-javadoc', '-plain', '-dev'))]
+          current = pathlib.Path('cult/bukkit/build/libs/CultAC-paper.jar')
+          jars = [current] if current.is_file() else [p for p in current.parent.glob('cultac-bukkit-*.jar') if not any(s in p.name for s in ('-sources', '-javadoc', '-plain', '-dev'))]
           if len(jars) != 1:
               raise SystemExit(f'Expected one Cult distributable, got {jars}')
-          subprocess.run(['python3', 'replay/scripts/run-movement-regressions.py', '--scenarios', 'scenarios/scenarios', '--cultac-jar', str(jars[0]), '--server-dir', 'server', '--artifacts', 'artifacts', '--seed', os.environ['REPLAY_MUTATION_SEED']], check=True)
+          subprocess.run(['python3', 'replay/scripts/run-movement-regressions.py', '--scenarios', 'scenarios/scenarios', '--cultac-jar', str(jars[0]), '--server-dir', 'server', '--artifacts', 'artifacts', '--seed', os.environ['REPLAY_MUTATION_SEED'], '--replay-runtime-lock', 'cult/scripts/smoketests/bedrock-replay-runtime.json'], check=True)
           PYRUN
       - name: Upload prediction, correction, and runtime evidence
         uses: actions/upload-artifact@v4

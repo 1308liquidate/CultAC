@@ -16,7 +16,7 @@ workspace_manifest="${SMOKETEST_WORKSPACE_MANIFEST:-}"
 bedrock_root="${BEDROCK_REPLAY_REPO:-$cultac_root/../BedrockPacketReplay}"
 bedrock_scenarios="${BEDROCK_SMOKETEST_SCENARIOS:-$cultac_root/../bedrock-smoketest-scenarios/scenarios}"
 bedrock_runtime="${BEDROCK_RUNTIME_LOCK:-$bedrock_root/runtime-lock.json}"
-bedrock_replay_runtime="${BEDROCK_REPLAY_RUNTIME_LOCK:-}"
+bedrock_replay_runtime="${BEDROCK_REPLAY_RUNTIME_LOCK:-$script_dir/smoketests/bedrock-replay-runtime.json}"
 bedrock_seed="${BEDROCK_MUTATION_SEED:-42}"
 timestamp="$(date +%Y%m%d-%H%M%S)"
 artifact_root="${SMOKETEST_ARTIFACT_ROOT:-$smoketest_root/.real-validation/runs/local-all-smoketests-$timestamp}"
@@ -72,7 +72,7 @@ Environment overrides match the long option names:
   SMOKETEST_USE_XVFB, SMOKETEST_WORKSPACE_MANIFEST, BEDROCK_REPLAY_REPO,
   BEDROCK_SMOKETEST_SCENARIOS, BEDROCK_RUNTIME_LOCK, BEDROCK_REPLAY_RUNTIME_LOCK,
   BEDROCK_MUTATION_SEED. BEDROCK_RUNTIME_LOCK verifies historical capture
-  provenance; BEDROCK_REPLAY_RUNTIME_LOCK optionally pins a separate native 26.3 target.
+  provenance; BEDROCK_REPLAY_RUNTIME_LOCK overrides the checked-in native 26.3 target.
 EOF
 }
 
