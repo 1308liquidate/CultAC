@@ -14,6 +14,12 @@ final class GeyserKeepAliveTranslator extends PacketTranslator<ClientboundKeepAl
 
     @SuppressWarnings("unchecked")
     GeyserKeepAliveTranslator() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            delegate = ac.cult.reload.integrations.GeyserTranslatorRouter.install(
+                    ClientboundKeepAlivePacket.class, host, this);
+            return;
+        }
         delegate = (PacketTranslator<ClientboundKeepAlivePacket>)
                 Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundKeepAlivePacket.class);
         if (delegate == null) throw new IllegalStateException("Missing Geyser keepalive translator");
@@ -36,10 +42,19 @@ final class GeyserKeepAliveTranslator extends PacketTranslator<ClientboundKeepAl
     }
 
     boolean isInstalled() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null)
+            return ac.cult.reload.integrations.GeyserTranslatorRouter.installed(
+                    ClientboundKeepAlivePacket.class, host, this);
         return Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundKeepAlivePacket.class) == this;
     }
 
     void close() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            ac.cult.reload.integrations.GeyserTranslatorRouter.remove(ClientboundKeepAlivePacket.class, host, this);
+            return;
+        }
         if (isInstalled()) Registries.JAVA_PACKET_TRANSLATORS.register(ClientboundKeepAlivePacket.class, delegate);
     }
 }

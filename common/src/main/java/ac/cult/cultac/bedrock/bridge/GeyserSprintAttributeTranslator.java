@@ -27,6 +27,12 @@ final class GeyserSprintAttributeTranslator extends PacketTranslator<Clientbound
     GeyserSprintAttributeTranslator(BiConsumer<GeyserSession, Attribute> movement, VehicleMovement vehicleMovement) {
         this.movement = movement;
         this.vehicleMovement = vehicleMovement;
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            delegate = ac.cult.reload.integrations.GeyserTranslatorRouter.install(
+                    ClientboundUpdateAttributesPacket.class, host, this);
+            return;
+        }
         delegate = (PacketTranslator<ClientboundUpdateAttributesPacket>)
                 Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundUpdateAttributesPacket.class);
         if (delegate == null) throw new IllegalStateException("Missing Geyser attribute translator");
@@ -54,11 +60,21 @@ final class GeyserSprintAttributeTranslator extends PacketTranslator<Clientbound
     }
 
     void close() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            ac.cult.reload.integrations.GeyserTranslatorRouter.remove(
+                    ClientboundUpdateAttributesPacket.class, host, this);
+            return;
+        }
         if (isInstalled())
             Registries.JAVA_PACKET_TRANSLATORS.register(ClientboundUpdateAttributesPacket.class, delegate);
     }
 
     boolean isInstalled() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null)
+            return ac.cult.reload.integrations.GeyserTranslatorRouter.installed(
+                    ClientboundUpdateAttributesPacket.class, host, this);
         return Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundUpdateAttributesPacket.class) == this;
     }
 }

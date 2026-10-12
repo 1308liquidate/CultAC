@@ -611,7 +611,8 @@ public class CultPlayer implements GrimUser {
         } else {
             transactionsSent.add(new SentTransaction(transaction.transaction(), transaction.id(), System.nanoTime()));
         }
-        TransactionChannels.SEND.fire(this, transaction.id(), timestamp);
+        TransactionChannels.SEND.fire(
+                ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(this), transaction.id(), timestamp);
         return true;
     }
 
@@ -876,7 +877,10 @@ public class CultPlayer implements GrimUser {
         // `database.session.heartbeat-interval-ms`, so this runs every tick
         // but only emits a row upsert every N seconds. Bounds how stale
         // last_activity_epoch_ms can be when the server crashes.
-        CultAPI.INSTANCE.getDataStoreLifecycle().sessionTracker().pollHeartbeat(playerUUID, System.currentTimeMillis());
+        CultAPI.INSTANCE
+                .getDataStoreLifecycle()
+                .sessionTracker()
+                .pollHeartbeat(playerUUID, user.getConnectionId(), System.currentTimeMillis());
     }
 
     public boolean noModifyPacketPermission = false;

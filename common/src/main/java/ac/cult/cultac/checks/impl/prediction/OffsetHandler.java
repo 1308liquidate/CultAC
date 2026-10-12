@@ -59,7 +59,10 @@ public class OffsetHandler extends Check implements PostPredictionListener {
 
         // The pinned API artifact exposes CompletePredictionEvent through Cult's event bus
         // rather than as a Bukkit event; fire() returns true when a handler cancelled it.
-        if (COMPLETE_PREDICTION_CHANNEL.fire(getPlayer(), this, offset)) return;
+        if (COMPLETE_PREDICTION_CHANNEL.fire(
+                ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(getPlayer()),
+                ac.cult.cultac.runtime.RuntimeEnvironment.outwardCheck(this),
+                offset)) return;
 
         // Short circuit out flag call
         if ((offset >= threshold || offset >= immediateSetbackThreshold)

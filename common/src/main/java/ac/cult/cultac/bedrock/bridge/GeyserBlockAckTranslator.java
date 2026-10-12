@@ -15,6 +15,12 @@ final class GeyserBlockAckTranslator extends PacketTranslator<ClientboundBlockCh
     @SuppressWarnings("unchecked")
     GeyserBlockAckTranslator(Predicate<GeyserSession> attached) {
         this.attached = attached;
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            delegate = ac.cult.reload.integrations.GeyserTranslatorRouter.install(
+                    ClientboundBlockChangedAckPacket.class, host, this);
+            return;
+        }
         delegate = (PacketTranslator<ClientboundBlockChangedAckPacket>)
                 Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundBlockChangedAckPacket.class);
         if (delegate == null) throw new IllegalStateException("Missing Geyser block acknowledgement translator");
@@ -42,10 +48,20 @@ final class GeyserBlockAckTranslator extends PacketTranslator<ClientboundBlockCh
     }
 
     boolean isInstalled() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null)
+            return ac.cult.reload.integrations.GeyserTranslatorRouter.installed(
+                    ClientboundBlockChangedAckPacket.class, host, this);
         return Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundBlockChangedAckPacket.class) == this;
     }
 
     void close() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            ac.cult.reload.integrations.GeyserTranslatorRouter.remove(
+                    ClientboundBlockChangedAckPacket.class, host, this);
+            return;
+        }
         if (isInstalled())
             Registries.JAVA_PACKET_TRANSLATORS.register(ClientboundBlockChangedAckPacket.class, delegate);
     }

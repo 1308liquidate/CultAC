@@ -68,6 +68,8 @@ public class InitManager {
                 // Detach the Geyser session taps before Cult's own networking tears down.
                 .add(new TerminateGeyserBedrockBridge())
                 .add(new TerminateNetworkManager())
+                .add(CultAPI.INSTANCE.getDiscordManager())
+                .add(() -> CultAPI.INSTANCE.getEventBus().unregisterAllListeners(CultAPI.INSTANCE.getGrimPlugin()))
                 .add(ac.cult.cultac.protocol.ProtocolCodecs::close)
                 .add(CultAPI.INSTANCE.getDataStoreLifecycle())
                 .addAll(extraStoppableInitables)
@@ -101,13 +103,17 @@ public class InitManager {
     }
 
     public void stop() {
+        IllegalStateException failure = null;
         for (StoppableInitable initable : initializersOnStop) {
             try {
                 initable.stop();
             } catch (Exception e) {
                 LogUtil.error("Failed to stop " + initable.getClass().getSimpleName(), e);
+                if (failure == null) failure = new IllegalStateException("CultAC cleanup failed");
+                failure.addSuppressed(e);
             }
         }
+        if (failure != null && ac.cult.cultac.runtime.RuntimeEnvironment.host() != null) throw failure;
         stopped = true;
     }
 }

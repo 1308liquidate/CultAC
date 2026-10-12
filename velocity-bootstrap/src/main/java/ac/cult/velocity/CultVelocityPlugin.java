@@ -1,22 +1,31 @@
 package ac.cult.velocity;
 
-import ac.cult.cultac.platform.velocity.VelocityPlatform;
+import ac.cult.reload.host.CommandRouting;
+import ac.cult.reload.host.GenerationManager;
+import ac.grim.grimac.api.GrimAPIProvider;
+import ac.grim.grimac.api.GrimAbstractAPI;
 import com.google.inject.Inject;
+import com.velocitypowered.api.command.SimpleCommand;
+import com.velocitypowered.api.event.EventTask;
 import com.velocitypowered.api.event.PostOrder;
 import com.velocitypowered.api.event.Subscribe;
+import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.plugin.Dependency;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
+import io.netty.channel.Channel;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 
 @Plugin(
         id = "cultac",
         name = "CultAC",
-        version = "0.1.0",
+        version = CultBuildVersion.VERSION,
         description = "Compensated movement anticheat",
         authors = {"GrimCult"},
         dependencies = {
@@ -29,7 +38,8 @@ public final class CultVelocityPlugin {
     private final ProxyServer proxy;
     private final Logger logger;
     private final Path directory;
-    private VelocityPlatform engine;
+    private GenerationManager engine;
+    private java.lang.reflect.Method connectionMethod, channelMethod;
 
     @Inject
     public CultVelocityPlugin(ProxyServer proxy, Logger logger, @DataDirectory Path directory) {
@@ -43,15 +53,82 @@ public final class CultVelocityPlugin {
     @Subscribe(order = PostOrder.LAST)
     public void initialize(ProxyInitializeEvent event) throws Exception {
         try {
-            engine = new VelocityPlatform(proxy, this, directory, logger);
-            engine.start();
+            engine = new GenerationManager(
+                    directory,
+                    "velocity",
+                    this,
+                    proxy,
+                    logger,
+                    getClass().getClassLoader(),
+                    logger::info,
+                    null,
+                    ac.cult.reload.host.LoaderVersions.read(
+                            getClass().getResourceAsStream("/velocity-plugin.json"), "velocity"));
+            engine.connectionResolver(ac.cult.reload.integrations.GeyserConnections::upstream);
+            engine.loadInitial(getClass().getResourceAsStream("/cult-runtime/default.jar"));
+            engine.startInitial();
+            proxy.getScheduler()
+                    .buildTask(this, engine::tick)
+                    .repeat(java.time.Duration.ofMillis(50))
+                    .schedule();
+            GrimAPIProvider.init((GrimAbstractAPI) engine.publicApi());
+            var hostLoader = proxy.getClass().getClassLoader();
+            connectionMethod = Class.forName(
+                            "com.velocitypowered.proxy.connection.client.ConnectedPlayer", false, hostLoader)
+                    .getMethod("getConnection");
+            channelMethod = connectionMethod.getReturnType().getMethod("getChannel");
+            var metadata = proxy.getCommandManager()
+                    .metaBuilder("cult")
+                    .aliases("cultac", "grim", "grimac")
+                    .plugin(this)
+                    .build();
+            proxy.getCommandManager().register(metadata, new SimpleCommand() {
+                public void execute(Invocation invocation) {
+                    var source = invocation.source();
+                    var args = invocation.arguments();
+                    if (args.length > 0 && args[0].equalsIgnoreCase("update")) {
+                        if (!source.hasPermission("cult.update")) {
+                            source.sendMessage(net.kyori.adventure.text.Component.text("You do not have permission."));
+                            return;
+                        }
+                        if (args.length != 2) {
+                            source.sendMessage(
+                                    net.kyori.adventure.text.Component.text("Usage: /cult update <filename.jar>"));
+                            return;
+                        }
+                        engine.update(args[1])
+                                .whenComplete((message, failure) ->
+                                        source.sendMessage(net.kyori.adventure.text.Component.text(
+                                                failure == null ? message : "Update failed: " + failure.getMessage())));
+                    } else if (args.length > 0 && args[0].equalsIgnoreCase("runtimes")) {
+                        if (!source.hasPermission("cult.runtimes")) {
+                            source.sendMessage(net.kyori.adventure.text.Component.text("You do not have permission."));
+                            return;
+                        }
+                        engine.status()
+                                .forEach(line -> source.sendMessage(net.kyori.adventure.text.Component.text(line)));
+                    } else {
+                        String name = CommandRouting.target(args);
+                        Object target =
+                                name == null ? source : proxy.getPlayer(name).orElse(null);
+                        engine.execute(
+                                source, "cult " + String.join(" ", args), target, CommandRouting.aggregate(args));
+                    }
+                }
+
+                public CompletableFuture<List<String>> suggestAsync(Invocation invocation) {
+                    return engine.suggest(invocation.source(), "cult " + String.join(" ", invocation.arguments()))
+                            .toCompletableFuture();
+                }
+            });
         } catch (Throwable failure) {
-            if (engine != null)
+            if (engine != null) {
                 try {
                     engine.close();
                 } catch (Throwable cleanup) {
                     failure.addSuppressed(cleanup);
                 }
+            }
             engine = null;
             proxy.shutdown(net.kyori.adventure.text.Component.text("CultAC failed to initialize. See the proxy log."));
             throw failure;
@@ -59,7 +136,35 @@ public final class CultVelocityPlugin {
     }
 
     @Subscribe
+    public EventTask login(PostLoginEvent event) {
+        if (engine == null) return null;
+        try {
+            var channel = (Channel) channelMethod.invoke(connectionMethod.invoke(event.getPlayer()));
+            channel.closeFuture().addListener(ignored -> engine.disconnect(channel));
+            return EventTask.resumeWhenComplete(CompletableFuture.runAsync(
+                    () -> {
+                        try {
+                            engine.attach(channel, event.getPlayer());
+                        } catch (Exception failure) {
+                            throw new java.util.concurrent.CompletionException(failure);
+                        }
+                    },
+                    channel.eventLoop()));
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("Cannot access Velocity client channel", failure);
+        }
+    }
+
+    @Subscribe
     public void shutdown(ProxyShutdownEvent event) throws Exception {
-        if (engine != null) engine.close();
+        if (engine != null) {
+            Path installed = proxy.getPluginManager()
+                    .fromInstance(this)
+                    .orElseThrow()
+                    .getDescription()
+                    .getSource()
+                    .orElseThrow();
+            engine.shutdown(installed).toCompletableFuture().join();
+        }
     }
 }

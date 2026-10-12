@@ -63,6 +63,10 @@ final class VelocityTransport {
     }
 
     synchronized void install() {
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() != null) {
+            running = true;
+            return;
+        }
         if (!proxy.getAllPlayers().isEmpty()) {
             throw new IllegalStateException("CultAC must start before players connect");
         }
@@ -123,7 +127,7 @@ final class VelocityTransport {
         }
     }
 
-    private synchronized void attach(Player player, Channel channel, PacketOwner bedrock) {
+    synchronized void attach(Player player, Channel channel, PacketOwner bedrock) {
         if (!running) {
             return;
         }
@@ -150,12 +154,13 @@ final class VelocityTransport {
 
     synchronized CompletionStage<Void> remove() {
         running = false;
-        proxy.getEventManager().unregisterListener(plugin, this);
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+            proxy.getEventManager().unregisterListener(plugin, this);
         return CompletableFuture.allOf(
                 manager.connections().stream().map(this::detach).toArray(CompletableFuture[]::new));
     }
 
-    private CompletableFuture<Void> detach(CultConnection connection) {
+    CompletableFuture<Void> detach(CultConnection connection) {
         try {
             // Enter I/O before requesting removal; removal waits for accepted packet work.
             return CompletableFuture.supplyAsync(

@@ -667,8 +667,14 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             // Preserve the public packet-level and semantic setback signals from
             // the PacketEvents path after the teleport is tracked and emitted.
             long now = System.currentTimeMillis();
-            Channels.TELEPORT.fire(player, teleportId, now);
-            Channels.PLAYER_SETBACK.fire(player, teleportId, position.x, position.y, position.z, now);
+            Channels.TELEPORT.fire(ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(player), teleportId, now);
+            Channels.PLAYER_SETBACK.fire(
+                    ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(player),
+                    teleportId,
+                    position.x,
+                    position.y,
+                    position.z,
+                    now);
 
             final KnockbackHandler knockbackHandler = player.checkManager.getKnockbackHandler();
             if (!bedrockVehicle

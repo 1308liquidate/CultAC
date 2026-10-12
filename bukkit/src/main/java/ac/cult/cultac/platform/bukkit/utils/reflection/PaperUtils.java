@@ -28,6 +28,7 @@ public class PaperUtils {
     public static boolean registerTickEndEvent(Listener listener, Runnable runnable) {
         try {
             if (!HAS_TICK_END_EVENT) return false;
+            var guarded = ac.cult.cultac.runtime.RuntimeEnvironment.guard(runnable);
             CultACBukkitLoaderPlugin.LOADER
                     .getServer()
                     .getPluginManager()
@@ -35,8 +36,10 @@ public class PaperUtils {
                             (Class<? extends Event>) SERVER_TICK_END_EVENT_CLASS,
                             listener,
                             EventPriority.NORMAL,
-                            (l, event) -> runnable.run(),
+                            (l, event) -> guarded.run(),
                             CultACBukkitLoaderPlugin.LOADER);
+            ac.cult.cultac.runtime.RuntimeEnvironment.track(
+                    listener, () -> org.bukkit.event.HandlerList.unregisterAll(listener));
             return true;
         } catch (Exception e) {
             LogUtil.error("Failed to register tick end event", e);

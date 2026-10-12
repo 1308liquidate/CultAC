@@ -164,7 +164,10 @@ public class Check extends CultProcessor implements AbstractCheck {
         if (player.isDisabled() || (experimental && !player.isExperimentalChecks()) || exemptPermission)
             return false; // Avoid calling event if disabled
 
-        if (FLAG_CHANNEL.fire(player, this, verbose)) return false;
+        if (FLAG_CHANNEL.fire(
+                ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(player),
+                ac.cult.cultac.runtime.RuntimeEnvironment.outwardCheck(this),
+                verbose)) return false;
 
         lastFlagStoredBinaryVerbose = false;
         player.punishmentManager.handleViolation(this);
@@ -180,7 +183,10 @@ public class Check extends CultProcessor implements AbstractCheck {
         if (player.isDisabled() || (experimental && !player.isExperimentalChecks()) || exemptPermission)
             return false; // Avoid calling event if disabled
 
-        if (FLAG_CHANNEL.fire(player, this, rendered)) return false;
+        if (FLAG_CHANNEL.fire(
+                ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(player),
+                ac.cult.cultac.runtime.RuntimeEnvironment.outwardCheck(this),
+                ac.cult.cultac.runtime.RuntimeEnvironment.outwardVerbose(rendered))) return false;
 
         lastFlagStoredBinaryVerbose = true;
         player.punishmentManager.handleViolation(this);

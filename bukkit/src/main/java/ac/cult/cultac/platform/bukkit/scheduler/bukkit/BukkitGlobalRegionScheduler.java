@@ -14,28 +14,38 @@ public class BukkitGlobalRegionScheduler implements GlobalRegionScheduler {
 
     @Override
     public void execute(@NotNull GrimPlugin plugin, @NotNull Runnable task) {
-        bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, task);
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        new BukkitTaskHandle(bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, guarded_task));
     }
 
     @Override
     public TaskHandle run(@NotNull GrimPlugin plugin, @NotNull Runnable task) {
-        return new BukkitTaskHandle(bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, task));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new BukkitTaskHandle(bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, guarded_task));
     }
 
     @Override
     public TaskHandle runDelayed(@NotNull GrimPlugin plugin, @NotNull Runnable task, long delay) {
-        return new BukkitTaskHandle(bukkitScheduler.runTaskLater(CultACBukkitLoaderPlugin.LOADER, task, delay));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new BukkitTaskHandle(bukkitScheduler.runTaskLater(CultACBukkitLoaderPlugin.LOADER, guarded_task, delay));
     }
 
     @Override
     public TaskHandle runAtFixedRate(
             @NotNull GrimPlugin plugin, @NotNull Runnable task, long initialDelayTicks, long periodTicks) {
-        return new BukkitTaskHandle(
-                bukkitScheduler.runTaskTimer(CultACBukkitLoaderPlugin.LOADER, task, initialDelayTicks, periodTicks));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new BukkitTaskHandle(bukkitScheduler.runTaskTimer(
+                CultACBukkitLoaderPlugin.LOADER, guarded_task, initialDelayTicks, periodTicks));
     }
 
     @Override
     public void cancel(@NotNull GrimPlugin plugin) {
-        bukkitScheduler.cancelTasks(CultACBukkitLoaderPlugin.LOADER);
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+            bukkitScheduler.cancelTasks(CultACBukkitLoaderPlugin.LOADER);
+        else ac.cult.cultac.runtime.RuntimeEnvironment.host().resources().close();
     }
 }

@@ -1,4 +1,6 @@
-plugins { cult.`base-conventions` }
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
+plugins { cult.`base-conventions`; id("com.gradleup.shadow") }
 
 repositories {
     if (providers.gradleProperty("mavenLocalOverride").getOrElse("false").toBoolean()) mavenLocal()
@@ -16,6 +18,7 @@ configurations.configureEach {
     attributes.attribute(org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25)
 }
 dependencies {
+    compileOnly(project(":reload-host"))
     api(project(":common"))
     implementation(project(":protocol-netty"))
     implementation(libs.cult.internal.shims)
@@ -40,3 +43,43 @@ for (variant in listOf("apiElements", "runtimeElements")) {
         attributes.attribute(org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 21)
     }
 }
+
+val runtimeDescriptor = tasks.register("runtimeDescriptor") {
+    val descriptor = layout.buildDirectory.file("runtime-descriptor/velocity-plugin.json")
+    inputs.property("version", rootProject.version.toString())
+    inputs.property("loader-version", providers.gradleProperty("cultLoaderVersion").get())
+    outputs.file(descriptor)
+    doLast {
+        descriptor.get().asFile.apply { parentFile.mkdirs(); writeText("{\"id\":\"cultac\",\"version\":\"${rootProject.version}\",\"cult-loader-version\":\"${providers.gradleProperty("cultLoaderVersion").get()}\"}\n") }
+    }
+}
+tasks.shadowJar {
+    dependsOn(runtimeDescriptor)
+    from(layout.buildDirectory.dir("runtime-descriptor"))
+    archiveFileName.set("CultAC-velocity-runtime.jar")
+    dependencies {
+        exclude(dependency("ac.grim.grimac:.*:.*"))
+        exclude(dependency("com.zaxxer:HikariCP:.*"))
+        exclude(dependency("com.google.code.gson:gson:.*"))
+        exclude(dependency("com.google.guava:guava:.*"))
+        exclude(dependency("it.unimi.dsi:fastutil:.*"))
+        exclude(dependency("org.joml:joml:.*"))
+        exclude(dependency("org.xerial:sqlite-jdbc:.*"))
+        exclude(dependency("org.mongodb:.*:.*"))
+        exclude(project(":reload-api"))
+        exclude(project(":reload-host"))
+        exclude(project(":reload-services"))
+        exclude(project(":reload-integrations"))
+    }
+    exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
+    exclude("META-INF/services/javax.annotation.processing.Processor")
+    mergeServiceFiles()
+    manifest.attributes(mapOf(
+        "Cult-Runtime-SPI" to "1",
+        "Cult-Runtime-Platform" to "velocity",
+        "Cult-Runtime-Java" to "21",
+        "Cult-Runtime-Build" to rootProject.version.toString(),
+        "Cult-Runtime-Entrypoint" to "ac.cult.cultac.platform.velocity.VelocityRuntimeEntrypoint"
+    ))
+}
+tasks.assemble { dependsOn(tasks.shadowJar) }

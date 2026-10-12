@@ -35,6 +35,10 @@ public interface SessionTracker {
      */
     void pollHeartbeat(@NotNull UUID playerUuid, long now);
 
+    default void pollHeartbeat(UUID playerUuid, UUID connectionId, long now) {
+        pollHeartbeat(playerUuid, now);
+    }
+
     /**
      * Final activity heartbeat for a disconnecting player + drop the in-memory
      * state so the next join opens a fresh session. Stamps {@code closed_at}
@@ -49,12 +53,20 @@ public interface SessionTracker {
     @Nullable
     UUID currentSessionId(@NotNull UUID playerUuid);
 
+    default UUID currentSessionId(UUID playerUuid, ClientMeta meta) {
+        return currentSessionId(playerUuid);
+    }
+
     /**
      * Optional client/server metadata stamped on every session upsert.
      * {@code clientVersion} is a PacketEvents protocol-version number; {@code -1}
      * means unknown. Use {@link #empty()} when none of the fields are known.
      */
-    record ClientMeta(String grimVersion, String clientBrand, int clientVersion, String serverVersion) {
+    record ClientMeta(
+            String grimVersion, String clientBrand, int clientVersion, String serverVersion, UUID connectionId) {
+        public ClientMeta(String grimVersion, String clientBrand, int clientVersion, String serverVersion) {
+            this(grimVersion, clientBrand, clientVersion, serverVersion, null);
+        }
 
         public static ClientMeta empty() {
             return new ClientMeta(null, null, -1, null);

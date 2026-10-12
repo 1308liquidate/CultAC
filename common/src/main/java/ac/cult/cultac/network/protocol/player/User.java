@@ -13,6 +13,12 @@ public final class User {
     private volatile PlatformPlayer player;
 
     private final Profile profile;
+    private final UUID connectionId = UUID.randomUUID();
+
+    public UUID getConnectionId() {
+        return connectionId;
+    }
+
     private final AtomicBoolean closeRequested = new AtomicBoolean();
     private final ac.cult.cultac.network.CultConnection cultConnection;
 

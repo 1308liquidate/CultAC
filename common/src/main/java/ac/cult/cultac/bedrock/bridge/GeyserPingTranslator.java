@@ -13,6 +13,12 @@ final class GeyserPingTranslator extends PacketTranslator<ClientboundPingPacket>
 
     @SuppressWarnings("unchecked")
     GeyserPingTranslator() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            delegate =
+                    ac.cult.reload.integrations.GeyserTranslatorRouter.install(ClientboundPingPacket.class, host, this);
+            return;
+        }
         delegate = (PacketTranslator<ClientboundPingPacket>)
                 Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundPingPacket.class);
         if (delegate == null) throw new IllegalStateException("Missing Geyser ping translator");
@@ -34,10 +40,19 @@ final class GeyserPingTranslator extends PacketTranslator<ClientboundPingPacket>
     }
 
     boolean isInstalled() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null)
+            return ac.cult.reload.integrations.GeyserTranslatorRouter.installed(
+                    ClientboundPingPacket.class, host, this);
         return Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundPingPacket.class) == this;
     }
 
     void close() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            ac.cult.reload.integrations.GeyserTranslatorRouter.remove(ClientboundPingPacket.class, host, this);
+            return;
+        }
         if (isInstalled()) Registries.JAVA_PACKET_TRANSLATORS.register(ClientboundPingPacket.class, delegate);
     }
 }

@@ -96,6 +96,8 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
     }
 
     private static String resolveCultVersion(CultAPI api) {
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() != null)
+            return ac.cult.cultac.runtime.RuntimeEnvironment.host().build();
         try {
             Properties properties = PropertiesUtil.readProperties(CultExternalAPI.class, "cultac.properties");
             String buildVersion = properties.getProperty("build.version");
@@ -158,7 +160,8 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
 
     // on load, load the config & register the service
     public void load() {
-        reload(configManagerFile);
+        if (!successfulReload(configManagerFile) && ac.cult.cultac.runtime.RuntimeEnvironment.host() != null)
+            throw new IllegalStateException("Runtime configuration rejected");
         api.getLoader().registerAPIService();
     }
 
@@ -199,12 +202,20 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
     }
 
     private boolean successfulReload(ConfigManager config) {
+        return successfulReload(config, true);
+    }
+
+    public boolean applyPrepared(ConfigManager config) {
+        return successfulReload(config, false);
+    }
+
+    private boolean successfulReload(ConfigManager config, boolean read) {
         try {
-            config.reload();
+            if (read) config.reload();
             CultAPI.INSTANCE.getConfigManager().load(config);
             if (started) CultAPI.INSTANCE.getConfigManager().start();
             onReload(config);
-            if (started)
+            if (started && ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
                 CultAPI.INSTANCE
                         .getScheduler()
                         .getAsyncScheduler()
@@ -213,7 +224,7 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
         } catch (Exception e) {
             LogUtil.error("Failed to reload config", e);
         }
-        if (started)
+        if (started && ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
             CultAPI.INSTANCE
                     .getScheduler()
                     .getAsyncScheduler()

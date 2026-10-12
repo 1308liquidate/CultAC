@@ -92,7 +92,8 @@ public interface LiveWriteHooks {
             ClientBrand check = gp.checkManager.getCheck(ClientBrand.class);
             if (check != null && check.isHasBrand()) brand = check.getBrand();
         }
-        return new SessionTracker.ClientMeta(grimVersion, brand, clientVersionPvn, serverVersion);
+        return new SessionTracker.ClientMeta(
+                grimVersion, brand, clientVersionPvn, serverVersion, user.getConnectionId());
     }
 
     /**

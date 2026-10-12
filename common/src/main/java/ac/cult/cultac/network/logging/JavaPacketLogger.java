@@ -220,10 +220,12 @@ public final class JavaPacketLogger implements AutoCloseable {
         });
         writer.shutdown();
         try {
-            if (!writer.awaitTermination(5, TimeUnit.SECONDS))
-                report.accept("Java packet logger is still draining files after shutdown timeout.");
+            while (!writer.awaitTermination(5, TimeUnit.SECONDS)) {
+                report.accept("Java packet logger is still draining files; runtime remains loaded.");
+            }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+            throw new IllegalStateException("Packet logger cleanup interrupted", interrupted);
         }
     }
 }

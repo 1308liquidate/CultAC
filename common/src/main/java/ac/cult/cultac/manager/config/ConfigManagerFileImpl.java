@@ -21,13 +21,28 @@ public class ConfigManagerFileImpl implements ConfigManager, BasicReloadable {
 
     private final DynamicConfig config;
     private boolean initialized = false;
+    private final File snapshotDirectory;
 
     public ConfigManagerFileImpl() {
+        this(
+                ac.cult.cultac.runtime.RuntimeEnvironment.host() == null
+                        ? null
+                        : ac.cult.cultac.runtime.RuntimeEnvironment.host()
+                                .directory()
+                                .resolve("runtime/generations")
+                                .resolve(ac.cult.cultac.runtime.RuntimeEnvironment.host()
+                                        .generationId())
+                                .resolve("config")
+                                .toFile());
+    }
+
+    public ConfigManagerFileImpl(File snapshotDirectory) {
+        this.snapshotDirectory = snapshotDirectory;
         config = new DynamicConfig();
     }
 
     File getDataFolder() {
-        return CultAPI.INSTANCE.getGrimPlugin().getDataFolder();
+        return snapshotDirectory == null ? CultAPI.INSTANCE.getGrimPlugin().getDataFolder() : snapshotDirectory;
     }
 
     private File getConfigFile(String path) {
@@ -72,6 +87,21 @@ public class ConfigManagerFileImpl implements ConfigManager, BasicReloadable {
     public void reload() {
         getDataFolder().mkdirs();
         if (!initialized) {
+            if (snapshotDirectory != null) {
+                var canonical = ac.cult.cultac.runtime.RuntimeEnvironment.host().directory();
+                for (var name : configurationNames()) {
+                    var source = canonical.resolve(name);
+                    var target = snapshotDirectory.toPath().resolve(name);
+                    try {
+                        if (Files.exists(source)) {
+                            Files.createDirectories(target.getParent());
+                            Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    } catch (IOException failure) {
+                        throw new IllegalStateException("Cannot snapshot configuration " + name, failure);
+                    }
+                }
+            }
             initialized = true;
             config.addSource(CultAPI.class, "config", getConfigFile("config.yml"));
             config.addSource(CultAPI.class, "cult", getConfigFile("cult.yml"));
@@ -125,6 +155,23 @@ public class ConfigManagerFileImpl implements ConfigManager, BasicReloadable {
         } catch (Exception e) {
             throw new RuntimeException("Failed to load config", e);
         }
+    }
+
+    private static List<String> configurationNames() {
+        var names = new java.util.ArrayList<>(
+                List.of("config.yml", "cult.yml", "messages.yml", "discord.yml", "punishments.yml", "database.yml"));
+        for (var id : BACKEND_IDS) names.add("databases/" + id + ".yml");
+        return names;
+    }
+
+    public Map<String, byte[]> publication() throws IOException {
+        if (snapshotDirectory == null) return Map.of();
+        var files = new LinkedHashMap<String, byte[]>();
+        for (var name : configurationNames()) {
+            var path = snapshotDirectory.toPath().resolve(name);
+            if (Files.exists(path)) files.put(name, Files.readAllBytes(path));
+        }
+        return files;
     }
 
     private void upgrade() {

@@ -62,11 +62,12 @@ if (gradle.startParameter.isBuildScan) {
 
 rootProject.name = "cultac"
 include("common")
+include("reload-api", "reload-host", "reload-services", "reload-integrations")
 include("block-sim", "block-sim-generator")
 include("velocity-bootstrap", "velocity-platform")
 include("velocity-validation")
 project(":velocity-validation").projectDir = file("validation/velocity/harness")
-include("bukkit")
+include("bukkit", "bukkit-runtime")
 include("protocol", "protocol-netty")
 include("protocol-codec")
 

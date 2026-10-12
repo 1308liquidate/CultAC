@@ -14,29 +14,43 @@ public class FoliaGlobalRegionScheduler implements GlobalRegionScheduler {
 
     @Override
     public void execute(@NotNull GrimPlugin plugin, @NotNull Runnable task) {
-        globalRegionScheduler.execute(CultACBukkitLoaderPlugin.LOADER, task);
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        globalRegionScheduler.execute(CultACBukkitLoaderPlugin.LOADER, guarded_task);
     }
 
     @Override
     public TaskHandle run(@NotNull GrimPlugin plugin, @NotNull Runnable task) {
-        return new FoliaTaskHandle(globalRegionScheduler.run(CultACBukkitLoaderPlugin.LOADER, ignored -> task.run()));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new FoliaTaskHandle(globalRegionScheduler.run(
+                CultACBukkitLoaderPlugin.LOADER, ac.cult.reload.host.Callbacks.run(guarded_task)));
     }
 
     @Override
     public TaskHandle runDelayed(@NotNull GrimPlugin plugin, @NotNull Runnable task, long delay) {
-        return new FoliaTaskHandle(
-                globalRegionScheduler.runDelayed(CultACBukkitLoaderPlugin.LOADER, ignored -> task.run(), delay));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new FoliaTaskHandle(globalRegionScheduler.runDelayed(
+                CultACBukkitLoaderPlugin.LOADER, ac.cult.reload.host.Callbacks.run(guarded_task), delay));
     }
 
     @Override
     public TaskHandle runAtFixedRate(
             @NotNull GrimPlugin plugin, @NotNull Runnable task, long initialDelayTicks, long periodTicks) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
         return new FoliaTaskHandle(globalRegionScheduler.runAtFixedRate(
-                CultACBukkitLoaderPlugin.LOADER, ignored -> task.run(), initialDelayTicks, periodTicks));
+                CultACBukkitLoaderPlugin.LOADER,
+                ac.cult.reload.host.Callbacks.run(guarded_task),
+                initialDelayTicks,
+                periodTicks));
     }
 
     @Override
     public void cancel(@NotNull GrimPlugin plugin) {
-        globalRegionScheduler.cancelTasks(CultACBukkitLoaderPlugin.LOADER);
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+            globalRegionScheduler.cancelTasks(CultACBukkitLoaderPlugin.LOADER);
+        else ac.cult.cultac.runtime.RuntimeEnvironment.host().resources().close();
     }
 }

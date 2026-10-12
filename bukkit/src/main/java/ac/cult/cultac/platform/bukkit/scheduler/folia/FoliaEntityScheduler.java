@@ -19,10 +19,13 @@ public class FoliaEntityScheduler implements EntityScheduler {
             @NotNull Runnable task,
             @Nullable Runnable retired,
             long delay) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+        final Runnable guarded_retired = ac.cult.cultac.runtime.RuntimeEnvironment.guard(retired);
+
         ((BukkitCultEntity) entity)
                 .getBukkitEntity()
                 .getScheduler()
-                .execute(CultACBukkitLoaderPlugin.LOADER, task, retired, delay);
+                .execute(CultACBukkitLoaderPlugin.LOADER, guarded_task, guarded_retired, delay);
     }
 
     @Override
@@ -31,10 +34,13 @@ public class FoliaEntityScheduler implements EntityScheduler {
             @NotNull GrimPlugin plugin,
             @NotNull Runnable task,
             @Nullable Runnable retired) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+        final Runnable guarded_retired = ac.cult.cultac.runtime.RuntimeEnvironment.guard(retired);
+
         ScheduledTask scheduled = ((BukkitCultEntity) entity)
                 .getBukkitEntity()
                 .getScheduler()
-                .run(CultACBukkitLoaderPlugin.LOADER, ignored -> task.run(), retired);
+                .run(CultACBukkitLoaderPlugin.LOADER, ac.cult.reload.host.Callbacks.run(guarded_task), guarded_retired);
 
         return scheduled == null ? null : new FoliaTaskHandle(scheduled);
     }
@@ -46,10 +52,17 @@ public class FoliaEntityScheduler implements EntityScheduler {
             @NotNull Runnable task,
             @Nullable Runnable retired,
             long delayTicks) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+        final Runnable guarded_retired = ac.cult.cultac.runtime.RuntimeEnvironment.guard(retired);
+
         ScheduledTask scheduled = ((BukkitCultEntity) entity)
                 .getBukkitEntity()
                 .getScheduler()
-                .runDelayed(CultACBukkitLoaderPlugin.LOADER, ignored -> task.run(), retired, delayTicks);
+                .runDelayed(
+                        CultACBukkitLoaderPlugin.LOADER,
+                        ac.cult.reload.host.Callbacks.run(guarded_task),
+                        guarded_retired,
+                        delayTicks);
 
         return scheduled == null ? null : new FoliaTaskHandle(scheduled);
     }
@@ -62,13 +75,16 @@ public class FoliaEntityScheduler implements EntityScheduler {
             @Nullable Runnable retired,
             long initialDelayTicks,
             long periodTicks) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+        final Runnable guarded_retired = ac.cult.cultac.runtime.RuntimeEnvironment.guard(retired);
+
         ScheduledTask scheduled = ((BukkitCultEntity) entity)
                 .getBukkitEntity()
                 .getScheduler()
                 .runAtFixedRate(
                         CultACBukkitLoaderPlugin.LOADER,
-                        ignored -> task.run(),
-                        retired,
+                        ac.cult.reload.host.Callbacks.run(guarded_task),
+                        guarded_retired,
                         initialDelayTicks,
                         periodTicks);
 

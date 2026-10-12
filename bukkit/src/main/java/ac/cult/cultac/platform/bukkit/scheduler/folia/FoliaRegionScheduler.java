@@ -18,29 +18,41 @@ public class FoliaRegionScheduler implements RegionScheduler {
     @Override
     public void execute(
             @NotNull GrimPlugin plugin, @NotNull PlatformWorld world, int chunkX, int chunkZ, @NotNull Runnable task) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
         regionScheduler.execute(
-                CultACBukkitLoaderPlugin.LOADER, ((BukkitPlatformWorld) world).bukkitWorld(), chunkX, chunkZ, task);
+                CultACBukkitLoaderPlugin.LOADER,
+                ((BukkitPlatformWorld) world).bukkitWorld(),
+                chunkX,
+                chunkZ,
+                guarded_task);
     }
 
     @Override
     public void execute(@NotNull GrimPlugin plugin, @NotNull Location location, @NotNull Runnable task) {
-        execute(plugin, location.getWorld(), location.getBlockX() >> 4, location.getBlockZ() >> 4, task);
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        execute(plugin, location.getWorld(), location.getBlockX() >> 4, location.getBlockZ() >> 4, guarded_task);
     }
 
     @Override
     public TaskHandle run(
             @NotNull GrimPlugin plugin, @NotNull PlatformWorld world, int chunkX, int chunkZ, @NotNull Runnable task) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
         return new FoliaTaskHandle(regionScheduler.run(
                 CultACBukkitLoaderPlugin.LOADER,
                 ((BukkitPlatformWorld) world).bukkitWorld(),
                 chunkX,
                 chunkZ,
-                ignored -> task.run()));
+                ac.cult.reload.host.Callbacks.run(guarded_task)));
     }
 
     @Override
     public TaskHandle run(@NotNull GrimPlugin plugin, @NotNull Location location, @NotNull Runnable task) {
-        return run(plugin, location.getWorld(), location.getBlockX() >> 4, location.getBlockZ() >> 4, task);
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return run(plugin, location.getWorld(), location.getBlockX() >> 4, location.getBlockZ() >> 4, guarded_task);
     }
 
     @Override
@@ -51,20 +63,29 @@ public class FoliaRegionScheduler implements RegionScheduler {
             int chunkZ,
             @NotNull Runnable task,
             long delayTicks) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
         return new FoliaTaskHandle(regionScheduler.runDelayed(
                 CultACBukkitLoaderPlugin.LOADER,
                 ((BukkitPlatformWorld) world).bukkitWorld(),
                 chunkX,
                 chunkZ,
-                ignored -> task.run(),
+                ac.cult.reload.host.Callbacks.run(guarded_task),
                 delayTicks));
     }
 
     @Override
     public TaskHandle runDelayed(
             @NotNull GrimPlugin plugin, @NotNull Location location, @NotNull Runnable task, long delayTicks) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
         return runDelayed(
-                plugin, location.getWorld(), location.getBlockX() >> 4, location.getBlockZ() >> 4, task, delayTicks);
+                plugin,
+                location.getWorld(),
+                location.getBlockX() >> 4,
+                location.getBlockZ() >> 4,
+                guarded_task,
+                delayTicks);
     }
 
     @Override
@@ -76,12 +97,14 @@ public class FoliaRegionScheduler implements RegionScheduler {
             @NotNull Runnable task,
             long initialDelayTicks,
             long periodTicks) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
         return new FoliaTaskHandle(regionScheduler.runAtFixedRate(
                 CultACBukkitLoaderPlugin.LOADER,
                 ((BukkitPlatformWorld) world).bukkitWorld(),
                 chunkX,
                 chunkZ,
-                ignored -> task.run(),
+                ac.cult.reload.host.Callbacks.run(guarded_task),
                 initialDelayTicks,
                 periodTicks));
     }
@@ -93,12 +116,14 @@ public class FoliaRegionScheduler implements RegionScheduler {
             @NotNull Runnable task,
             long initialDelayTicks,
             long periodTicks) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
         return runAtFixedRate(
                 plugin,
                 location.getWorld(),
                 location.getBlockX() >> 4,
                 location.getBlockZ() >> 4,
-                task,
+                guarded_task,
                 initialDelayTicks,
                 periodTicks);
     }

@@ -9,13 +9,10 @@ import com.velocitypowered.api.proxy.ProxyServer;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import org.incendo.cloud.SenderMapper;
-import org.incendo.cloud.execution.ExecutionCoordinator;
 import org.incendo.cloud.parser.ParserDescriptor;
 import org.incendo.cloud.parser.standard.StringParser;
 import org.incendo.cloud.suggestion.Suggestion;
 import org.incendo.cloud.suggestion.SuggestionProvider;
-import org.incendo.cloud.velocity.VelocityCommandManager;
 
 final class VelocityCommands implements CloudPlatformCommandArguments {
     private final ProxyServer proxy;
@@ -27,13 +24,7 @@ final class VelocityCommands implements CloudPlatformCommandArguments {
     }
 
     CommandService service(Object plugin) {
-        return new CloudCommandService(
-                () -> new VelocityCommandManager<>(
-                        proxy.getPluginManager().fromInstance(plugin).orElseThrow(),
-                        proxy,
-                        ExecutionCoordinator.simpleCoordinator(),
-                        SenderMapper.create(senders::wrap, senders::unwrap)),
-                this);
+        return new CloudCommandService(ac.cult.cultac.command.IsolatedCommandManager::new, this);
     }
 
     @Override

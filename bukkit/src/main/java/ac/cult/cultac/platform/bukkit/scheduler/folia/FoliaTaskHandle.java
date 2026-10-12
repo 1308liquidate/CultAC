@@ -13,6 +13,7 @@ public class FoliaTaskHandle implements TaskHandle {
     @Contract(pure = true)
     public FoliaTaskHandle(@NotNull ScheduledTask task) {
         this.task = Objects.requireNonNull(task, "task");
+        ac.cult.cultac.runtime.RuntimeEnvironment.track(this, task::cancel);
     }
 
     @Override

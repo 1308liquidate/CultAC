@@ -52,9 +52,9 @@ public final class VelocityFlagObserver implements SimpleCommand {
         ClassLoader loader = java.util.Objects.requireNonNull(field.get(bootstrap), "CultAC failed to start")
                 .getClass()
                 .getClassLoader();
-        Class<?> apiClass = Class.forName("ac.cult.cultac.CultAPI", false, loader);
-        Object api = apiClass.getField("INSTANCE").get(null);
-        Object owner = apiClass.getMethod("getGrimPlugin").invoke(api);
+        Class<?> apiClass = Class.forName("ac.grim.grimac.api.GrimAbstractAPI", false, loader);
+        Object api = field.get(bootstrap).getClass().getMethod("publicApi").invoke(field.get(bootstrap));
+        Object owner = apiClass.getMethod("getGrimPlugin", Object.class).invoke(api, this);
         Object bus = apiClass.getMethod("getEventBus").invoke(api);
         Class<?> eventType = Class.forName("ac.grim.grimac.api.event.events.FlagEvent", false, loader);
         Class<?> listenerType = Class.forName("ac.grim.grimac.api.event.GrimEventListener", false, loader);

@@ -27,6 +27,10 @@ public class ChannelManager implements StartableInitable, PluginMessageListener 
                 ac.cult.cultac.platform.bukkit.CultACBukkitLoaderPlugin.LOADER, channelName);
         messenger.registerIncomingPluginChannel(
                 ac.cult.cultac.platform.bukkit.CultACBukkitLoaderPlugin.LOADER, channelName, this);
+        ac.cult.cultac.runtime.RuntimeEnvironment.track(
+                this,
+                () -> messenger.unregisterIncomingPluginChannel(
+                        ac.cult.cultac.platform.bukkit.CultACBukkitLoaderPlugin.LOADER, channelName, this));
     }
 
     @Override

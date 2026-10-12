@@ -1,0 +1,894 @@
+package ac.cult.reload.host;
+
+import ac.cult.reload.api.*;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+
+/** Admissions and publication share one lock; engine callbacks never execute under that lock. */
+public final class GenerationManager implements AutoCloseable {
+    private enum State {
+        PREPARING,
+        CURRENT,
+        DRAINING,
+        STOPPING,
+        CLEANUP_FAILED,
+        CLOSED
+    }
+
+    private final Path directory;
+    private final String platform;
+    private final String hostVersion;
+    private final String loaderVersion;
+    private final Object plugin, server, logger;
+    private final ClassLoader parent;
+    private final Consumer<String> report;
+    private final ExecutorService management;
+    private final Map<String, Generation> generations = new LinkedHashMap<>();
+    private final IdentityHashMap<Object, Session> sessions = new IdentityHashMap<>();
+    private final IdentityHashMap<Object, UserBinding> users = new IdentityHashMap<>();
+    private final Map<UUID, List<UserBinding>> usersByUuid = new HashMap<>();
+    private final IdentityHashMap<Object, UserBinding> nativeUsers = new IdentityHashMap<>();
+    private java.util.function.Function<Object, Object> upstream = ignored -> null;
+    private long generationOrder, bindingOrder;
+    private final Map<String, Object> shared = new LinkedHashMap<>();
+    private final HostApiRouter api = new HostApiRouter(this);
+    private Generation current;
+    private boolean closing;
+    private final CompletableFuture<Void> shutdown = new CompletableFuture<>();
+    private final java.util.concurrent.atomic.AtomicInteger ticks = new java.util.concurrent.atomic.AtomicInteger();
+
+    public void tick() {
+        ticks.incrementAndGet();
+    }
+
+    public int currentTick() {
+        return ticks.get();
+    }
+
+    public GenerationManager(
+            Path directory,
+            String platform,
+            Object plugin,
+            Object server,
+            Object logger,
+            ClassLoader parent,
+            Consumer<String> report) {
+        this(directory, platform, plugin, server, logger, parent, report, null);
+    }
+
+    public GenerationManager(
+            Path directory,
+            String platform,
+            Object plugin,
+            Object server,
+            Object logger,
+            ClassLoader parent,
+            Consumer<String> report,
+            String hostVersion) {
+        this(directory, platform, plugin, server, logger, parent, report, hostVersion, "2");
+    }
+
+    public GenerationManager(
+            Path directory,
+            String platform,
+            Object plugin,
+            Object server,
+            Object logger,
+            ClassLoader parent,
+            Consumer<String> report,
+            String hostVersion,
+            String loaderVersion) {
+        this.loaderVersion = loaderVersion;
+        this.hostVersion = hostVersion;
+        this.directory = directory.toAbsolutePath().normalize();
+        this.platform = platform;
+        this.plugin = plugin;
+        this.server = server;
+        this.logger = logger;
+        this.parent = parent;
+        this.report = report;
+        management = Executors.newSingleThreadExecutor(task -> {
+            var thread = new Thread(task, "cult-runtime-manager");
+            thread.setDaemon(true);
+            thread.setContextClassLoader(parent);
+            return thread;
+        });
+    }
+
+    /** Paper calls this during load, before Geyser snapshots its connection initializer. */
+    public void loadInitial(InputStream embedded) throws Exception {
+        Files.createDirectories(directory.resolve("updates"));
+        Files.createDirectories(directory.resolve("runtime"));
+        Path marker = directory.resolve("runtime/current.properties");
+        Path selected;
+        if (Files.exists(marker)) {
+            if (embedded != null) embedded.close();
+            var properties = new Properties();
+            try (var input = Files.newInputStream(marker)) {
+                properties.load(input);
+            }
+            selected = directory
+                    .resolve("runtime")
+                    .resolve(properties.getProperty("artifact"))
+                    .normalize();
+            if (!selected.startsWith(directory.resolve("runtime")))
+                throw new IOException("Invalid active runtime path");
+            var descriptor = RuntimeArtifact.inspect(selected, platform, loaderVersion);
+            if (!descriptor.digest().equals(properties.getProperty("sha256")))
+                throw new IOException("Active runtime digest changed");
+        } else {
+            selected = directory.resolve("runtime/default.jar");
+            try (embedded) {
+                if (embedded == null) throw new IOException("Bootstrap contains no default runtime");
+                Files.copy(embedded, selected, StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+        var generation = prepare(selected);
+        synchronized (this) {
+            current = generation;
+        }
+    }
+
+    public void startInitial() throws Exception {
+        Generation generation;
+        synchronized (this) {
+            generation = Objects.requireNonNull(current, "Runtime not loaded");
+        }
+        invoke(generation, () -> {
+            generation.runtime.start();
+            return null;
+        });
+        try (var settings = new ConfigFiles(directory, generation.runtime.configurationFiles())) {
+            persist(generation);
+            settings.commit();
+        }
+        synchronized (this) {
+            generation.state = State.CURRENT;
+        }
+    }
+
+    public CompletionStage<String> update(String filename) {
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        Path name = Path.of(filename);
+                        if (name.isAbsolute() || name.getNameCount() != 1 || !filename.endsWith(".jar")) {
+                            throw new IOException("Specify a jar filename in the updates directory");
+                        }
+                        Path root = directory.resolve("updates").toRealPath();
+                        Path input = root.resolve(name).toRealPath();
+                        if (!input.startsWith(root) || !Files.isRegularFile(input))
+                            throw new IOException("Invalid update artifact");
+                        synchronized (this) {
+                            if (closing) throw new IllegalStateException("Host is stopping");
+                        }
+                        var next = prepare(input);
+                        boolean duplicate;
+                        synchronized (this) {
+                            duplicate = current != null
+                                    && current.artifact.identity().equals(next.artifact.identity());
+                        }
+                        if (duplicate) {
+                            if (Files.exists(next.home.resolve("distribution.jar"))) {
+                                Files.copy(
+                                        next.home.resolve("distribution.jar"),
+                                        current.home.resolve("distribution.jar"),
+                                        StandardCopyOption.REPLACE_EXISTING);
+                            }
+                            synchronized (this) {
+                                next.state = State.DRAINING;
+                            }
+                            retire(next);
+                            return "Already running " + next.artifact.display();
+                        }
+                        try {
+                            invoke(next, () -> {
+                                next.runtime.start();
+                                return null;
+                            });
+                        } catch (Throwable failure) {
+                            synchronized (this) {
+                                next.state = State.DRAINING;
+                            }
+                            retire(next);
+                            throw failure;
+                        }
+                        Generation previous;
+                        try {
+                            try (var settings = new ConfigFiles(directory, next.runtime.configurationFiles())) {
+                                synchronized (this) {
+                                    if (closing) throw new IllegalStateException("Host is stopping");
+                                    persist(next);
+                                    previous = current;
+                                    current = next;
+                                    next.state = State.CURRENT;
+                                    if (previous != null) previous.state = State.DRAINING;
+                                }
+                                settings.commit();
+                            }
+                        } catch (Throwable failure) {
+                            synchronized (this) {
+                                next.state = State.DRAINING;
+                            }
+                            retire(next);
+                            throw failure;
+                        }
+                        report.accept("Activated CultAC runtime " + next.artifact.display() + " (" + next.id + ")");
+                        if (previous != null) retire(previous);
+                        return "Activated " + next.artifact.display();
+                    } catch (Throwable failure) {
+                        throw new CompletionException(RuntimeFailures.detached(failure));
+                    }
+                },
+                management);
+    }
+
+    private Generation prepare(Path source) throws Exception {
+        String id = UUID.randomUUID().toString();
+        Path home = directory.resolve("runtime/generations").resolve(id);
+        Files.createDirectories(home);
+        Path artifactPath = home.resolve("runtime.jar");
+        RuntimeArtifact descriptor;
+        try {
+            descriptor = RuntimeBundle.stage(source, home, platform, loaderVersion);
+            RuntimeArtifact.validateHost(artifactPath, hostVersion);
+        } catch (Exception failure) {
+            deleteHome(home);
+            throw failure;
+        }
+        var loader = new RuntimeClassLoader(artifactPath.toUri().toURL(), parent);
+        var generation = new Generation(id, home, descriptor, loader, ++generationOrder);
+        synchronized (this) {
+            generations.put(id, generation);
+        }
+        try {
+            invoke(generation, () -> {
+                var entry = (RuntimeEntrypoint) loader.loadClass(descriptor.entrypoint())
+                        .getConstructor()
+                        .newInstance();
+                generation.runtime = entry.create(new Context(generation));
+                generation.runtime.load();
+                api.initialize(generation.id);
+                return null;
+            });
+            return generation;
+        } catch (Throwable failure) {
+            synchronized (this) {
+                generation.state = State.DRAINING;
+            }
+            retire(generation);
+            if (failure instanceof Exception error) throw error;
+            throw (Error) failure;
+        }
+    }
+
+    /** Native integrations resolve the physical upstream once, before downstream admission. */
+    public synchronized void connectionResolver(java.util.function.Function<Object, Object> resolver) {
+        upstream = Objects.requireNonNull(resolver);
+    }
+
+    public void attach(Object connection, Object nativePlayer) throws Exception {
+        attach(connection, nativePlayer, false);
+    }
+
+    public void attach(Object connection, Object nativePlayer, boolean requireUpstream) throws Exception {
+        synchronized (this) {
+            if (sessions.containsKey(connection)) return;
+        }
+        Object physicalUpstream = upstream.apply(connection);
+        Generation owner;
+        synchronized (this) {
+            if (closing) throw new IllegalStateException("Host is stopping");
+            if (sessions.containsKey(connection)) return;
+            Session pinned = physicalUpstream == null ? null : sessions.get(physicalUpstream);
+            if (physicalUpstream != null && pinned == null) throw new IllegalStateException("Unpinned Bedrock session");
+            if (pinned == null && requireUpstream) return;
+            owner = pinned == null ? Objects.requireNonNull(current, "No active runtime") : pinned.owner;
+            if (owner.state != State.CURRENT && owner.state != State.DRAINING)
+                throw new IllegalStateException("Runtime cannot accept a session");
+            sessions.put(connection, new Session(owner));
+            owner.leases++;
+        }
+        try {
+            invoke(owner, () -> {
+                owner.runtime.attach(connection, nativePlayer);
+                return null;
+            });
+        } catch (Throwable failure) {
+            disconnect(connection);
+            throw RuntimeFailures.detached(failure);
+        }
+    }
+
+    public CompletionStage<Void> disconnect(Object connection) {
+        Session session;
+        synchronized (this) {
+            session = sessions.get(connection);
+            if (session == null) return CompletableFuture.completedFuture(null);
+            if (session.disconnect != null) return session.disconnect.minimalCompletionStage();
+            session.disconnect = new CompletableFuture<>();
+        }
+        var owner = session.owner;
+        release(connection, owner, operation(owner, () -> owner.runtime.disconnect(connection)));
+        return session.disconnect.minimalCompletionStage();
+    }
+
+    private void release(Object connection, Generation owner, CompletionStage<Void> cleanup) {
+        cleanup.whenComplete((ignored, failure) -> {
+            Session session;
+            synchronized (this) {
+                session = sessions.get(connection);
+                if (session == null || session.owner != owner) return;
+                if (failure == null) {
+                    sessions.remove(connection);
+                    owner.leases--;
+                }
+            }
+            if (failure != null) {
+                report.accept("CultAC session cleanup failed for " + owner.id + ": " + failure);
+                if (session.disconnect != null)
+                    session.disconnect.completeExceptionally(RuntimeFailures.detached(failure));
+                if (closing) failedCleanup(owner, failure);
+                return;
+            }
+            unbindUser(connection);
+            if (session.disconnect != null) session.disconnect.complete(null);
+            management.execute(() -> retire(owner));
+        });
+    }
+
+    private void failedCleanup(Generation owner, Throwable failure) {
+        synchronized (this) {
+            owner.state = State.CLEANUP_FAILED;
+        }
+        owner.closed.completeExceptionally(RuntimeFailures.detached(failure));
+    }
+
+    private void retire(Generation generation) {
+        synchronized (this) {
+            if (generation.state != State.DRAINING || generation.leases != 0) return;
+            generation.state = State.STOPPING;
+        }
+        generation
+                .resources
+                .close()
+                .thenComposeAsync(
+                        ignored -> {
+                            try {
+                                return generation.runtime == null
+                                        ? CompletableFuture.<Void>completedFuture(null)
+                                        : finishInvoke(generation, () -> generation.runtime.close());
+                            } catch (Throwable error) {
+                                return CompletableFuture.<Void>failedFuture(error);
+                            }
+                        },
+                        management)
+                .whenCompleteAsync(
+                        (ignored, failure) -> {
+                            try {
+                                if (failure != null) throw new CompletionException(failure);
+                                api.detach(generation.id);
+                                ac.cult.cultac.manager.datastore.SharedVerboseTags.releaseDeclarations(
+                                        generation.loader);
+                                generation.loader.close();
+                                if (!generation.preserveArtifact) deleteHome(generation.home);
+                                synchronized (this) {
+                                    generation.runtime = null;
+                                    generation.state = State.CLOSED;
+                                    generations.remove(generation.id);
+                                }
+                                report.accept("Unloaded CultAC runtime " + generation.id);
+                                generation.closed.complete(null);
+                            } catch (Throwable error) {
+                                synchronized (this) {
+                                    generation.state = State.CLEANUP_FAILED;
+                                }
+                                report.accept("CultAC runtime " + generation.id + " cleanup failed: " + error);
+                                generation.closed.completeExceptionally(RuntimeFailures.detached(error));
+                            }
+                        },
+                        management);
+    }
+
+    private void persist(Generation generation) throws IOException {
+        var properties = new Properties();
+        properties.setProperty(
+                "artifact",
+                directory
+                        .resolve("runtime")
+                        .relativize(generation.home.resolve("runtime.jar"))
+                        .toString());
+        properties.setProperty("sha256", generation.artifact.digest());
+        Path temporary = directory.resolve("runtime/current.properties.tmp");
+        try (var output = Files.newOutputStream(temporary)) {
+            properties.store(output, "CultAC active runtime");
+        }
+        Files.move(
+                temporary,
+                directory.resolve("runtime/current.properties"),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    public synchronized List<String> status() {
+        return generations.values().stream()
+                .map(g -> g.artifact.display() + " " + g.id + " " + g.state + " sessions=" + g.leases + " work="
+                        + g.resources.inFlight())
+                .toList();
+    }
+
+    private synchronized List<Generation> snapshot() {
+        return generations.values().stream()
+                .filter(g -> g.runtime != null && (g.state == State.CURRENT || g.state == State.DRAINING))
+                .toList();
+    }
+
+    synchronized List<String> runtimeIds() {
+        return snapshot().stream().map(g -> g.id).toList();
+    }
+
+    synchronized String currentId() {
+        if (current == null) throw RuntimeFailures.ended();
+        return current.id;
+    }
+
+    private synchronized Generation generation(String id) {
+        var owner = generations.get(id);
+        if (owner == null
+                || owner.state == State.STOPPING
+                || owner.state == State.CLOSED
+                || owner.state == State.CLEANUP_FAILED) throw RuntimeFailures.ended();
+        return owner;
+    }
+
+    <T> T call(String owner, RuntimeCall<T> action) throws Exception {
+        var generation = generation(owner);
+        return invoke(generation, () -> action.apply(generation.runtime));
+    }
+
+    public Object publicApi() {
+        return api.facade();
+    }
+
+    public CompletionStage<Void> execute(Object sender, String input, Object target, boolean aggregate) {
+        if (aggregate)
+            return CompletableFuture.allOf(snapshot().stream()
+                    .map(g ->
+                            operation(g, () -> g.runtime.execute(sender, input)).toCompletableFuture())
+                    .toArray(CompletableFuture[]::new));
+        UserBinding user = user(target);
+        var owner = generation(user == null ? currentId() : user.owner());
+        return operation(owner, () -> owner.runtime.execute(sender, input));
+    }
+
+    public CompletionStage<List<String>> suggest(Object sender, String input) {
+        var owner = generation(currentId());
+        return operation(owner, () -> owner.runtime.suggest(sender, input));
+    }
+
+    public List<String> placeholders() {
+        try {
+            return call(currentId(), runtime -> List.copyOf(runtime.placeholders()));
+        } catch (Exception failure) {
+            return List.of();
+        }
+    }
+
+    public String placeholder(UUID player, String parameter) {
+        UserBinding user = user(player);
+        try {
+            return call(
+                    user == null ? currentId() : user.owner(),
+                    runtime -> runtime.placeholder(user == null ? null : player, parameter));
+        } catch (Exception failure) {
+            throw RuntimeFailures.detached(failure);
+        }
+    }
+
+    private <T> CompletionStage<T> operation(Generation owner, Supplier<CompletionStage<T>> action) {
+        return owner.resources.callAsync(action::get);
+    }
+
+    synchronized String ownerOf(Object connection) {
+        var session = sessions.get(connection);
+        return session == null ? null : session.owner.id;
+    }
+
+    synchronized UserBinding user(Object identity) {
+        if (identity instanceof UUID uuid) {
+            var entries = usersByUuid.get(uuid);
+            return entries == null
+                    ? null
+                    : entries.stream()
+                            .max(Comparator.comparingLong(UserBinding::generationOrder)
+                                    .thenComparingLong(UserBinding::bindingOrder))
+                            .orElse(null);
+        }
+        return nativeUsers.get(identity);
+    }
+
+    private void bindUser(Generation owner, Object connection, UUID uuid, Object nativePlayer, Object user) {
+        synchronized (this) {
+            var session = sessions.get(connection);
+            if (session == null || session.owner != owner)
+                throw new IllegalStateException("User has no pinned connection");
+            var previous = users.get(connection);
+            if (previous != null) removeBinding(previous);
+            var binding = new UserBinding(owner.id, connection, uuid, nativePlayer, user, owner.order, ++bindingOrder);
+            users.put(connection, binding);
+            usersByUuid.computeIfAbsent(uuid, ignored -> new ArrayList<>()).add(binding);
+            if (nativePlayer != null) nativeUsers.put(nativePlayer, binding);
+        }
+    }
+
+    private void removeBinding(UserBinding binding) {
+        users.remove(binding.connection(), binding);
+        var entries = usersByUuid.get(binding.uuid());
+        entries.remove(binding);
+        if (entries.isEmpty()) usersByUuid.remove(binding.uuid());
+        if (binding.nativePlayer() != null) nativeUsers.remove(binding.nativePlayer(), binding);
+    }
+
+    private void unbindUser(Object connection) {
+        UserBinding binding;
+        synchronized (this) {
+            binding = users.get(connection);
+            if (binding != null) removeBinding(binding);
+        }
+        if (binding != null) api.detachUser(binding.user());
+    }
+
+    record UserBinding(
+            String owner,
+            Object connection,
+            UUID uuid,
+            Object nativePlayer,
+            Object user,
+            long generationOrder,
+            long bindingOrder) {}
+
+    public CompletableFuture<Boolean> reload(Object configuration) {
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    var live = snapshot();
+                    var leases = new ArrayList<ResourceScope.Lease>();
+                    var old = new LinkedHashMap<Generation, Object>();
+                    var next = new LinkedHashMap<Generation, Object>();
+                    var applied = new ArrayList<Generation>();
+                    boolean success = false;
+                    try {
+                        if (configuration instanceof ac.grim.grimac.api.config.ConfigManager config) config.reload();
+                        for (var generation : live) {
+                            leases.add(generation.resources.acquire());
+                            old.put(generation, generation.runtime.currentConfiguration());
+                            next.put(
+                                    generation,
+                                    invoke(generation, () -> generation.runtime.prepareReload(configuration)));
+                        }
+                        for (var generation : live) {
+                            applied.add(generation);
+                            if (!invoke(generation, () -> generation.runtime.applyReload(next.get(generation))))
+                                throw new IllegalStateException(
+                                        "Configuration rejected by " + generation.artifact.build());
+                        }
+                        Generation active;
+                        synchronized (this) {
+                            active = current;
+                        }
+                        if (active != null)
+                            try (var files = new ConfigFiles(directory, active.runtime.configurationFiles())) {
+                                files.commit();
+                            }
+                        success = true;
+                    } catch (Throwable failure) {
+                        report.accept("CultAC configuration reload failed: " + failure);
+                        Collections.reverse(applied);
+                        for (var generation : applied) {
+                            try {
+                                invoke(generation, () -> generation.runtime.applyReload(old.get(generation)));
+                            } catch (Exception rollback) {
+                                report.accept("CultAC configuration rollback failed: " + rollback);
+                            }
+                        }
+                    } finally {
+                        for (var lease : leases) {
+                            try {
+                                lease.close();
+                            } catch (Exception failure) {
+                                report.accept("CultAC reload cleanup failed: " + failure);
+                            }
+                        }
+                        synchronized (shared) {
+                            var bus = shared.get("event-bus");
+                            if (bus instanceof ac.grim.grimac.api.event.EventBus events)
+                                events.get(ac.grim.grimac.api.event.events.GrimReloadEvent.class)
+                                        .fire(success);
+                        }
+                    }
+                    return success;
+                },
+                management);
+    }
+
+    ClassLoader parentLoader() {
+        return parent;
+    }
+
+    private <T> T invoke(Generation generation, CheckedSupplier<T> action) throws Exception {
+        return generation.resources.call(action::get);
+    }
+
+    /** The only unguarded engine invocation: its gate has drained before final stop. */
+    private <T> T finishInvoke(Generation generation, CheckedSupplier<T> action) throws Exception {
+        var thread = Thread.currentThread();
+        var previous = thread.getContextClassLoader();
+        try {
+            thread.setContextClassLoader(generation.loader);
+            return action.get();
+        } finally {
+            thread.setContextClassLoader(previous);
+        }
+    }
+
+    public CompletionStage<Void> stop() {
+        return shutdown(null);
+    }
+
+    /** Install the latest engine and clean staging before any final runtime unload. */
+    public CompletionStage<Void> shutdown(Path installedPlugin) {
+        synchronized (this) {
+            if (closing) return shutdown.minimalCompletionStage();
+            closing = true;
+        }
+        management.execute(() -> beginStop(installedPlugin));
+        return shutdown.minimalCompletionStage();
+    }
+
+    private void beginStop(Path installedPlugin) {
+        List<Generation> all;
+        Generation latest;
+        synchronized (this) {
+            latest = current;
+            if (latest != null) latest.preserveArtifact = true;
+            all = new ArrayList<>(generations.values());
+        }
+        Throwable installationFailure = null;
+        if (latest != null && installedPlugin != null) {
+            try {
+                PluginInstaller.install(installedPlugin, latest.home.resolve("runtime.jar"), latest.artifact, platform);
+                report.accept(
+                        "Installed CultAC " + latest.artifact.display() + " into " + installedPlugin.getFileName());
+                Files.deleteIfExists(directory.resolve("runtime/current.properties"));
+                latest.preserveArtifact = false;
+                try {
+                    int removed = PluginInstaller.cleanUpdates(directory.resolve("updates"));
+                    report.accept("Removed " + removed + " staged CultAC update files");
+                } catch (IOException cleanup) {
+                    report.accept("CultAC update-folder cleanup failed: " + cleanup);
+                }
+            } catch (Throwable failure) {
+                installationFailure = RuntimeFailures.detached(failure);
+                report.accept(
+                        "CultAC plugin installation failed; active artifact and staged updates retained: " + failure);
+            }
+        }
+        synchronized (this) {
+            current = null;
+            for (var generation : all)
+                if (generation.state != State.STOPPING && generation.state != State.CLEANUP_FAILED)
+                    generation.state = State.DRAINING;
+        }
+        for (var connection : sessionSnapshot()) {
+            Generation owner;
+            synchronized (this) {
+                var session = sessions.get(connection);
+                owner = session == null ? null : session.owner;
+            }
+            if (owner != null)
+                disconnect(connection).whenComplete((ignored, error) -> {
+                    if (error != null) failedCleanup(owner, error);
+                });
+        }
+        for (var generation : all) retire(generation);
+        Throwable promotionError = installationFailure;
+        CompletableFuture.allOf(all.stream().map(g -> g.closed).toArray(CompletableFuture[]::new))
+                .whenCompleteAsync(
+                        (ignored, failure) -> {
+                            Throwable error = failure == null ? promotionError : RuntimeFailures.detached(failure);
+                            synchronized (shared) {
+                                var values = new ArrayList<>(shared.values());
+                                Collections.reverse(values);
+                                for (var value : values)
+                                    if (value instanceof AutoCloseable resource) {
+                                        try {
+                                            resource.close();
+                                        } catch (Exception cleanup) {
+                                            if (error == null) error = RuntimeFailures.detached(cleanup);
+                                            else error.addSuppressed(RuntimeFailures.detached(cleanup));
+                                        }
+                                    }
+                                shared.clear();
+                            }
+                            if (error == null) shutdown.complete(null);
+                            else shutdown.completeExceptionally(error);
+                            management.shutdown();
+                        },
+                        management);
+    }
+
+    private static void deleteHome(Path home) throws IOException {
+        try (var files = Files.walk(home)) {
+            for (var file : files.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(file);
+        }
+    }
+
+    private synchronized List<Object> sessionSnapshot() {
+        return new ArrayList<>(sessions.keySet());
+    }
+
+    @Override
+    public void close() {
+        stop().toCompletableFuture().join();
+    }
+
+    private final class Context implements HostContext {
+        private final Generation generation;
+
+        Context(Generation generation) {
+            this.generation = generation;
+        }
+
+        public String generationId() {
+            return generation.id;
+        }
+
+        public String platform() {
+            return platform;
+        }
+
+        public String build() {
+            return generation.artifact.display();
+        }
+
+        public Path directory() {
+            return directory;
+        }
+
+        public Object plugin() {
+            return plugin;
+        }
+
+        public Object server() {
+            return server;
+        }
+
+        public Object logger() {
+            return logger;
+        }
+
+        public ResourceScope resources() {
+            return generation.resources;
+        }
+
+        public boolean current() {
+            synchronized (GenerationManager.this) {
+                return current == generation;
+            }
+        }
+
+        public boolean owns(Object session) {
+            synchronized (GenerationManager.this) {
+                var binding = sessions.get(session);
+                return binding != null && binding.owner == generation;
+            }
+        }
+
+        public boolean pin(Object session) {
+            synchronized (GenerationManager.this) {
+                var owner = sessions.get(session);
+                if (owner != null) return owner.owner == generation;
+                if (closing || current != generation || generation.state != State.CURRENT) return false;
+                sessions.put(session, new Session(generation));
+                generation.leases++;
+                return true;
+            }
+        }
+
+        public void release(Object session, CompletionStage<Void> cleanup) {
+            GenerationManager.this.release(session, generation, cleanup);
+        }
+
+        public String ownerOf(Object connection) {
+            return GenerationManager.this.ownerOf(connection);
+        }
+
+        public void bindUser(Object connection, UUID uuid, Object nativePlayer, Object user) {
+            GenerationManager.this.bindUser(generation, connection, uuid, nativePlayer, user);
+        }
+
+        public void unbindUser(Object connection) {
+            if (owns(connection)) GenerationManager.this.unbindUser(connection);
+        }
+
+        public Object shared(String key, Supplier<Object> create) {
+            synchronized (shared) {
+                var value = shared.get(key);
+                if (value == null) {
+                    value = create.get();
+                    if (value.getClass().getClassLoader() instanceof RuntimeClassLoader) {
+                        throw new IllegalArgumentException("Shared services must be bootstrap-owned: " + key);
+                    }
+                    shared.put(key, value);
+                }
+                return value;
+            }
+        }
+
+        public Object publicApi() {
+            return api.facade();
+        }
+
+        public Object wrap(Object value) {
+            return api.wrap(generation.id, value, null);
+        }
+
+        public Object wrap(Object value, Object user) {
+            return api.wrap(generation.id, value, user);
+        }
+
+        public CompletionStage<String> update(String filename) {
+            return GenerationManager.this.update(filename);
+        }
+
+        public List<String> status() {
+            return GenerationManager.this.status();
+        }
+    }
+
+    private static final class Generation {
+        final String id;
+        final Path home;
+        final RuntimeArtifact artifact;
+        final RuntimeClassLoader loader;
+        final ScopedResources resources;
+        final CompletableFuture<Void> closed = new CompletableFuture<>();
+        RuntimeInstance runtime;
+        State state = State.PREPARING;
+        int leases;
+        final long order;
+        boolean preserveArtifact;
+
+        Generation(String id, Path home, RuntimeArtifact artifact, RuntimeClassLoader loader, long order) {
+            this.order = order;
+            this.id = id;
+            this.home = home;
+            this.artifact = artifact;
+            this.loader = loader;
+            resources = new ScopedResources(loader);
+        }
+    }
+
+    private static final class Session {
+        final Generation owner;
+        CompletableFuture<Void> disconnect;
+
+        Session(Generation owner) {
+            this.owner = owner;
+        }
+    }
+
+    @FunctionalInterface
+    interface RuntimeCall<T> {
+        T apply(RuntimeInstance runtime) throws Exception;
+    }
+
+    @FunctionalInterface
+    private interface CheckedSupplier<T> {
+        T get() throws Exception;
+    }
+}

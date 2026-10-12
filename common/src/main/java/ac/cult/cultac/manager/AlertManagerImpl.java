@@ -35,17 +35,27 @@ public final class AlertManagerImpl implements AlertManager, ConfigReloadable, S
 
         public @NotNull String enableMessage;
         public @NotNull String disableMessage;
-        public final @NotNull Set<@NotNull PlatformPlayer> players = new CopyOnWriteArraySet<>();
-        public boolean console;
+        public final @NotNull Set<@NotNull PlatformPlayer> players;
+        private final java.util.concurrent.atomic.AtomicBoolean console;
 
         AlertType(@NotNull String enableMessage, @NotNull String disableMessage) {
             this.enableMessage = enableMessage;
             this.disableMessage = disableMessage;
+            var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+            if (host == null) {
+                players = new CopyOnWriteArraySet<>();
+                console = new java.util.concurrent.atomic.AtomicBoolean();
+            } else {
+                var subscriptions = (ac.cult.reload.host.AlertSubscriptions)
+                        host.shared("alerts", ac.cult.reload.host.AlertSubscriptions::new);
+                players = new ac.cult.cultac.runtime.NativePlayerSet(subscriptions.players(name()));
+                console = subscriptions.console(name());
+            }
         }
 
         @Contract(pure = true)
         public boolean hasListeners() {
-            return !players.isEmpty() || console;
+            return !players.isEmpty() || console.get();
         }
 
         @Contract(pure = true)
@@ -69,7 +79,7 @@ public final class AlertManagerImpl implements AlertManager, ConfigReloadable, S
                 platformPlayer.sendMessage(component);
             }
 
-            if (console && (excluding == null || !excluding.contains(null))) {
+            if (console.get() && (excluding == null || !excluding.contains(null))) {
                 platformServer.getConsoleSender().sendMessage(component);
                 listeners.add(null);
             }
@@ -86,8 +96,11 @@ public final class AlertManagerImpl implements AlertManager, ConfigReloadable, S
 
     @Override
     public void reload(ConfigManager config) {
-        setConsoleAlertsEnabled(config.getBooleanElse("alerts.print-to-console", true), true);
-        setConsoleVerboseEnabled(config.getBooleanElse("verbose.print-to-console", false), true);
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host == null || host.current()) {
+            setConsoleAlertsEnabled(config.getBooleanElse("alerts.print-to-console", true), true);
+            setConsoleVerboseEnabled(config.getBooleanElse("verbose.print-to-console", false), true);
+        }
 
         AlertType.NORMAL.enableMessage = config.getStringElse("alerts-enabled", "%prefix% &fAlerts enabled");
         AlertType.NORMAL.disableMessage = config.getStringElse("alerts-disabled", "%prefix% &fAlerts disabled");
@@ -238,7 +251,7 @@ public final class AlertManagerImpl implements AlertManager, ConfigReloadable, S
 
     @Contract(pure = true)
     public boolean hasConsoleAlertsEnabled() {
-        return AlertType.NORMAL.console;
+        return AlertType.NORMAL.console.get();
     }
 
     public boolean toggleConsoleVerbose() {
@@ -262,7 +275,7 @@ public final class AlertManagerImpl implements AlertManager, ConfigReloadable, S
 
     @Contract(pure = true)
     public boolean hasConsoleVerboseEnabled() {
-        return AlertType.VERBOSE.console;
+        return AlertType.VERBOSE.console.get();
     }
 
     public boolean toggleConsoleBrands() {
@@ -285,12 +298,12 @@ public final class AlertManagerImpl implements AlertManager, ConfigReloadable, S
 
     @Contract(pure = true)
     public boolean hasConsoleBrandsEnabled() {
-        return AlertType.BRAND.console;
+        return AlertType.BRAND.console.get();
     }
 
     @Contract("_, _, _ -> param2")
     private boolean setConsoleStateAndNotify(@NotNull AlertType type, boolean enabled, boolean silent) {
-        if (type.console != enabled && !silent) {
+        if (type.console.get() != enabled && !silent) {
             String rawMessage = type.getToggleMessage(enabled);
             if (!rawMessage.isEmpty()) {
                 platformServer
@@ -300,7 +313,7 @@ public final class AlertManagerImpl implements AlertManager, ConfigReloadable, S
             }
         }
 
-        type.console = enabled;
+        type.console.set(enabled);
         return enabled;
     }
 

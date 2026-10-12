@@ -34,11 +34,20 @@ public class ProxyAlertMessenger implements PluginMessageListener {
                     .getMessenger()
                     .registerIncomingPluginChannel(
                             ac.cult.cultac.platform.bukkit.CultACBukkitLoaderPlugin.LOADER, "BungeeCord", this);
+            ac.cult.cultac.runtime.RuntimeEnvironment.track(
+                    this,
+                    () -> org.bukkit.Bukkit.getMessenger()
+                            .unregisterIncomingPluginChannel(
+                                    ac.cult.cultac.platform.bukkit.CultACBukkitLoaderPlugin.LOADER,
+                                    "BungeeCord",
+                                    this));
         }
     }
 
     @Override
     public void onPluginMessageReceived(@NotNull String channel, @NotNull Player player, @NotNull byte[] data) {
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() != null
+                && !ac.cult.cultac.runtime.RuntimeEnvironment.host().current()) return;
         if (!ProxyAlertMessenger.canReceiveAlerts()) return;
         if (!channel.equals("BungeeCord") && !channel.equals("bungeecord:main")) return;
 

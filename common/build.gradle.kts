@@ -105,6 +105,13 @@ tasks.processResources {
 }
 
 dependencies {
+    api(project(":reload-services"))
+    compileOnly(project(":reload-api"))
+    compileOnly(project(":reload-host"))
+    compileOnly(project(":reload-integrations"))
+    testImplementation(project(":reload-integrations"))
+    testImplementation(project(":reload-api"))
+    testImplementation(project(":reload-host"))
     api(project(":block-sim"))
     api(project(":protocol"))
 

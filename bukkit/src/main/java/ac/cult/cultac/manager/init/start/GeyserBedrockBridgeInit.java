@@ -12,7 +12,8 @@ import org.bukkit.event.server.PluginEnableEvent;
 public class GeyserBedrockBridgeInit implements StartableInitable, Listener {
     @Override
     public void start() {
-        Bukkit.getPluginManager().registerEvents(this, ac.cult.cultac.platform.bukkit.CultACBukkitLoaderPlugin.LOADER);
+        ac.cult.cultac.platform.bukkit.BukkitRuntimeRegistrations.registerEvents(
+                this, ac.cult.cultac.platform.bukkit.CultACBukkitLoaderPlugin.LOADER);
         if (Bukkit.getPluginManager().isPluginEnabled("Geyser-Spigot")) {
             startBridge();
         }

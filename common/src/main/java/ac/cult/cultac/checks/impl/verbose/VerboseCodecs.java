@@ -9,9 +9,7 @@ import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
-import ac.grim.grimac.api.storage.verbose.VerboseSchema;
 import ac.grim.grimac.api.storage.verbose.VerboseTags;
-import java.util.List;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -28,38 +26,50 @@ public final class VerboseCodecs {
     public static final int PACKET_TRANSACTION = Integer.MIN_VALUE + 1;
 
     static {
-        VerboseTags.registerEnum("face", Direction.values());
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.registerEnum("face", Direction.values(), false);
         var version = ProtocolVersion.V26_3;
         var digging = java.util.Arrays.stream(PlayerAction.values())
                 .filter(action ->
                         (action != PlayerAction.CHANGE_DESTROY_DIRECTION || version.atLeast(ProtocolVersion.V26_3))
                                 && (action != PlayerAction.STAB || version.atLeast(ProtocolVersion.V1_21_11)))
                 .toArray(PlayerAction[]::new);
-        VerboseTags.registerEnum("digging", digging);
-        VerboseTags.registerEnumLower("digging_lower", digging);
-        VerboseTags.registerEnum("clicktype", ac.cult.cultac.utils.inventory.inventory.WindowClickType.values());
-        VerboseTags.registerEnumLower(
-                "clicktype_lower", ac.cult.cultac.utils.inventory.inventory.WindowClickType.values());
-        VerboseTags.registerEnum("entityaction", PlayerCommandAction.values());
-        VerboseTags.registerEnum("hand", Hand.values());
-        VerboseTags.register(
-                "block", List.of(VerboseSchema.TypeTag.ZZ), (in, ctx, out, fmt) -> out.append(blockName(in.rzz())));
-        VerboseTags.register(
-                "item", List.of(VerboseSchema.TypeTag.ZZ), (in, ctx, out, fmt) -> out.append(itemTypeName(in.rzz())));
-        VerboseTags.register(
-                "packet", List.of(VerboseSchema.TypeTag.STR), (in, ctx, out, fmt) -> out.append(in.rstr()));
-        VerboseTags.register(
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.registerEnum("digging", digging, false);
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.registerEnum("digging_lower", digging, true);
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.registerEnum(
+                "clicktype", ac.cult.cultac.utils.inventory.inventory.WindowClickType.values(), false);
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.registerEnum(
+                "clicktype_lower", ac.cult.cultac.utils.inventory.inventory.WindowClickType.values(), true);
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.registerEnum(
+                "entityaction", PlayerCommandAction.values(), false);
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.registerEnum("hand", Hand.values(), false);
+        var blocks = DataTables.defaults().registry().blocks();
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.register(
+                "block", blocks.stream().map(BlockDefinition::key).toList(), false, "unknown", BlockIds.AIR.key());
+        var items = ac.cult.cultac.protocol.data.ModelRegistryData.load(ProtocolVersion.V26_3)
+                .registry("minecraft:item");
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.register(
+                "item",
+                java.util.stream.IntStream.range(0, items.size())
+                        .mapToObj(items::name)
+                        .toList(),
+                false,
+                "",
+                null);
+        var entities = ac.cult.blocksim.entity.EntityTypes.defaults();
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.register(
                 "entity",
-                List.of(VerboseSchema.TypeTag.VI),
-                (in, ctx, out, fmt) -> out.append(entityTypeName(in.rvi())));
-        VerboseTags.register(
-                "offset",
-                List.of(VerboseSchema.TypeTag.F64),
-                (in, ctx, out, fmt) -> out.append(humanFormattedOffset(in.rf64())));
-        VerboseTags.register(
-                "stdnum",
-                List.of(VerboseSchema.TypeTag.F64),
-                (in, ctx, out, fmt) -> out.append(formatNumberStandard(in.rf64())));
+                java.util.stream.IntStream.range(0, entities.types().size())
+                        .mapToObj(i -> entities.byId(i).key())
+                        .toList(),
+                true,
+                "unknown",
+                "unknown");
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.register(
+                "packet", ac.cult.cultac.manager.datastore.SharedVerboseTags.Primitive.PACKET);
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.register(
+                "offset", ac.cult.cultac.manager.datastore.SharedVerboseTags.Primitive.OFFSET);
+        ac.cult.cultac.manager.datastore.SharedVerboseTags.register(
+                "stdnum", ac.cult.cultac.manager.datastore.SharedVerboseTags.Primitive.NUMBER);
     }
 
     private VerboseCodecs() {}
@@ -100,52 +110,5 @@ public final class VerboseCodecs {
     /** Encoder for {@code {entity}}: the shared model entity-type id. */
     public static int entity(int type, @NotNull ClientVersion version) {
         return type;
-    }
-
-    private static @NotNull String blockName(int id) {
-        if (id < 0) return "unknown";
-        var blocks = DataTables.defaults().registry().blocks();
-        return id < blocks.size() ? blocks.get(id).key() : BlockIds.AIR.key();
-    }
-
-    private static @NotNull String itemTypeName(int id) {
-        if (id < 0) return "";
-        var items = ac.cult.cultac.protocol.data.ModelRegistryData.load(ProtocolVersion.V26_3)
-                .registry("minecraft:item");
-        return id >= items.size() ? "unknown(" + id + ")" : items.name(id);
-    }
-
-    private static @NotNull String entityTypeName(int entityId) {
-        var types = ac.cult.blocksim.entity.EntityTypes.defaults();
-        return entityId < 0 || entityId >= types.types().size()
-                ? "unknown"
-                : types.byId(entityId).key();
-    }
-
-    private static @NotNull String humanFormattedOffset(double offset) {
-        String humanFormattedOffset;
-        if (offset < 0.001) { // 1.129E-3
-            humanFormattedOffset = String.format("%.4E", offset);
-            // Squeeze out an extra digit here by E-03 to E-3
-            humanFormattedOffset = humanFormattedOffset.replace("E-0", "E-");
-        } else {
-            // 0.00112945678 -> .001129
-            humanFormattedOffset = String.format("%6f", offset);
-            // I like the leading zero, but removing it lets us add another digit to the end
-            humanFormattedOffset = humanFormattedOffset.replace("0.", ".");
-        }
-        return humanFormattedOffset;
-    }
-
-    private static @NotNull String formatNumberStandard(double value) {
-        double abs = Math.abs(value);
-        if (abs < 1e-7) return "0";
-        String formatted;
-        if (abs < 0.001) {
-            formatted = String.format("%.4E", value);
-            return formatted.replace("E-0", "E-");
-        }
-        formatted = String.format("%6f", value);
-        return formatted.replace("0.", ".");
     }
 }

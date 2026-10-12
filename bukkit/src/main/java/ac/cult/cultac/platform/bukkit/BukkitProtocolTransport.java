@@ -7,7 +7,6 @@ import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.data.ProtocolData;
 import net.minecraft.SharedConstants;
 import net.minecraft.network.protocol.game.ServerboundChatCommandPacket;
-import org.bukkit.Bukkit;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -15,7 +14,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 final class BukkitProtocolTransport {
     private BukkitProtocolTransport() {}
 
-    static void initialize(CultNetworkManager manager, JavaPlugin plugin) {
+    static PaperInjector initialize(CultNetworkManager manager, JavaPlugin plugin) {
         var version = ProtocolVersion.of(SharedConstants.getProtocolVersion());
         // The dispatcher speaks the 26.3 model; an older host's wire is projected per connection.
         // Every connection's value codecs load here rather than on the first event loop.
@@ -29,10 +28,16 @@ final class BukkitProtocolTransport {
         var injector = new PaperInjector(manager);
         var listener = new BukkitConnectionListener(manager);
         manager.configureTransport(
-                runtime, injector::register, () -> Bukkit.getPluginManager().registerEvents(listener, plugin), () -> {
+                runtime,
+                injector::enable,
+                () -> {
+                    ac.cult.cultac.platform.bukkit.BukkitRuntimeRegistrations.registerEvents(listener, plugin);
+                },
+                () -> {
                     HandlerList.unregisterAll(listener);
                     return injector.unregister();
                 });
+        return injector;
     }
 
     private static int commandInputLimit(ProtocolVersion version) {

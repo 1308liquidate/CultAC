@@ -38,6 +38,26 @@ public class TickEndEvent implements StartableInitable {
             Field connectionsList = Reflection.getField(connection.getClass(), List.class, 1);
             List<Object> endOfTickObject = (List<Object>) connectionsList.get(connection);
 
+            var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+            if (host != null) {
+                var hook = (ac.cult.reload.host.EndOfTickHook) host.shared("paper-tick-end", () -> {
+                    try {
+                        return new ac.cult.reload.host.EndOfTickHook(connection, connectionsList);
+                    } catch (ReflectiveOperationException failure) {
+                        throw new IllegalStateException(failure);
+                    }
+                });
+                var subscription =
+                        hook.subscribe(ac.cult.cultac.runtime.RuntimeEnvironment.guard(TickEndEvent::fireEndOfTick));
+                host.resources().track(subscription, () -> {
+                    try {
+                        subscription.close();
+                    } catch (Exception failure) {
+                        throw new IllegalStateException(failure);
+                    }
+                });
+                return;
+            }
             // Use a list wrapper to check when the size method is called
             // Unsure why synchronized is needed because the object itself gets synchronized
             // but whatever.  At least plugins can't break it, I guess.

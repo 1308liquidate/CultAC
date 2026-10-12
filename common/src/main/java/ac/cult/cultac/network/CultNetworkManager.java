@@ -146,6 +146,11 @@ public final class CultNetworkManager {
         return connections.snapshot();
     }
 
+    public CompletionStage<Void> disconnect(Channel channel) {
+        var connection = connections.get(channel);
+        return connection == null ? CompletableFuture.completedFuture(null) : connections.disconnect(connection);
+    }
+
     public CompletionStage<Void> disconnect(User user) {
         return connections.disconnect(user.getCultConnection());
     }

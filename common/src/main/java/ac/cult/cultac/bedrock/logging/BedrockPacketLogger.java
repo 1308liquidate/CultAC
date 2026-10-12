@@ -162,11 +162,12 @@ public final class BedrockPacketLogger implements AutoCloseable {
         });
         writer.shutdown();
         try {
-            if (!writer.awaitTermination(5, TimeUnit.SECONDS)) {
-                report.accept("Geyser packet logger is still draining files after shutdown timeout.");
+            while (!writer.awaitTermination(5, TimeUnit.SECONDS)) {
+                report.accept("Geyser packet logger is still draining files; runtime remains loaded.");
             }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+            throw new IllegalStateException("Packet logger cleanup interrupted", interrupted);
         }
     }
 }

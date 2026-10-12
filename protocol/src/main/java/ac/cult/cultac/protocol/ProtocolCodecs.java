@@ -54,7 +54,33 @@ public final class ProtocolCodecs {
         // ViaBackwards' configuration API needs a data directory; no code is extracted.
         Path directory = Files.createTempDirectory("cult-value-codecs-");
         try {
-            return new Runtime(directory, new PrivateCodecService(directory));
+            // Via's Config keeps a private SnakeYAML instance in a ThreadLocal. Initialize
+            // it on an owned thread so no server/packet thread retains a retired runtime.
+            var result = new java.util.concurrent.CompletableFuture<WireValueDecoder>();
+            var initializer = new Thread(
+                    () -> {
+                        try {
+                            result.complete(new PrivateCodecService(directory));
+                        } catch (Throwable failure) {
+                            result.completeExceptionally(failure);
+                        }
+                    },
+                    "cult-codec-initialize");
+            initializer.setDaemon(true);
+            initializer.start();
+            boolean interrupted = false;
+            try {
+                while (initializer.isAlive()) {
+                    try {
+                        initializer.join();
+                    } catch (InterruptedException ignored) {
+                        interrupted = true;
+                    }
+                }
+                return new Runtime(directory, result.join());
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
         } catch (Exception | Error failure) {
             deleteDirectory(directory);
             throw failure;

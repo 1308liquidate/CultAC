@@ -30,7 +30,8 @@ public class BukkitLuckPermsHandler extends AbstractLuckPermsHandler implements 
     @Override
     protected <T extends LuckPermsEvent> EventSubscription<T> subscribe(
             LuckPerms luckPerms, Class<T> eventClass, Consumer<? super T> handler) {
-        return luckPerms.getEventBus().subscribe(CultACBukkitLoaderPlugin.LOADER, eventClass, handler);
+        var subscription = luckPerms.getEventBus().subscribe(CultACBukkitLoaderPlugin.LOADER, eventClass, handler);
+        return ac.cult.cultac.runtime.RuntimeEnvironment.track(subscription, subscription::close);
     }
 
     @Override

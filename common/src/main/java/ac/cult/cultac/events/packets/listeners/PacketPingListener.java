@@ -15,7 +15,8 @@ public class PacketPingListener {
         player.checkManager
                 .getCheck(ac.cult.cultac.checks.impl.movement.timer.TimerCheck.class)
                 .onTransactionResponse();
-        Channels.RECEIVED.fire(player, id, true, System.currentTimeMillis());
+        Channels.RECEIVED.fire(
+                ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(player), id, true, System.currentTimeMillis());
         return true;
     }
 
@@ -32,7 +33,11 @@ public class PacketPingListener {
             boolean shouldCancel = !CultAPI.INSTANCE.getConfigManager().isDisablePongCancelling();
             // Not needed for vanilla as vanilla ignores this packet, needed for packet limiters
             event.setCancelled(shouldCancel);
-            Channels.RECEIVED.fire(player, packet.id(), shouldCancel, event.getTimestamp());
+            Channels.RECEIVED.fire(
+                    ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(player),
+                    packet.id(),
+                    shouldCancel,
+                    event.getTimestamp());
         }
     }
 

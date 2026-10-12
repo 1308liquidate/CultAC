@@ -221,12 +221,40 @@ public final class CultConnection implements CodecState {
     }
 
     public void execute(Runnable task) {
-        if (owner.inEventLoop()) runInModel(task);
-        else owner.execute(() -> runInModel(task));
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host == null) {
+            if (owner.inEventLoop()) runInModel(task);
+            else owner.execute(() -> runInModel(task));
+            return;
+        }
+        var accepted = host.resources().once(() -> runInModel(task));
+        try {
+            if (owner.inEventLoop()) accepted.run();
+            else owner.execute(accepted);
+        } catch (RuntimeException | Error failure) {
+            try {
+                ((AutoCloseable) accepted).close();
+            } catch (Exception cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
+        }
     }
 
     public void executeLater(Runnable task) {
-        owner.execute(() -> runInModel(task));
+        Runnable accepted = ac.cult.cultac.runtime.RuntimeEnvironment.once(() -> runInModel(task));
+        try {
+            owner.execute(accepted);
+        } catch (RuntimeException | Error failure) {
+            if (accepted instanceof AutoCloseable cancellable) {
+                try {
+                    cancellable.close();
+                } catch (Exception cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+            }
+            throw failure;
+        }
     }
     /** Allocate packet proofs only once earlier outbound work has reached its queue position. */
     public ChannelFuture executeAfterWrites(Runnable task) {

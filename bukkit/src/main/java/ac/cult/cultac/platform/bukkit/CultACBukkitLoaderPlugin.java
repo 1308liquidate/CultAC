@@ -1,10 +1,8 @@
 package ac.cult.cultac.platform.bukkit;
 
 import ac.cult.cultac.CultAPI;
-import ac.cult.cultac.CultExternalAPI;
 import ac.cult.cultac.command.CloudCommandService;
 import ac.cult.cultac.manager.init.Initable;
-import ac.cult.cultac.manager.init.start.ExemptOnlinePlayersOnReload;
 import ac.cult.cultac.manager.init.start.StartableInitable;
 import ac.cult.cultac.platform.api.Platform;
 import ac.cult.cultac.platform.api.PlatformLoader;
@@ -32,26 +30,17 @@ import ac.cult.cultac.platform.bukkit.sender.BukkitSenderFactory;
 import ac.cult.cultac.platform.bukkit.utils.placeholder.PlaceholderAPIExpansion;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.cultac.utils.lazy.LazyHolder;
-import ac.grim.grimac.api.GrimAPIProvider;
-import ac.grim.grimac.api.GrimAbstractAPI;
-import ac.grim.grimac.api.event.EventBus;
 import ac.grim.grimac.api.plugin.GrimPlugin;
 import ac.grim.grimac.internal.platform.bukkit.resolver.BukkitResolverRegistrar;
-import java.util.concurrent.CompletableFuture;
 import lombok.Getter;
-import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
-import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.incendo.cloud.CommandManager;
-import org.incendo.cloud.brigadier.BrigadierSetting;
-import org.incendo.cloud.brigadier.CloudBrigadierManager;
-import org.incendo.cloud.bukkit.CloudBukkitCapabilities;
-import org.incendo.cloud.execution.ExecutionCoordinator;
-import org.incendo.cloud.paper.LegacyPaperCommandManager;
 
-public final class CultACBukkitLoaderPlugin extends JavaPlugin implements PlatformLoader {
-    public static CultACBukkitLoaderPlugin LOADER;
+public final class CultACBukkitLoaderPlugin implements PlatformLoader {
+    public static JavaPlugin LOADER;
+    public static CultACBukkitLoaderPlugin INSTANCE;
+    private PaperInjector injector;
 
     private final LazyHolder<PlatformScheduler> scheduler = LazyHolder.simple(this::createScheduler);
     private final LazyHolder<BukkitSenderFactory> senderFactory = LazyHolder.simple(BukkitSenderFactory::new);
@@ -77,22 +66,29 @@ public final class CultACBukkitLoaderPlugin extends JavaPlugin implements Platfo
     @Getter
     private final BukkitPermissionRegistrationManager permissionManager = new BukkitPermissionRegistrationManager();
 
-    public CultACBukkitLoaderPlugin() {
+    public CultACBukkitLoaderPlugin(JavaPlugin nativePlugin) {
+        LOADER = nativePlugin;
+        INSTANCE = this;
         BukkitResolverRegistrar registrar = new BukkitResolverRegistrar();
-        registrar.registerAll(CultAPI.INSTANCE.getExtensionManager());
-        this.plugin = registrar.resolvePlugin(this);
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host == null) registrar.registerAll(CultAPI.INSTANCE.getExtensionManager());
+        this.plugin = host == null
+                ? registrar.resolvePlugin(nativePlugin)
+                : ac.cult.reload.host.SharedPlugin.create(host.directory(), host.logger(), host.build());
     }
 
     @Override
+    public boolean failOnInitializationError() {
+        return true;
+    }
+
     public void onLoad() {
-        LOADER = this;
-        BukkitProtocolTransport.initialize(CultAPI.INSTANCE.getNetworkManager(), this);
+        injector = BukkitProtocolTransport.initialize(CultAPI.INSTANCE.getNetworkManager(), LOADER);
         CultAPI.INSTANCE.load(this, this.getBukkitInitTasks());
     }
 
     private Initable[] getBukkitInitTasks() {
         return new Initable[] {
-            new ExemptOnlinePlayersOnReload(),
             new ac.cult.cultac.manager.init.start.TickEndEvent(),
             new ac.cult.cultac.manager.init.start.ChannelManager(),
             new ac.cult.cultac.manager.init.start.GeyserBedrockBridgeInit(),
@@ -101,20 +97,20 @@ public final class CultACBukkitLoaderPlugin extends JavaPlugin implements Platfo
             new BukkitLuckPermsInitable(),
             (StartableInitable) () -> {
                 if (BukkitMessagePlaceHolderManager.hasPlaceholderAPI) {
-                    new PlaceholderAPIExpansion().register();
+                    if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+                        new PlaceholderAPIExpansion().register();
                 }
             }
         };
     }
 
-    @Override
     public void onEnable() {
         CultAPI.INSTANCE.start();
     }
 
-    @Override
     public void onDisable() {
-        CultAPI.INSTANCE.stop();
+        if (CultAPI.INSTANCE.isInitialized()) CultAPI.INSTANCE.stop();
+        else CultAPI.INSTANCE.getNetworkManager().stop().toCompletableFuture().join();
     }
 
     @Override
@@ -140,65 +136,19 @@ public final class CultACBukkitLoaderPlugin extends JavaPlugin implements Platfo
     @Override
     @SuppressWarnings("removal")
     public void registerAPIService() {
-        final CultExternalAPI externalAPI = CultAPI.INSTANCE.getExternalAPI();
-        final EventBus eventBus = externalAPI.getEventBus();
-        final ac.grim.grimac.api.plugin.GrimPlugin plugin = CultAPI.INSTANCE.getGrimPlugin();
+        // The bootstrap registers the stable GrimAPI service exactly once.
+    }
 
-        // Bridge Cult events → legacy Bukkit Event API so pre-1.3 plugins that
-        // listened for ac.grim.grimac.api.events.* Bukkit events keep working.
-        // Typed channel subscriptions here are plugin-bound so they go away if
-        // CultAC itself is disabled.
+    public void inject(io.netty.channel.Channel channel) {
+        injector.injectNew(channel);
+    }
 
-        eventBus.get(ac.grim.grimac.api.event.events.GrimJoinEvent.class).onJoin(plugin, (user) -> {
-            Bukkit.getPluginManager().callEvent(new ac.grim.grimac.api.events.GrimJoinEvent(user));
-        });
+    public java.util.concurrent.CompletionStage<Void> disconnect(io.netty.channel.Channel channel) {
+        return injector.disconnect(channel);
+    }
 
-        eventBus.get(ac.grim.grimac.api.event.events.GrimQuitEvent.class).onQuit(plugin, (user) -> {
-            Runnable notifyQuit =
-                    () -> Bukkit.getPluginManager().callEvent(new ac.grim.grimac.api.events.GrimQuitEvent(user));
-            if (Bukkit.isPrimaryThread()) {
-                CompletableFuture.runAsync(notifyQuit).join();
-            } else {
-                notifyQuit.run();
-            }
-        });
-
-        eventBus.get(ac.grim.grimac.api.event.events.GrimReloadEvent.class).onReload(plugin, (success) -> {
-            Bukkit.getPluginManager().callEvent(new ac.grim.grimac.api.events.GrimReloadEvent(success));
-        });
-
-        eventBus.subscribe(
-                plugin,
-                ac.grim.grimac.api.event.events.FlagEvent.class,
-                event -> {
-                    ac.grim.grimac.api.events.FlagEvent bukkitEvent = new ac.grim.grimac.api.events.FlagEvent(
-                            event.getUser(), event.getCheck(), event::getVerbose);
-                    Bukkit.getPluginManager().callEvent(bukkitEvent);
-                    event.setCancelled(event.isCancelled() || bukkitEvent.isCancelled());
-                },
-                0,
-                false,
-                CultACBukkitLoaderPlugin.class);
-
-        eventBus.get(ac.grim.grimac.api.event.events.CommandExecuteEvent.class)
-                .onCommandExecute(plugin, (user, check, verbose, command, cancelled) -> {
-                    ac.grim.grimac.api.events.CommandExecuteEvent bukkitEvent =
-                            new ac.grim.grimac.api.events.CommandExecuteEvent(user, check, verbose, command);
-                    Bukkit.getPluginManager().callEvent(bukkitEvent);
-                    return cancelled || bukkitEvent.isCancelled();
-                });
-
-        eventBus.get(ac.grim.grimac.api.event.events.CompletePredictionEvent.class)
-                .onCompletePrediction(plugin, (user, check, offset, cancelled) -> {
-                    // Legacy Bukkit event has a verbose field that the new channel event does not; pass empty.
-                    ac.grim.grimac.api.events.CompletePredictionEvent bukkitEvent =
-                            new ac.grim.grimac.api.events.CompletePredictionEvent(user, check, "", offset);
-                    Bukkit.getPluginManager().callEvent(bukkitEvent);
-                    return cancelled || bukkitEvent.isCancelled();
-                });
-
-        GrimAPIProvider.init(externalAPI);
-        Bukkit.getServicesManager().register(GrimAbstractAPI.class, externalAPI, this, ServicePriority.Normal);
+    public java.io.File getDataFolder() {
+        return LOADER.getDataFolder();
     }
 
     private PlatformScheduler createScheduler() {
@@ -211,6 +161,8 @@ public final class CultACBukkitLoaderPlugin extends JavaPlugin implements Platfo
         try {
             return new CloudCommandService(this::createCloudCommandManager, commandArguments);
         } catch (Throwable t) {
+            if (ac.cult.cultac.runtime.RuntimeEnvironment.host() != null)
+                throw new IllegalStateException("Unable to initialize CultAC commands", t);
             LogUtil.warn(
                     "CRITICAL: Failed to initialize Command Framework. "
                             + "Cult will continue to run with no commands.",
@@ -220,21 +172,7 @@ public final class CultACBukkitLoaderPlugin extends JavaPlugin implements Platfo
     }
 
     private CommandManager<Sender> createCloudCommandManager() {
-        LegacyPaperCommandManager<Sender> manager =
-                new LegacyPaperCommandManager<>(this, ExecutionCoordinator.simpleCoordinator(), senderFactory.get());
-        if (manager.hasCapability(CloudBukkitCapabilities.NATIVE_BRIGADIER)) {
-            try {
-                manager.registerBrigadier();
-                CloudBrigadierManager<Sender, ?> cbm = manager.brigadierManager();
-                cbm.settings().set(BrigadierSetting.FORCE_EXECUTABLE, true);
-            } catch (Throwable t) {
-                LogUtil.error(
-                        "Failed to register Brigadier native completions. Falling back to standard completions.", t);
-            }
-        } else if (manager.hasCapability(CloudBukkitCapabilities.ASYNCHRONOUS_COMPLETION)) {
-            manager.registerAsynchronousCompletions();
-        }
-        return manager;
+        return new ac.cult.cultac.command.IsolatedCommandManager();
     }
 
     public BukkitSenderFactory getBukkitSenderFactory() {

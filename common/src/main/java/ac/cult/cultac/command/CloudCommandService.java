@@ -29,6 +29,7 @@ public class CloudCommandService implements CommandService {
             RequirementApplicable.factory(REQUIREMENT_KEY);
 
     private boolean commandsRegistered = false;
+    private CommandManager<Sender> manager;
 
     private final Supplier<CommandManager<Sender>> commandManagerSupplier;
     private final CloudPlatformCommandArguments commandArguments;
@@ -42,6 +43,7 @@ public class CloudCommandService implements CommandService {
     public void registerCommands() {
         if (commandsRegistered) return;
         CommandManager<Sender> commandManager = commandManagerSupplier.get();
+        manager = commandManager;
         new CultDebug().register(commandManager, commandArguments);
         new CultDebugVelocity().register(commandManager, commandArguments);
         new CultGeyserPacketLog().register(commandManager, commandArguments);
@@ -69,6 +71,18 @@ public class CloudCommandService implements CommandService {
         commandManager.registerCommandPostProcessor(senderRequirementPostprocessor);
         registerInvalidSyntaxHandler(commandManager);
         commandsRegistered = true;
+    }
+
+    public java.util.concurrent.CompletionStage<Void> execute(Sender sender, String input) {
+        return manager.commandExecutor().executeCommand(sender, input).thenApply(ignored -> null);
+    }
+
+    public java.util.concurrent.CompletionStage<java.util.List<String>> suggest(Sender sender, String input) {
+        return manager.suggestionFactory()
+                .suggest(sender, input)
+                .thenApply(result -> result.list().stream()
+                        .map(org.incendo.cloud.suggestion.Suggestion::suggestion)
+                        .toList());
     }
 
     private void registerInvalidSyntaxHandler(CommandManager<Sender> commandManager) {

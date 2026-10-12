@@ -18,13 +18,13 @@ public class BukkitPlatformServer implements PlatformServer {
     @Override
     public void dispatchCommand(Sender sender, String command) {
         CommandSender commandSender =
-                CultACBukkitLoaderPlugin.LOADER.getBukkitSenderFactory().reverse(sender);
+                CultACBukkitLoaderPlugin.INSTANCE.getBukkitSenderFactory().reverse(sender);
         Bukkit.dispatchCommand(commandSender, command);
     }
 
     @Override
     public Sender getConsoleSender() {
-        return CultACBukkitLoaderPlugin.LOADER.getBukkitSenderFactory().map(Bukkit.getConsoleSender());
+        return CultACBukkitLoaderPlugin.INSTANCE.getBukkitSenderFactory().map(Bukkit.getConsoleSender());
     }
 
     @Override

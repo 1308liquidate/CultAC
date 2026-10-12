@@ -90,6 +90,8 @@ public final class GeyserBedrockBridgeRuntime {
     private static GeyserKeepAliveTranslator keepAliveTranslator;
     private static GeyserBlockAckTranslator blockAckTranslator;
     private static volatile BedrockPacketLogger packetLogger;
+    private static final Map<Object, java.util.concurrent.CompletableFuture<Void>> DISCONNECTS =
+            new ConcurrentHashMap<>();
 
     private GeyserBedrockBridgeRuntime() {}
 
@@ -136,11 +138,12 @@ public final class GeyserBedrockBridgeRuntime {
         refreshCollisionMappings();
         if (ac.cult.cultac.network.protocol.util.viaversion.ViaVersionUtil.isAvailable()
                 && !com.viaversion.viaversion.api.Via.getManager().isInitialized()) {
-            com.viaversion.viaversion.api.Via.getManager().addPostEnableListener(() -> {
-                if (started) {
-                    refreshCollisionMappings();
-                }
-            });
+            com.viaversion.viaversion.api.Via.getManager()
+                    .addPostEnableListener(ac.cult.cultac.runtime.RuntimeEnvironment.guard(() -> {
+                        if (started) {
+                            refreshCollisionMappings();
+                        }
+                    }));
         }
 
         EventRegistrar owner = EventRegistrar.of(CultAPI.INSTANCE.getLoader());
@@ -261,7 +264,15 @@ public final class GeyserBedrockBridgeRuntime {
 
         for (PacketTapHandler tap : Set.copyOf(PACKET_TAPS.values())) {
             tap.connection.disconnect("CultAC movement bridge stopped. Please reconnect.");
-            tap.detach();
+            var cleanup = tap.detach();
+            ac.cult.cultac.runtime.RuntimeEnvironment.release(tap.connection, cleanup);
+            cleanup.whenComplete((ignored, failure) -> {
+                var pending = DISCONNECTS.remove(tap.connection);
+                if (pending != null) {
+                    if (failure == null) pending.complete(null);
+                    else pending.completeExceptionally(failure);
+                }
+            });
         }
         // Resolve optional Geyser classes only when there is an attached session.
         for (GeyserFloatingPointsAdapter adapter : GFP_ADAPTERS.values()) {
@@ -284,16 +295,35 @@ public final class GeyserBedrockBridgeRuntime {
         }
     }
 
+    public static java.util.concurrent.CompletionStage<Void> disconnectSession(Object nativeSession) {
+        if (!(nativeSession instanceof GeyserSession session))
+            return java.util.concurrent.CompletableFuture.failedFuture(new IllegalArgumentException("Unknown session"));
+        var complete = DISCONNECTS.computeIfAbsent(session, ignored -> new java.util.concurrent.CompletableFuture<>());
+        session.ensureInEventLoop(() -> session.disconnect("CultAC is shutting down."));
+        return complete;
+    }
+
     private static void onSessionDisconnect(SessionDisconnectEvent event) {
         GeyserConnection connection = event.connection();
-        BedrockPacketLogger logger = packetLogger;
-        if (logger != null) logger.stop(connection, "disconnect");
-        GeyserFloatingPointsAdapter adapter = GFP_ADAPTERS.remove(connection);
-        if (adapter != null) adapter.close();
-        PacketTapHandler tap = PACKET_TAPS.remove(connection);
-        if (tap != null) {
-            tap.detach();
+        java.util.concurrent.CompletionStage<Void> cleanup;
+        try {
+            BedrockPacketLogger logger = packetLogger;
+            if (logger != null) logger.stop(connection, "disconnect");
+            GeyserFloatingPointsAdapter adapter = GFP_ADAPTERS.remove(connection);
+            if (adapter != null) adapter.close();
+            PacketTapHandler tap = PACKET_TAPS.remove(connection);
+            cleanup = tap == null ? java.util.concurrent.CompletableFuture.completedFuture(null) : tap.detach();
+        } catch (Throwable failure) {
+            cleanup = java.util.concurrent.CompletableFuture.failedFuture(failure);
         }
+        cleanup.whenComplete((ignored, failure) -> {
+            var pending = DISCONNECTS.remove(connection);
+            if (pending != null) {
+                if (failure == null) pending.complete(null);
+                else pending.completeExceptionally(failure);
+            }
+        });
+        ac.cult.cultac.runtime.RuntimeEnvironment.release(connection, cleanup);
     }
 
     public static void configurePacketLog(String username, UUID uuid, boolean onJoin, Consumer<String> feedback) {
@@ -410,6 +440,7 @@ public final class GeyserBedrockBridgeRuntime {
         var field = GeyserSession.class.getDeclaredField("latencyPingCache");
         field.setAccessible(true);
         GeyserQueue queue = new GeyserQueue();
+        queue.originalQueue(current);
         field.set(session, queue);
         if (session.getLatencyPingCache() != queue) throw new IllegalStateException("Latency queue replacement failed");
         return queue;
@@ -657,29 +688,71 @@ public final class GeyserBedrockBridgeRuntime {
             if (logger != null) logger.record(connection, direction, packet);
         }
 
-        private void detach() {
+        private final java.util.concurrent.CompletableFuture<Void> detachCompletion =
+                new java.util.concurrent.CompletableFuture<>();
+
+        private java.util.concurrent.CompletionStage<Void> detach() {
             if (!detached.compareAndSet(false, true)) {
-                return;
+                return detachCompletion;
             }
             glideBoostAcks.clear();
             PACKET_TAPS.remove(connection, this);
-            connection.ensureInEventLoop(() -> {
-                entityPositions.clear();
-                entityAttributes.clear();
-                sprintAttributes.close();
-                poses.clear();
-                vehicleAttributes.clear();
-            });
-            if (connection.isClosed()) latencyQueue.clear();
-            else latencyQueue.stopTrackingWrites();
+            var nativeCleanup = new java.util.concurrent.CompletableFuture<Void>();
+            try {
+                connection.getTickEventLoop().execute(() -> {
+                    try {
+                        entityPositions.clear();
+                        entityAttributes.clear();
+                        sprintAttributes.close();
+                        poses.clear();
+                        vehicleAttributes.clear();
+                        if (connection.isClosed()) {
+                            latencyQueue.clear();
+                            var field = GeyserSession.class.getDeclaredField("latencyPingCache");
+                            field.setAccessible(true);
+                            if (field.get(connection) == latencyQueue)
+                                field.set(connection, latencyQueue.originalQueue());
+                        } else latencyQueue.stopTrackingWrites();
+                        nativeCleanup.complete(null);
+                    } catch (Throwable failure) {
+                        nativeCleanup.completeExceptionally(failure);
+                    }
+                });
+            } catch (Throwable failure) {
+                nativeCleanup.completeExceptionally(failure);
+            }
             if (bedrockSession.getPacketHandler() == this) {
                 bedrockSession.setPacketHandler(delegate);
             }
             var channel = bedrockSession.getPeer().getChannel();
-            channel.eventLoop().execute(() -> {
-                removeHandlerIfPresent(channel.pipeline(), outboundHandlerName);
-                removeHandlerIfPresent(channel.pipeline(), packetLogHandlerName);
+            var ioCleanup = new java.util.concurrent.CompletableFuture<Void>();
+            try {
+                channel.eventLoop().execute(() -> {
+                    try {
+                        removeHandlerIfPresent(channel.pipeline(), outboundHandlerName);
+                        removeHandlerIfPresent(channel.pipeline(), packetLogHandlerName);
+                        ioCleanup.complete(null);
+                    } catch (Throwable failure) {
+                        ioCleanup.completeExceptionally(failure);
+                    }
+                });
+            } catch (Throwable failure) {
+                ioCleanup.completeExceptionally(failure);
+            }
+            var drained = ioCleanup.thenCompose(ignored -> {
+                var barrier = new java.util.concurrent.CompletableFuture<Void>();
+                try {
+                    connection.getTickEventLoop().execute(() -> barrier.complete(null));
+                } catch (Throwable failure) {
+                    barrier.completeExceptionally(failure);
+                }
+                return barrier;
             });
+            java.util.concurrent.CompletableFuture.allOf(nativeCleanup, drained).whenComplete((ignored, failure) -> {
+                if (failure == null) detachCompletion.complete(null);
+                else detachCompletion.completeExceptionally(failure);
+            });
+            return detachCompletion;
         }
 
         private void attachOutboundTap() {

@@ -108,7 +108,14 @@ public class PlayerDataManager {
             activePlayers.add(created);
         }
 
-        Channels.JOIN.fire(created);
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null)
+            host.bindUser(
+                    user.getChannel(),
+                    user.getUUID(),
+                    user.getPlayer() == null ? null : user.getPlayer().getNative(),
+                    created);
+        Channels.JOIN.fire(ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(created));
         UUID uuid = user.getUUID();
         if (uuid != null && CultAPI.INSTANCE.getDataStoreLifecycle() != null) {
             CultAPI.INSTANCE.getDataStoreLifecycle().playerToggleStore().prefetch(uuid);
@@ -130,6 +137,8 @@ public class PlayerDataManager {
             return false;
         }
         tracked.onRemove();
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) host.unbindUser(user.getChannel());
         return true;
     }
 
@@ -164,7 +173,9 @@ public class PlayerDataManager {
 
         tracked.onRemove();
         clearExemptions(user);
-        Channels.QUIT.fire(tracked);
+        Channels.QUIT.fire(ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(tracked));
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() != null)
+            ac.cult.cultac.runtime.RuntimeEnvironment.host().unbindUser(user.getChannel());
         if (CultAPI.INSTANCE.getDataStoreLifecycle() != null) {
             CultAPI.INSTANCE
                     .getDataStoreLifecycle()

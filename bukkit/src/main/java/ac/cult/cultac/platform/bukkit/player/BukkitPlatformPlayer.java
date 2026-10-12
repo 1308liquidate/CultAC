@@ -188,7 +188,7 @@ public class BukkitPlatformPlayer extends BukkitCultEntity implements PlatformPl
 
     @Override
     public Sender getSender() {
-        return CultACBukkitLoaderPlugin.LOADER.getBukkitSenderFactory().map(this.bukkitPlayer);
+        return CultACBukkitLoaderPlugin.INSTANCE.getBukkitSenderFactory().map(this.bukkitPlayer);
     }
 
     @Override

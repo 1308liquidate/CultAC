@@ -13,6 +13,16 @@ public final class GeyserQueue extends java.util.AbstractQueue<Runnable> {
         }
     }
 
+    private java.util.Queue<Runnable> originalQueue;
+
+    public void originalQueue(java.util.Queue<Runnable> queue) {
+        originalQueue = queue;
+    }
+
+    public java.util.Queue<Runnable> originalQueue() {
+        return originalQueue;
+    }
+
     private Entry first;
     private Entry last;
     private Entry lastWritten;

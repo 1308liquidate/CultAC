@@ -68,11 +68,17 @@ final class VelocityScheduler
             throw new RejectedExecutionException("CultAC scheduler is closed");
         }
         var owned = tasks.computeIfAbsent(plugin, ignored -> ConcurrentHashMap.newKeySet());
+        Runnable guarded = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
         Future<?> future = period > 0
-                ? executor.scheduleAtFixedRate(task, Math.max(0, delay), period, unit)
-                : executor.schedule(task, Math.max(0, delay), unit);
+                ? executor.scheduleAtFixedRate(guarded, Math.max(0, delay), period, unit)
+                : executor.schedule(guarded, Math.max(0, delay), unit);
         owned.add(future);
-        future.addListener(ignored -> owned.remove(future));
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host == null) future.addListener(ignored -> owned.remove(future));
+        else {
+            future.addListener(ac.cult.reload.host.Callbacks.future(host.resources(), () -> owned.remove(future)));
+            host.resources().track(future, () -> future.cancel(false));
+        }
         return new TaskHandle() {
             @Override
             public boolean isSync() {

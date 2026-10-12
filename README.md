@@ -49,6 +49,80 @@ retain your configured database names and table mappings to keep existing data.
 New defaults use CultAC branding. GrimAPI's logical storage IDs and legacy
 migration schema names remain unchanged for compatibility.
 
+## Updating without a restart
+
+Install `bukkit/build/libs/CultAC-paper.jar` on Paper or
+`velocity-bootstrap/build/libs/CultAC-velocity.jar` on Velocity once to enable the loader.
+The native plugin stays loaded while each anticheat generation runs in its own classloader.
+
+1. Copy a compatible plugin release or runtime jar into the plugin data directory's `updates/` folder
+   (`plugins/CultAC/updates/` on Paper, `plugins/cultac/updates/` on Velocity).
+2. Run `/cult update <filename.jar>` with `cult.update` permission.
+3. Run `/cult runtimes` with `cult.runtimes` permission to see current and draining generations.
+
+A version is the `plugin.yml` version (Velocity uses `velocity-plugin.json`) plus the runtime
+jar's complete SHA-256 digest. Commands display the first twelve digest characters.
+Two builds with the same descriptor version and different hashes are distinct versions;
+an identical engine is not activated twice. A complete plugin release is identified by its
+embedded engine, and its complete native jar is saved for installation on shutdown.
+
+Existing Java and Bedrock connections remain on their original generation until disconnect.
+New connections use the most recently activated generation. There is no fixed generation limit.
+The bootstrap records connection and user ownership explicitly; commands, placeholders, and
+GrimAPI handles use that same directory. Runtime ownership is not inferred from implementation
+classloaders. One resource scope tracks calls, callbacks, and accepted queued work. The manager
+alone cancels registrations, drains work, stops the engine, and closes its classloader.
+An old generation unloads after its connections, queued packet work, callbacks, and native
+registrations finish cleanup. Cleanup failures retain the generation and appear in `/cult runtimes`.
+Cached GrimAPI user/check handles detach when their session ends; acquire a new user after reconnect.
+
+`/cult reload` validates the configuration for every live generation before applying it.
+Startup failure, a wrong platform/host version, or an incompatible `cult-loader-version`
+rejects an update before publication. `cult-loader-version` is an explicit compatibility revision, configured with `cultLoaderVersion`
+in `gradle.properties` and included in both the native plugin and runtime descriptors. Increment
+it only for incompatible runtime/shared API changes. Compatible loader bug fixes keep the same
+revision and do not block engine updates; the updated native loader takes effect on the next
+normal shutdown/restart. An incompatible revision requires installing the complete plugin and
+restarting once.
+The current compatibility revision is `2`, covering the explicit ownership and lifetime SPI.
+
+On shutdown, Cult installs the latest selected version into its installed plugin jar **before
+final runtime unload**. For a runtime-only update it preserves the bootstrap and replaces the
+embedded engine; for a complete release it installs the saved release jar. It verifies the
+version and engine digest before an atomic replacement. After successful installation it
+removes regular files from `updates/`; it leaves subdirectories and symlinks alone. If installation
+fails, it retains both the immutable active artifact and staged updates, reports the failure,
+and keeps the restart marker pointing at the selected engine.
+
+Runtime-only artifacts are `bukkit-runtime/build/libs/CultAC-paper-runtime.jar` and
+`velocity-platform/build/libs/CultAC-velocity-runtime.jar`. Put them in `updates/`, not directly
+in the native `plugins/` folder. The complete distributable includes the bootstrap and its
+initial runtime.
+
+
+Loader unit tests: `./gradlew :reload-host:test :reload-services:test`.
+The separate lifecycle smoke runner is `scripts/smoketests/hot-update-lifecycle.py`;
+pass `--paper-jar <Paper 26.3 jar>` and optionally `--velocity-jar <Velocity jar>`.
+It starts isolated loopback servers, holds real Java login connections across an update,
+checks incompatibility rejection and retirement, verifies shutdown installation and cleanup,
+and restarts each server to verify the selected hash. It performs ten updates by default
+(`--iterations` changes that count). Run it separately with `--collect-loaders` to require
+loader collection using `jcmd`. Only that collection run clears soft metadata caches on GC;
+functional runs use normal JVM policy. Collection also waits for pending JIT compilation
+to release its loader handles. Production needs no additional JVM flags.
+Optional `--paper-geyser <jar>` and `--velocity-geyser <jar>` also start Geyser on
+isolated loopback ports and check bridge startup and retirement.
+
+`scripts/smoketests/hot-update-bedrock.py` reuses the existing BedrockPacketReplay CLI and
+observer with the immutable `elytra`, `elytra2`, and `longcourse` corpus. Pass `--replay-root`,
+`--scenarios`, `--paper-lock`, and optionally `--velocity-lock` for pinned native runtime
+artifacts. It updates during continuously replaying longcourse baseline and seed-42 mutation
+runs while holding a Java connection, then checks all three captures through three baseline
+rounds and their mutations on the selected runtime. It preserves every replay assertion,
+verifies shutdown installation/cleanup, and restarts the installed version. Artifacts are
+saved under `build/hot-update-bedrock/` by default. Use distinct `--java-port` and
+`--bedrock-port` values when other local servers are running.
+
 ## Compiling From Source
 
 Install JDK 25 and Git, and set `JAVA_HOME` to the JDK 25 installation.

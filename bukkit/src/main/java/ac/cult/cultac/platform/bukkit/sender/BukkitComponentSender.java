@@ -25,6 +25,11 @@ public final class BukkitComponentSender {
     }
 
     private static final class LegacyAudiences {
-        private static final BukkitAudiences INSTANCE = BukkitAudiences.create(CultACBukkitLoaderPlugin.LOADER);
+        private static final BukkitAudiences INSTANCE = create();
+
+        private static BukkitAudiences create() {
+            var audiences = BukkitAudiences.create(CultACBukkitLoaderPlugin.LOADER);
+            return ac.cult.cultac.runtime.RuntimeEnvironment.track(audiences, audiences::close);
+        }
     }
 }

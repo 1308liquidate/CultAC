@@ -18,7 +18,9 @@ public final class SessionTrackerImpl implements SessionTracker {
     private final DataStore store;
     private final long heartbeatIntervalMs;
     private final @Nullable UUID startupId;
-    private final Map<UUID, State> states = new ConcurrentHashMap<>();
+    private final Map<ConnectionKey, State> states = new ConcurrentHashMap<>();
+
+    private final Map<UUID, ConnectionKey> latestConnections = new ConcurrentHashMap<>();
 
     public SessionTrackerImpl(@NotNull DataStore store, @NotNull String serverName, long heartbeatIntervalMs) {
         this(store, serverName, heartbeatIntervalMs, null);
@@ -37,13 +39,15 @@ public final class SessionTrackerImpl implements SessionTracker {
         // under the lock. UUID.randomUUID() (~1µs) runs unlocked. The loop keeps a fresh in-memory session_id on
         // race-with-close (unconditional put would have re-inserted the closed session's id and a quick reconnect would
         // inherit it).
+        ConnectionKey key = new ConnectionKey(playerUuid, meta.connectionId());
         UUID candidateSessionId = null;
         while (true) {
-            State current = states.get(playerUuid);
+            State current = states.get(key);
             if (current == null) {
                 if (candidateSessionId == null) candidateSessionId = UUID.randomUUID();
                 State fresh = new State(candidateSessionId, now, now, now, meta);
-                if (states.putIfAbsent(playerUuid, fresh) == null) {
+                if (states.putIfAbsent(key, fresh) == null) {
+                    latestConnections.put(playerUuid, key);
                     emit(fresh, playerUuid, now, null); // closed_at stays OPEN while alive
                     return fresh.sessionId;
                 }
@@ -52,7 +56,7 @@ public final class SessionTrackerImpl implements SessionTracker {
             }
             State next =
                     new State(current.sessionId, current.startedEpochMs, now, now, mergeMeta(current.cachedMeta, meta));
-            if (states.replace(playerUuid, current, next)) {
+            if (states.replace(key, current, next)) {
                 emit(next, playerUuid, now, null);
                 return next.sessionId;
             }
@@ -62,21 +66,28 @@ public final class SessionTrackerImpl implements SessionTracker {
 
     @Override
     public void pollHeartbeat(@NotNull UUID playerUuid, long now) {
+        ConnectionKey key = latestConnections.get(playerUuid);
+        if (key != null) heartbeat(key, now);
+    }
+
+    @Override
+    public void pollHeartbeat(UUID playerUuid, UUID connectionId, long now) {
+        heartbeat(new ConnectionKey(playerUuid, connectionId), now);
+    }
+
+    private void heartbeat(ConnectionKey key, long now) {
         if (heartbeatIntervalMs <= 0) return;
-        State current = states.get(playerUuid);
-        if (current == null) return;
-        if (now - current.lastEmittedEpochMs < heartbeatIntervalMs) return;
+        State current = states.get(key);
+        if (current == null || now - current.lastEmittedEpochMs < heartbeatIntervalMs) return;
         State next = new State(current.sessionId, current.startedEpochMs, now, now, current.cachedMeta);
-        // CAS the new state in. If another thread (rare — pollData runs on a
-        // single tick scheduler per player) beat us, just skip — they'll emit.
-        if (states.replace(playerUuid, current, next)) {
-            emit(next, playerUuid, now, null);
-        }
+        if (states.replace(key, current, next)) emit(next, key.playerUuid, now, null);
     }
 
     @Override
     public void close(@NotNull UUID playerUuid, long now, @NotNull ClientMeta meta) {
-        State prev = states.remove(playerUuid);
+        ConnectionKey key = new ConnectionKey(playerUuid, meta.connectionId());
+        State prev = states.remove(key);
+        latestConnections.remove(playerUuid, key);
         if (prev == null) return;
         // Emit last_activity from the prev state (the last actual observation),
         // closed_at = now (the disconnect timestamp). They diverge by design so
@@ -88,9 +99,18 @@ public final class SessionTrackerImpl implements SessionTracker {
 
     @Override
     public @Nullable UUID currentSessionId(@NotNull UUID playerUuid) {
-        State s = states.get(playerUuid);
+        ConnectionKey key = latestConnections.get(playerUuid);
+        State s = key == null ? null : states.get(key);
         return s == null ? null : s.sessionId;
     }
+
+    @Override
+    public UUID currentSessionId(UUID playerUuid, ClientMeta meta) {
+        State state = states.get(new ConnectionKey(playerUuid, meta.connectionId()));
+        return state == null ? null : state.sessionId;
+    }
+
+    private record ConnectionKey(UUID playerUuid, UUID connectionId) {}
 
     private void emit(State s, UUID playerUuid, long now, @Nullable Long closedAt) {
         final UUID sessionId = s.sessionId;
@@ -113,7 +133,8 @@ public final class SessionTrackerImpl implements SessionTracker {
                 latest(incoming.grimVersion(), current.grimVersion()),
                 current.clientBrand() != null ? current.clientBrand() : incoming.clientBrand(),
                 incoming.clientVersion() >= 0 ? incoming.clientVersion() : current.clientVersion(),
-                latest(incoming.serverVersion(), current.serverVersion()));
+                latest(incoming.serverVersion(), current.serverVersion()),
+                current.connectionId());
     }
 
     private static <T> T latest(T incoming, T current) {

@@ -36,7 +36,7 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
     private final ProxyServer proxy;
     private final Object nativePlugin;
     private final WireValueDecoder codecs;
-    private final VelocityPlugin plugin;
+    private final GrimPlugin plugin;
     private final VelocityPermissions permissions = new VelocityPermissions();
     private final VelocitySenders senders;
     private final VelocityPlayers players;
@@ -56,7 +56,12 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
         try {
             this.codecs = ProtocolCodecs.decoder();
             cleanup.push(ProtocolCodecs::close);
-            this.plugin = new VelocityPlugin(directory, logger);
+            this.plugin = ac.cult.cultac.runtime.RuntimeEnvironment.host() == null
+                    ? new VelocityPlugin(directory, logger)
+                    : ac.cult.reload.host.SharedPlugin.create(
+                            directory,
+                            logger,
+                            ac.cult.cultac.runtime.RuntimeEnvironment.host().build());
             this.senders = new VelocitySenders(proxy, permissions);
             this.players = new VelocityPlayers(proxy, senders);
             this.scheduler = new VelocityScheduler(world -> ((VelocityWorld) world).connection());
@@ -89,7 +94,10 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
             var runtime = ProtocolRuntime.create(
                     ProtocolData.load(ProtocolVersion.V26_3), ClientPacketCodecs.connectionCatalog(), 32767);
             manager.configureTransport(runtime, transport::install, () -> {}, transport::remove);
-            CultAPI.INSTANCE.getExtensionManager().registerResolver(context -> context == nativePlugin ? plugin : null);
+            if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+                CultAPI.INSTANCE
+                        .getExtensionManager()
+                        .registerResolver(context -> context == nativePlugin ? plugin : null);
         } catch (Exception | Error failure) {
             for (var resource : cleanup) {
                 try {
@@ -102,9 +110,14 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
         }
     }
 
-    public void start() {
+    public void load() {
+        if (loaded) return;
         CultAPI.INSTANCE.load(this, (StartableInitable) this::startBedrockBridge);
         loaded = true;
+    }
+
+    public void start() {
+        load();
         CultAPI.INSTANCE.start();
         plugin.getLogger().info("CultAC is inspecting Velocity client connections using the bundled 26.3 model");
         plugin.getLogger()
@@ -180,7 +193,8 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
 
     @Override
     public void registerAPIService() {
-        GrimAPIProvider.init(CultAPI.INSTANCE.getExternalAPI());
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+            GrimAPIProvider.init(CultAPI.INSTANCE.getExternalAPI());
     }
 
     @Override
@@ -203,6 +217,26 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
         };
     }
 
+    VelocitySenders senders() {
+        return senders;
+    }
+
+    void attach(com.velocitypowered.api.proxy.Player player, Channel channel) {
+        var owner = bedrockOwner(channel);
+        if (owner == null && new VelocityClientSupport(proxy).isBedrock(player.getUniqueId())) {
+            throw new IllegalStateException("Bedrock session requires a Geyser bridge on this proxy");
+        }
+        transport.attach(player, channel, owner);
+    }
+
+    java.util.concurrent.CompletionStage<Void> disconnect(Channel channel) {
+        var connection = CultAPI.INSTANCE.getNetworkManager().connection(channel);
+        if (connection == null) return java.util.concurrent.CompletableFuture.completedFuture(null);
+        return transport
+                .detach(connection)
+                .thenCompose(ignored -> CultAPI.INSTANCE.getNetworkManager().disconnect(channel));
+    }
+
     @Override
     public synchronized void close() {
         if (closed) {
@@ -221,7 +255,8 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
                         .join();
             }
         } finally {
-            proxy.getEventManager().unregisterListeners(nativePlugin);
+            if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+                proxy.getEventManager().unregisterListeners(nativePlugin);
             scheduler.close();
             try {
                 ProtocolCodecs.close();

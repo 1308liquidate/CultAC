@@ -36,15 +36,15 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-public class DiscordManager implements StartableInitable, ReloadableInitable {
+public class DiscordManager
+        implements StartableInitable, ReloadableInitable, ac.cult.cultac.manager.init.stop.StoppableInitable {
     private static final Predicate<String> WEBHOOK_REGEX = Pattern.compile(
                     "^https://(?:canary\\.)?discord\\.com/api(?:/v\\d+)?/webhooks/\\d+/[\\w-]+(\\?thread_id=\\d+)?$")
             .asMatchPredicate();
     private static final Predicate<String> HTTPS_URL_REGEX =
             Pattern.compile("^https://[^/\\s]+/\\S+$").asMatchPredicate();
     private static final Duration timeout = Duration.ofMillis(CommonCultArguments.URL_TIMEOUT.value());
-    private static final HttpClient client =
-            HttpClient.newBuilder().connectTimeout(timeout).build();
+    private static final HttpClient client = ac.cult.cultac.runtime.RuntimeEnvironment.http(timeout);
     private static final ConcurrentLinkedDeque<Pair<HttpRequest, CompletableFuture<Boolean>>> requests =
             new ConcurrentLinkedDeque<>();
     private static final AtomicBoolean taskStarted = new AtomicBoolean();
@@ -230,36 +230,44 @@ public class DiscordManager implements StartableInitable, ReloadableInitable {
         Pair<HttpRequest, CompletableFuture<Boolean>> pair = requests.peek();
         if (pair != null && rateLimitedUntil < System.currentTimeMillis() && !sending.getAndSet(true)) {
             HttpRequest request = pair.first();
-            client.sendAsync(request, HttpResponse.BodyHandlers.ofString()).whenComplete((response, throwable) -> {
-                if (throwable != null) {
-                    sending.set(false);
-                    LogUtil.error("Exception caught while sending a Discord webhook alert", throwable);
-                    return;
-                }
+            client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .whenComplete(ac.cult.cultac.runtime.RuntimeEnvironment.completion((response, throwable) -> {
+                        if (throwable != null) {
+                            sending.set(false);
+                            LogUtil.error("Exception caught while sending a Discord webhook alert", throwable);
+                            return;
+                        }
 
-                if (response != null && response.statusCode() == 429) {
-                    sending.set(false);
-                    rateLimitedUntil = Math.max(
-                            response.headers()
-                                            .firstValueAsLong("X-RateLimit-Reset")
-                                            .getAsLong()
-                                    * 1000,
-                            rateLimitedUntil);
-                    return;
-                }
+                        if (response != null && response.statusCode() == 429) {
+                            sending.set(false);
+                            rateLimitedUntil = Math.max(
+                                    response.headers()
+                                                    .firstValueAsLong("X-RateLimit-Reset")
+                                                    .getAsLong()
+                                            * 1000,
+                                    rateLimitedUntil);
+                            return;
+                        }
 
-                requests.remove(pair);
-                sending.set(false);
+                        requests.remove(pair);
+                        sending.set(false);
 
-                // TODO: handle 503 (Service Unavailable)?
-                if (response != null && response.statusCode() >= 400) {
-                    LogUtil.error("Encountered status code " + response.statusCode() + " with body " + response.body()
-                            + " and headers " + response.headers().map() + " while sending a Discord webhook alert.");
-                    pair.second().complete(false);
-                } else {
-                    pair.second().complete(true);
-                }
-            });
+                        // TODO: handle 503 (Service Unavailable)?
+                        if (response != null && response.statusCode() >= 400) {
+                            LogUtil.error("Encountered status code " + response.statusCode() + " with body "
+                                    + response.body() + " and headers "
+                                    + response.headers().map() + " while sending a Discord webhook alert.");
+                            pair.second().complete(false);
+                        } else {
+                            pair.second().complete(true);
+                        }
+                    }));
         }
+    }
+
+    @Override
+    public void stop() {
+        for (var request : requests) request.second().complete(false);
+        requests.clear();
     }
 }

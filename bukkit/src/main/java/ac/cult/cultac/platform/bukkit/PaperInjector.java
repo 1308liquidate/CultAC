@@ -29,6 +29,44 @@ final class PaperInjector {
         this.manager = manager;
     }
 
+    void enable() {
+        registered = true;
+    }
+
+    void injectNew(Channel channel) {
+        inject(channel, false);
+    }
+
+    java.util.concurrent.CompletionStage<Void> disconnect(Channel channel) {
+        var connection = manager.connection(channel);
+        if (connection == null) return CompletableFuture.completedFuture(null);
+        var completion = new CompletableFuture<Void>();
+        Runnable detach = () -> {
+            try {
+                connection
+                        .removeHandlers(() -> {
+                            var pipeline = channel.pipeline();
+                            if (pipeline.get(CultDecoder.NAME) != null) pipeline.remove(CultDecoder.NAME);
+                            if (pipeline.get(CultEncoder.NAME) != null) pipeline.remove(CultEncoder.NAME);
+                        })
+                        .thenCompose(ignored -> manager.disconnect(channel))
+                        .whenComplete((ignored, failure) -> {
+                            if (failure == null) completion.complete(null);
+                            else completion.completeExceptionally(failure);
+                        });
+            } catch (Throwable failure) {
+                completion.completeExceptionally(failure);
+            }
+        };
+        try {
+            if (channel.eventLoop().inEventLoop()) detach.run();
+            else channel.eventLoop().execute(detach);
+        } catch (Throwable failure) {
+            completion.completeExceptionally(failure);
+        }
+        return completion;
+    }
+
     void register() {
         registered = true;
         // Paper iterates an unordered listener map. Wait for every initializer,
@@ -60,7 +98,8 @@ final class PaperInjector {
 
     synchronized CompletionStage<Void> unregister() {
         registered = false;
-        ChannelInitializeListenerHolder.removeListener(KEY);
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+            ChannelInitializeListenerHolder.removeListener(KEY);
         return CompletableFuture.allOf(manager.connections().stream()
                 .map(connection -> {
                     var completion = new CompletableFuture<Void>();

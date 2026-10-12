@@ -30,9 +30,8 @@ import org.jetbrains.annotations.Nullable;
 public class CultVersion implements BuildableCommand {
 
     private static final AtomicReference<Component> updateMessage = new AtomicReference<>();
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .connectTimeout(Duration.of(CommonCultArguments.URL_TIMEOUT.value(), ChronoUnit.MILLIS))
-            .build();
+    private static final HttpClient HTTP_CLIENT = ac.cult.cultac.runtime.RuntimeEnvironment.http(
+            Duration.of(CommonCultArguments.URL_TIMEOUT.value(), ChronoUnit.MILLIS));
     private static long lastCheck;
 
     public static void checkForUpdatesAsync(Sender sender) {

@@ -17,23 +17,31 @@ public class BukkitRegionScheduler implements RegionScheduler {
     @Override
     public void execute(
             @NotNull GrimPlugin plugin, @NotNull PlatformWorld world, int chunkX, int chunkZ, @NotNull Runnable task) {
-        bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, task);
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        new BukkitTaskHandle(bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, guarded_task));
     }
 
     @Override
     public void execute(@NotNull GrimPlugin plugin, @NotNull Location location, @NotNull Runnable task) {
-        bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, task);
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        new BukkitTaskHandle(bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, guarded_task));
     }
 
     @Override
     public TaskHandle run(
             @NotNull GrimPlugin plugin, @NotNull PlatformWorld world, int chunkX, int chunkZ, @NotNull Runnable task) {
-        return new BukkitTaskHandle(bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, task));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new BukkitTaskHandle(bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, guarded_task));
     }
 
     @Override
     public TaskHandle run(@NotNull GrimPlugin plugin, @NotNull Location location, @NotNull Runnable task) {
-        return new BukkitTaskHandle(bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, task));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new BukkitTaskHandle(bukkitScheduler.runTask(CultACBukkitLoaderPlugin.LOADER, guarded_task));
     }
 
     @Override
@@ -44,13 +52,19 @@ public class BukkitRegionScheduler implements RegionScheduler {
             int chunkZ,
             @NotNull Runnable task,
             long delayTicks) {
-        return new BukkitTaskHandle(bukkitScheduler.runTaskLater(CultACBukkitLoaderPlugin.LOADER, task, delayTicks));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new BukkitTaskHandle(
+                bukkitScheduler.runTaskLater(CultACBukkitLoaderPlugin.LOADER, guarded_task, delayTicks));
     }
 
     @Override
     public TaskHandle runDelayed(
             @NotNull GrimPlugin plugin, @NotNull Location location, @NotNull Runnable task, long delayTicks) {
-        return new BukkitTaskHandle(bukkitScheduler.runTaskLater(CultACBukkitLoaderPlugin.LOADER, task, delayTicks));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new BukkitTaskHandle(
+                bukkitScheduler.runTaskLater(CultACBukkitLoaderPlugin.LOADER, guarded_task, delayTicks));
     }
 
     @Override
@@ -62,8 +76,10 @@ public class BukkitRegionScheduler implements RegionScheduler {
             @NotNull Runnable task,
             long initialDelayTicks,
             long periodTicks) {
-        return new BukkitTaskHandle(
-                bukkitScheduler.runTaskTimer(CultACBukkitLoaderPlugin.LOADER, task, initialDelayTicks, periodTicks));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new BukkitTaskHandle(bukkitScheduler.runTaskTimer(
+                CultACBukkitLoaderPlugin.LOADER, guarded_task, initialDelayTicks, periodTicks));
     }
 
     @Override
@@ -73,7 +89,9 @@ public class BukkitRegionScheduler implements RegionScheduler {
             @NotNull Runnable task,
             long initialDelayTicks,
             long periodTicks) {
-        return new BukkitTaskHandle(
-                bukkitScheduler.runTaskTimer(CultACBukkitLoaderPlugin.LOADER, task, initialDelayTicks, periodTicks));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new BukkitTaskHandle(bukkitScheduler.runTaskTimer(
+                CultACBukkitLoaderPlugin.LOADER, guarded_task, initialDelayTicks, periodTicks));
     }
 }

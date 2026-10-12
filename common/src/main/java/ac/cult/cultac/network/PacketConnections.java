@@ -104,6 +104,8 @@ final class PacketConnections {
             cultPlayer.platformPlayer = player;
             binding.initialize(cultPlayer);
             cultPlayer.updatePermissions();
+            var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+            if (host != null) host.bindUser(session.channel(), user.getUUID(), player.getNative(), cultPlayer);
         }
         session.loginNotified = true;
         hooks.onLogin(user, player);
@@ -158,11 +160,15 @@ final class PacketConnections {
                 completion.completeExceptionally(failure);
             }
         };
+        Runnable accepted = ac.cult.cultac.runtime.RuntimeEnvironment.once(task);
         try {
             // Even a hook which closes its own channel finishes creation before teardown.
-            owner.execute(task);
+            owner.execute(accepted);
         } catch (RuntimeException rejected) {
-            owner.terminationFuture().addListener(done -> task.run());
+            var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+            if (host == null) owner.terminationFuture().addListener(done -> accepted.run());
+            else
+                owner.terminationFuture().addListener(ac.cult.reload.host.Callbacks.future(host.resources(), accepted));
         }
         return completion.minimalCompletionStage();
     }

@@ -26,8 +26,8 @@ public class CultReload implements BuildableCommand {
         // reload config
         sender.sendMessage(MessageUtil.getParsedComponent(sender, "reloading", "%prefix% &7Reloading config..."));
 
-        CultAPI.INSTANCE
-                .getExternalAPI()
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        (host == null ? CultAPI.INSTANCE.getExternalAPI() : (ac.grim.grimac.api.GrimAbstractAPI) host.publicApi())
                 .reloadAsync()
                 .exceptionally(throwable -> false)
                 .thenAccept(bool -> {

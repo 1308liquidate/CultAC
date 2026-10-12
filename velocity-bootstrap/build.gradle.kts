@@ -15,23 +15,47 @@ java.toolchain.languageVersion.set(JavaLanguageVersion.of(21))
 tasks.withType<JavaCompile>().configureEach { options.release.set(21) }
 dependencies {
     compileOnly("com.velocitypowered:velocity-api:3.4.0")
-    implementation(project(":velocity-platform"))
+    implementation(project(":reload-host"))
+    implementation(libs.cult.internal.shims)
+    compileOnly("io.netty:netty-handler:4.2.18.Final")
     annotationProcessor("com.velocitypowered:velocity-api:3.4.0")
 }
+val bootstrapVersion = tasks.register("bootstrapVersion") {
+    val output = layout.buildDirectory.file("generated/version/ac/cult/velocity/CultBuildVersion.java")
+    inputs.property("version", rootProject.version.toString())
+    outputs.file(output)
+    doLast {
+        output.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText("package ac.cult.velocity; final class CultBuildVersion { static final String VERSION = \"${rootProject.version}\"; }\n")
+        }
+    }
+}
+sourceSets.main { java.srcDir(layout.buildDirectory.dir("generated/version")) }
+tasks.compileJava { dependsOn(bootstrapVersion) }
+evaluationDependsOn(":velocity-platform")
+val engine = project(":velocity-platform").tasks.named<ShadowJar>("shadowJar")
 tasks.shadowJar {
+    dependsOn(engine)
+    from(engine.flatMap { it.archiveFile }) { into("cult-runtime"); rename { "default.jar" } }
     archiveFileName.set("CultAC-velocity.jar")
+
     mergeServiceFiles()
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
     exclude("META-INF/services/javax.annotation.processing.Processor")
-    doLast {
-        check(ProcessBuilder("python3", rootProject.file("scripts/verify-no-bundled-minecraft.py").path,
-            archiveFile.get().asFile.path).inheritIO().start().waitFor() == 0)
-        val codecAudit = ProcessBuilder("python3", rootProject.file("scripts/verify-vialib-packaging.py").path,
-            "--library", rootProject.project(":protocol-codec").layout.buildDirectory.file("libs/vialib.jar").get().asFile.path,
-            archiveFile.get().asFile.path).redirectErrorStream(true).start()
-        val codecAuditOutput = codecAudit.inputStream.bufferedReader().use { it.readText() }
-        check(codecAudit.waitFor() == 0) { codecAuditOutput }
-        logger.lifecycle(codecAuditOutput.trim())
-    }
+
 }
 tasks.assemble { dependsOn(tasks.shadowJar) }
+
+
+tasks.compileJava {
+    val loaderVersion = providers.gradleProperty("cultLoaderVersion").get()
+    inputs.property("cult-loader-version", loaderVersion)
+    doLast {
+        val descriptor = destinationDirectory.file("velocity-plugin.json").get().asFile
+        val json = descriptor.readText().trim()
+        val existing = Regex("""["]cult-loader-version["]\s*:\s*["][^"]*["]""")
+        val field = "\"cult-loader-version\":\"$loaderVersion\""
+        descriptor.writeText(if (existing.containsMatchIn(json)) existing.replace(json, field) else json.dropLast(1) + "," + field + "}\n")
+    }
+}

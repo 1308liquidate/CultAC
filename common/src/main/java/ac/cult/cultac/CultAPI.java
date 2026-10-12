@@ -54,7 +54,10 @@ public final class CultAPI {
     private final EventBus eventBus;
     private final CultExternalAPI externalAPI;
     private DataStoreLifecycle dataStoreLifecycle;
-    private final BackendRegistry backendRegistry = buildBackendRegistry();
+    private final BackendRegistry backendRegistry = ac.cult.cultac.runtime.RuntimeEnvironment.host() == null
+            ? buildBackendRegistry()
+            : (BackendRegistry) ac.cult.cultac.runtime.RuntimeEnvironment.host()
+                    .shared("backend-registry", CultAPI::buildBackendRegistry);
     private PlatformLoader loader;
     private InitManager initManager;
     private boolean initialized = false;
@@ -67,8 +70,17 @@ public final class CultAPI {
         this.playerDataManager = new PlayerDataManager();
         this.tickManager = new TickManager();
         this.networkManager = new CultNetworkManager();
-        this.extensionManager = new GrimExtensionManager();
-        this.eventBus = new OptimizedEventBus(extensionManager);
+        this.extensionManager = ac.cult.cultac.runtime.RuntimeEnvironment.host() == null
+                ? new GrimExtensionManager()
+                : (GrimExtensionManager) ac.cult.cultac.runtime.RuntimeEnvironment.host()
+                        .shared(
+                                "extension-manager",
+                                () -> ac.cult.reload.host.SharedExtensions.create(
+                                        ac.cult.cultac.runtime.RuntimeEnvironment.host()));
+        this.eventBus = ac.cult.cultac.runtime.RuntimeEnvironment.host() == null
+                ? new OptimizedEventBus(extensionManager)
+                : (EventBus) ac.cult.cultac.runtime.RuntimeEnvironment.host()
+                        .shared("event-bus", () -> new OptimizedEventBus(extensionManager));
         this.externalAPI = new CultExternalAPI(this);
     }
 

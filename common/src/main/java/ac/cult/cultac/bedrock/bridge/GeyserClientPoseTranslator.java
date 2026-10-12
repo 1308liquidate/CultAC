@@ -19,6 +19,12 @@ final class GeyserClientPoseTranslator extends PacketTranslator<ClientboundSetEn
     @SuppressWarnings("unchecked")
     GeyserClientPoseTranslator(Predicate<GeyserSession> attached) {
         this.attached = attached;
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            delegate = ac.cult.reload.integrations.GeyserTranslatorRouter.install(
+                    ClientboundSetEntityDataPacket.class, host, this);
+            return;
+        }
         delegate = (PacketTranslator<ClientboundSetEntityDataPacket>)
                 Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundSetEntityDataPacket.class);
         if (delegate == null) throw new IllegalStateException("Missing Geyser metadata translator");
@@ -63,10 +69,19 @@ final class GeyserClientPoseTranslator extends PacketTranslator<ClientboundSetEn
     }
 
     boolean isInstalled() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null)
+            return ac.cult.reload.integrations.GeyserTranslatorRouter.installed(
+                    ClientboundSetEntityDataPacket.class, host, this);
         return Registries.JAVA_PACKET_TRANSLATORS.get(ClientboundSetEntityDataPacket.class) == this;
     }
 
     void close() {
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host != null) {
+            ac.cult.reload.integrations.GeyserTranslatorRouter.remove(ClientboundSetEntityDataPacket.class, host, this);
+            return;
+        }
         if (isInstalled()) Registries.JAVA_PACKET_TRANSLATORS.register(ClientboundSetEntityDataPacket.class, delegate);
     }
 }

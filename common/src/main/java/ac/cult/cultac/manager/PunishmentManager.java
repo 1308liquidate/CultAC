@@ -162,7 +162,11 @@ public class PunishmentManager implements ConfigReloadable {
                         if (shouldRun) {
                             String renderedVerbose = safeGet(verbose);
                             String cmd = replaceAlertPlaceholders(command.command, vl, check, renderedVerbose);
-                            boolean canceled = COMMAND_CHANNEL.fire(player, check, renderedVerbose, cmd);
+                            boolean canceled = COMMAND_CHANNEL.fire(
+                                    ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(player),
+                                    ac.cult.cultac.runtime.RuntimeEnvironment.outwardCheck(check),
+                                    renderedVerbose,
+                                    cmd);
                             if (command.interval == 0) {
                                 command.executeCount++;
                             } else {

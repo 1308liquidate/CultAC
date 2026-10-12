@@ -14,29 +14,42 @@ public class FoliaAsyncScheduler implements AsyncScheduler {
 
     @Override
     public TaskHandle runNow(@NotNull GrimPlugin plugin, @NotNull Runnable task) {
-        return new FoliaTaskHandle(scheduler.runNow(CultACBukkitLoaderPlugin.LOADER, ignored -> task.run()));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new FoliaTaskHandle(
+                scheduler.runNow(CultACBukkitLoaderPlugin.LOADER, ac.cult.reload.host.Callbacks.run(guarded_task)));
     }
 
     @Override
     public TaskHandle runDelayed(
             @NotNull GrimPlugin plugin, @NotNull Runnable task, long delay, @NotNull TimeUnit timeUnit) {
-        return new FoliaTaskHandle(
-                scheduler.runDelayed(CultACBukkitLoaderPlugin.LOADER, ignored -> task.run(), delay, timeUnit));
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
+        return new FoliaTaskHandle(scheduler.runDelayed(
+                CultACBukkitLoaderPlugin.LOADER, ac.cult.reload.host.Callbacks.run(guarded_task), delay, timeUnit));
     }
 
     @Override
     public TaskHandle runAtFixedRate(
             @NotNull GrimPlugin plugin, @NotNull Runnable task, long delay, long period, @NotNull TimeUnit timeUnit) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
         return new FoliaTaskHandle(scheduler.runAtFixedRate(
-                CultACBukkitLoaderPlugin.LOADER, ignored -> task.run(), delay, period, timeUnit));
+                CultACBukkitLoaderPlugin.LOADER,
+                ac.cult.reload.host.Callbacks.run(guarded_task),
+                delay,
+                period,
+                timeUnit));
     }
 
     @Override
     public TaskHandle runAtFixedRate(
             @NotNull GrimPlugin plugin, @NotNull Runnable task, long initialDelayTicks, long periodTicks) {
+        final Runnable guarded_task = ac.cult.cultac.runtime.RuntimeEnvironment.guard(task);
+
         return new FoliaTaskHandle(scheduler.runAtFixedRate(
                 CultACBukkitLoaderPlugin.LOADER,
-                ignored -> task.run(),
+                ac.cult.reload.host.Callbacks.run(guarded_task),
                 initialDelayTicks * 50,
                 periodTicks * 50,
                 TimeUnit.MILLISECONDS));
@@ -44,6 +57,8 @@ public class FoliaAsyncScheduler implements AsyncScheduler {
 
     @Override
     public void cancel(@NotNull GrimPlugin plugin) {
-        scheduler.cancelTasks(CultACBukkitLoaderPlugin.LOADER);
+        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+            scheduler.cancelTasks(CultACBukkitLoaderPlugin.LOADER);
+        else ac.cult.cultac.runtime.RuntimeEnvironment.host().resources().close();
     }
 }
