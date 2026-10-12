@@ -11,6 +11,7 @@ import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPacket;
 import ac.cult.cultac.protocol.wire.Wire;
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
@@ -25,6 +26,7 @@ import java.util.List;
 /** Prepares and emits ordered packet groups synchronously on the connection event loop. */
 public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     public static final String NAME = "cult-encoder";
+    private static final String HOST_CONTROL_NAME = NAME + "-host-control";
 
     private final CultConnection connection;
     private boolean insideBundle;
@@ -43,15 +45,43 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 before,
                 NAME,
                 new CultEncoder(connection));
+        if (connection.owner() != connection.channel().eventLoop()) {
+            pipeline.addAfter(NAME, HOST_CONTROL_NAME, new HostControl(pipeline.context(NAME)));
+        }
+    }
+
+    public static void uninstall(Channel channel) {
+        var pipeline = channel.pipeline();
+        if (pipeline.get(HOST_CONTROL_NAME) != null) pipeline.remove(HOST_CONTROL_NAME);
+        if (pipeline.get(NAME) != null) pipeline.remove(NAME);
+    }
+
+    private static boolean packetMessage(Object message) {
+        return message instanceof ByteBuf
+                || message instanceof CultWrite
+                || message instanceof CultConnection.WriteGroup
+                || message instanceof CultConnection.WriteTask;
+    }
+
+    /** Paper waits synchronously for protocol tasks on its I/O loop. Only packets may change executor. */
+    private static final class HostControl extends ChannelOutboundHandlerAdapter {
+        private final ChannelHandlerContext encoder;
+
+        private HostControl(ChannelHandlerContext encoder) {
+            this.encoder = encoder;
+        }
+
+        @Override
+        public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
+            if (packetMessage(message)) ctx.write(message, promise);
+            else encoder.write(message, promise);
+        }
     }
 
     @Override
     public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
         // Host configuration objects pass through to their original handlers.
-        if (!(message instanceof ByteBuf
-                || message instanceof CultWrite
-                || message instanceof CultConnection.WriteGroup
-                || message instanceof CultConnection.WriteTask)) {
+        if (!packetMessage(message)) {
             ctx.write(message, promise);
             return;
         }

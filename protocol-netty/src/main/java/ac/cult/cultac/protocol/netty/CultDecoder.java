@@ -9,12 +9,15 @@ import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPacket;
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.handler.flow.FlowControlHandler;
 
 /** Processes and forwards a frame synchronously on its connection's event loop. */
 public final class CultDecoder extends ChannelInboundHandlerAdapter {
     public static final String NAME = "cult-decoder";
+    private static final String HOST_FLOW_NAME = NAME + "-host-flow";
     private static final long FAILURE_LOG_INTERVAL_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
     private final CultConnection connection;
     private long lastFailureLog;
@@ -32,6 +35,26 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
                 before,
                 NAME,
                 new CultDecoder(connection));
+        if (connection.owner() != connection.channel().eventLoop()) {
+            // Frames queued on the packet owner have passed the host's upstream
+            // flow handler. Honor terminal-packet read pauses at the native decoder.
+            pipeline.addAfter(NAME, HOST_FLOW_NAME, new HostFlow());
+        }
+    }
+
+    public static void uninstall(Channel channel) {
+        var pipeline = channel.pipeline();
+        if (pipeline.get(HOST_FLOW_NAME) != null) pipeline.remove(HOST_FLOW_NAME);
+        if (pipeline.get(NAME) != null) pipeline.remove(NAME);
+    }
+
+    private static final class HostFlow extends FlowControlHandler {
+        @Override
+        public void read(ChannelHandlerContext ctx) throws Exception {
+            // A terminal decoder can request a read as it is removed. Paper's
+            // inbound_config rejects every frame until the next codec is installed.
+            if (ctx.pipeline().get("inbound_config") == null) super.read(ctx);
+        }
     }
 
     @Override

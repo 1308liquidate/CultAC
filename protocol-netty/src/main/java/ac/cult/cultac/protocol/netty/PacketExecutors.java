@@ -14,8 +14,8 @@ final class PacketExecutors {
         int index = names.indexOf(decoder.name());
         var previous = index > 0 ? pipeline.context(names.get(index - 1)) : null;
         boolean encoder = pipeline.get(CultEncoder.NAME) != null;
-        pipeline.remove(CultDecoder.NAME);
-        if (encoder) pipeline.remove(CultEncoder.NAME);
+        CultDecoder.uninstall(connection.channel());
+        if (encoder) CultEncoder.uninstall(connection.channel());
         CultDecoder.install(connection);
         if (encoder) CultEncoder.install(connection);
         // Netty schedules the read on the assigned executor. Resume after the

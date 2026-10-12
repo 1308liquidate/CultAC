@@ -25,6 +25,7 @@ dependencies {
     api(project(":common"))
     compileOnly("io.netty:netty-transport:4.2.16.Final")
     compileOnly("io.netty:netty-codec-base:4.2.16.Final")
+    compileOnly("io.netty:netty-handler:4.2.16.Final")
     testImplementation("io.netty:netty-transport:4.2.16.Final")
     testImplementation("io.netty:netty-codec-base:4.2.16.Final")
     testImplementation(testlibs.junitJupiter)

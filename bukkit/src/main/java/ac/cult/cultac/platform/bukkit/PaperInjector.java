@@ -46,8 +46,8 @@ final class PaperInjector {
                 connection
                         .removeHandlers(() -> {
                             var pipeline = channel.pipeline();
-                            if (pipeline.get(CultDecoder.NAME) != null) pipeline.remove(CultDecoder.NAME);
-                            if (pipeline.get(CultEncoder.NAME) != null) pipeline.remove(CultEncoder.NAME);
+                            CultDecoder.uninstall(channel);
+                            CultEncoder.uninstall(channel);
                         })
                         .thenCompose(ignored -> manager.disconnect(channel))
                         .whenComplete((ignored, failure) -> {
@@ -109,8 +109,8 @@ final class PaperInjector {
                             .execute(() -> connection
                                     .removeHandlers(() -> {
                                         var pipeline = connection.channel().pipeline();
-                                        if (pipeline.get(CultDecoder.NAME) != null) pipeline.remove(CultDecoder.NAME);
-                                        if (pipeline.get(CultEncoder.NAME) != null) pipeline.remove(CultEncoder.NAME);
+                                        CultDecoder.uninstall(connection.channel());
+                                        CultEncoder.uninstall(connection.channel());
                                     })
                                     .whenComplete((ignored, failure) -> {
                                         if (failure == null) completion.complete(null);

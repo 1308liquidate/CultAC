@@ -166,12 +166,8 @@ final class VelocityTransport {
             return CompletableFuture.supplyAsync(
                             () -> connection.removeHandlers(() -> {
                                 var pipeline = connection.channel().pipeline();
-                                if (pipeline.get(CultDecoder.NAME) != null) {
-                                    pipeline.remove(CultDecoder.NAME);
-                                }
-                                if (pipeline.get(CultEncoder.NAME) != null) {
-                                    pipeline.remove(CultEncoder.NAME);
-                                }
+                                CultDecoder.uninstall(connection.channel());
+                                CultEncoder.uninstall(connection.channel());
                             }),
                             connection.channel().eventLoop())
                     .thenCompose(CompletionStage::toCompletableFuture);
