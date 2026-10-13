@@ -30,6 +30,15 @@ public class BadPacketsL extends Check implements CheckListener {
                 || action == PlayerAction.STOP_DESTROY_BLOCK
                 || action == PlayerAction.ABORT_DESTROY_BLOCK) return;
 
+        // 26.3 MultiPlayerGameMode#continueDestroyBlock sends this while still mining the same
+        // target, with that target's position and the newly hit face. It is not a predicted
+        // action: the three-argument ServerboundPlayerActionPacket constructor always sends
+        // sequence 0. Its position and face are real, so only the sequence is fixed.
+        if (action == PlayerAction.CHANGE_DESTROY_DIRECTION) {
+            if (packet.sequence() != 0) flagInvalid(event, packet);
+            return;
+        }
+
         // 1.8 and above clients always send digging packets that aren't used for digging at 0, 0, 0, face 0
         // 1.7 and below clients do the same, except use face 255 for RELEASE_USE_ITEM
         // as of https://github.com/ViaVersion/ViaRewind/commit/e7b0606e187afbccf98ef7c88d3f3af27fe11da3, ViaRewind maps
@@ -42,15 +51,20 @@ public class BadPacketsL extends Check implements CheckListener {
 
         final BlockPos pos = packet.position();
         if (!isValidFace || pos.getX() != 0 || pos.getY() != 0 || pos.getZ() != 0 || packet.sequence() != 0) {
-            var buf = V.write(verbose())
-                    .mcPos(pos.getX(), pos.getY(), pos.getZ())
-                    .sint(faceId)
-                    .sint(packet.sequence())
-                    .uint(VerboseCodecs.digging(action));
-            if (flag(buf) && shouldModifyPackets() && canCancel(action)) {
-                event.setCancelled(true);
-                player.onPacketCancel();
-            }
+            flagInvalid(event, packet);
+        }
+    }
+
+    private void flagInvalid(PacketReceiveEvent<ServerboundPlayerAction> event, ServerboundPlayerAction packet) {
+        final BlockPos pos = packet.position();
+        var buf = V.write(verbose())
+                .mcPos(pos.getX(), pos.getY(), pos.getZ())
+                .sint(packet.direction().ordinal())
+                .sint(packet.sequence())
+                .uint(VerboseCodecs.digging(packet.action()));
+        if (flag(buf) && shouldModifyPackets() && canCancel(packet.action())) {
+            event.setCancelled(true);
+            player.onPacketCancel();
         }
     }
 
