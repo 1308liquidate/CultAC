@@ -16,7 +16,7 @@ public final class CultJavaPacketLog implements BuildableCommand {
                 .literal("debug")
                 .literal("javapacketlog")
                 .permission("cult.debug")
-                .required("username", StringParser.quotedStringParser())
+                .optional("username", StringParser.quotedStringParser())
                 .flag(manager.flagBuilder("onjoin"))
                 .handler(this::handle));
     }
@@ -30,7 +30,8 @@ public final class CultJavaPacketLog implements BuildableCommand {
             sender.sendMessage(Component.text("Java packet logger is unavailable."));
             return;
         }
-        String username = context.get("username");
+        // Without a username, capture the player running the command.
+        String username = context.getOrDefault("username", sender.isPlayer() ? sender.getName() : "");
         if (username.isBlank()) {
             sender.sendMessage(Component.text("Specify a Java-side username."));
             return;

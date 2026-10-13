@@ -9,6 +9,7 @@ import com.velocitypowered.api.proxy.ProxyServer;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import org.incendo.cloud.parser.ArgumentParseResult;
 import org.incendo.cloud.parser.ParserDescriptor;
 import org.incendo.cloud.parser.standard.StringParser;
 import org.incendo.cloud.suggestion.Suggestion;
@@ -30,11 +31,15 @@ final class VelocityCommands implements CloudPlatformCommandArguments {
     @Override
     public ParserDescriptor<Sender, PlayerSelector> singlePlayerSelectorParser() {
         return ParserDescriptor.of(
-                StringParser.<Sender>stringParser().parser().mapSuccess((context, name) -> {
-                    var player = proxy.getPlayer(name)
-                            .orElseThrow(() -> new IllegalArgumentException("Player is not online: " + name));
+                StringParser.<Sender>stringParser().parser().flatMapSuccess((context, name) -> {
+                    var player = proxy.getPlayer(name).orElse(null);
+                    // Suggestions also try this dynamic branch beside literals such as proxyticks.
+                    // An offline name is a normal parse failure, not an exceptional future.
+                    if (player == null)
+                        return ArgumentParseResult.failureFuture(
+                                new IllegalArgumentException("Player is not online: " + name));
                     Sender sender = senders.wrap(player);
-                    return CompletableFuture.completedFuture(new PlayerSelector() {
+                    return ArgumentParseResult.successFuture(new PlayerSelector() {
                         @Override
                         public boolean isSingle() {
                             return true;

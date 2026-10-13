@@ -5,6 +5,7 @@ import ac.cult.cultac.command.handler.CultCommandFailureHandler;
 import ac.cult.cultac.platform.api.command.CommandService;
 import ac.cult.cultac.platform.api.manager.cloud.CloudPlatformCommandArguments;
 import ac.cult.cultac.platform.api.sender.Sender;
+import ac.cult.cultac.utils.anticheat.LogUtil;
 import io.leangen.geantyref.TypeToken;
 import java.util.Locale;
 import java.util.function.Function;
@@ -13,7 +14,12 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.ComponentLike;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.incendo.cloud.CommandManager;
+import org.incendo.cloud.exception.ArgumentParseException;
+import org.incendo.cloud.exception.CommandExecutionException;
+import org.incendo.cloud.exception.InvalidCommandSenderException;
 import org.incendo.cloud.exception.InvalidSyntaxException;
+import org.incendo.cloud.exception.NoPermissionException;
+import org.incendo.cloud.exception.NoSuchCommandException;
 import org.incendo.cloud.key.CloudKey;
 import org.incendo.cloud.processors.requirements.RequirementApplicable;
 import org.incendo.cloud.processors.requirements.RequirementApplicable.RequirementApplicableFactory;
@@ -69,7 +75,7 @@ public class CloudCommandService implements CommandService {
         final RequirementPostprocessor<Sender, SenderRequirement> senderRequirementPostprocessor =
                 RequirementPostprocessor.of(REQUIREMENT_KEY, new CultCommandFailureHandler());
         commandManager.registerCommandPostProcessor(senderRequirementPostprocessor);
-        registerInvalidSyntaxHandler(commandManager);
+        registerExceptionHandlers(commandManager);
         commandsRegistered = true;
     }
 
@@ -85,7 +91,32 @@ public class CloudCommandService implements CommandService {
                         .toList());
     }
 
-    private void registerInvalidSyntaxHandler(CommandManager<Sender> commandManager) {
+    private void registerExceptionHandlers(CommandManager<Sender> commandManager) {
+        // The isolated manager has no platform adapter to report command failures for us.
+        registerExceptionHandler(
+                commandManager,
+                NoSuchCommandException.class,
+                exception -> Component.text("Invalid command. Use /cult help for available commands."));
+        registerExceptionHandler(
+                commandManager,
+                NoPermissionException.class,
+                exception -> Component.text("You do not have permission to use this command."));
+        registerExceptionHandler(
+                commandManager,
+                InvalidCommandSenderException.class,
+                exception -> Component.text("This command is not available from this sender."));
+        registerExceptionHandler(commandManager, ArgumentParseException.class, exception -> {
+            String detail = exception.getCause().getMessage();
+            return Component.text(detail == null ? "Invalid command argument." : "Invalid argument: " + detail);
+        });
+        commandManager.exceptionController().registerHandler(CommandExecutionException.class, context -> {
+            context.context()
+                    .sender()
+                    .sendMessage(Component.text(
+                            "An error occurred while running this command; see console for details.",
+                            NamedTextColor.RED));
+            LogUtil.error("Failed to execute Cult command", context.exception().getCause());
+        });
         commandManager.exceptionController().registerHandler(InvalidSyntaxException.class, context -> {
             Sender sender = context.context().sender();
             if (isHistoryInput(context.context().rawInput().input())) {
@@ -100,7 +131,8 @@ public class CloudCommandService implements CommandService {
                         NamedTextColor.GRAY));
                 return;
             }
-            sender.sendMessage(Component.text(context.exception().correctSyntax(), NamedTextColor.RED));
+            sender.sendMessage(Component.text(
+                    "Invalid command syntax. Use: /" + context.exception().correctSyntax(), NamedTextColor.RED));
         });
     }
 

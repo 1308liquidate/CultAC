@@ -43,9 +43,8 @@ public class CultSpectate implements BuildableCommand {
 
         @NotNull PlatformPlayer platformPlayer = Objects.requireNonNull(sender.getPlatformPlayer(), "platformPlayer");
         if (!platformPlayer.hasServerAuthority()) {
-            sender.sendMessage(
-                    net.kyori.adventure.text.Component.text(
-                            "Spectating requires server-side game-mode changes and teleports, which this platform cannot perform."));
+            sender.sendMessage(net.kyori.adventure.text.Component.text(
+                    "Spectating is only available on Paper: it requires server-side game-mode changes and teleports."));
             return;
         }
 

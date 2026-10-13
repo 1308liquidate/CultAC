@@ -19,7 +19,7 @@ public final class CultGeyserPacketLog implements BuildableCommand {
                 .literal("debug")
                 .literal("geyserpacketlog")
                 .permission("cult.debug")
-                .required("username", StringParser.quotedStringParser())
+                .optional("username", StringParser.quotedStringParser())
                 .flag(manager.flagBuilder("onjoin"))
                 .handler(this::handle));
     }
@@ -30,7 +30,8 @@ public final class CultGeyserPacketLog implements BuildableCommand {
             sender.sendMessage(Component.text("Local Geyser is unavailable."));
             return;
         }
-        String username = context.get("username");
+        // Without a username, capture the player running the command.
+        String username = context.getOrDefault("username", sender.isPlayer() ? sender.getName() : "");
         if (username.isBlank()) {
             sender.sendMessage(Component.text("Specify a Bedrock username."));
             return;

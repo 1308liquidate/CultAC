@@ -232,8 +232,8 @@ What makes Cult stand out against other anticheats?
 
 ### Java packet logging
 
-Use `/cult debug javapacketlog <username>` to start or stop a readable packet capture for a connected player.
-The command requires `cult.debug` and also works through the `cultac`, `grim`, and `grimac` aliases.
+Use `/cult debug javapacketlog [username]` to start or stop a readable packet capture for a connected player;
+without a username it captures the player running the command. The command requires `cult.debug` and also works through the `cultac`, `grim`, and `grimac` aliases.
 Use `/cult debug javapacketlog <username> --onjoin` to capture the next connection for that Java-side profile name,
 including the Floodgate prefix when applicable. Captures start when the authenticated profile is available,
 covering configuration and play traffic.
