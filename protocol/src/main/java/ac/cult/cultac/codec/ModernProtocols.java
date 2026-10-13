@@ -25,12 +25,16 @@ final class ModernProtocols {
     // Closing a value-decoder facade does not reinitialize Via's private singleton.
     private static ViaManagerImpl shared;
 
-    static synchronized ViaManagerImpl open(File directory) {
-        if (shared == null) shared = initialize(directory);
+    static synchronized ViaManagerImpl open() {
+        if (shared == null) shared = initialize();
         return shared;
     }
 
-    private static ViaManagerImpl initialize(File directory) {
+    private static ViaManagerImpl initialize() {
+        // Via's APIs take a data folder and config file. Neither is ever created: these relative
+        // names never exist, so mapping overrides and configs fall back to the bundled resources,
+        // and config saving is disabled below. Nothing is written to disk.
+        File directory = new File("cult-value-codecs-" + java.util.UUID.randomUUID());
         var platform = new CodecPlatform(directory);
         var manager =
                 new ViaManagerImpl(platform, new NoopInjector(), new ViaCommandHandler(false), ViaPlatformLoader.NOOP);
@@ -106,7 +110,13 @@ final class ModernProtocols {
                     return directory;
                 }
             };
-            var config = new ViaBackwardsConfig(new File(directory, "backwards.yml"), platform.getLogger());
+            var config =
+                    new ViaBackwardsConfig(
+                            new File("cult-backwards-" + java.util.UUID.randomUUID() + ".yml"), platform.getLogger()) {
+                        // Config#loadConfig saves the merged bundled defaults; keep them in memory only.
+                        @Override
+                        public synchronized void save(File location, java.util.Map<String, Object> values) {}
+                    };
             config.reload();
             manager.getConfigurationProvider().register(config);
             ViaBackwards.init(backwards, config);

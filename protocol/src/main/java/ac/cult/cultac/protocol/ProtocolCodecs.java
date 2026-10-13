@@ -1,15 +1,12 @@
 package ac.cult.cultac.protocol;
 
 import ac.cult.cultac.codec.PrivateCodecService;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
 /** Directly linked, relocated value codecs shared by the platform. */
 public final class ProtocolCodecs {
-    private static volatile Runtime runtime;
+    private static volatile WireValueDecoder runtime;
 
     private ProtocolCodecs() {}
 
@@ -27,7 +24,7 @@ public final class ProtocolCodecs {
                 }
             }
         }
-        return current.decoder();
+        return current;
     }
 
     public static Map<String, List<String>> projectTags(
@@ -42,58 +39,36 @@ public final class ProtocolCodecs {
     public static synchronized void close() {
         var current = runtime;
         runtime = null;
-        if (current == null) return;
-        try {
-            current.decoder().close();
-        } finally {
-            deleteDirectory(current.directory());
-        }
+        if (current != null) current.close();
     }
 
-    private static Runtime open() throws Exception {
-        // ViaBackwards' configuration API needs a data directory; no code is extracted.
-        Path directory = Files.createTempDirectory("cult-value-codecs-");
-        try {
-            // Via's Config keeps a private SnakeYAML instance in a ThreadLocal. Initialize
-            // it on an owned thread so no server/packet thread retains a retired runtime.
-            var result = new java.util.concurrent.CompletableFuture<WireValueDecoder>();
-            var initializer = new Thread(
-                    () -> {
-                        try {
-                            result.complete(new PrivateCodecService(directory));
-                        } catch (Throwable failure) {
-                            result.completeExceptionally(failure);
-                        }
-                    },
-                    "cult-codec-initialize");
-            initializer.setDaemon(true);
-            initializer.start();
-            boolean interrupted = false;
-            try {
-                while (initializer.isAlive()) {
+    private static WireValueDecoder open() throws Exception {
+        // Via's Config keeps a private SnakeYAML instance in a ThreadLocal. Initialize
+        // it on an owned thread so no server/packet thread retains a retired runtime.
+        var result = new java.util.concurrent.CompletableFuture<WireValueDecoder>();
+        var initializer = new Thread(
+                () -> {
                     try {
-                        initializer.join();
-                    } catch (InterruptedException ignored) {
-                        interrupted = true;
+                        result.complete(new PrivateCodecService());
+                    } catch (Throwable failure) {
+                        result.completeExceptionally(failure);
                     }
+                },
+                "cult-codec-initialize");
+        initializer.setDaemon(true);
+        initializer.start();
+        boolean interrupted = false;
+        try {
+            while (initializer.isAlive()) {
+                try {
+                    initializer.join();
+                } catch (InterruptedException ignored) {
+                    interrupted = true;
                 }
-                return new Runtime(directory, result.join());
-            } finally {
-                if (interrupted) Thread.currentThread().interrupt();
             }
-        } catch (Exception | Error failure) {
-            deleteDirectory(directory);
-            throw failure;
+            return result.join();
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
         }
     }
-
-    private static void deleteDirectory(Path directory) {
-        try (var files = Files.walk(directory)) {
-            for (var path : files.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
-        } catch (IOException failure) {
-            throw new java.io.UncheckedIOException("Cannot close CultAC value codecs", failure);
-        }
-    }
-
-    private record Runtime(Path directory, WireValueDecoder decoder) {}
 }

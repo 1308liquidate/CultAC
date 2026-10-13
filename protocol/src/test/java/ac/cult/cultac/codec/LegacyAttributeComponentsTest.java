@@ -9,14 +9,10 @@ import ac.cult.cultac.protocol.wire.Wire;
 import ac.cult.shaded.vialib.api.type.Types;
 import ac.cult.shaded.vialib.nbt.tag.CompoundTag;
 import io.netty.buffer.Unpooled;
-import java.nio.file.Path;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class LegacyAttributeComponentsTest {
-    @TempDir
-    Path directory;
 
     @ParameterizedTest
     @EnumSource(
@@ -33,7 +29,7 @@ class LegacyAttributeComponentsTest {
                 return data.registry(registry).id(key);
             }
         };
-        try (var decoder = new PrivateCodecService(directory)) {
+        try (var decoder = new PrivateCodecService()) {
             for (boolean tooltip : new boolean[] {true, false}) {
                 var input = Unpooled.buffer();
                 try {

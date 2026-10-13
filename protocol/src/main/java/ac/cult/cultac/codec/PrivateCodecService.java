@@ -15,7 +15,6 @@ import ac.cult.shaded.vialib.protocol.packet.PacketWrapperImpl;
 import ac.cult.shaded.vialib.rewriter.TagRewriter;
 import ac.cult.shaded.vialib.util.Key;
 import io.netty.buffer.*;
-import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -28,8 +27,8 @@ public final class PrivateCodecService implements WireValueDecoder {
     private final Map<Versions, ModelIdMappings> mappings = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
-    public PrivateCodecService(Path directory) throws Exception {
-        manager = ModernProtocols.open(directory.toFile());
+    public PrivateCodecService() {
+        manager = ModernProtocols.open();
     }
 
     /** Via's cached protocol path, ordered from backend toward client for clientbound values. */
@@ -207,8 +206,8 @@ public final class PrivateCodecService implements WireValueDecoder {
     }
 
     @Override
-    public <T> DecodedItem<T> item(ProtocolVersion version, ByteBuf input, boolean creative,
-            Registries registries, NbtFactory<T> factory) {
+    public <T> DecodedItem<T> item(
+            ProtocolVersion version, ByteBuf input, boolean creative, Registries registries, NbtFactory<T> factory) {
         var decoded = readItem(version, input, creative);
         return item(decoded.item(), registries, version, decoded.patch(), factory);
     }
@@ -234,8 +233,7 @@ public final class PrivateCodecService implements WireValueDecoder {
         Types.VAR_INT.readPrimitive(header);
         Types.VAR_INT.readPrimitive(header);
         return new ItemInput(
-                item,
-                ByteBufUtil.getBytes(input, header.readerIndex(), input.readerIndex() - header.readerIndex()));
+                item, ByteBufUtil.getBytes(input, header.readerIndex(), input.readerIndex() - header.readerIndex()));
     }
 
     private ItemValue item(Item item, Registries registries, ProtocolVersion version) {
@@ -279,19 +277,23 @@ public final class PrivateCodecService implements WireValueDecoder {
         }
     }
 
-    private <T> DecodedItem<T> item(Item item, Registries registries, ProtocolVersion version,
-            byte[] wirePatch, NbtFactory<T> factory) {
+    private <T> DecodedItem<T> item(
+            Item item, Registries registries, ProtocolVersion version, byte[] wirePatch, NbtFactory<T> factory) {
         if (item == null || item.isEmpty()) return new DecodedItem<>(0, 0, null, null, Map.of(), null);
         var context = new ValueContext(registries, version, mappings(version, ProtocolVersion.V26_3));
         var patch = ComponentValues.patch(item, context);
         var layouts = ComponentValues.layouts(item, patch, context);
         var encodings = new HashMap<String, ComponentEncoding>();
         for (var data : item.dataContainer().data().values()) {
-            if (!data.isEmpty()) encodings.put(Key.namespaced(data.key().identifier()),
-                    ComponentValues.wireEncoding(data, context));
+            if (!data.isEmpty())
+                encodings.put(Key.namespaced(data.key().identifier()), ComponentValues.wireEncoding(data, context));
         }
-        return new DecodedItem<>(item.identifier(), item.amount(), PortableNbt.read(patch, factory),
-                layouts.isEmpty() ? null : PortableNbt.read(layouts, factory), encodings,
+        return new DecodedItem<>(
+                item.identifier(),
+                item.amount(),
+                PortableNbt.read(patch, factory),
+                layouts.isEmpty() ? null : PortableNbt.read(layouts, factory),
+                encodings,
                 wirePatch == null ? null : new ComponentEncoding(version.protocol(), wirePatch, context.references()));
     }
 
@@ -312,13 +314,17 @@ public final class PrivateCodecService implements WireValueDecoder {
     }
 
     @Override
-    public <T> DecodedItem<T> itemCost(ProtocolVersion version, ByteBuf input, boolean optional,
-            Registries registries, NbtFactory<T> factory) {
+    public <T> DecodedItem<T> itemCost(
+            ProtocolVersion version, ByteBuf input, boolean optional, Registries registries, NbtFactory<T> factory) {
         checkOpen();
         var types = types(version);
         ItemStructureGuard.scanItemCost(types, version, input.duplicate(), optional);
-        return item((optional ? types.optionalItemCost() : types.itemCost()).read(input),
-                registries, version, null, factory);
+        return item(
+                (optional ? types.optionalItemCost() : types.itemCost()).read(input),
+                registries,
+                version,
+                null,
+                factory);
     }
 
     private record MetadataTypes(
@@ -389,8 +395,8 @@ public final class PrivateCodecService implements WireValueDecoder {
     }
 
     @Override
-    public <T> List<MetadataValue> metadata(ProtocolVersion version, ByteBuf input,
-            Registries registries, NbtFactory<T> factory) {
+    public <T> List<MetadataValue> metadata(
+            ProtocolVersion version, ByteBuf input, Registries registries, NbtFactory<T> factory) {
         checkOpen();
         var types = types(version);
         var serializers = metadataTypes(types);
@@ -433,8 +439,10 @@ public final class PrivateCodecService implements WireValueDecoder {
             } else {
                 if (kind.equals("item")) ItemStructureGuard.scanItemStack(types, version, input.duplicate(), false);
                 value = values[id].type().read(input);
-                if (kind.equals("item")) value = factory == null ? item((Item) value, registries, version)
-                        : item((Item) value, registries, version, null, factory);
+                if (kind.equals("item"))
+                    value = factory == null
+                            ? item((Item) value, registries, version)
+                            : item((Item) value, registries, version, null, factory);
                 else if (kind.equals("optional_position") && value != null) {
                     var position = (ac.cult.shaded.vialib.api.minecraft.BlockPosition) value;
                     value = new int[] {position.x(), position.y(), position.z()};

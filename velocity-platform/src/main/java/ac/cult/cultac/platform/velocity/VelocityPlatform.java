@@ -258,11 +258,7 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
             if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
                 proxy.getEventManager().unregisterListeners(nativePlugin);
             scheduler.close();
-            try {
-                ProtocolCodecs.close();
-            } catch (java.io.UncheckedIOException failure) {
-                plugin.getLogger().log(java.util.logging.Level.WARNING, "Unable to close packet codecs", failure);
-            }
+            ProtocolCodecs.close();
         }
     }
 }

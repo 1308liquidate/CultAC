@@ -21,17 +21,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.*;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.io.TempDir;
 
 class WireValueDecoderTest {
-    @TempDir
-    static Path directory;
-
     private static PrivateCodecService decoder;
 
     @BeforeAll
     static void open() throws Exception {
-        decoder = new PrivateCodecService(directory);
+        decoder = new PrivateCodecService();
     }
 
     @AfterAll
@@ -1023,8 +1019,9 @@ class WireValueDecoderTest {
             }
         }
     }
-    private static WireValueDecoder.ItemValue checkedItem(ProtocolVersion version, ByteBuf input,
-            boolean creative, WireValueDecoder.Registries names) {
+
+    private static WireValueDecoder.ItemValue checkedItem(
+            ProtocolVersion version, ByteBuf input, boolean creative, WireValueDecoder.Registries names) {
         int start = input.readerIndex();
         var original = decoder.item(version, input, creative, names);
         int end = input.readerIndex();
@@ -1033,14 +1030,22 @@ class WireValueDecoderTest {
         assertEquals(end, input.readerIndex());
         assertEquals(original.id(), direct.id());
         assertEquals(original.count(), direct.count());
-        assertEquals(original.components() == null ? null : ac.cult.blocksim.data.nbt.BinaryNbt.read(original.components()),
-                direct.components(), version + "/components");
-        assertEquals(original.componentLayouts() == null ? null
-                : ac.cult.blocksim.data.nbt.BinaryNbt.read(original.componentLayouts()), direct.componentLayouts(), version + "/layouts");
+        assertEquals(
+                original.components() == null ? null : ac.cult.blocksim.data.nbt.BinaryNbt.read(original.components()),
+                direct.components(),
+                version + "/components");
+        assertEquals(
+                original.componentLayouts() == null
+                        ? null
+                        : ac.cult.blocksim.data.nbt.BinaryNbt.read(original.componentLayouts()),
+                direct.componentLayouts(),
+                version + "/layouts");
         for (var entry : original.componentEncodings().entrySet())
-            assertArrayEquals(entry.getValue().bytes(), direct.componentEncodings().get(entry.getKey()).bytes());
-        if (original.wirePatch() != null) assertArrayEquals(original.wirePatch().bytes(), direct.wirePatch().bytes());
+            assertArrayEquals(
+                    entry.getValue().bytes(),
+                    direct.componentEncodings().get(entry.getKey()).bytes());
+        if (original.wirePatch() != null)
+            assertArrayEquals(original.wirePatch().bytes(), direct.wirePatch().bytes());
         return original;
     }
-
 }
