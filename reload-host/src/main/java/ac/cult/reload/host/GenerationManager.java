@@ -161,9 +161,10 @@ public final class GenerationManager implements AutoCloseable {
                             throw new IOException("Specify a jar filename in the updates directory");
                         }
                         Path root = directory.resolve("updates").toRealPath();
+                        // A named staging entry may link to a development build outside this directory.
+                        // prepare() snapshots it before publication; cleanup never follows symlinks.
                         Path input = root.resolve(name).toRealPath();
-                        if (!input.startsWith(root) || !Files.isRegularFile(input))
-                            throw new IOException("Invalid update artifact");
+                        if (!Files.isRegularFile(input)) throw new IOException("Invalid update artifact");
                         synchronized (this) {
                             if (closing) throw new IllegalStateException("Host is stopping");
                         }

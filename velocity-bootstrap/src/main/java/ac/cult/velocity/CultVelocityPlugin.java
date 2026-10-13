@@ -86,17 +86,19 @@ public final class CultVelocityPlugin {
                 public void execute(Invocation invocation) {
                     var source = invocation.source();
                     var args = invocation.arguments();
-                    if (args.length > 0 && args[0].equalsIgnoreCase("update")) {
-                        if (!source.hasPermission("cult.update")) {
+                    if (args.length > 0
+                            && (args[0].equalsIgnoreCase("update") || args[0].equalsIgnoreCase("devswap"))) {
+                        boolean devSwap = args[0].equalsIgnoreCase("devswap");
+                        if (!source.hasPermission(devSwap ? "cult.devswap" : "cult.update")) {
                             source.sendMessage(net.kyori.adventure.text.Component.text("You do not have permission."));
                             return;
                         }
-                        if (args.length != 2) {
-                            source.sendMessage(
-                                    net.kyori.adventure.text.Component.text("Usage: /cult update <filename.jar>"));
+                        if (args.length != (devSwap ? 1 : 2)) {
+                            source.sendMessage(net.kyori.adventure.text.Component.text(
+                                    devSwap ? "Usage: /cult devswap" : "Usage: /cult update <filename.jar>"));
                             return;
                         }
-                        engine.update(args[1])
+                        engine.update(devSwap ? "CultAC-velocity.jar" : args[1])
                                 .whenComplete((message, failure) ->
                                         source.sendMessage(net.kyori.adventure.text.Component.text(
                                                 failure == null ? message : "Update failed: " + failure.getMessage())));

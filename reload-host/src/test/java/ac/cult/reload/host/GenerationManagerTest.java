@@ -135,6 +135,44 @@ class GenerationManagerTest {
     }
 
     @Test
+    void externalBuildSymlinkIsSnapshottedAndSurvivesCleanup() throws Exception {
+        var manager = start();
+        try {
+            Path build = directory.resolve("build/CultAC-dev.jar");
+            Files.createDirectories(build.getParent());
+            Files.move(artifact("first.jar", "2", "first", "paper"), build);
+            Path link = directory.resolve("CultAC/updates/dev.jar");
+            Files.createSymbolicLink(link, build);
+            byte[] first = Files.readAllBytes(build);
+            await(manager.update("dev.jar"));
+            manager.attach("old", null);
+            var marker = new Properties();
+            try (var input = Files.newInputStream(directory.resolve("CultAC/runtime/current.properties"))) {
+                marker.load(input);
+            }
+            Path snapshot = directory.resolve("CultAC/runtime").resolve(marker.getProperty("artifact"));
+
+            Files.move(artifact("second.jar", "2", "second", "paper"), build, StandardCopyOption.REPLACE_EXISTING);
+            assertArrayEquals(first, Files.readAllBytes(snapshot));
+            await(manager.update("dev.jar"));
+            manager.attach("new", null);
+            assertTrue(events.contains("first:attach:old"));
+            assertTrue(events.contains("second:attach:new"));
+            assertFalse(events.contains("first:close"));
+            await(manager.disconnect("old"));
+            eventually(() -> events.contains("first:close"));
+
+            byte[] rebuilt = Files.readAllBytes(build);
+            PluginInstaller.cleanUpdates(link.getParent());
+            assertTrue(Files.isSymbolicLink(link));
+            assertEquals(build, link.toRealPath());
+            assertArrayEquals(rebuilt, Files.readAllBytes(build));
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
     void explicitLoaderRevisionRejectsOnlyIncompatibleReleases() throws Exception {
         var manager = start();
         try {

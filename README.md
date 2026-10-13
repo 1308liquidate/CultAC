@@ -60,6 +60,12 @@ The native plugin stays loaded while each anticheat generation runs in its own c
 2. Run `/cult update <filename.jar>` with `cult.update` permission.
 3. Run `/cult runtimes` with `cult.runtimes` permission to see current and draining generations.
 
+For development on Velocity, `/cult devswap` loads `plugins/cultac/updates/CultAC-velocity.jar`
+and requires the separate `cult.devswap` permission. `/cult update` still requires a filename.
+That fixed-name staging entry can be a symlink to the build output. Wait for the build to finish
+before running the command; the loader snapshots each accepted version into its own immutable
+generation directory. Shutdown cleanup preserves the symlink and its build target.
+
 A version is the `plugin.yml` version (Velocity uses `velocity-plugin.json`) plus the runtime
 jar's complete SHA-256 digest. Commands display the first twelve digest characters.
 Two builds with the same descriptor version and different hashes are distinct versions;
