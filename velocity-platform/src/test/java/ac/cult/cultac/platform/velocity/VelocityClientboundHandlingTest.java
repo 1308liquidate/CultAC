@@ -56,7 +56,18 @@ class VelocityClientboundHandlingTest {
         try (var fixture = new Fixture(version)) {
             var proof = new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(123), false));
             when(fixture.player.supportsBundles()).thenReturn(true);
-            when(fixture.player.createTrackedTransactionPacketForBundle()).thenReturn(proof);
+            // The player now owns appending and tracking a proof group. Exercise
+            // that current contract, retaining the exact wire-order assertions below.
+            doAnswer(call -> {
+                        PacketSendEvent<?> event = call.getArgument(0);
+                        List<CultWrite> beforeProof = call.getArgument(1);
+                        event.getWritesAfterSend().addAll(beforeProof);
+                        event.getWritesAfterSend().add(proof.packet());
+                        event.getTasksAfterSend().add(() -> fixture.player.markTrackedTransactionPacketSent(proof));
+                        return proof;
+                    })
+                    .when(fixture.player)
+                    .appendTrailingProofTransaction(any(), anyList());
             var replication = new PacketEntityReplication(fixture.player);
             var callbackWriteCount = new AtomicInteger(-1);
             fixture.dispatcher.register(routes -> routes.send(

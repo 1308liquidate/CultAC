@@ -62,10 +62,19 @@ cult:
       max-ceiling: 2
 
   prediction:
-    # Valor acumulado necesario para detener el uso de un objeto si el movimiento sigue
-    # siendo demasiado rápido para la ralentización al usarlo. Los valores <= 0 desactivan
-    # las cancelaciones forzadas de este controlador, incluidas las causadas por cambiar de ranura.
-    use-item-buffer: 20
+    # Solo regula las correcciones de movimiento; superar este porcentaje nunca registra infracciones por trampas.
+    # El historial se conserva al dejar de usar un objeto, volver a usarlo o corregir la posición.
+    item-use-desync:
+      max-percent: 20
+      history-ticks: 100
+
+    # Correcciones estadísticas para ráfagas cortas y repetidas de movimiento tras usar un objeto.
+    # No registra infracciones por trampas. El crédito solo se recupera en ticks con la
+    # ralentización correcta, según item-use-desync.max-percent. Dejar de usar el objeto
+    # y los periodos de inactividad no reinician la deuda.
+    item-use-burst-balance:
+      max-credit-ticks: 8
+      setback-debt-ticks: 4
 
     # Ping de transacciones o tiempo sin paquetes de movimiento máximo tolerado
     # mientras hay un retroceso pendiente, en milisegundos.

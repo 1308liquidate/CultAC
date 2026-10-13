@@ -29,6 +29,14 @@ import lombok.ToString;
 @Getter
 @ToString
 public class SimulationContext {
+    @Setter
+    ac.cult.cultac.utils.data.ClientItemUseState.Snapshot itemUse =
+            ac.cult.cultac.utils.data.ClientItemUseState.Snapshot.NONE;
+
+    // Counterfactual input bound for statistical corrections only, after a proven release.
+    @Setter
+    float postUseMultiplier = 1;
+
     Vec3 start;
 
     @Setter

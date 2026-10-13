@@ -74,6 +74,17 @@ public final class BlockSimulator {
             switch (action) {
                 case SimAction.UseOn a -> interaction = use.useItemOn(level, fork.player(), a.hand(), a.hit());
                 case SimAction.Use a -> interaction = use.useItem(level, fork.player(), a.hand());
+                case SimAction.CompleteUse ignored -> {
+                    var active = fork.player().activeUse();
+                    if (active != null && !active.stack().isEmpty()
+                            && active.stack() == fork.player().hand(active.hand())) {
+                        var context = new UseContext(level, fork.player(), active.hand(), active.stack(), null);
+                        var completed = stacks.finishUsingItem(active.stack(), context);
+                        fork.player().inventory().set(active.hand() == Hand.MAIN_HAND
+                                ? fork.player().inventory().selected() : 40, completed);
+                    }
+                    fork.player().stopUsingItem();
+                }
                 case SimAction.DestroyBlock a -> accepted = breaks.destroyBlock(level, fork.player(), a.pos());
                 case SimAction.StartBreak a -> breaking = session.start(level, fork.player(), fork.mining(), a.pos(), a.face());
                 case SimAction.ContinueBreak a -> breaking = session.continueBreaking(level, fork.player(), fork.mining(), a.pos(), a.face());

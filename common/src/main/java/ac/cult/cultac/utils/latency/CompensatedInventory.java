@@ -904,6 +904,8 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
         if (slot < 0 || slot > 8) return;
         if (inventory.selected != slot) player.packetStateData.carriedItemChangedThisClientTick = true;
         inventory.selected = slot;
+        if (player.usesModernJavaItemUse() && player.packetStateData.lastSlotSelected != slot)
+            player.clientItemUse.claimedSlotChanged();
         player.packetStateData.lastSlotSelected = slot;
         player.compensatedEntities.vehicles.markItemControlledVehicleControlSwitch();
     }
@@ -1234,6 +1236,8 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
         if (slot >= 0 && slot <= 8) {
             deferClientboundInventoryTask(event, () -> {
                 inventory.selected = slot;
+                // A clientbound selected-slot packet changes the client's inventory.
+                // It does not prove the server has stopped its outstanding use.
                 player.packetStateData.lastSlotSelected = slot;
             });
         }

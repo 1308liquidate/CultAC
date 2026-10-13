@@ -2,110 +2,64 @@ package ac.cult.cultac.checks.impl.prediction.checks;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckInfo;
-import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.ItemUseTickResult;
 import ac.cult.cultac.checks.type.PostPredictionListener;
-import ac.cult.cultac.network.CultPacketHandler;
-import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerAction;
 import ac.cult.cultac.protocol.value.GameMode;
-import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
-import ac.cult.cultac.utils.math.Vec3;
-import ac.cult.cultac.utils.nmsutil.IsUsingItem;
-import lombok.Setter;
+import ac.grim.grimac.api.config.ConfigManager;
 
-// @CheckData(name = "NoSlow", stableKey = "cult.movement.noslow")
-public class NoSlow extends Check implements PostPredictionListener {
-    public NoSlow(CultPlayer cultPlayer) {
+/** Only source-proven incorrect movement produces a flag. Desync policy owns no violations. */
+public final class NoSlow extends Check implements PostPredictionListener {
+    private double threshold;
+
+    public NoSlow(CultPlayer player) {
         super(
-                cultPlayer,
+                player,
                 CheckInfo.builder()
                         .name("NoSlow")
                         .stableKey("cult.movement.noslow")
+                        .description("Ignored a proven item-use slowdown")
+                        .setback(5)
                         .build());
     }
 
-    boolean shouldCheck = false;
-
-    @Setter
-    boolean doneSettingMetadata = false;
-
     @Override
-    public void onPredictionComplete(final PredictionComplete predictionComplete) {
-        if (player.platformPlayer == null || !player.platformPlayer.hasServerAuthority()) {
-            shouldCheck = false;
-            if (doneSettingMetadata) {
-                player.settingMetaData = false;
-                doneSettingMetadata = false;
-            }
-            if (predictionComplete.getPredictionResult() != null) {
-                predictionComplete.getPredictionResult().setExceedsSlowedSpeed(false);
-            }
-            return;
-        }
-        if (predictionComplete.isTeleport()
-                || predictionComplete.isExempt()
-                || player.inVehicle()
-                || player.gamemode == GameMode.CREATIVE
-                || player.gamemode == GameMode.SPECTATOR) return;
-        if (!IsUsingItem.isSlowDueToUsingItem(player)) {
-            predictionComplete.getPredictionResult().setExceedsSlowedSpeed(false);
-            shouldCheck = false;
-            return;
-        }
-
-        boolean shouldFlag = true;
-        double useSpeedScale = IsUsingItem.getUseItemSpeedMultiplier(player) / 0.2D;
-        for (PredictionResult predResult :
-                predictionComplete.getPredictionResult().getRealities()) {
-            // Let's check the speed of the player first as it's the simplest
-            Vec3 closestForSpeed = predResult.getValidMovements().getClosestToTarget();
-            Vec3 horizDiffToTarget =
-                    predResult.getTarget().subtract(closestForSpeed).multiply(1, 0, 1);
-
-            Vec3 minimumInputRequired = HorizontalAnalyzer.getBestTheoreticalPlayerInput(
-                    horizDiffToTarget, predResult.getSimulationContext().getXRot());
-            minimumInputRequired = new Vec3(Math.abs(minimumInputRequired.x), 0, Math.abs(minimumInputRequired.z));
-
-            float playerSpeed = predResult.getSimulationContext().getMaxSpeed(player);
-            double maxDirLength = playerSpeed * 0.261 * useSpeedScale;
-            double speedFlagAmount =
-                    Math.max(minimumInputRequired.x - maxDirLength, minimumInputRequired.z - maxDirLength);
-
-            if (speedFlagAmount < 0.001) {
-                shouldFlag = false;
-                break;
-            }
-        }
-
-        if (doneSettingMetadata) {
-            this.player.settingMetaData = false;
-            doneSettingMetadata = false;
-        }
-
-        predictionComplete.getPredictionResult().setExceedsSlowedSpeed(shouldFlag);
-
-        if (shouldCheck) {
-            shouldCheck = false;
-            if (player.checkManager.getSimulationProcessor().getLastTickSkip().hasOccurredSince(1)) {
-                return;
-            }
-
-            PredictionResult lastResult =
-                    player.checkManager.getSimulationProcessor().getLastPrediction();
-            if (lastResult.isExceedsSlowedSpeed()) {
-                flag();
-            }
-        }
+    public void onReload(ConfigManager config) {
+        threshold = Math.max(ItemUseTickResult.NUMERIC_EPSILON, config.getDoubleElse("NoSlow.threshold", 0.001));
     }
 
-    @CultPacketHandler
-    public void onPlayerAction(
-            PacketReceiveEvent<ServerboundPlayerAction> event, CultPlayer player, ServerboundPlayerAction packet) {
-        if (player.platformPlayer == null || !player.platformPlayer.hasServerAuthority()) return;
-        if (packet.action() == PlayerAction.RELEASE_USE_ITEM && !player.settingMetaData) {
-            shouldCheck = true;
+    public double threshold() {
+        return threshold;
+    }
+
+    @Override
+    public void onPredictionComplete(PredictionComplete complete) {
+        if (!player.usesModernJavaItemUse()
+                || complete.isTeleport()
+                || complete.isExempt()
+                || player.gamemode == GameMode.SPECTATOR
+                || player.compensatedEntities.getSelf().isDead) return;
+        var result = complete.getPredictionResult();
+        ItemUseTickResult best = null;
+        double bestSlowed = Double.POSITIVE_INFINITY;
+        // Realities already satisfy the other movement checks. Never choose a
+        // horizontally convenient candidate with an illegal vertical path.
+        for (var reality : result.getRealities()) {
+            var evidence = reality.getItemUseResult();
+            if (evidence == null) {
+                result.setItemUseResult(null);
+                return;
+            }
+            bestSlowed = Math.min(bestSlowed, evidence.slowedOffset());
+            if (best == null || evidence.legalOffset() < best.legalOffset()) best = evidence;
         }
+        if (best == null) return;
+        best = new ItemUseTickResult(best.state(), best.legalOffset(), bestSlowed);
+        result.setItemUseResult(best);
+        if (best.deterministic(threshold)) {
+            if (flag("offset=" + best.legalOffset() + ",tick=" + best.state().tick() + ",proof="
+                    + best.state().proof())) setbackIfAboveSetbackVL();
+        } else if (best.state().required() && best.slowedOffset() <= threshold) reward();
     }
 }

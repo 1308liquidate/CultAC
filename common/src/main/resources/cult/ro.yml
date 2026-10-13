@@ -62,10 +62,19 @@ cult:
       max-ceiling: 2
 
   prediction:
-    # Valoarea acumulată necesară pentru a opri folosirea unui obiect când mișcarea rămâne
-    # prea rapidă față de încetinirea așteptată. Valorile <= 0 dezactivează opririle forțate
-    # ale folosirii obiectelor de către acest modul, inclusiv la schimbarea slotului.
-    use-item-buffer: 20
+    # Reglementează doar corecțiile de mișcare; depășirea acestui procent nu este niciodată înregistrată ca trișare.
+    # Istoricul se păstrează la oprirea și reluarea folosirii unui obiect, precum și după corecțiile de poziție.
+    item-use-desync:
+      max-percent: 20
+      history-ticks: 100
+
+    # Corecții statistice pentru rafale scurte și repetate de mișcare după folosirea unui obiect.
+    # Nu înregistrează abateri pentru trișare. Creditul se reface doar în tickurile cu încetinire
+    # corectă, conform item-use-desync.max-percent. Oprirea folosirii obiectului
+    # și perioadele de inactivitate nu resetează datoria acumulată.
+    item-use-burst-balance:
+      max-credit-ticks: 8
+      setback-debt-ticks: 4
 
     # Pingul maxim al tranzacțiilor sau timpul maxim tolerat fără pachete de mișcare
     # cât timp se așteaptă reacția la respingere, în milisecunde.

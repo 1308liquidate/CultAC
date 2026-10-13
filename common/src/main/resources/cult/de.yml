@@ -62,10 +62,20 @@ cult:
       max-ceiling: 2
 
   prediction:
-    # Erforderlicher Puffer, bevor die Gegenstandsnutzung bei dauerhaft zu schneller
-    # Bewegung trotz Nutzungsverlangsamung beendet wird. Werte <= 0 deaktivieren die
-    # erzwungenen Nutzungsabbrüche dieses Handlers, auch beim Wechsel des Schnellleistenplatzes.
-    use-item-buffer: 20
+    # Regelt nur Bewegungskorrekturen; das Überschreiten dieses Anteils zählt nie als Cheat-Verstoß.
+    # Der Verlauf bleibt beim Beenden und erneuten Starten der Gegenstandsnutzung
+    # sowie bei Positionskorrekturen erhalten.
+    item-use-desync:
+      max-percent: 20
+      history-ticks: 100
+
+    # Statistische Korrekturen für wiederholte kurze Bewegungsschübe nach der Gegenstandsnutzung.
+    # Es werden keine Cheat-Verstöße erfasst. Das Guthaben erholt sich nur in Ticks mit
+    # korrekter Verlangsamung, gemäß item-use-desync.max-percent. Das Beenden der Nutzung
+    # und Leerlaufzeiten setzen die angesammelten Schulden nicht zurück.
+    item-use-burst-balance:
+      max-credit-ticks: 8
+      setback-debt-ticks: 4
 
     # Maximal tolerierter Transaktions-Ping oder Zeitraum ohne Bewegungspakete,
     # während Rückstoß aussteht, in Millisekunden.

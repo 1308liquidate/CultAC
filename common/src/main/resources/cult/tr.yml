@@ -62,10 +62,19 @@ cult:
       max-ceiling: 2
 
   prediction:
-    # Hareket, eşya kullanırken uygulanması gereken yavaşlamaya göre fazla hızlı kalırsa
-    # eşya kullanımını durdurmak için gereken birikim. <= 0 değerleri bu işleyicinin zorunlu
-    # eşya kullanımı iptallerini, yuva değişimindeki iptaller dahil, devre dışı bırakır.
-    use-item-buffer: 20
+    # Yalnızca hareket düzeltmelerini düzenler; bu oranın aşılması asla hile ihlali olarak kaydedilmez.
+    # Eşya kullanımı durdurulup yeniden başlatıldığında ve konum düzeltildiğinde geçmiş korunur.
+    item-use-desync:
+      max-percent: 20
+      history-ticks: 100
+
+    # Eşya kullanımından sonra tekrarlanan kısa hareket patlamaları için istatistiksel düzeltmeler.
+    # Hile ihlali kaydedilmez. Kredi yalnızca doğru yavaşlamanın uygulandığı tiklerde,
+    # item-use-desync.max-percent değerine göre yenilenir. Kullanımı durdurmak
+    # ve hareketsiz beklemek birikmiş borcu sıfırlamaz.
+    item-use-burst-balance:
+      max-credit-ticks: 8
+      setback-debt-ticks: 4
 
     # Geri itmeye tepki beklenirken izin verilen en yüksek işlem onayı gecikmesi veya
     # hareket paketi alınmadan geçen süre, milisaniye cinsinden.

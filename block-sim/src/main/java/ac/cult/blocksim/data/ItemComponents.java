@@ -14,6 +14,18 @@ import java.util.Map;
 public final class ItemComponents {
     private ItemComponents() {}
 
+    public record UseEffects(boolean canSprint, float speedMultiplier) {
+        public static final UseEffects DEFAULT = new UseEffects(false, 0.2F);
+    }
+
+    /** UseEffects.CODEC defaults; sprint restriction and movement scale are independent. */
+    public static UseEffects useEffects(Components components) {
+        var value = object(components, "minecraft:use_effects");
+        return value == null ? UseEffects.DEFAULT
+                : new UseEffects(value.has("can_sprint") && value.get("can_sprint").getAsBoolean(),
+                        number(value, "speed_multiplier", 0.2F));
+    }
+
     public record HolderSet(String tag, List<String> entries) {
         public HolderSet { entries = List.copyOf(entries); }
         public boolean contains(DataTables data, String registry, String key) {

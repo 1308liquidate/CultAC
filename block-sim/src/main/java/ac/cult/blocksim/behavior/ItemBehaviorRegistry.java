@@ -12,6 +12,7 @@ import java.util.HashMap;
 public final class ItemBehaviorRegistry {
     private final Map<ItemDefinition, ItemBehavior> byItem = new java.util.IdentityHashMap<>();
     private final ItemDefinition air;
+    private final ItemBehavior generalItem;
     public ItemBehaviorRegistry(DataTables data, ItemBehavior generalItem, PlacementObstruction obstruction, BlockEntityComponentWriter components) {
         this(data, generalItem, obstruction, components, Map.of());
     }
@@ -25,6 +26,7 @@ public final class ItemBehaviorRegistry {
     public ItemBehaviorRegistry(DataTables data, ItemRegistry items, ItemBehavior generalItem, PlacementObstruction obstruction, BlockEntityComponentWriter components,
                                  Map<String, ItemBehavior> additionalFamilies) {
         air = data.items().stream().filter(item -> item.key().equals("minecraft:air")).findFirst().orElseThrow();
+        this.generalItem = generalItem;
         var families = new HashMap<String, ItemBehavior>();
         families.put("net.minecraft.world.item.Item", generalItem);
         var thrown = new SimpleUseItemBehavior(generalItem, SimpleUseItemBehavior.Kind.THROW);
@@ -84,6 +86,12 @@ public final class ItemBehaviorRegistry {
         }
     }
     public ItemBehavior behavior(ItemDefinition item) { return byItem.get(item); }
+    public ac.cult.blocksim.engine.SimItemStack finishUsingItem(ac.cult.blocksim.interaction.UseContext context) {
+        // 1.21.2+ Item#finishUsingItem is inherited by every family except SpyglassItem,
+        // whose override only plays the stop sound and returns the unchanged stack.
+        return itemForStack(context.stack()).vanillaClass().equals("net.minecraft.world.item.SpyglassItem")
+                ? context.stack() : generalItem.finishUsingItem(context);
+    }
     public boolean canDestroyBlock(ac.cult.blocksim.engine.SimItemStack stack, ac.cult.blocksim.engine.SimPlayer player) {
         var item = itemForStack(stack);
         // DebugStickItem's client branch has no interaction side effect and always returns false.

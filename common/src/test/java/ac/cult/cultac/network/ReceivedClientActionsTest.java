@@ -210,7 +210,7 @@ class ReceivedClientActionsTest {
                     ac.cult.blocksim.data.ItemComponents.useCooldown(worn.components())
                             .group());
             assertTrue(player.checkManager.getCompensatedCooldown().hasItem(worn));
-            assertFalse(player.packetStateData.isSlowedByUsingItem());
+            assertFalse(player.isClientUsingItem());
 
             // A newly received held stack shares the active cooldown group.
             storage.setItem(Inventory.HOTBAR_OFFSET, helmet.copy());
@@ -227,11 +227,11 @@ class ReceivedClientActionsTest {
             player.food = 20;
             storage.setItem(Inventory.SLOT_OFFHAND, OfflineCultTestBootstrap.item("minecraft:apple", 2));
             queuedUse(player, Hand.OFF_HAND, 3);
-            assertFalse(player.packetStateData.isSlowedByUsingItem());
+            assertFalse(player.isClientUsingItem());
             player.isInvulnerable = true;
             queuedUse(player, Hand.OFF_HAND, 4);
-            assertTrue(player.packetStateData.isSlowedByUsingItem());
-            assertEquals(Hand.OFF_HAND, player.packetStateData.itemInUseHand);
+            assertTrue(player.isClientUsingItem());
+            assertEquals(Hand.OFF_HAND, player.getClientItemUseHand());
             assertEquals(2, storage.getItem(Inventory.SLOT_OFFHAND).getCount());
         }
     }
@@ -265,14 +265,19 @@ class ReceivedClientActionsTest {
             assertSame(held, player.getInventory().getHeldItem());
             assertTrue(player.getInventory().getHelmet().isEmpty());
             assertFalse(player.checkManager.getCompensatedCooldown().hasItem(held));
-            assertTrue(player.packetStateData.isSlowedByUsingItem());
+            assertTrue(player.isClientUsingItem());
 
             received.damage(received.maxDamage() - 1);
             var damaged = received.copy();
             player.getInventory().inventory.setHeldItem(damaged);
             forwardUse(fixture, 2);
             assertSame(damaged, player.getInventory().getHeldItem());
-            assertFalse(player.packetStateData.isSlowedByUsingItem());
+            // TridentItem.use returns FAIL here; it does not release an existing
+            // use. LivingEntity's same-item comparison also ignores damage.
+            assertTrue(player.isClientUsingItem());
+            player.clientItemUse.release();
+            forwardUse(fixture, 3);
+            assertFalse(player.isClientUsingItem());
         }
     }
 

@@ -52,6 +52,13 @@ public class CultDebug implements BuildableCommand {
                 .permission("cult.debug")
                 .handler(this::handleDebugVisibility));
 
+        commandManager.command(cultCommand
+                .literal("debug")
+                .literal("itemslow", Description.of("Toggle item slowdown balance rewards and debits"))
+                .permission("cult.debug")
+                .optional("target", arguments.singlePlayerSelectorParser())
+                .handler(this::handleDebugItemSlow));
+
         // Register "consoledebug" subcommand
         Command.Builder<Sender> consoleDebugCommand = cultCommand
                 .literal("consoledebug", Description.of("Toggle console debug output for a player"))
@@ -112,6 +119,29 @@ public class CultDebug implements BuildableCommand {
                 (enabled ? "Enabled" : "Disabled") + " rewind debugging for " + target.getName()
                         + (enabled ? ": c=client, s=server, o=c-s" : ""),
                 NamedTextColor.GRAY));
+    }
+
+    private void handleDebugItemSlow(@NotNull CommandContext<Sender> context) {
+        Sender sender = context.sender();
+        PlayerSelector selector = context.getOrDefault("target", null);
+        CultPlayer target = parseTarget(sender, selector == null ? null : selector.getSinglePlayer());
+        if (target == null) return;
+        if (!target.usesModernJavaItemUse()) {
+            sender.sendMessage(
+                    Component.text("Item slowdown debugging requires a Java 1.21.2+ player.", NamedTextColor.RED));
+            return;
+        }
+        String stopCommand = "/grim debug itemslow" + (selector == null ? "" : " " + target.getName());
+        target.runSafely(() -> {
+            boolean enabled = target.checkManager.getDebugHandler().toggleItemSlowListener(sender);
+            sender.sendMessage(Component.text(
+                    (enabled ? "Enabled" : "Disabled") + " item slowdown debugging for " + target.getName()
+                            + (enabled
+                                    ? ": " + target.getItemUseDesync().describeBurstBalance()
+                                            + ". Positive balance is credit; run " + stopCommand + " again to stop."
+                                    : "."),
+                    NamedTextColor.GRAY));
+        });
     }
 
     private void handleDebugPlaces(@NotNull CommandContext<Sender> context) {

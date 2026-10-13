@@ -49,6 +49,11 @@ public final class ItemStackActions implements StackActions {
         return result;
     }
 
+    public SimItemStack finishUsingItem(SimItemStack original, UseContext context) {
+        var before = original.copy();
+        return afterUse(behaviors.finishUsingItem(context), context.player(), before);
+    }
+
     private SimItemStack afterUse(SimItemStack used, SimPlayer player, SimItemStack before) {
         var remainder = before.components().get("minecraft:use_remainder");
         var cooldown = ItemComponents.useCooldown(before.components());

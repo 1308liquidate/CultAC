@@ -62,10 +62,18 @@ cult:
       max-ceiling: 2
 
   prediction:
-    # Buffer required before stopping item use when movement remains
-    # too fast for item-use slowdown. Values <= 0 disable this handler's
-    # forced item-use cancellation, including its slot-change cancellation.
-    use-item-buffer: 20
+    # Movement-only policy; exceeding this share never adds cheating violations.
+    # History survives stopping/restarting item use and movement setbacks.
+    item-use-desync:
+      max-percent: 20
+      history-ticks: 100
+
+    # Statistical corrections for repeated partial bursts after item use.
+    # No cheating violations. Credit recovers only on compliant slowed ticks,
+    # using item-use-desync.max-percent; releases and idle time do not reset debt.
+    item-use-burst-balance:
+      max-credit-ticks: 8
+      setback-debt-ticks: 4
 
     # Maximum transaction ping or movement-packet silence tolerated
     # while knockback is pending, in milliseconds.

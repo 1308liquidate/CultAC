@@ -38,6 +38,8 @@ public class PacketEntitySelf extends PacketEntity {
     // attribute packets change them: ServerPlayer#updatePlayerAttributes owns the creative modifiers.
     public final ClientAttributeInstance blockInteractionRange = new ClientAttributeInstance(4.5D, 0.0D, 64.0D);
     public final ClientAttributeInstance entityInteractionRange = new ClientAttributeInstance(3.0D, 0.0D, 64.0D);
+    // LocalPlayer#modifyInput reads the synced attribute, including plugin and enchantment modifiers.
+    public final ClientAttributeInstance sneakingSpeed = new ClientAttributeInstance(0.3D, 0.0D, 1.0D);
 
     public PacketEntitySelf(CultPlayer player) {
         this(player, null);
@@ -65,6 +67,7 @@ public class PacketEntitySelf extends PacketEntity {
         this.submergedMiningSpeed = old.submergedMiningSpeed;
         this.blockInteractionRange.copyFrom(old.blockInteractionRange);
         this.entityInteractionRange.copyFrom(old.entityInteractionRange);
+        this.sneakingSpeed.copyFrom(old.sneakingSpeed);
     }
 
     public boolean inVehicle() {
@@ -129,6 +132,7 @@ public class PacketEntitySelf extends PacketEntity {
         } else if (!keepAttributeModifiers) {
             blockInteractionRange.clearModifiers();
             entityInteractionRange.clearModifiers();
+            sneakingSpeed.clearModifiers();
         }
     }
 

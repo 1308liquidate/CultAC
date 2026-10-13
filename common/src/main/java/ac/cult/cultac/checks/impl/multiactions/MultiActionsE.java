@@ -67,8 +67,9 @@ public class MultiActionsE extends Check implements CheckListener {
     }
 
     private boolean isActivelyUsingItem() {
-        return player.packetStateData.isSlowedByUsingItem()
-                && (player.packetStateData.lastSlotSelected == player.packetStateData.getSlowedByUsingItemSlot()
-                        || player.packetStateData.itemInUseHand == Hand.OFF_HAND);
+        return player.isClientUsingItem()
+                && (player.usesModernJavaItemUse()
+                        || player.packetStateData.lastSlotSelected == player.packetStateData.getSlowedByUsingItemSlot()
+                        || player.getClientItemUseHand() == Hand.OFF_HAND);
     }
 }

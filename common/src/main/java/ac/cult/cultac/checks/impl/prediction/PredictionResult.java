@@ -47,7 +47,12 @@ public class PredictionResult {
 
     @Getter
     @Setter
-    boolean exceedsSlowedSpeed = false;
+    ItemUseTickResult itemUseResult;
+
+    ItemUseBurstResult itemUseBurstResult;
+
+    // Filled by the existing horizontal input classifier, without another collision query.
+    float sneakingInputMultiplier = 1F;
 
     @Getter
     @Setter

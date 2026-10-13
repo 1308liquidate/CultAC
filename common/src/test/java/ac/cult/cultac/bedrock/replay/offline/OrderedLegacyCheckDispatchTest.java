@@ -446,34 +446,43 @@ public final class OrderedLegacyCheckDispatchTest {
         player.setDisabled(true);
         try {
             MultiActionsE check = player.checkManager.getListener(MultiActionsE.class);
-            player.packetStateData.lastSlotSelected = 2;
-            player.packetStateData.itemInUseHand = Hand.MAIN_HAND;
-            player.packetStateData.setSlowedByUsingItem(true);
+            var food = OfflineCultTestBootstrap.item("minecraft:golden_apple");
+            player.clientItemUse.start(Hand.MAIN_HAND, food);
             assertTrue(invokeBoolean(check, "isActivelyUsingItem"));
 
-            player.packetStateData.lastSlotSelected = 3;
+            // Same-item slot changes stop the SERVER main-hand obligation, but
+            // LivingEntity.updatingUsingItem preserves the client's local use.
+            player.clientItemUse.claimedSlotChanged();
+            player.clientItemUse.prepare(
+                    0, 0, player.getClientVersion(), food, food, java.util.Collections.nCopies(9, food));
+            assertTrue(invokeBoolean(check, "isActivelyUsingItem"));
+            assertFalse(player.clientItemUse.hasObligation());
+
+            // A received different offhand stack interrupts local use at travel;
+            // no RELEASE packet was emitted, so the obligation remains outstanding.
+            player.clientItemUse.release();
+            player.clientItemUse.start(Hand.OFF_HAND, food);
+            player.clientItemUse.claimedSlotChanged();
+            assertTrue(invokeBoolean(check, "isActivelyUsingItem"));
+            assertTrue(player.clientItemUse.hasObligation());
+            player.clientItemUse.prepare(
+                    1,
+                    0,
+                    player.getClientVersion(),
+                    food,
+                    ac.cult.blocksim.engine.SimItemStack.EMPTY,
+                    java.util.Collections.nCopies(9, food));
             assertFalse(invokeBoolean(check, "isActivelyUsingItem"));
+            assertTrue(player.clientItemUse.hasObligation());
 
-            player.packetStateData.lastSlotSelected = 2;
-            player.packetStateData.itemInUseHand = Hand.OFF_HAND;
-            player.packetStateData.setSlowedByUsingItem(true);
-            player.packetStateData.lastSlotSelected = 3;
-            assertTrue(invokeBoolean(check, "isActivelyUsingItem"));
-
-            player.packetStateData.itemInUseHand = Hand.MAIN_HAND;
-            ServerboundMovePlayer movement = new ServerboundMovePlayer(0, 0, 0, 0, 0, true, false, false, false);
-            player.actionManager.onMovePlayerPos(receiveEvent(player, movement), player, movement);
-            assertFalse(player.packetStateData.isSlowedByUsingItem());
-
-            player.packetStateData.lastSlotSelected = 3;
-            player.packetStateData.setSlowedByUsingItem(true);
             ServerboundPlayerAction release = new ServerboundPlayerAction(
                     PlayerAction.RELEASE_USE_ITEM,
                     new ac.cult.cultac.protocol.value.BlockPos(0, 0, 0),
                     ac.cult.cultac.protocol.value.Direction.DOWN,
                     0);
             player.actionManager.onPlayerAction(receiveEvent(player, release), player, release);
-            assertFalse(player.packetStateData.isSlowedByUsingItem());
+            assertFalse(player.isClientUsingItem());
+            assertFalse(player.clientItemUse.hasObligation());
         } finally {
             OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
         }

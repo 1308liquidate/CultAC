@@ -69,6 +69,13 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
                         && ac.cult.cultac.utils.inventory.ItemUtil.name(heldStack.getItem())
                                 .endsWith("_SWORD"));
 
+        if (player.usesModernJavaItemUse()) {
+            // ClientBlockActions owns modern action prediction, including bow ammo,
+            // cooldowns and component-driven uses. Trident retains its existing path.
+            if (heldStack.is("minecraft:trident") && canStartUsingItem(heldStack))
+                player.clientItemUse.start(hand, heldStack);
+            return;
+        }
         if (canStartUsingItem(heldStack)) {
             player.packetStateData.setSlowedByUsingItem(true);
             player.packetStateData.itemInUseHand = hand;
@@ -86,6 +93,10 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
 
     public void releaseItem() {
         this.releasing = true;
+        if (player.usesModernJavaItemUse()) {
+            player.getItemUseDesync().onUseCompleted();
+            player.clientItemUse.release();
+        }
         this.blocking = false;
         player.packetStateData.setSlowedByUsingItem(false);
     }
@@ -245,7 +256,7 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
             CultPlayer player,
             ClientboundSetHeldSlot packet) {
         this.blocking = false;
-        player.packetStateData.setSlowedByUsingItem(false);
+        if (!player.usesModernJavaItemUse()) player.packetStateData.setSlowedByUsingItem(false);
     }
 
     public boolean attackedWithin(long windowMs) {
@@ -253,6 +264,9 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
     }
 
     public void onRespawn() {
+        player.clientItemUse.reset();
+        player.getItemUseDesync().reset();
+        player.itemUseBurst.reset();
         this.target = null;
         this.lastTargetId = 0;
         this.targetId = 0;
@@ -261,6 +275,7 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
     }
 
     private void clearMainHandUseAfterSlotChange() {
+        if (player.usesModernJavaItemUse()) return;
         if (player.packetStateData.isSlowedByUsingItem()
                 && player.packetStateData.itemInUseHand == Hand.MAIN_HAND
                 && player.packetStateData.getSlowedByUsingItemSlot() != player.packetStateData.lastSlotSelected) {

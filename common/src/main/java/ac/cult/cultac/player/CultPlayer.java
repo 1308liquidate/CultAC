@@ -9,9 +9,10 @@ import ac.cult.cultac.checks.impl.aim.processor.AimProcessor;
 import ac.cult.cultac.checks.impl.combat.FairReach;
 import ac.cult.cultac.checks.impl.combat.KeepSprint;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
+import ac.cult.cultac.checks.impl.movement.timer.ItemUseBurst;
 import ac.cult.cultac.checks.impl.packetorder.PacketOrderProcessor;
 import ac.cult.cultac.checks.impl.ping.TransactionOrder;
-import ac.cult.cultac.checks.impl.prediction.checks.ServerStateNoSlow;
+import ac.cult.cultac.checks.impl.prediction.checks.ItemUseDesync;
 import ac.cult.cultac.checks.impl.prediction.runner.ExplosionHandler;
 import ac.cult.cultac.checks.impl.prediction.runner.KnockbackHandler;
 import ac.cult.cultac.events.packets.PacketEntityReplication;
@@ -41,6 +42,7 @@ import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.BoatData;
 import ac.cult.cultac.utils.data.ClientAttackStrength;
 import ac.cult.cultac.utils.data.ClientCombatAttributes;
+import ac.cult.cultac.utils.data.ClientItemUseState;
 import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.data.PacketStateData;
 import ac.cult.cultac.utils.data.VehicleData;
@@ -209,7 +211,8 @@ public class CultPlayer implements GrimUser {
     public long lastOpenedInventory;
     public int food = 20;
     public float flySpeed;
-    public boolean settingMetaData = false;
+    public final ClientItemUseState clientItemUse = new ClientItemUseState();
+    public final ItemUseBurst itemUseBurst;
     public @NotNull BoatData boatData = new BoatData();
     // You cannot initialize everything here for some reason
     public final @NotNull LastInstanceManager lastInstanceManager;
@@ -230,14 +233,14 @@ public class CultPlayer implements GrimUser {
     public final @NotNull PluginChannelManager pluginChannelManager;
     public final @NotNull PacketEntityReplication packetEntityReplication;
     private final @NotNull GhostBlockMitigator ghostBlockMitigator;
-    private final @NotNull ServerStateNoSlow serverStateNoSlow;
+    private final @NotNull ItemUseDesync itemUseDesync;
 
     public GhostBlockMitigator getGhostBlockMitigator() {
         return ghostBlockMitigator;
     }
 
-    public ServerStateNoSlow getServerStateNoSlow() {
-        return serverStateNoSlow;
+    public ItemUseDesync getItemUseDesync() {
+        return itemUseDesync;
     }
 
     public long lastRotated;
@@ -342,7 +345,8 @@ public class CultPlayer implements GrimUser {
         this.nettyScheduler = new NettyScheduler(this);
         this.packetEntityReplication = new PacketEntityReplication(this);
         this.ghostBlockMitigator = new GhostBlockMitigator(this);
-        this.serverStateNoSlow = new ServerStateNoSlow(this);
+        this.itemUseDesync = new ItemUseDesync(this);
+        this.itemUseBurst = new ItemUseBurst(this);
         this.movementData = new MovementData(this);
         this.knockbackHandler = new KnockbackHandler(this);
         this.explosionHandler = new ExplosionHandler(this);
@@ -448,6 +452,7 @@ public class CultPlayer implements GrimUser {
             rawTransactionPing = System.nanoTime() - current.sentAt();
             transPings.add(rawTransactionPing);
             playerClockAtLeast = current.sentAt();
+            if (usesModernJavaItemUse()) itemUseBurst.acknowledge(current.transaction(), current.sentAt());
             if (current instanceof BedrockTransaction bedrock) {
                 // Drain ordinary compensation before callbacks on this exact wire boundary.
                 latencyUtils.handleNettySyncTransaction(current.transaction());
@@ -946,6 +951,7 @@ public class CultPlayer implements GrimUser {
         onReload();
         // reload all checks
         for (AbstractCheck value : getChecks()) value.reload();
+        itemUseDesync.reload(config);
         // reload punishment manager
         punishmentManager.reload(config);
     }
@@ -986,6 +992,20 @@ public class CultPlayer implements GrimUser {
     }
 
     @Contract(pure = true)
+    public boolean usesModernJavaItemUse() {
+        return !isBedrockMovement() && supportsEndTick();
+    }
+
+    public boolean isClientUsingItem() {
+        return usesModernJavaItemUse()
+                ? clientItemUse.definitelyUsing() && clientItemUse.handKnown()
+                : packetStateData.isSlowedByUsingItem();
+    }
+
+    public ac.cult.cultac.protocol.value.Hand getClientItemUseHand() {
+        return usesModernJavaItemUse() ? clientItemUse.hand() : packetStateData.itemInUseHand;
+    }
+
     public boolean supportsEndTick() {
         return getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)
                 && getObservedProtocol().atLeast(ac.cult.cultac.protocol.ProtocolVersion.V1_21_3);

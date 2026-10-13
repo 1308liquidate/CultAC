@@ -198,10 +198,12 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                         context.getTarget());
             }
             initialVel = trace.position();
-            final boolean usingItem = IsUsingItem.isUsingItem(player);
             float speed = context.getMaxSpeed(player);
-            if (usingItem) {
-                speed = (float) (speed * 0.2);
+            if (player.usesModernJavaItemUse()) {
+                speed *= context.getItemUse().legalMultiplier();
+                if (player.isGliding && context.getItemUse().legalMultiplier() >= 1) speed = 0.0F;
+            } else if (IsUsingItem.isUsingItem(player)) {
+                speed *= 0.2F;
             } else if (player.isGliding) {
                 speed = 0.0f;
             }

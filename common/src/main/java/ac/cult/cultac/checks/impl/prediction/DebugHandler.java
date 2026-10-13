@@ -27,6 +27,25 @@ import net.kyori.adventure.text.Component;
 // @CheckData(name = "Prediction (Debug)")
 public class DebugHandler extends CultProcessor implements PostPredictionListener {
     private final Map<UUID, Sender> rewindListeners = new ConcurrentHashMap<>();
+    private final Map<UUID, Sender> itemSlowListeners = new ConcurrentHashMap<>();
+
+    public boolean toggleItemSlowListener(Sender sender) {
+        if (itemSlowListeners.remove(sender.getUniqueId()) != null) return false;
+        itemSlowListeners.put(sender.getUniqueId(), sender);
+        return true;
+    }
+
+    public boolean hasItemSlowListeners() {
+        if (itemSlowListeners.isEmpty()) return false;
+        removeInvalidListeners(itemSlowListeners);
+        return !itemSlowListeners.isEmpty();
+    }
+
+    public void relayItemSlow(Supplier<Component> details) {
+        if (!hasItemSlowListeners()) return;
+        var message = Component.text("[itemslow] " + player.getName() + " ").append(details.get());
+        itemSlowListeners.values().forEach(sender -> sender.sendMessage(message));
+    }
 
     public boolean toggleRewindListener(Sender sender) {
         if (rewindListeners.remove(sender.getUniqueId()) != null) return false;
@@ -47,7 +66,11 @@ public class DebugHandler extends CultProcessor implements PostPredictionListene
     }
 
     private void removeInvalidRewindListeners() {
-        rewindListeners
+        removeInvalidListeners(rewindListeners);
+    }
+
+    private static void removeInvalidListeners(Map<UUID, Sender> listeners) {
+        listeners
                 .values()
                 .removeIf(sender -> !sender.isValid()
                         || sender.getPlatformPlayer() != null

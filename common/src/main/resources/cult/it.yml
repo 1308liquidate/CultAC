@@ -62,10 +62,20 @@ cult:
       max-ceiling: 2
 
   prediction:
-    # Valore accumulato necessario per interrompere l'uso di un oggetto quando il movimento
-    # rimane troppo veloce rispetto al rallentamento previsto. Valori <= 0 disattivano le
-    # interruzioni forzate di questo gestore, incluse quelle al cambio di slot.
-    use-item-buffer: 20
+    # Regola solo le correzioni del movimento; superare questa percentuale non registra mai violazioni per cheat.
+    # La cronologia viene conservata quando si interrompe o si riprende l'uso di un oggetto
+    # e quando viene corretta la posizione.
+    item-use-desync:
+      max-percent: 20
+      history-ticks: 100
+
+    # Correzioni statistiche per brevi raffiche ripetute di movimento dopo l'uso di un oggetto.
+    # Non registra violazioni per cheat. Il credito si recupera solo nei tick con il rallentamento
+    # corretto, in base a item-use-desync.max-percent. Interrompere l'uso dell'oggetto
+    # e restare inattivi non azzerano il debito.
+    item-use-burst-balance:
+      max-credit-ticks: 8
+      setback-debt-ticks: 4
 
     # Ping delle transazioni o tempo massimo senza pacchetti di movimento tollerato
     # mentre è in attesa una spinta di contraccolpo, in millisecondi.

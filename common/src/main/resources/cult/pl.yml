@@ -62,10 +62,19 @@ cult:
       max-ceiling: 2
 
   prediction:
-    # Wartość bufora wymagana do przerwania używania przedmiotu, gdy ruch pozostaje
-    # zbyt szybki mimo wymaganego spowolnienia. Wartości <= 0 wyłączają wymuszone
-    # przerywanie używania przedmiotów przez ten moduł, także przy zmianie slotu.
-    use-item-buffer: 20
+    # Reguluje wyłącznie korekty ruchu; przekroczenie tego odsetka nigdy nie jest rejestrowane jako oszustwo.
+    # Historia jest zachowywana po przerwaniu i wznowieniu używania przedmiotu oraz po korektach pozycji.
+    item-use-desync:
+      max-percent: 20
+      history-ticks: 100
+
+    # Korekty statystyczne dla powtarzających się krótkich serii ruchów po użyciu przedmiotu.
+    # Nie rejestruje naruszeń za oszustwa. Zapas odnawia się tylko w tickach z prawidłowym
+    # spowolnieniem, zgodnie z item-use-desync.max-percent. Przerwanie używania przedmiotu
+    # i bezczynność nie zerują zadłużenia.
+    item-use-burst-balance:
+      max-credit-ticks: 8
+      setback-debt-ticks: 4
 
     # Maksymalny tolerowany ping transakcji lub czas bez pakietów ruchu,
     # gdy oczekiwana jest reakcja na odrzut, w milisekundach.

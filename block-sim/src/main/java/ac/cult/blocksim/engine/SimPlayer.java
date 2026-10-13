@@ -80,6 +80,7 @@ public final class SimPlayer {
     public int foodLevel() { return foodLevel; }
     public float saturationLevel() { return saturationLevel; }
     public ActiveUse activeUse() { return activeUse; }
+    public void stopUsingItem() { activeUse = null; }
     public void startUsingItem(Hand hand, int duration) {
         var stack = hand(hand);
         if (!stack.isEmpty() && activeUse == null) activeUse = new ActiveUse(hand, stack, duration);

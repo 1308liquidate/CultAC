@@ -11,6 +11,8 @@ public interface ItemBehavior {
     SimInteraction useOn(UseContext context);
     SimInteraction use(UseContext context);
 
+    default SimItemStack finishUsingItem(UseContext context) { return context.stack(); }
+
     default boolean canDestroyBlock(SimItemStack stack, SimPlayer player) {
         var tool = ItemComponents.tool(stack.components());
         return tool == null || tool.canDestroyBlocksInCreative() || !player.state().infiniteMaterials();

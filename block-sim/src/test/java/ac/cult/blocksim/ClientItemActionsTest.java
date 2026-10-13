@@ -13,6 +13,42 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ClientItemActionsTest {
+    @Test void provenCompletionConsumesOnceAndAppliesRemainderAndCooldown() throws Exception {
+        var simulator = BlockSimulator.create(DATA, ITEMS, InteractionRegistries.load("26.3"),
+                (context, state, shape) -> true, new ConsumableBehavior(context -> {}));
+        for (boolean creative : new boolean[]{false, true}) {
+            var owner = player("golden_apple", 1, creative);
+            owner.hand(Hand.MAIN_HAND).components(owner.hand(Hand.MAIN_HAND).components()
+                    .with("minecraft:use_remainder", JsonParser.parseString("{\"id\":\"minecraft:glass_bottle\",\"count\":1}"))
+                    .with("minecraft:use_cooldown", JsonParser.parseString("{\"seconds\":1}")));
+            owner.startUsingItem(Hand.MAIN_HAND, 32);
+            var result = simulator.simulate(new SimAction.CompleteUse(), new SimInput(new World(state("air")), owner,
+                    new SimCooldowns(0, Map.of()), MINING, BreakSession.State.initial(ITEMS.empty())));
+            assertNull(result.decline());
+            assertNull(result.player().activeUse());
+            assertEquals(creative ? "minecraft:golden_apple" : "minecraft:glass_bottle",
+                    result.player().hand(Hand.MAIN_HAND).itemKey());
+            assertTrue(result.cooldowns().isOnCooldown(owner.hand(Hand.MAIN_HAND)));
+            assertEquals(1, owner.hand(Hand.MAIN_HAND).count());
+        }
+    }
+
+    @Test void completionDoesNotConsumeAReplacedStackOrSpyglassWithAConsumableComponent() throws Exception {
+        var simulator = BlockSimulator.create(DATA, ITEMS, InteractionRegistries.load("26.3"),
+                (context, state, shape) -> true, new ConsumableBehavior(context -> {}));
+        for (boolean replace : new boolean[]{false, true}) {
+            var owner = player(replace ? "golden_apple" : "spyglass", 1, false);
+            owner.hand(Hand.MAIN_HAND).components(owner.hand(Hand.MAIN_HAND).components()
+                    .with("minecraft:consumable", JsonParser.parseString("{\"consume_seconds\":1}")));
+            owner.startUsingItem(Hand.MAIN_HAND, 20);
+            if (replace) owner.hand(Hand.MAIN_HAND, owner.hand(Hand.MAIN_HAND).copy());
+            var result = simulator.simulate(new SimAction.CompleteUse(), new SimInput(new World(state("air")), owner,
+                    new SimCooldowns(0, Map.of()), MINING, BreakSession.State.initial(ITEMS.empty())));
+            assertNull(result.player().activeUse());
+            assertEquals(1, result.player().hand(Hand.MAIN_HAND).count());
+        }
+    }
+
     private static final DataTables DATA;
     private static final ItemRegistry ITEMS;
     private static final BlockSimulator SIM;

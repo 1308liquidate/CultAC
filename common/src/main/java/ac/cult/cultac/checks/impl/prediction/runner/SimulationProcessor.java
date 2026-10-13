@@ -1679,6 +1679,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                         : lastPrediction.getSimulationContext().getWorldData().getMainSupportingBlockPos(),
                 player.pose,
                 player.getScale());
+        if (player.usesModernJavaItemUse()) {
+            context.setItemUse(ac.cult.cultac.utils.data.ItemUseInventory.prepare(player));
+            context.setPostUseMultiplier(player.getItemUseDesync().postUseMultiplier());
+        }
         context.setSprintModifier(this.sprintModifierAtTravel(player, riding));
         context.setProfileCarry(this.profileCarry);
         context.setBedrockTeleport(player.isBedrockMovement() ? this.bedrockTeleport : null);

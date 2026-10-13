@@ -201,6 +201,10 @@ public class CompensatedEntities {
                     player.compensatedEntities.getSelf().entityInteractionRange.onServerSnapshot(snapshot);
                 }
 
+                if (supportsAttributes(ClientVersion.V_1_20_5) && matchesAttribute(snapshot, "sneaking_speed")) {
+                    player.compensatedEntities.getSelf().sneakingSpeed.onServerSnapshot(snapshot);
+                }
+
                 if (matchesAttribute(snapshot, "block_break_speed")) {
                     player.compensatedEntities.getSelf().blockBreakSpeed = calculateAttribute(snapshot, 0.0, 1024.0);
                 }

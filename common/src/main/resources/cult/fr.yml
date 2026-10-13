@@ -62,10 +62,20 @@ cult:
       max-ceiling: 2
 
   prediction:
-    # Valeur accumulée requise pour interrompre l'utilisation d'un objet lorsque le déplacement
-    # reste trop rapide malgré le ralentissement attendu. Les valeurs <= 0 désactivent les
-    # interruptions forcées de ce gestionnaire, y compris celles liées au changement d'emplacement.
-    use-item-buffer: 20
+    # Ne régit que les corrections de déplacement ; dépasser ce pourcentage ne compte jamais comme une triche.
+    # L'historique est conservé lors de l'arrêt ou de la reprise de l'utilisation d'un objet,
+    # ainsi que lors des corrections de position.
+    item-use-desync:
+      max-percent: 20
+      history-ticks: 100
+
+    # Corrections statistiques des courtes rafales de déplacement répétées après l'utilisation d'un objet.
+    # Aucune infraction pour triche n'est enregistrée. Le crédit ne se reconstitue que lors des ticks
+    # avec un ralentissement conforme, selon item-use-desync.max-percent. L'arrêt de l'utilisation
+    # et les périodes d'inactivité ne remettent pas la dette à zéro.
+    item-use-burst-balance:
+      max-credit-ticks: 8
+      setback-debt-ticks: 4
 
     # Ping de transaction ou durée maximale sans paquet de déplacement tolérés
     # lorsqu'un recul est en attente, en millisecondes.

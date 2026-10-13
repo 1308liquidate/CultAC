@@ -39,4 +39,10 @@ public final class GeneralItemBehavior implements ItemBehavior {
         }
         return SimInteraction.PASS;
     }
+
+    @Override
+    public ac.cult.blocksim.engine.SimItemStack finishUsingItem(UseContext context) {
+        if (context.stack().components().has("minecraft:consumable")) consumables.onConsume(context);
+        return context.stack();
+    }
 }

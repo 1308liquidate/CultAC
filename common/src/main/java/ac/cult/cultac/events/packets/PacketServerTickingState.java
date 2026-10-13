@@ -19,12 +19,12 @@ public class PacketServerTickingState extends CultProcessor implements CheckList
     @CultPacketHandler
     public void onTickingState(
             PacketSendEvent<ClientboundTickingState> event, CultPlayer player, ClientboundTickingState packet) {
-        player.latencyUtils.addRealTimeTaskNow(() -> {
+        deferToClient(event, () -> {
             boolean wasTickingNormally = isTickingNormally(
                     player.packetStateData.serverTickRate,
                     player.packetStateData.serverTicksFrozen,
                     player.packetStateData.serverFrozenTickStepsRemaining);
-            player.packetStateData.serverTickRate = packet.tickRate();
+            player.packetStateData.serverTickRate = Math.max(packet.tickRate(), 1F);
             player.packetStateData.serverTicksFrozen = packet.frozen();
             if (!packet.frozen()) {
                 player.packetStateData.serverFrozenTickStepsRemaining = 0;
@@ -43,7 +43,7 @@ public class PacketServerTickingState extends CultProcessor implements CheckList
     @CultPacketHandler
     public void onTickingStep(
             PacketSendEvent<ClientboundTickingStep> event, CultPlayer player, ClientboundTickingStep packet) {
-        player.latencyUtils.addRealTimeTaskNow(() -> {
+        deferToClient(event, () -> {
             boolean wasTickingNormally = isTickingNormally(
                     player.packetStateData.serverTickRate,
                     player.packetStateData.serverTicksFrozen,
@@ -64,6 +64,18 @@ public class PacketServerTickingState extends CultProcessor implements CheckList
         player.checkManager.getCheck(TimerCheck.class).resetTimerWindow();
         player.checkManager.getCheck(VehicleTimer.class).resetTimerWindow();
         player.checkManager.getListener(DumbTimer.class).resetTimerWindow();
+    }
+
+    private void deferToClient(PacketSendEvent<?> event, Runnable update) {
+        if (player.usesModernJavaItemUse()) {
+            var proof = player.appendTrailingProofTransaction(event);
+            if (proof != null) {
+                if (player.supportsBundles() && !event.isInsideBundle()) event.bundle();
+                player.latencyUtils.addRealTimeTask(proof.transaction(), update);
+                return;
+            }
+        }
+        player.latencyUtils.addRealTimeTaskNow(update);
     }
 
     private boolean isTickingNormally(float tickRate, boolean frozen, int frozenTickStepsRemaining) {

@@ -97,6 +97,14 @@ public class HorizontalAnalyzer implements EngineCheck {
             if (player.inVehicle()) isSlowed = false;
         }
 
+        if (isSlowed
+                && !player.isFlying
+                && !result.getSimulationContext().getWorldData().maybeInLiquid()
+                && player.usesModernJavaItemUse()) {
+            result.setSneakingInputMultiplier(
+                    (float) player.compensatedEntities.getSelf().sneakingSpeed.value());
+        }
+
         if (isSlowed) {
             double maxDirLength = getSneakingMaxInputAxis(
                     playerSpeed, sprintMultiplier, result.getSimulationContext().getSwiftSneakLevel());

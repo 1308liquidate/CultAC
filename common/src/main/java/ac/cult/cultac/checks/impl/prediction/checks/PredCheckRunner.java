@@ -11,6 +11,7 @@ public class PredCheckRunner extends CultProcessor {
     private final List<EngineCheck> checks = Arrays.asList(
             new VerticalAnalyzer(),
             new HorizontalAnalyzer(),
+            new ItemUseAnalyzer(),
             new BedrockInputAnalyzer(),
             new ElytraCheck(),
             new VehicleOffsetCheck(),

@@ -62,10 +62,20 @@ cult:
       max-ceiling: 2
 
   prediction:
-    # Benodigde buffer voordat voorwerpgebruik wordt gestopt als de beweging te snel
-    # blijft voor de vertraging tijdens gebruik. Waarden <= 0 schakelen de gedwongen
-    # gebruiksannulering van deze handler uit, ook bij het wisselen van een slot.
-    use-item-buffer: 20
+    # Regelt alleen bewegingscorrecties; het overschrijden van dit percentage telt nooit als cheatovertreding.
+    # De geschiedenis blijft behouden bij het stoppen en hervatten van voorwerpgebruik
+    # en bij positiecorrecties.
+    item-use-desync:
+      max-percent: 20
+      history-ticks: 100
+
+    # Statistische correcties voor herhaalde korte bewegingspieken na voorwerpgebruik.
+    # Registreert geen cheatovertredingen. Tegoed wordt alleen aangevuld tijdens ticks met
+    # de juiste vertraging, op basis van item-use-desync.max-percent. Stoppen met het gebruik
+    # en inactiviteit wissen de opgebouwde schuld niet.
+    item-use-burst-balance:
+      max-credit-ticks: 8
+      setback-debt-ticks: 4
 
     # Maximaal toegestane transactieping of tijd zonder bewegingspakketten terwijl
     # terugslag in behandeling is, in milliseconden.

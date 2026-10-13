@@ -1,6 +1,5 @@
 package ac.cult.cultac.events.packets.listeners;
 
-import ac.cult.cultac.checks.impl.prediction.checks.NoSlow;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.EntityMetadata;
@@ -151,31 +150,23 @@ public class PacketSelfMetadataListener {
                 Object handValue = handState.value();
                 boolean isRiptiding = (((byte) handValue) & 0x04) > 0;
 
-                if (!hasSendTransaction) player.sendTransaction();
-
-                player.latencyUtils.addRealTimeTaskNow(() -> {
-                    player.isRiptidePose = isRiptiding;
-                    player.refreshPlayerPose();
-                });
-
-                boolean isActive = (((byte) handValue) & 0x01) > 0;
-
-                if (isActive) {
-                    player.sendTransaction();
-
-                    // Player might have gotten this packet
-                    final Runnable markSettingMetadata = () -> player.settingMetaData = true;
-                    player.latencyUtils.addRealTimeTaskNow(markSettingMetadata);
-
-                    // Player has gotten this packet
-                    final Runnable finishMetadata = () -> {
-                        final NoSlow noSlowCheck = player.checkManager.getListener(NoSlow.class);
-                        noSlowCheck.setDoneSettingMetadata(true);
-                    };
-                    player.latencyUtils.addRealTimeTaskNext(finishMetadata);
-
-                    // Yes, we do have to use a transaction for eating as otherwise it can desync much easier
-                    event.getTasksAfterSend().add(player::sendTransaction);
+                if (player.usesModernJavaItemUse()) {
+                    var proof = player.appendTrailingProofTransaction(event);
+                    if (proof != null) {
+                        if (player.supportsBundles() && !event.isInsideBundle()) event.bundle();
+                        player.itemUseBurst.expectProof(proof.transaction());
+                        player.latencyUtils.addRealTimeTask(proof.transaction(), () -> {
+                            player.isRiptidePose = isRiptiding;
+                            player.refreshPlayerPose();
+                            ac.cult.cultac.utils.data.ItemUseInventory.metadata(player, (byte) handValue);
+                        });
+                    }
+                } else {
+                    if (!hasSendTransaction) player.sendTransaction();
+                    player.latencyUtils.addRealTimeTaskNow(() -> {
+                        player.isRiptidePose = isRiptiding;
+                        player.refreshPlayerPose();
+                    });
                 }
             }
 

@@ -9,6 +9,8 @@ import ac.cult.blocksim.interaction.Hand;
 public sealed interface SimAction {
     record UseOn(Hand hand, BlockHit hit) implements SimAction { }
     record Use(Hand hand) implements SimAction { }
+    /** Player.handleEntityEvent(9), not an elapsed client duration. */
+    record CompleteUse() implements SimAction { }
     /** Existing packet/check callers have already proved this tick completed destruction. */
     record DestroyBlock(BlockPos pos) implements SimAction { }
     record StartBreak(BlockPos pos, Direction face) implements SimAction { }

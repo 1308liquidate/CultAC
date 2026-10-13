@@ -80,6 +80,14 @@ public final class ClientBlockActions {
         debugPlacement(player, prediction, item, null);
     }
 
+    /** Mirror the client completion callback on its proven packet boundary, before metadata clears use. */
+    public static void completeUse(CultPlayer player) {
+        // Main-hand selection can still be unreported; its existing completion uncertainty
+        // remains owned by ClientAttackStrength. Offhand has no selected-slot ambiguity.
+        if (!player.clientItemUse.canCompleteOffhand(player.getInventory().getHandItem(Hand.OFF_HAND))) return;
+        apply(player, predict(player, new SimAction.CompleteUse(), player.xRot, player.yRot), null);
+    }
+
     private static void debugPlacement(CultPlayer player, Prediction prediction, SimItemStack item, BlockPlace place) {
         var result = prediction.result();
         if (result.decline() != null
@@ -135,8 +143,8 @@ public final class ClientBlockActions {
                 player.food,
                 5.0F);
         SimPlayer.ActiveUse active = null;
-        if (player.packetStateData.isSlowedByUsingItem()) {
-            var hand = hand(player.packetStateData.itemInUseHand);
+        if (player.isClientUsingItem()) {
+            var hand = hand(player.getClientItemUseHand());
             // These action entry points only read use presence and its hand; no use timer is inferred.
             active = new SimPlayer.ActiveUse(
                     hand,
@@ -206,9 +214,18 @@ public final class ClientBlockActions {
                 .applyBlockSimulatorChanges(prediction.input().cooldowns(), result.cooldowns());
         player.food = result.player().foodLevel();
         var active = result.player().activeUse();
-        if (active != null)
-            player.packetStateData.itemInUseHand = Hand.valueOf(active.hand().name());
-        player.packetStateData.setSlowedByUsingItem(active != null);
+        if (player.usesModernJavaItemUse()) {
+            if (active != null) {
+                Hand usedHand = Hand.valueOf(active.hand().name());
+                player.clientItemUse.start(
+                        usedHand, player.getInventory().getHandItem(usedHand), active.remainingTicks());
+            }
+        } else {
+            if (active != null)
+                player.packetStateData.itemInUseHand =
+                        Hand.valueOf(active.hand().name());
+            player.packetStateData.setSlowedByUsingItem(active != null);
+        }
     }
 
     private static ac.cult.blocksim.interaction.Hand hand(Hand hand) {

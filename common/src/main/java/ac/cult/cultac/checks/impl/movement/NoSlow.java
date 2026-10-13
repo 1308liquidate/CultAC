@@ -19,7 +19,7 @@ import org.jetbrains.annotations.NotNull;
 @DeadCheck(
         reason = DeadCheck.Reason.DEAD_BY_CONSTRUCTION,
         detail =
-                "Deliberately never registered: its offset feed died with the 2.0 runner; superseded by prediction/checks/NoSlow + ServerStateNoSlow.")
+                "Deliberately never registered: its offset feed died with the 2.0 runner; superseded by prediction/checks/NoSlow + ItemUseDesync.")
 public class NoSlow extends Check implements PostPredictionListener {
     // The player sends that they switched items the next tick if they switch from an item that can be used
     // to another item that can be used.  What the fuck Mojang.  Affects 1.8 (and most likely 1.7) clients.

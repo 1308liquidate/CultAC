@@ -31,6 +31,7 @@ import ac.cult.cultac.checks.impl.movement.EntityControl;
 import ac.cult.cultac.checks.impl.movement.SetbackBlocker;
 import ac.cult.cultac.checks.impl.movement.VehiclePredictionRunner;
 import ac.cult.cultac.checks.impl.movement.timer.DumbTimer;
+import ac.cult.cultac.checks.impl.movement.timer.ItemUseBurst;
 import ac.cult.cultac.checks.impl.movement.timer.NegativeTimerCheck;
 import ac.cult.cultac.checks.impl.movement.timer.TickTimer;
 import ac.cult.cultac.checks.impl.movement.timer.TimerCheck;
@@ -44,9 +45,9 @@ import ac.cult.cultac.checks.impl.prediction.DebugHandler;
 import ac.cult.cultac.checks.impl.prediction.FlagCaller;
 import ac.cult.cultac.checks.impl.prediction.OffsetHandler;
 import ac.cult.cultac.checks.impl.prediction.SuperDebug;
+import ac.cult.cultac.checks.impl.prediction.checks.ItemUseDesync;
 import ac.cult.cultac.checks.impl.prediction.checks.NoSlow;
 import ac.cult.cultac.checks.impl.prediction.checks.Phase;
-import ac.cult.cultac.checks.impl.prediction.checks.ServerStateNoSlow;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.*;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfiles;
 import ac.cult.cultac.checks.impl.prediction.runner.ExplosionHandler;
@@ -381,7 +382,7 @@ public class CheckManager {
                 new FlagCaller(player),
                 new SuperDebug(player),
                 new NoSlow(player),
-                player.getServerStateNoSlow(),
+                player.getItemUseDesync(),
                 new Phase(player),
                 new PostCheck(player),
                 new NegativeTimerCheck(player),
@@ -453,6 +454,7 @@ public class CheckManager {
         return listenerMap(List.<CheckListener>of(
                 new TimerCheck(player),
                 new TickTimer(player),
+                player.itemUseBurst,
                 new DumbTimer(player),
                 new CrashA(player),
                 new CrashB(player),
@@ -534,6 +536,7 @@ public class CheckManager {
 
         registerPreReceive(registrations, prePredictionChecks.get(TimerCheck.class));
         registerPreReceive(registrations, prePredictionChecks.get(TickTimer.class));
+        registerPreReceive(registrations, prePredictionChecks.get(ItemUseBurst.class));
         registerPreReceive(registrations, prePredictionChecks.get(DumbTimer.class));
         registerPreReceive(registrations, prePredictionChecks.get(CrashA.class));
         registerPreReceive(registrations, prePredictionChecks.get(CrashC.class));
@@ -602,6 +605,7 @@ public class CheckManager {
         // entity interpolation advances afterward for the next client tick.
         registerTickEnd(packetChecks.get(PacketEntityReplication.class));
         registerTickEnd(packetChecks.get(SimulationProcessor.class));
+        registerTickEnd(postPredictionCheck.get(ItemUseDesync.class));
         registerTickEnd(packetChecks.get(AutoclickerLimit.class));
         registerTickEnd(packetChecks.get(PacketWorldBorder.class));
         registerTickEnd(positionCheck.get(CompensatedCooldown.class));
@@ -610,8 +614,6 @@ public class CheckManager {
         registerTickEnd(packetChecks.get(MultiActionsM.class));
         registerTickEnd(player.openWindow);
 
-        registerReceive(registrations, postPredictionCheck.get(NoSlow.class));
-        registerReceive(registrations, postPredictionCheck.get(ServerStateNoSlow.class));
         registerReceive(registrations, postPredictionCheck.get(Phase.class));
         registerReceive(registrations, postPredictionCheck.get(PostCheck.class));
         registerReceive(registrations, postPredictionCheck.get(NegativeTimerCheck.class));

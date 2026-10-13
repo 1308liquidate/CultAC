@@ -30,7 +30,7 @@ public class SprintC extends Check implements PostPredictionListener {
         // Teleport results carry no simulation context; there is nothing to read.
         if (predictionComplete.isTeleport()) return;
 
-        if (player.packetStateData.isSlowedByUsingItem()) {
+        if (player.isClientUsingItem()) {
             ClientVersion version = player.getClientVersion();
 
             // https://bugs.mojang.com/browse/MC-152728

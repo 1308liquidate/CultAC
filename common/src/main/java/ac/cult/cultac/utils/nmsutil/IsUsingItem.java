@@ -20,10 +20,6 @@ public final class IsUsingItem {
         return state.active() ? state.speedMultiplier() : 1.0F;
     }
 
-    public static void stopUseItem(CultPlayer player) {
-        if (player.platformPlayer != null) player.platformPlayer.clearActiveItem();
-    }
-
     private static ItemUseState state(CultPlayer player) {
         ItemUseState state = player.platformPlayer == null ? null : player.platformPlayer.getItemUseState();
         return state == null ? ItemUseState.NONE : state;

@@ -63,8 +63,9 @@ public class MultiActionsA extends Check implements CheckListener {
 
     // Limit the active item to the in-use hand's current slot.
     private boolean isActivelyUsingItem() {
-        return player.packetStateData.isSlowedByUsingItem()
-                && (player.packetStateData.lastSlotSelected == player.packetStateData.getSlowedByUsingItemSlot()
-                        || player.packetStateData.itemInUseHand == Hand.OFF_HAND);
+        return player.isClientUsingItem()
+                && (player.usesModernJavaItemUse()
+                        || player.packetStateData.lastSlotSelected == player.packetStateData.getSlowedByUsingItemSlot()
+                        || player.getClientItemUseHand() == Hand.OFF_HAND);
     }
 }

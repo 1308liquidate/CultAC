@@ -22,7 +22,6 @@ public class TickEndEvent implements StartableInitable {
                 continue;
             } // If we aren't active don't spam extra transactions
             player.runSafely(player::onEndOfTickEvent);
-            player.getServerStateNoSlow().tick();
         }
     }
 

@@ -38,7 +38,7 @@ public final class ClientVisibility {
         beginSelection();
         if (slot < 0 || slot > 8) return;
         var held = player.getInventory().inventory.getInventoryStorage().getItem(36 + slot);
-        var attack = player.packetStateData.isSlowedByUsingItem()
+        var attack = player.isClientUsingItem()
                 ? selections.getFirst().attackRange()
                 : held == null || held.isEmpty()
                         ? null
@@ -261,13 +261,15 @@ public final class ClientVisibility {
     private ac.cult.blocksim.data.ItemComponents.AttackRange currentAttackRange() {
         if (player.gamemode == ac.cult.cultac.protocol.value.GameMode.SPECTATOR) return null;
         if (player.getClientVersion().isOlderThan(ac.cult.cultac.network.protocol.ClientVersion.V_1_21_11)) return null;
-        var hand = player.packetStateData.isSlowedByUsingItem()
-                ? player.packetStateData.itemInUseHand
+        var hand = player.isClientUsingItem()
+                ? player.getClientItemUseHand()
                 : ac.cult.cultac.protocol.value.Hand.MAIN_HAND;
         var item = hand == ac.cult.cultac.protocol.value.Hand.MAIN_HAND
                 ? player.getInventory().getClientSelectedHeldItem()
                 : player.getInventory().getOffHand();
-        if (hand == ac.cult.cultac.protocol.value.Hand.MAIN_HAND && player.packetStateData.isSlowedByUsingItem())
+        if (hand == ac.cult.cultac.protocol.value.Hand.MAIN_HAND
+                && player.isClientUsingItem()
+                && !player.usesModernJavaItemUse())
             item = player.getInventory()
                     .inventory
                     .getInventoryStorage()
