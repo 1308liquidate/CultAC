@@ -1233,6 +1233,17 @@ public class CultPlayer implements GrimUser {
         });
     }
 
+    @Nullable
+    public ac.cult.cultac.manager.tick.BackendTickEstimator backendTicks() {
+        return user.getCultConnection().platform().backendTicks();
+    }
+
+    /** An estimated server tick boundary: ends this tick and starts the next. Owner thread only. */
+    public void onServerTickEnd() {
+        onEndOfTickEvent();
+        packetEntityReplication.tickStartTick();
+    }
+
     public void onEndOfTickEvent() {
         tick++;
         for (Runnable task : endOfTickTasks) task.run();

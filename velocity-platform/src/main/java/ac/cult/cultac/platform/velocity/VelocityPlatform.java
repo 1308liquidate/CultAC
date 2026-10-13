@@ -121,9 +121,9 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
         CultAPI.INSTANCE.start();
         plugin.getLogger().info("CultAC is inspecting Velocity client connections using the bundled 26.3 model");
         plugin.getLogger()
-                .info(
-                        "Proxy-only mode: server item-use verification, authoritative resends, pose resets, "
-                                + "and administrative teleports/spectating are unavailable; packet prediction and setbacks remain active.");
+                .info("Proxy mode: resyncs use the server state each backend sent; server tick ends are estimated "
+                        + "from the backend stream. Administrative teleports, spectating and real validation blocks "
+                        + "require Paper.");
     }
 
     // Geyser loads first (a declared dependency); the bridge taps the Bedrock sessions it hosts here.

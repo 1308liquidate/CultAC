@@ -53,6 +53,15 @@ public interface PlatformConnection {
     }
 
     /**
+     * Server tick boundaries estimated from the backend stream, for platforms that cannot observe the
+     * server's tick loop. Null where the platform delivers tick ends itself.
+     */
+    @Nullable
+    default ac.cult.cultac.manager.tick.BackendTickEstimator backendTicks() {
+        return null;
+    }
+
+    /**
      * Runs connection work that started on a bridge's own thread, such as Geyser's tick loop.
      */
     default void runInModel(Runnable task) {

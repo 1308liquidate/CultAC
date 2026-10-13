@@ -59,6 +59,8 @@ public class BasePacketWorldReader {
             PacketSendEvent<ac.cult.cultac.network.packet.WorldPackets.TimeUpdate> event,
             CultPlayer player,
             ac.cult.cultac.network.packet.WorldPackets.TimeUpdate packet) {
+        var backendTicks = player.backendTicks();
+        if (backendTicks != null) backendTicks.onGameTime(packet.gameTime(), System.nanoTime());
         player.latencyUtils.addRealTimeTaskNext(() -> player.compensatedWorld.applyClientTime(packet));
     }
 

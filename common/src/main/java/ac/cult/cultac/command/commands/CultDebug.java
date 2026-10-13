@@ -11,6 +11,7 @@ import ac.cult.cultac.platform.api.sender.Sender;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.cultac.utils.anticheat.MessageUtil;
+import java.util.Locale;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.incendo.cloud.Command;
@@ -58,6 +59,22 @@ public class CultDebug implements BuildableCommand {
                 .permission("cult.debug")
                 .optional("target", arguments.singlePlayerSelectorParser())
                 .handler(this::handleDebugItemSlow));
+
+        Command.Builder<Sender> proxyTicksCommand = cultCommand
+                .literal("debug")
+                .literal("proxyticks", Description.of("Show observed proxy tick-end hits and misses"))
+                .permission("cult.debug");
+        commandManager.command(proxyTicksCommand
+                .optional("target", arguments.singlePlayerSelectorParser())
+                .flag(commandManager.flagBuilder("reset"))
+                .handler(context ->
+                        handleDebugProxyTicks(context, context.flags().hasFlag("reset"))));
+        // Cloud normally parses flags after positional arguments. This literal also allows
+        // omitting the player, without changing flag placement for unrelated command trees.
+        commandManager.command(proxyTicksCommand
+                .literal("--reset")
+                .optional("target", arguments.singlePlayerSelectorParser())
+                .handler(context -> handleDebugProxyTicks(context, true)));
 
         // Register "consoledebug" subcommand
         Command.Builder<Sender> consoleDebugCommand = cultCommand
@@ -140,6 +157,42 @@ public class CultDebug implements BuildableCommand {
                                     ? ": " + target.getItemUseDesync().describeBurstBalance()
                                             + ". Positive balance is credit; run " + stopCommand + " again to stop."
                                     : "."),
+                    NamedTextColor.GRAY));
+        });
+    }
+
+    private void handleDebugProxyTicks(@NotNull CommandContext<Sender> context, boolean reset) {
+        Sender sender = context.sender();
+        PlayerSelector selector = context.getOrDefault("target", null);
+        CultPlayer target = parseTarget(sender, selector == null ? null : selector.getSinglePlayer());
+        if (target == null) return;
+        target.runSafely(() -> {
+            var ticks = target.backendTicks();
+            if (ticks == null) {
+                sender.sendMessage(
+                        Component.text("Proxy tick diagnostics are only available on Velocity.", NamedTextColor.RED));
+                return;
+            }
+            if (reset) {
+                ticks.resetTickEndStats();
+                sender.sendMessage(Component.text(
+                        "Reset proxy tick diagnostics for " + target.getName() + ".", NamedTextColor.GRAY));
+                return;
+            }
+            var stats = ticks.tickEndStats();
+            String counts = stats.observedWaves() == 0
+                    ? "hit=n/a, missed=n/a (no completed tracking waves yet)"
+                    : String.format(
+                            Locale.ROOT,
+                            "hit=%.2f%% (%d), missed=%.2f%% (%d), observed waves=%d",
+                            stats.hitPercent(),
+                            stats.hits(),
+                            stats.missPercent(),
+                            stats.misses(),
+                            stats.observedWaves());
+            sender.sendMessage(Component.text(
+                    "Observed proxy ticks for " + target.getName() + ": " + counts + ", emitted ends=" + stats.emitted()
+                            + ", mode=" + ticks.mode(),
                     NamedTextColor.GRAY));
         });
     }

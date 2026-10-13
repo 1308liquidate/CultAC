@@ -165,7 +165,7 @@ final class VelocityTransport {
             // Enter I/O before requesting removal; removal waits for accepted packet work.
             return CompletableFuture.supplyAsync(
                             () -> connection.removeHandlers(() -> {
-                                var pipeline = connection.channel().pipeline();
+                                ((VelocityConnectionAdapter) connection.platform()).closeBackendTicks();
                                 CultDecoder.uninstall(connection.channel());
                                 CultEncoder.uninstall(connection.channel());
                             }),

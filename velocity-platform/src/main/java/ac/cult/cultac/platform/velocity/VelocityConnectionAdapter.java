@@ -1,5 +1,6 @@
 package ac.cult.cultac.platform.velocity;
 
+import ac.cult.cultac.manager.tick.BackendTickEstimator;
 import ac.cult.cultac.network.CultConnection;
 import ac.cult.cultac.network.PlatformConnection;
 import ac.cult.cultac.network.codec.ConnectionModelValues;
@@ -7,6 +8,7 @@ import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.player.CultPlayer;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
+import io.netty.channel.Channel;
 import io.netty.util.concurrent.EventExecutor;
 import net.kyori.adventure.text.Component;
 
@@ -19,6 +21,10 @@ final class VelocityConnectionAdapter implements PlatformConnection {
     private VelocityProtocols.Versions protocols;
     private final ConnectionModelValues model;
     private CultConnection connection;
+    private BackendTickEstimator backendTicks;
+    private Object observedServer;
+    private Channel observedBackend;
+    private boolean backendTicksClosed;
 
     VelocityConnectionAdapter(ProxyServer proxy, Player nativePlayer, VelocityPlayer player, EventExecutor eventLoop) {
         this(proxy, nativePlayer, player, eventLoop, null, null);
@@ -51,6 +57,78 @@ final class VelocityConnectionAdapter implements PlatformConnection {
     void attach(CultConnection connection) {
         this.connection = connection;
         player.attach(connection);
+        backendTicks = new BackendTickEstimator(
+                this::serverTickEnd, this::schedule, this::tickPeriodNanos, this::refreshBackendObserver);
+    }
+
+    @Override
+    public BackendTickEstimator backendTicks() {
+        return backendTicks;
+    }
+
+    private void serverTickEnd() {
+        CultPlayer target = connection.player();
+        if (target != null && !target.isDisabled()) target.onServerTickEnd();
+    }
+
+    private AutoCloseable schedule(Runnable task, long delayNanos) {
+        var future = owner.schedule(
+                () -> {
+                    if (!connection.disconnected()) connection.execute(task);
+                },
+                delayNanos,
+                java.util.concurrent.TimeUnit.NANOSECONDS);
+        return () -> future.cancel(false);
+    }
+
+    private long tickPeriodNanos() {
+        CultPlayer target = connection.player();
+        if (target == null) return 50_000_000L;
+        var state = target.packetStateData;
+        if (state.serverTicksFrozen && state.serverFrozenTickStepsRemaining == 0) return 0;
+        return (long) (1_000_000_000L / Math.max(1F, state.serverTickRate));
+    }
+
+    /**
+     * Observes the bursts of the backend currently forwarding to this client. Runs at each time
+     * synchronization (every 20 server ticks) on the connection owner, so a switch is followed within a second.
+     */
+    private void refreshBackendObserver() {
+        if (backendTicksClosed || connection == null) return;
+        Object current = nativePlayer.getCurrentServer().orElse(null);
+        if (current == observedServer) return;
+        removeBackendObserver();
+        Channel backend = current == null ? null : VelocityBackendChannels.channel(current);
+        if (backend == null) return;
+        var observer = new VelocityBackendTickObserver(partial -> {
+            if (nativePlayer.getCurrentServer().orElse(null) != current) return;
+            long now = System.nanoTime();
+            connection.execute(() -> backendTicks.onBurstEnd(partial, now));
+        });
+        backend.eventLoop().execute(() -> {
+            if (backend.isActive() && backend.pipeline().get(VelocityBackendTickObserver.NAME) == null)
+                backend.pipeline().addFirst(VelocityBackendTickObserver.NAME, observer);
+        });
+        observedServer = current;
+        observedBackend = backend;
+    }
+
+    private void removeBackendObserver() {
+        Channel backend = observedBackend;
+        observedServer = null;
+        observedBackend = null;
+        if (backend == null) return;
+        backend.eventLoop().execute(() -> {
+            if (backend.pipeline().get(VelocityBackendTickObserver.NAME) != null)
+                backend.pipeline().remove(VelocityBackendTickObserver.NAME);
+        });
+    }
+
+    /** Detaches the backend observer and stops the timer; called when Cult detaches this connection. */
+    void closeBackendTicks() {
+        backendTicksClosed = true;
+        removeBackendObserver();
+        if (backendTicks != null) backendTicks.close();
     }
 
     void bindProtocols(VelocityProtocols.Versions protocols) {

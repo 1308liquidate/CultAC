@@ -1402,6 +1402,11 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private void handleMoveEntity(PacketSendEvent<?> event, EntityMovement movement) {
+        // ServerEntity#sendChanges sends one tracked movement per entity per tick; explicit
+        // teleports may share a tick with it.
+        var backendTicks = player.backendTicks();
+        if (backendTicks != null && movement.kind() != MovementKind.TELEPORT_ENTITY)
+            backendTicks.onEntityTracked(movement.entityId(), System.nanoTime());
         boolean useDelimiterProof = shouldUseEntityTrackingBundleDelimiter();
         if (!useDelimiterProof && !hasSentPreWavePacket) {
             hasSentPreWavePacket = true;

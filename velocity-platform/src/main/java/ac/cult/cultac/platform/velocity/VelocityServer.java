@@ -40,10 +40,22 @@ final class VelocityServer implements PlatformServer {
         return true;
     }
 
+    /** The mean tick rate measured on connected backends' streams; NaN before any measurement. */
     @Override
     public double getTPS() {
-        return Double.NaN;
-    } // A proxy has no server tick rate.
+        double total = 0;
+        int measured = 0;
+        for (var connection :
+                ac.cult.cultac.CultAPI.INSTANCE.getNetworkManager().connections()) {
+            var ticks = connection.platform().backendTicks();
+            double rate = ticks == null ? Double.NaN : ticks.ticksPerSecond();
+            if (!Double.isNaN(rate)) {
+                total += rate;
+                measured++;
+            }
+        }
+        return measured == 0 ? Double.NaN : total / measured;
+    }
 
     @Override
     public void forwardAlert(String message) {

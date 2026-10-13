@@ -244,3 +244,15 @@ decoded fields and named empty packets; unread payloads are omitted and counted 
 summarized by size, and item stacks show type and quantity. Headers identify the observed and model protocols.
 Outbound records describe observed writes rather than client acknowledgements. Disconnecting stops the capture,
 and the command reports the path after saving.
+
+### Proxy tick diagnostics
+
+Use `/cult debug proxyticks [player]` on Velocity to show the observed tick-end hit and miss percentages,
+sample counts, total emitted tick ends, and estimator mode. The player defaults to yourself; console must
+name a player. Requires `cult.debug`. Add `--reset` to start a new measurement for that connection.
+
+A hit is a tracking wave followed by a proxy tick end. A miss is another update for the same tracked entity,
+or a time synchronization starting the next tick, before the previous wave received a tick end. A late
+corrective tick end still counts as a miss. In timer mode, a backend burst alone does not count as a hit.
+Percentages cover observed tracking waves since connection or reset; empty tick ends do not improve them.
+This is an estimate: ticks without tracking evidence and extra boundaries within one wave cannot be judged.
