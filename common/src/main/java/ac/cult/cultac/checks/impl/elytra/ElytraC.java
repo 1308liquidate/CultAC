@@ -59,7 +59,7 @@ public class ElytraC extends Check implements PostPredictionListener, DecodedPac
                 if (shouldModifyPackets()) {
                     event.setCancelled(true);
                     player.onPacketCancel();
-                    resyncPose();
+                    player.resyncPose();
                 }
             }
         }
@@ -121,11 +121,5 @@ public class ElytraC extends Check implements PostPredictionListener, DecodedPac
         return player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_9)
                 && !(player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)
                         && SERVER_VERSION.isNewerThanOrEquals(ClientVersion.V_1_21_2));
-    }
-
-    private void resyncPose() {
-        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_14) && player.platformPlayer != null) {
-            player.platformPlayer.setSneaking(!player.platformPlayer.isSneaking());
-        }
     }
 }

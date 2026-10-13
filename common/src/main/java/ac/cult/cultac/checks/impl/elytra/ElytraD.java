@@ -43,7 +43,7 @@ public class ElytraD extends Check implements PostPredictionListener {
             if (shouldModifyPackets()) {
                 event.setCancelled(true);
                 player.onPacketCancel();
-                resyncPose();
+                player.resyncPose();
             }
         }
     }
@@ -77,11 +77,5 @@ public class ElytraD extends Check implements PostPredictionListener {
 
     private static boolean isGlider(ac.cult.blocksim.engine.SimItemStack stack, EquipmentSlot slot) {
         return ac.cult.cultac.utils.inventory.ClientGlider.canUse(stack, slot);
-    }
-
-    private void resyncPose() {
-        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_14) && player.platformPlayer != null) {
-            player.platformPlayer.setSneaking(!player.platformPlayer.isSneaking());
-        }
     }
 }

@@ -1,7 +1,6 @@
 package ac.cult.cultac.manager.init.start;
 
 import ac.cult.cultac.CultAPI;
-import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
 import ac.cult.cultac.network.protocol.util.SpigotReflectionUtil;
 import ac.cult.cultac.network.protocol.util.reflection.Reflection;
 import ac.cult.cultac.player.CultPlayer;
@@ -22,9 +21,7 @@ public class TickEndEvent implements StartableInitable {
             if (player.isDisabled()) {
                 continue;
             } // If we aren't active don't spam extra transactions
-            player.runSafely(() -> player.onEndOfTickEvent());
-            final GhostBlockMitigator ghostBlockMitigator = player.getGhostBlockMitigator();
-            ghostBlockMitigator.onEndOfTickEvent();
+            player.runSafely(player::onEndOfTickEvent);
             player.getServerStateNoSlow().tick();
         }
     }

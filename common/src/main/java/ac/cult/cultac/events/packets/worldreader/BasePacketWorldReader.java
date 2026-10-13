@@ -102,6 +102,7 @@ public class BasePacketWorldReader {
     @CultPacketHandler
     public void onBlockChangedAck(
             PacketSendEvent<ClientboundBlockChangedAck> event, CultPlayer player, ClientboundBlockChangedAck packet) {
+        player.getGhostBlockMitigator().onServerAckSent(packet.sequence());
         CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
         if (transaction != null) {
             player.compensatedWorld.handlePredictionConfirmation(packet.sequence(), transaction);
@@ -277,8 +278,12 @@ public class BasePacketWorldReader {
             }
         }
 
-        player.latencyUtils.addRealTimeTaskNow(() -> player.compensatedWorld.handleServerBlockUpdate(
-                blockPosition, state, player.lastTransactionSent.get()));
+        player.compensatedWorld.queueServerBlockUpdate(
+                blockPosition.getX(),
+                blockPosition.getY(),
+                blockPosition.getZ(),
+                state,
+                player.lastTransactionSent.get());
     }
 
     public void handleBlockEvent(
@@ -340,17 +345,15 @@ public class BasePacketWorldReader {
         if (nearPlayer) {
             CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
             if (transaction != null) {
-                player.latencyUtils.addRealTimeTask(
-                        transaction.transaction(),
-                        () -> multiBlockChange.runUpdates(
-                                (x, y, z, state) -> player.compensatedWorld.handleServerBlockUpdate(
-                                        x, y, z, state, transaction.transaction())));
+                multiBlockChange.runUpdates((x, y, z, state) ->
+                        player.compensatedWorld.queueServerBlockUpdate(x, y, z, state, transaction.transaction()));
                 return;
             }
         }
 
-        player.latencyUtils.addRealTimeTaskNow(() -> multiBlockChange.runUpdates((x, y, z, state) ->
-                player.compensatedWorld.handleServerBlockUpdate(x, y, z, state, player.lastTransactionSent.get())));
+        int transaction = player.lastTransactionSent.get();
+        multiBlockChange.runUpdates(
+                (x, y, z, state) -> player.compensatedWorld.queueServerBlockUpdate(x, y, z, state, transaction));
     }
 
     private boolean isNearPlayer(CultPlayer player, BlockPos pos, int range) {

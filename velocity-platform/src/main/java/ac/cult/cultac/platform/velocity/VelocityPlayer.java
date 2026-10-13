@@ -1,12 +1,15 @@
 package ac.cult.cultac.platform.velocity;
 
-import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.cultac.network.CultConnection;
 import ac.cult.cultac.platform.api.entity.CultEntity;
-import ac.cult.cultac.platform.api.player.PlatformInventory;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.platform.api.sender.Sender;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.PacketDirection;
+import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundContainerClose;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.ItemUseState;
 import ac.cult.cultac.utils.math.Location;
@@ -24,35 +27,6 @@ final class VelocityPlayer implements PlatformPlayer {
     private final VelocitySenders senders;
     private volatile CultConnection connection;
     private volatile VelocityWorld world;
-    private final PlatformInventory inventory = new PlatformInventory() {
-        @Override
-        public SimItemStack getStack(int bukkitSlot, int vanillaSlot) {
-            var actor = connection == null ? null : connection.player();
-            return actor == null
-                    ? SimItemStack.EMPTY
-                    : actor.getInventory()
-                            .inventory
-                            .getInventoryStorage()
-                            .getItem(vanillaSlot)
-                            .copy();
-        }
-
-        @Override
-        public SimItemStack getMainHand() {
-            var actor = connection == null ? null : connection.player();
-            return actor == null
-                    ? SimItemStack.EMPTY
-                    : actor.getInventory().getHeldItem().copy();
-        }
-
-        @Override
-        public SimItemStack getOffHand() {
-            var actor = connection == null ? null : connection.player();
-            return actor == null
-                    ? SimItemStack.EMPTY
-                    : actor.getInventory().getOffHand().copy();
-        }
-    };
 
     VelocityPlayer(Player player, VelocitySenders senders) {
         this.player = player;
@@ -187,11 +161,6 @@ final class VelocityPlayer implements PlatformPlayer {
     }
 
     @Override
-    public PlatformInventory getInventory() {
-        return inventory;
-    }
-
-    @Override
     public ItemUseState getItemUseState() {
         // Client intent and compensated metadata cannot prove server-side item use.
         return ItemUseState.NONE;
@@ -204,23 +173,24 @@ final class VelocityPlayer implements PlatformPlayer {
     }
 
     @Override
-    public void updateInventory() {
-        // No authoritative inventory to resend.
-    }
-
-    @Override
     public void closeInventory() {
-        // Closing only the client would leave the server's container open.
+        CultConnection current = connection;
+        if (current == null) return;
+        current.execute(() -> {
+            CultPlayer target = current.player();
+            if (target == null || current.phase(PacketDirection.SERVERBOUND) != ConnectionPhase.PLAY) return;
+            int window = target.getInventory().serverWindowId();
+            // ServerPlayer#closeContainer closes the client screen and the server's container. The proxy
+            // does both as the client would: the close the client sees, then the close the server handles.
+            target.user.write(new ClientboundContainerClose(window));
+            VelocityServerbound.inject(
+                    current, ServerboundPackets.CONTAINER_CLOSE, new ServerboundContainerClose(window));
+        });
     }
 
     @Override
     public void clearActiveItem() {
         // No server-side item-use mutation API.
-    }
-
-    @Override
-    public void setSneaking(boolean value) {
-        // No server-side pose mutation API.
     }
 
     @Override
@@ -231,11 +201,6 @@ final class VelocityPlayer implements PlatformPlayer {
     @Override
     public boolean eject() {
         return false;
-    }
-
-    @Override
-    public void resendBlocks(int x1, int y1, int z1, int x2, int y2, int z2) {
-        // Compensated blocks describe the client view, not an authoritative correction.
     }
 
     @Override

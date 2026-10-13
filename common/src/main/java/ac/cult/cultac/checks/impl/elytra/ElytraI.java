@@ -6,7 +6,6 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.type.PostPredictionListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
-import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
@@ -38,7 +37,7 @@ public class ElytraI extends Check implements PostPredictionListener {
             if (shouldModifyPackets()) {
                 event.setCancelled(true);
                 player.onPacketCancel();
-                resyncPose();
+                player.resyncPose();
             }
         }
     }
@@ -60,12 +59,6 @@ public class ElytraI extends Check implements PostPredictionListener {
         if (setback) {
             setback = false;
             setbackIfAboveSetbackVL();
-        }
-    }
-
-    private void resyncPose() {
-        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_14) && player.platformPlayer != null) {
-            player.platformPlayer.setSneaking(!player.platformPlayer.isSneaking());
         }
     }
 }

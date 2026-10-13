@@ -75,6 +75,8 @@ public class CompensatedWorld {
     // Pair of the block position and the owning list TO the actual block
     // The owning list is so that this info can be removed when the final list is processed
     private final Long2ObjectOpenHashMap<BlockPrediction> originalServerBlocks = new Long2ObjectOpenHashMap<>();
+    // Server block states sent to the client but not yet acknowledged, for resynchronization.
+    private final ServerBlockView serverBlockView = new ServerBlockView();
     // Blocks the client changed while placing or breaking blocks
     private List<BlockPos> currentlyChangedBlocks = new LinkedList<>();
     private final Map<Integer, List<BlockPos>> serverIsCurrentlyProcessingThesePredictions = new HashMap<>();
@@ -463,9 +465,40 @@ public class CompensatedWorld {
     }
 
     public void handleServerBlockUpdate(BlockPos pos, int state, CultPlayer.TrackedTransaction transaction) {
-        player.latencyUtils.addRealTimeTask(
-                transaction.transaction(), () -> handleServerBlockUpdate(pos, state, transaction.transaction()));
+        queueServerBlockUpdate(pos.getX(), pos.getY(), pos.getZ(), state, transaction.transaction());
     }
+
+    /** Records a block update at send time and applies it once the client has processed it. */
+    public void queueServerBlockUpdate(int x, int y, int z, int state, int transaction) {
+        long position = BlockPos.asLong(x, y, z);
+        long id = serverBlockView.sent(
+                position, ViaClientBlockShapeMappings.clientBlockStateId(player, stateIdOrAir(state)));
+        player.latencyUtils.addRealTimeTask(transaction, () -> {
+            handleServerBlockUpdate(x, y, z, state, transaction);
+            serverBlockView.applied(position, id);
+        });
+    }
+
+    /** A login or dimension change was sent; earlier server blocks no longer describe the client's world. */
+    public void serverWorldChangeSent() {
+        serverBlockView.worldChangeSent();
+        player.latencyUtils.addRealTimeTaskNext(serverBlockView::worldChangeApplied);
+    }
+
+    /**
+     * The newest block state the server has sent for this position, excluding client predictions, or
+     * {@link #UNKNOWN_SERVER_STATE} while the column or world is unloaded or being replaced.
+     * Resynchronization packets are written after everything already sent, so they must use this.
+     */
+    public int getServerSentBlockStateIdAt(BlockPos pos) {
+        int chunkX = pos.getX() >> 4;
+        int chunkZ = pos.getZ() >> 4;
+        if (serverBlockView.isUnknown(chunkX, chunkZ) || !isChunkLoaded(chunkX, chunkZ)) return UNKNOWN_SERVER_STATE;
+        int sent = serverBlockView.sentState(pos.asLong());
+        return sent != ServerBlockView.UNKNOWN ? sent : getServerBlockStateIdAt(pos);
+    }
+
+    public static final int UNKNOWN_SERVER_STATE = ServerBlockView.UNKNOWN;
 
     public void handleServerBlockUpdate(BlockPos pos, int state, int transaction) {
         handleServerBlockUpdate(pos.getX(), pos.getY(), pos.getZ(), state, transaction);
@@ -1393,7 +1426,9 @@ public class CompensatedWorld {
             List<BlockPos> geyserTickers,
             long[] motionBlocking) {
         long chunkPosition = chunkPositionToLong(chunkX, chunkZ);
+        serverBlockView.columnSent(chunkX, chunkZ);
         player.latencyUtils.addRealTimeTask(transaction, () -> {
+            serverBlockView.columnApplied(chunkX, chunkZ);
             CachedChunk previous = chunks.get(chunkPosition);
             String previousDimension = chunkDimensions.get(chunkPosition);
             if (previous != null && dimension.equals(previousDimension) && previous.getTransaction() > transaction) {
@@ -1600,7 +1635,9 @@ public class CompensatedWorld {
 
     public void removeChunkLater(String dimension, int chunkX, int chunkZ, int transaction) {
         long chunkPosition = chunkPositionToLong(chunkX, chunkZ);
+        serverBlockView.columnSent(chunkX, chunkZ);
         player.latencyUtils.addRealTimeTask(transaction, () -> {
+            serverBlockView.columnApplied(chunkX, chunkZ);
             String currentDimension = chunkDimensions.get(chunkPosition);
             if (currentDimension != null && !dimension.equals(currentDimension)) {
                 sectionPoolLeases.release(dimension, chunkX, chunkZ);

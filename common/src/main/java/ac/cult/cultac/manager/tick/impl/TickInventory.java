@@ -12,7 +12,7 @@ public class TickInventory implements Tickable {
 
             if (player.getInventory().inventory.getInventoryStorage()
                     instanceof CorrectingPlayerInventoryStorage correcting) {
-                correcting.tickWithBukkit();
+                player.runSafely(correcting::tickServerView);
             }
         }
     }

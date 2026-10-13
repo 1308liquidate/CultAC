@@ -149,7 +149,11 @@ public final class ServerboundPackets {
             PLAY.add("edit_book", ServerboundEditBook.class, new EditBookCodec());
     public static final PacketType<ServerboundRenameItem> RENAME_ITEM =
             PLAY.add("rename_item", ServerboundRenameItem.class, new RenameItemCodec());
-    public static final PacketType<Opaque> CONTAINER_CLOSE = PLAY.ignored("container_close");
+    public static final PacketType<ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose>
+            CONTAINER_CLOSE = PLAY.add(
+                    "container_close",
+                    ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose.class,
+                    new ac.cult.cultac.protocol.codec.connection.ContainerCloseCodecs.Serverbound());
     public static final PacketType<Opaque> CONTAINER_BUTTON_CLICK = PLAY.ignored("container_button_click");
     public static final PacketType<Opaque> CONTAINER_SLOT_STATE_CHANGED = PLAY.ignored("container_slot_state_changed");
     public static final PacketType<Opaque> PLACE_RECIPE = PLAY.ignored("place_recipe");

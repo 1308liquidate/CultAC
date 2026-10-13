@@ -13,13 +13,10 @@ import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.InventoryPackets;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
-import ac.cult.cultac.platform.api.scheduler.EntityScheduler;
-import ac.cult.cultac.platform.api.scheduler.PlatformScheduler;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
-import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundOpenScreen;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSwing;
@@ -30,7 +27,6 @@ import ac.cult.cultac.utils.inventory.inventory.MenuType;
 import ac.cult.cultac.utils.inventory.inventory.WindowClickType;
 import io.netty.buffer.ByteBuf;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -76,7 +72,7 @@ class InventoryWindowChecksTest {
         try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
             serverOpen(f, 7);
             acknowledge(f, 2);
-            var packet = new Opaque(ClientboundPackets.CONTAINER_CLOSE);
+            var packet = new ac.cult.cultac.protocol.packet.clientbound.ClientboundContainerClose(7);
             var event = new PacketSendEvent<>(
                     f.user, ConnectionPhase.PLAY, ClientboundPackets.CONTAINER_CLOSE, packet, true);
             f.player.openWindow.onServerWindow(event, 0, null);
@@ -176,29 +172,37 @@ class InventoryWindowChecksTest {
     }
 
     @Test
-    void cancelledWireClicksShareAResendAndKeepPredictionUntilTheCorrectionProof() throws Exception {
-        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3);
-                var scheduler = new InventoryResyncScheduler()) {
+    void cancelledWireClicksResendTheServerViewAndKeepPredictionUntilTheCorrectionProof() throws Exception {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+            // No server authority: the correction is built only from packets the server sent.
             var platform = mock(PlatformPlayer.class);
-            when(platform.hasServerAuthority()).thenReturn(true);
-            when(platform.isOnline()).thenReturn(true);
             f.user.bind(platform);
             f.player.platformPlayer = platform;
             var inventory = f.player.getInventory();
             var stone = ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap.item("minecraft:stone");
-            inventory.inventory.getInventoryStorage().setItem(36, stone.copy());
+            var authoritative = new ArrayList<SimItemStack>();
+            for (int i = 0; i < inventory.menu.getSlots().size(); i++) authoritative.add(SimItemStack.EMPTY);
+            authoritative.set(36, stone.copy());
+            sendContent(f, new InventoryPackets.Content(0, 42, authoritative, SimItemStack.EMPTY));
+            acknowledge(f, f.player.lastTransactionSent.get());
+            assertEquals(
+                    "minecraft:stone",
+                    inventory.inventory.getInventoryStorage().getItem(36).itemKey());
+            assertEquals(42, inventory.stateID);
+
             var type = clickEvent(f, click(0, 36, WindowClickType.PICKUP)).getPacketType();
-            f.registrar.register(
-                    routes -> routes.receive(type, PacketListenerPriority.NORMAL, (event, player, packet) -> {
+            f.registrar.register(routes ->
+                    routes.receive(type, PacketListenerPriority.NORMAL, (event, player, packet) -> {
                         inventory.onContainerClick(event, player, packet);
-                        if (event.isCancelled()) inventory.resyncCancelledClick();
+                        if (event.isCancelled()) inventory.resyncCancelledClick(packet);
+                        else inventory.onClickForwarded(packet);
                     }));
             int[] slots = {36, 37, 37, 38, 38, 39};
             for (int i = 0; i < slots.length; i++) {
                 boolean pickup = (i & 1) == 0;
                 var frame = f.id(type, "container_click");
                 Wire.writeVarInt(frame, 0);
-                Wire.writeVarInt(frame, 0);
+                Wire.writeVarInt(frame, 42);
                 frame.writeShort(slots[i]).writeByte(0);
                 Wire.writeVarInt(frame, WindowClickType.PICKUP.ordinal());
                 Wire.writeVarInt(frame, 1);
@@ -212,151 +216,81 @@ class InventoryWindowChecksTest {
                     assertEquals(0, frame.refCnt());
                 }
             }
-            assertEquals(1, scheduler.tasks.size());
-            verify(platform, never()).updateInventory();
+            // The client applied the cancelled clicks locally; keep that prediction until the proof.
             assertEquals(
                     "minecraft:stone",
                     inventory.inventory.getInventoryStorage().getItem(39).itemKey());
             assertTrue(inventory.menu.getCarried().isEmpty());
 
             // The server accepted only the first three clicks: the stone is on its cursor.
-            var authoritative = new ArrayList<SimItemStack>();
-            for (int i = 0; i < inventory.menu.getSlots().size(); i++) authoritative.add(SimItemStack.EMPTY);
-            var content = new InventoryPackets.Content(0, 42, authoritative, stone.copy());
-            @SuppressWarnings("unchecked")
-            var contentType = (PacketType<InventoryPackets.Content>)
-                    f.registrar.scanner().runtime().typeForRecord(InventoryPackets.Content.class);
-            var correction = new PacketSendEvent<>(f.user, ConnectionPhase.PLAY, contentType, content, false);
-            doAnswer(ignored -> {
-                        inventory.onContainerSetContent(correction, f.player, content);
-                        return null;
-                    })
-                    .when(platform)
-                    .updateInventory();
-            scheduler.tasks.removeFirst().run();
-            verify(platform).updateInventory();
-            assertFalse(correction.getWritesAfterSend().isEmpty());
-            assertEquals(
-                    "minecraft:stone",
-                    inventory.inventory.getInventoryStorage().getItem(39).itemKey());
-            assertTrue(inventory.menu.getCarried().isEmpty());
-            assertEquals(0, inventory.stateID);
             acknowledge(f, f.player.lastTransactionSent.get());
-            assertTrue(inventory.inventory.getInventoryStorage().getItem(39).isEmpty());
+            for (int slot = 36; slot <= 39; slot++)
+                assertTrue(
+                        inventory.inventory.getInventoryStorage().getItem(slot).isEmpty(), "slot " + slot);
             assertEquals("minecraft:stone", inventory.menu.getCarried().itemKey());
             assertEquals(42, inventory.stateID);
         }
     }
 
     @Test
-    void aCancellationDuringTheResendQueuesAnotherCorrectionAndRetirementReleasesIt() throws Exception {
-        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3);
-                var scheduler = new InventoryResyncScheduler()) {
-            var platform = mock(PlatformPlayer.class);
-            when(platform.hasServerAuthority()).thenReturn(true);
-            when(platform.isOnline()).thenReturn(true);
-            f.player.platformPlayer = platform;
+    void aCancelledClickNeverResendsSlotsTheServerHasNotDescribed() throws Exception {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+            f.user.bind(mock(PlatformPlayer.class));
             var inventory = f.player.getInventory();
-            doAnswer(ignored -> {
-                        inventory.resyncCancelledClick();
-                        return null;
-                    })
-                    .when(platform)
-                    .updateInventory();
-            inventory.resyncCancelledClick();
-            inventory.resyncCancelledClick();
-            assertEquals(1, scheduler.tasks.size());
-            scheduler.tasks.removeFirst().run();
-            assertEquals(1, scheduler.tasks.size());
-            scheduler.retired.getLast().run();
-            scheduler.tasks.clear();
-            inventory.resyncCancelledClick();
-            assertEquals(1, scheduler.tasks.size());
+            var stone = ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap.item("minecraft:stone");
+            inventory.inventory.getInventoryStorage().setItem(36, stone.copy());
+            int sent = f.player.lastTransactionSent.get();
+            inventory.resyncCancelledClick(new InventoryClick(
+                    0, 0, 36, 0, WindowClickType.PICKUP, Map.of(36, SimItemStack.EMPTY), stone.copy()));
+            assertEquals(sent, f.player.lastTransactionSent.get());
+            assertEquals(
+                    "minecraft:stone",
+                    inventory.inventory.getInventoryStorage().getItem(36).itemKey());
         }
     }
 
     @Test
-    void aProxyCannotProduceAnAuthoritativeInventoryResend() throws Exception {
-        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3);
-                var scheduler = new InventoryResyncScheduler()) {
-            var platform = mock(PlatformPlayer.class);
-            when(platform.hasServerAuthority()).thenReturn(false);
-            f.player.platformPlayer = platform;
-            f.player.getInventory().resyncCancelledClick();
-            assertTrue(scheduler.tasks.isEmpty());
-            verify(platform, never()).updateInventory();
-        }
-    }
+    void aRejectedLocalPredictionIsCorrectedFromTheSettledServerView() throws Exception {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+            f.user.bind(mock(PlatformPlayer.class));
+            var inventory = f.player.getInventory();
+            var stone = ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap.item("minecraft:stone");
+            var authoritative = new ArrayList<SimItemStack>();
+            for (int i = 0; i < inventory.menu.getSlots().size(); i++) authoritative.add(SimItemStack.EMPTY);
+            var two = stone.copy();
+            two.setCount(2);
+            authoritative.set(36, two);
+            sendContent(f, new InventoryPackets.Content(0, 7, authoritative, SimItemStack.EMPTY));
+            acknowledge(f, f.player.lastTransactionSent.get());
 
-    @Test
-    void aSchedulerFailureCannotUndoCancellationAndTheNextClickRetries() throws Exception {
-        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3);
-                var scheduler = new InventoryResyncScheduler()) {
-            var platform = mock(PlatformPlayer.class);
-            when(platform.hasServerAuthority()).thenReturn(true);
-            f.player.platformPlayer = platform;
-            var type = clickEvent(f, click(0, 36, WindowClickType.PICKUP)).getPacketType();
-            f.registrar.register(
-                    routes -> routes.receive(type, PacketListenerPriority.NORMAL, (event, player, packet) -> {
-                        event.setCancelled(true);
-                        player.getInventory().resyncCancelledClick();
-                    }));
-            scheduler.rejectNext = true;
-            for (int i = 0; i < 2; i++) {
-                var frame = f.id(type, "container_click");
-                Wire.writeVarInt(frame, 0);
-                Wire.writeVarInt(frame, 0);
-                frame.writeShort(36).writeByte(0);
-                Wire.writeVarInt(frame, WindowClickType.PICKUP.ordinal());
-                Wire.writeVarInt(frame, 0);
-                frame.writeBoolean(false);
-                assertFalse(f.channel.writeInbound(frame));
-                assertNull(f.channel.readInbound());
-                assertEquals(0, frame.refCnt());
-                assertEquals(i, scheduler.tasks.size());
+            // A local placement consumed one; the server rejected it and never echoes its unchanged slot.
+            var one = stone.copy();
+            one.setCount(1);
+            var storage = (ac.cult.cultac.utils.lists.CorrectingPlayerInventoryStorage)
+                    inventory.inventory.getInventoryStorage();
+            storage.setItem(36, one);
+            var ticks = ac.cult.cultac.CultAPI.INSTANCE.getTickManager();
+            int start = ticks.currentTick;
+            try {
+                storage.tickServerView();
+                assertEquals(1, storage.getItem(36).getCount());
+                ticks.currentTick = start + 5;
+                storage.tickServerView();
+                assertEquals(1, storage.getItem(36).getCount());
+                acknowledge(f, f.player.lastTransactionSent.get());
+                assertEquals(2, storage.getItem(36).getCount());
+            } finally {
+                ticks.currentTick = start;
             }
         }
     }
 
-    private static final class InventoryResyncScheduler implements AutoCloseable {
-        final List<Runnable> tasks = new ArrayList<>();
-        final List<Runnable> retired = new ArrayList<>();
-        boolean rejectNext;
-        final java.lang.reflect.Field loader = ac.cult.cultac.CultAPI.class.getDeclaredField("loader");
-        final Object original;
-
-        InventoryResyncScheduler() throws Exception {
-            loader.setAccessible(true);
-            original = loader.get(ac.cult.cultac.CultAPI.INSTANCE);
-            var entity = mock(EntityScheduler.class);
-            var scheduler = mock(PlatformScheduler.class);
-            when(scheduler.getEntityScheduler()).thenReturn(entity);
-            doAnswer(call -> {
-                        if (rejectNext) {
-                            rejectNext = false;
-                            throw new IllegalStateException("test scheduler rejection");
-                        }
-                        tasks.add(call.getArgument(2));
-                        retired.add(call.getArgument(3));
-                        assertEquals(2L, (long) call.getArgument(4));
-                        return null;
-                    })
-                    .when(entity)
-                    .execute(any(), any(), any(), any(), anyLong());
-            loader.set(
-                    ac.cult.cultac.CultAPI.INSTANCE,
-                    java.lang.reflect.Proxy.newProxyInstance(
-                            getClass().getClassLoader(),
-                            new Class<?>[] {ac.cult.cultac.platform.api.PlatformLoader.class},
-                            (proxy, method, args) -> method.getName().equals("getScheduler")
-                                    ? scheduler
-                                    : method.invoke(original, args)));
-        }
-
-        @Override
-        public void close() throws Exception {
-            loader.set(ac.cult.cultac.CultAPI.INSTANCE, original);
-        }
+    @SuppressWarnings("unchecked")
+    private static void sendContent(RecordReceiveFixture f, InventoryPackets.Content content) {
+        var contentType = (PacketType<InventoryPackets.Content>)
+                f.registrar.scanner().runtime().typeForRecord(InventoryPackets.Content.class);
+        var event = new PacketSendEvent<>(f.user, ConnectionPhase.PLAY, contentType, content, false);
+        f.player.getInventory().onContainerSetContent(event, f.player, content);
     }
 
     private static void writeClickItem(ByteBuf output, SimItemStack item) {

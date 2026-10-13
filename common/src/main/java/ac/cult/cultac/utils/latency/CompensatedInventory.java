@@ -5,7 +5,6 @@ import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.CultProcessor;
 import ac.cult.cultac.checks.type.CheckListener;
-import ac.cult.cultac.network.CultNetworkManager;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -13,9 +12,7 @@ import ac.cult.cultac.network.packet.InventoryPackets;
 import ac.cult.cultac.network.packet.InventoryPackets.Content;
 import ac.cult.cultac.network.packet.InventoryPackets.CreativeSlot;
 import ac.cult.cultac.network.packet.InventoryPackets.MerchantOffer;
-import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMountScreenOpen;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundOpenScreen;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetHeldSlot;
@@ -46,7 +43,6 @@ import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.Getter;
 
 // Updated to support modern 1.17 protocol
@@ -62,11 +58,10 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     private int lastClickServerTick;
     private int clicksThisServerTick;
     private int maxClicksPerTick = 3;
-    private final AtomicBoolean inventoryResyncRequested = new AtomicBoolean();
-    private final AtomicBoolean inventoryResyncQueued = new AtomicBoolean();
     public int stateID = 0; // Player inventory state ID. Don't mess up the last sent state ID by changing it.
-    private final SimItemStack[] serverSlots = new SimItemStack[Inventory.STORAGE_SIZE];
-    private int observedServerStateId;
+    // What the server sent or silently accepted; resynchronization resends only from this.
+    private final ServerInventoryView serverView = new ServerInventoryView();
+    private boolean lastClickMirrored;
     private int observedWindowId;
     private AbstractContainerMenu observedMenu;
     private List<MerchantOffer> merchantOffers = List.of();
@@ -75,7 +70,8 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     public CompensatedInventory(CultPlayer playerData) {
         super(playerData);
 
-        InventoryStorage storage = new InventoryStorage(Inventory.STORAGE_SIZE);
+        InventoryStorage storage =
+                new ac.cult.cultac.utils.lists.CorrectingPlayerInventoryStorage(playerData, Inventory.STORAGE_SIZE);
         inventory = new Inventory(playerData, storage);
 
         menu = inventory;
@@ -84,27 +80,72 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
 
     /** Outbound server values never include local item-use/placement predictions. */
     public SimItemStack serverSlotForCorrection(int slot) {
-        SimItemStack item = serverSlots[slot];
-        return ItemUtil.copy(item == null ? inventory.getInventoryStorage().getItem(slot) : item);
+        SimItemStack item = serverView.playerSlot(slot);
+        return item == null ? ItemUtil.copy(inventory.getInventoryStorage().getItem(slot)) : item;
     }
 
     public int serverStateId() {
-        return observedServerStateId;
+        return serverView.playerStateId();
+    }
+
+    /** The server's value for a player storage slot once every sent inventory packet is applied, else null. */
+    public SimItemStack settledServerSlot(int storageSlot) {
+        return serverView.settled() ? serverView.playerSlot(storageSlot) : null;
+    }
+
+    /** The container the server most recently opened for this player; 0 is its own inventory. */
+    public int serverWindowId() {
+        return observedWindowId;
+    }
+
+    public boolean hasPendingServerInventory() {
+        return !serverView.settled();
+    }
+
+    /** Resends the server's value for a player storage slot, applied to the model at its proof. */
+    public void correctPlayerSlot(int storageSlot) {
+        SimItemStack item = serverView.playerSlot(storageSlot);
+        if (item == null) return;
+        BlockPredictionAckSender.sendCorrections(
+                player,
+                0,
+                false,
+                List.of(),
+                List.of(new InventoryPackets.Slot(0, serverView.playerStateId(), storageSlot, item)),
+                null);
     }
 
     public void applySlotCorrection(InventoryPackets.Slot correction) {
-        stateID = correction.stateId();
-        Slot slot = inventory.getSlot(correction.slot());
+        Slot slot;
+        if (correction.windowId() == 0) {
+            stateID = correction.stateId();
+            slot = inventory.getSlot(correction.slot());
+        } else if (correction.windowId() == openWindowID) {
+            slot = menu.getSlot(correction.slot());
+        } else return;
         if (slot != null) {
             slot.set(ItemUtil.copy(correction.item()));
             confirmHotbarSlot(slot);
         }
     }
 
-    private void observeServerSlot(Slot slot, SimItemStack item) {
-        if (slot != null && slot.isBackedBy(inventory.getInventoryStorage())) {
-            serverSlots[slot.getContainerSlot()] = ItemUtil.copy(item);
+    public void applyCursorCorrection(SimItemStack item) {
+        setClientCarried(ItemUtil.copy(item));
+    }
+
+    private void observeServerSlot(boolean container, int index, Slot slot, SimItemStack item) {
+        if (slot == null) return;
+        if (slot.isBackedBy(inventory.getInventoryStorage())) {
+            serverView.playerSlot(slot.getContainerSlot(), item);
+        } else if (container) {
+            serverView.containerSlot(index, item);
         }
+    }
+
+    private SimItemStack serverMenuSlot(boolean container, int index, Slot slot) {
+        if (slot == null) return null;
+        if (slot.isBackedBy(inventory.getInventoryStorage())) return serverView.playerSlot(slot.getContainerSlot());
+        return container ? serverView.containerSlot(index) : null;
     }
 
     @Override
@@ -112,49 +153,68 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
         maxClicksPerTick = config.getIntElse("max-clicks-per-tick", 3);
     }
 
-    /** Called after all click checks, while the cancelled packet still belongs to Netty. */
-    public void resyncCancelledClick() {
-        PlatformPlayer platform = player.platformPlayer;
-        if (player.isBedrockMovement() || platform == null || !platform.hasServerAuthority()) return;
-        inventoryResyncRequested.set(true);
-        scheduleInventoryResync(platform);
+    /**
+     * Called after all click checks for a cancelled click. The client applied the click locally
+     * (MultiPlayerGameMode#handleContainerInput) and the server never saw it, so the server will not
+     * correct it. Resend the server's values for every slot the click touched, and the cursor.
+     */
+    public void resyncCancelledClick(InventoryClick click) {
+        if (player.isBedrockMovement() || click.windowId() != observedWindowId) return;
+        boolean container = click.windowId() != 0;
+        AbstractContainerMenu target = container ? observedMenu : inventory;
+        int stateId = container ? serverView.containerStateId() : serverView.playerStateId();
+        var touched = new java.util.LinkedHashSet<>(click.changedSlots().keySet());
+        if (click.slot() >= 0) touched.add(click.slot());
+        List<InventoryPackets.Slot> slots = new ArrayList<>();
+        for (int index : touched) {
+            SimItemStack item = serverMenuSlot(container, index, target.getSlot(index));
+            if (item != null) slots.add(new InventoryPackets.Slot(click.windowId(), stateId, index, item));
+        }
+        BlockPredictionAckSender.sendCorrections(player, 0, false, List.of(), slots, serverView.carried());
     }
 
-    private void scheduleInventoryResync(PlatformPlayer platform) {
-        if (!inventoryResyncQueued.compareAndSet(false, true)) return;
-        try {
-            ac.cult.cultac.CultAPI.INSTANCE
-                    .getScheduler()
-                    .getEntityScheduler()
-                    .execute(
-                            platform,
-                            ac.cult.cultac.CultAPI.INSTANCE.getGrimPlugin(),
-                            () -> {
-                                inventoryResyncRequested.set(false);
-                                try {
-                                    if (platform.isOnline()) platform.updateInventory();
-                                } finally {
-                                    inventoryResyncQueued.set(false);
-                                    // A cancellation racing the snapshot still needs its own correction.
-                                    if (inventoryResyncRequested.get()) scheduleInventoryResync(platform);
-                                }
-                            },
-                            () -> {
-                                inventoryResyncRequested.set(false);
-                                inventoryResyncQueued.set(false);
-                            },
-                            // A task queued just before the scheduler heartbeat can run in that tick.
-                            // Waiting two heartbeats leaves a complete owner tick for earlier accepted
-                            // clicks to drain first. The full resend includes the current menu's slots,
-                            // cursor and incremented state ID; its normal outbound proof updates our
-                            // client model, never this server-thread callback.
-                            2);
-        } catch (RuntimeException failure) {
-            inventoryResyncQueued.set(false);
-            // A scheduler failure must not reach dispatch recovery, which discards
-            // event changes and would forward the cancelled click to vanilla.
-            CultNetworkManager.reportFailure("inventory resync scheduling", failure);
+    /**
+     * Resends every known slot of the server's open menu and its cursor from the observed server
+     * view. Owner thread only. Returns the slots sent.
+     */
+    public int resyncFromServerView() {
+        if (player.isBedrockMovement()) return 0;
+        boolean container = observedWindowId != 0;
+        AbstractContainerMenu target = container ? observedMenu : inventory;
+        int stateId = container ? serverView.containerStateId() : serverView.playerStateId();
+        List<InventoryPackets.Slot> slots = new ArrayList<>();
+        for (int index = 0; index < target.getSlots().size(); index++) {
+            SimItemStack item = serverMenuSlot(container, index, target.getSlot(index));
+            if (item != null) slots.add(new InventoryPackets.Slot(observedWindowId, stateId, index, item));
         }
+        BlockPredictionAckSender.sendCorrections(player, 0, false, List.of(), slots, serverView.carried());
+        return slots.size();
+    }
+
+    /** Called after all click checks for a click forwarded to the server. */
+    public void onClickForwarded(InventoryClick click) {
+        if (player.isBedrockMovement() || click.windowId() != observedWindowId) return;
+        // ServerGamePacketListenerImpl#handleContainerClick records the client's claimed slots as the
+        // remote state and corrects only differences, so a click it accepts is never echoed back.
+        boolean known = lastClickMirrored && click.windowId() == openWindowID;
+        boolean container = click.windowId() != 0;
+        AbstractContainerMenu target = container ? observedMenu : inventory;
+        for (int index : click.changedSlots().keySet()) {
+            Slot claimed = known ? menu.getSlot(index) : null;
+            observeServerSlot(container, index, target.getSlot(index), claimed == null ? null : claimed.getItem());
+        }
+        serverView.carried(known ? menu.getCarried() : null);
+    }
+
+    private void deferServerInventoryTask(PacketSendEvent<?> event, Runnable task) {
+        serverView.packetSent();
+        deferClientboundInventoryTask(event, () -> {
+            try {
+                task.run();
+            } finally {
+                serverView.packetApplied();
+            }
+        });
     }
 
     private void setClientCarried(SimItemStack stack) {
@@ -457,6 +517,7 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
                     .itemKey();
         }
         boolean mirrored = applyContainerClick(packet);
+        lastClickMirrored = mirrored;
         if (!player.isBedrockMovement()) {
             // Retain the possible reset if the local click could not be reconstructed. The
             // selected slot can trail the client by one tick, so compare every hotbar slot.
@@ -855,11 +916,22 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     public void setCreativeSlot(int slot, SimItemStack stack) {
         if (player.gamemode == GameMode.CREATIVE && slot >= 1 && slot <= 45) {
             inventory.getSlot(slot).set(ItemUtil.copy(stack));
+            // ServerGamePacketListenerImpl#handleSetCreativeModeSlot sets the remote slot without echoing.
+            observeServerSlot(false, slot, inventory.getSlot(slot), stack);
         }
     }
 
-    @CultPacketHandler("serverbound.container_close")
-    public void onContainerClose(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {
+    @CultPacketHandler
+    public void onContainerClose(
+            PacketReceiveEvent<ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose> event,
+            CultPlayer player,
+            ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose packet) {
+        if (!event.isCancelled()) {
+            // The server's container closes when it handles this packet.
+            observedWindowId = 0;
+            observedMenu = inventory;
+            serverView.containerClosed();
+        }
         closeContainer();
     }
 
@@ -1013,6 +1085,7 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
         MenuType menuType = MenuType.fromRegistryKey(packet.menuType());
         observedWindowId = packet.containerId();
         observedMenu = menuFromOpenScreenType(menuType);
+        serverView.containerOpened(observedMenu.getSlots().size());
         // There doesn't seem to be a check against using 0 as the window ID - let's consider that an invalid packet
         // It will probably mess up a TON of logic both client and server sided, so don't do that!
         deferClientboundInventoryTask(event, () -> {
@@ -1029,6 +1102,7 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
             PacketSendEvent<ClientboundMountScreenOpen> event, CultPlayer player, ClientboundMountScreenOpen packet) {
         observedWindowId = packet.containerId();
         observedMenu = menuFromMountScreen(packet.inventoryColumns());
+        serverView.containerOpened(observedMenu.getSlots().size());
         deferClientboundInventoryTask(event, () -> {
             PacketEntity mount = player.compensatedEntities.getEntity(packet.entityId());
             if (mount == null
@@ -1059,10 +1133,14 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
         });
     }
 
-    @CultPacketHandler("clientbound.container_close")
-    public void onContainerClose(PacketSendEvent<Opaque> event, CultPlayer player, Opaque packet) {
+    @CultPacketHandler
+    public void onContainerClose(
+            PacketSendEvent<ac.cult.cultac.protocol.packet.clientbound.ClientboundContainerClose> event,
+            CultPlayer player,
+            ac.cult.cultac.protocol.packet.clientbound.ClientboundContainerClose packet) {
         observedWindowId = 0;
         observedMenu = inventory;
+        serverView.containerClosed();
         // Disregard provided window ID, client doesn't care...
         // We need to do this because the client doesn't send a packet when closing the window
         deferClientboundInventoryTask(event, () -> {
@@ -1080,15 +1158,21 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
         List<SimItemStack> slots = items.items();
         AbstractContainerMenu contentMenu = items.windowId() == 0 ? inventory : menuFromContentSlots(slots.size());
         if (items.windowId() == 0) {
-            observedServerStateId = items.stateId();
-            for (int i = 0; i < slots.size(); i++) observeServerSlot(inventory.getSlot(i), slots.get(i));
+            serverView.playerStateId(items.stateId());
+            for (int i = 0; i < slots.size(); i++) observeServerSlot(false, i, inventory.getSlot(i), slots.get(i));
+            if (observedWindowId == 0) serverView.carried(items.carriedItem());
         } else if (items.windowId() == observedWindowId) {
-            if (observedMenu.getSlots().size() != slots.size()) observedMenu = contentMenu;
-            for (int i = 0; i < slots.size(); i++) observeServerSlot(observedMenu.getSlot(i), slots.get(i));
+            if (observedMenu.getSlots().size() != slots.size()) {
+                observedMenu = contentMenu;
+                serverView.containerOpened(slots.size());
+            }
+            serverView.containerStateId(items.stateId());
+            for (int i = 0; i < slots.size(); i++) observeServerSlot(true, i, observedMenu.getSlot(i), slots.get(i));
+            serverView.carried(items.carriedItem());
         }
 
         if (items.windowId() == 0) { // Player inventory
-            deferClientboundInventoryTask(event, () -> {
+            deferServerInventoryTask(event, () -> {
                 stateID = items.stateId();
                 for (int i = 0; i < slots.size(); i++) {
                     Slot slot = inventory.getSlot(i);
@@ -1098,7 +1182,7 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
                 setClientCarried(items.carriedItem());
             });
         } else {
-            deferClientboundInventoryTask(event, () -> {
+            deferServerInventoryTask(event, () -> {
                 if (!isApplicableContainerMirror(items.windowId())) {
                     return;
                 }
@@ -1128,8 +1212,8 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
             InventoryPackets.PlayerInventory packet) {
         int storageSlot = directPlayerInventorySlotToStorageSlot(packet.slot());
         if (storageSlot != -1) {
-            serverSlots[storageSlot] = ItemUtil.copy(packet.item());
-            deferClientboundInventoryTask(event, () -> {
+            serverView.playerSlot(storageSlot, packet.item());
+            deferServerInventoryTask(event, () -> {
                 inventory.getInventoryStorage().setItem(storageSlot, packet.item());
                 player.attackStrength.confirmHotbarSlot(storageSlot - Inventory.HOTBAR_OFFSET);
             });
@@ -1139,7 +1223,8 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     @CultPacketHandler
     public void onSetCursorItem(
             PacketSendEvent<InventoryPackets.Cursor> event, CultPlayer player, InventoryPackets.Cursor packet) {
-        deferClientboundInventoryTask(event, () -> setClientCarried(packet.item()));
+        serverView.carried(packet.item());
+        deferServerInventoryTask(event, () -> setClientCarried(packet.item()));
     }
 
     @CultPacketHandler
@@ -1158,10 +1243,11 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     public void onContainerSetSlot(
             PacketSendEvent<InventoryPackets.Slot> event, CultPlayer player, InventoryPackets.Slot slotData) {
         if (slotData.windowId() == 0) {
-            observedServerStateId = slotData.stateId();
-            observeServerSlot(inventory.getSlot(slotData.slot()), slotData.item());
+            serverView.playerStateId(slotData.stateId());
+            observeServerSlot(false, slotData.slot(), inventory.getSlot(slotData.slot()), slotData.item());
         } else if (slotData.windowId() == observedWindowId) {
-            observeServerSlot(observedMenu.getSlot(slotData.slot()), slotData.item());
+            serverView.containerStateId(slotData.stateId());
+            observeServerSlot(true, slotData.slot(), observedMenu.getSlot(slotData.slot()), slotData.item());
         }
         Runnable task = () -> {
             if (!isApplicableContainerMirror(slotData.windowId())) {
@@ -1195,7 +1281,7 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
             }
         };
 
-        deferClientboundInventoryTask(event, task);
+        deferServerInventoryTask(event, task);
     }
 
     private boolean isApplicableContainerMirror(int windowId) {

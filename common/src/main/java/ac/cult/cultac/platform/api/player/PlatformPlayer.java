@@ -21,8 +21,6 @@ public interface PlatformPlayer extends CultEntity, OfflinePlatformPlayer {
 
     boolean isSneaking();
 
-    void setSneaking(boolean b);
-
     boolean hasPermission(String s);
 
     boolean hasPermission(String s, boolean defaultIfUnset);
@@ -30,9 +28,6 @@ public interface PlatformPlayer extends CultEntity, OfflinePlatformPlayer {
     void sendMessage(String message);
 
     void sendMessage(Component message);
-
-    /** Resends the authoritative active menu, including its cursor and state ID. Call on the owning thread. */
-    void updateInventory();
 
     int getPing();
 
@@ -46,12 +41,7 @@ public interface PlatformPlayer extends CultEntity, OfflinePlatformPlayer {
 
     void clearActiveItem();
 
-    /** Resends authoritative loaded blocks without loading chunks. Bounds are inclusive. */
-    void resendBlocks(int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
-
     Vec3 getPosition();
-
-    PlatformInventory getInventory();
 
     @Nullable
     CultEntity getVehicle();

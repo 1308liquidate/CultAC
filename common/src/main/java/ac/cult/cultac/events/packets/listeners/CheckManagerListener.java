@@ -118,7 +118,6 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             ServerboundPackets.SET_STRUCTURE_BLOCK,
             ServerboundPackets.CONTAINER_BUTTON_CLICK,
             ServerboundPackets.PICK_ITEM,
-            ServerboundPackets.CONTAINER_CLOSE,
             ServerboundPackets.CONFIGURATION_ACKNOWLEDGED,
             ServerboundPackets.CUSTOM_CLICK_ACTION);
     private static final List<PacketType<Opaque>> OPAQUE_CLIENTTICKEND = List.of(ServerboundPackets.CLIENT_TICK_END);
@@ -217,9 +216,18 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
     }
 
     @CultPacketHandler
+    public void onContainerClose(
+            PacketReceiveEvent<ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose> event,
+            CultPlayer player,
+            ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose packet) {
+        processGenericReceive(event, player);
+    }
+
+    @CultPacketHandler
     public void onContainerClick(PacketReceiveEvent<InventoryClick> event, CultPlayer player, InventoryClick packet) {
         processGenericReceive(event, player);
-        if (event.isCancelled()) player.getInventory().resyncCancelledClick();
+        if (event.isCancelled()) player.getInventory().resyncCancelledClick(packet);
+        else player.getInventory().onClickForwarded(packet);
     }
 
     @CultPacketHandler

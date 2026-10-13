@@ -164,8 +164,11 @@ public final class PacketOrderProcessor extends Check implements CheckListener {
         maybeReset(player, false);
     }
 
-    @CultPacketHandler("serverbound.container_close")
-    public void onContainerClose(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {
+    @CultPacketHandler
+    public void onContainerClose(
+            PacketReceiveEvent<ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose> event,
+            CultPlayer player,
+            ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose packet) {
         closingInventory = true;
 
         maybeReset(player, false);

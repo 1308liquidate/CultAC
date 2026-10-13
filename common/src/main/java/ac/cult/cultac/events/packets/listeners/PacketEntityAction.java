@@ -105,11 +105,7 @@ public class PacketEntityAction {
         // A grounded start or ghost glider must be resynchronized.
         final SetbackTeleportUtil setbackUtil = player.getSetbackTeleportUtil();
         setbackUtil.executeForceResync("elytra");
-        final var platformPlayer = player.platformPlayer;
-        if (platformPlayer != null) {
-            // Client ignores sneaking, use it to resync
-            platformPlayer.setSneaking(!platformPlayer.isSneaking());
-        }
+        player.resyncPose();
         event.setCancelled(true);
         player.onPacketCancel();
     }

@@ -3,7 +3,6 @@ package ac.cult.cultac.platform.bukkit.player;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.platform.api.entity.CultEntity;
-import ac.cult.cultac.platform.api.player.PlatformInventory;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.platform.api.sender.Sender;
 import ac.cult.cultac.platform.bukkit.CultACBukkitLoaderPlugin;
@@ -30,15 +29,11 @@ public class BukkitPlatformPlayer extends BukkitCultEntity implements PlatformPl
     @Getter
     private final Player bukkitPlayer;
 
-    @Getter
-    private final PlatformInventory inventory;
-
     private final @Nullable User user;
 
     public BukkitPlatformPlayer(@NotNull Player bukkitPlayer) {
         super(bukkitPlayer);
         this.bukkitPlayer = bukkitPlayer;
-        this.inventory = new BukkitPlatformInventory(bukkitPlayer);
         if (CommonCultArguments.USE_CHAT_FAST_BYPASS.value()) {
             this.user = CultAPI.INSTANCE.getNetworkManager().getUser(bukkitPlayer.getUniqueId(), bukkitPlayer);
         } else {
@@ -65,11 +60,6 @@ public class BukkitPlatformPlayer extends BukkitCultEntity implements PlatformPl
     @Override
     public boolean isSneaking() {
         return bukkitPlayer.isSneaking();
-    }
-
-    @Override
-    public void setSneaking(boolean isSneaking) {
-        bukkitPlayer.setSneaking(isSneaking);
     }
 
     @Override
@@ -101,11 +91,6 @@ public class BukkitPlatformPlayer extends BukkitCultEntity implements PlatformPl
     }
 
     @Override
-    public void updateInventory() {
-        bukkitPlayer.updateInventory();
-    }
-
-    @Override
     public int getPing() {
         return bukkitPlayer.getPing();
     }
@@ -129,11 +114,6 @@ public class BukkitPlatformPlayer extends BukkitCultEntity implements PlatformPl
     @Override
     public void clearActiveItem() {
         bukkitPlayer.clearActiveItem();
-    }
-
-    @Override
-    public void resendBlocks(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-        BukkitBlockResync.resend(bukkitPlayer, minX, minY, minZ, maxX, maxY, maxZ);
     }
 
     @Override

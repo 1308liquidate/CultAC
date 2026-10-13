@@ -3,15 +3,14 @@ package ac.cult.cultac.checks.impl.movement;
 import ac.cult.cultac.checks.CultProcessor;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.type.PostPredictionListener;
-import ac.cult.cultac.events.packets.patch.ResyncWorldUtil;
 import ac.cult.cultac.manager.player.SetbackTeleportUtil;
-import ac.cult.cultac.manager.tick.Tickable;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.anticheat.update.BlockPlace;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.blockplace.GhostBlock;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.latency.CompensatedWorld;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientBlockProperties;
 import java.util.HashSet;
@@ -27,8 +26,9 @@ import lombok.RequiredArgsConstructor;
 // Additionally, we don't give a shit if we setback too much here accidentally
 // We already would need to setback. lol. so it doesn't matter.
 //
-// Let ghost blocks persist for a single tick, before checking the server for the correct state
-public class GhostBlockMitigator extends CultProcessor implements PostPredictionListener, Tickable {
+// The server confirms or rejects each placement through the block updates it sends before the
+// matching block-change acknowledgement (ServerGamePacketListenerImpl#handleUseItemOn).
+public class GhostBlockMitigator extends CultProcessor implements PostPredictionListener {
 
     public GhostBlockMitigator(CultPlayer player) {
         super(player);
@@ -37,11 +37,6 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
     // If a player's movement requires colliding with one of these blocks to be valid, mark it as a suspicious block
     //
     // Keep this data until the server has confirmed these places - where we can then remove the data
-    //
-    // If after the next tick end event, the server fails to confirm these places,
-    // then send the player the blocks at this location (pre-1.19), then mark them as no longer ghost blocks
-    //
-    // once fully confirmed
     public final Map<BlockPos, GhostData> unknownStuff = new ConcurrentHashMap<>();
 
     // If a player uses a bucket in flags in the area of the bucket
@@ -53,7 +48,6 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
 
     @Override
     public void onPredictionComplete(final PredictionComplete predictionComplete) {
-        if (player.platformPlayer == null || !player.platformPlayer.hasServerAuthority()) return;
         if (predictionComplete.isTeleport()) return;
 
         PredictionResult result = predictionComplete.getPredictionResult();
@@ -116,34 +110,6 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
                 location -> player.compensatedWorld.getChunk(location.getX() >> 4, location.getZ() >> 4) == null);
     }
 
-    @Override
-    public void tick() {
-        // TODO: Replace with ServerTickEndEvent
-        // We must wait until the next tick for the server to verify these blocks
-        unknownStuff.values().forEach(GhostData::tick);
-    }
-
-    public void onEndOfTickEvent() {
-        // If we have any illegal positions for two ticks, setback with that teleport
-        for (Map.Entry<BlockPos, GhostData> data : unknownStuff.entrySet()) {
-            GhostData ghostData = data.getValue();
-
-            // Revert ghost blocks to server state, making sure to not fuck with block predictions
-            // We don't send blocks to the client, but we will if the player flags later on
-            if (!ghostData.isValid() && !ghostData.isReverted() && ghostData.ticks >= 2) {
-                if (player.compensatedWorld.hasPendingBlockPrediction(data.getKey())) {
-                    continue;
-                }
-                ghostData.revert();
-
-                // No predictions, ensure no ghost block. Special case when bukkit fails to confirm block place.
-                if (player.platformPlayer != null && ghostData.isReverted()) {
-                    ResyncWorldUtil.resyncPositions(player, new SimpleCollisionBox(data.getKey()).expand(1));
-                }
-            }
-        }
-    }
-
     public boolean isDesyncPos(BlockPos pos) {
         for (GhostData ghostData : unknownStuff.values()) {
             if (ghostData.isReverted() && ghostData.getPlacedPos().equals(pos)) {
@@ -167,13 +133,11 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
     }
 
     public void handlePseudoPlace(GhostBlock ghostBlock) {
-        if (player.platformPlayer == null || !player.platformPlayer.hasServerAuthority()) return;
         pseudoPlaces.add(ghostBlock);
     }
 
     // This method is called if and only if it isn't placed on a known desync pos
     public void handleBlockPlace(BlockPos placeBox, int original, int newState, BlockPlace place) {
-        if (player.platformPlayer == null || !player.platformPlayer.hasServerAuthority()) return;
         // Assume permanent desync
         if (place.isUseItem()) {
             bucketUseLocations.add(placeBox);
@@ -214,15 +178,20 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
         }
     }
 
-    public void onServerBlockChange(BlockPos pos, boolean isCancelled) {
-        GhostData data = unknownStuff.get(pos);
-        if (data != null) {
-            if (isCancelled) {
-                if (!player.compensatedWorld.hasPendingBlockPrediction(pos)) {
-                    data.revert();
-                }
-            } else {
+    /**
+     * Called when the server's block-change acknowledgement is sent. Every block update the server
+     * produced for the acknowledged placements precedes it, so the newest sent state is the server's.
+     */
+    public void onServerAckSent(int sequence) {
+        for (GhostData data : unknownStuff.values()) {
+            if (data.place.sequence > sequence || data.isValid()) continue;
+            int serverState = player.compensatedWorld.getServerSentBlockStateIdAt(data.getPlacedPos());
+            if (serverState == CompensatedWorld.UNKNOWN_SERVER_STATE) continue;
+            if (serverState == data.getClientState()) {
                 data.setValid(true);
+            } else {
+                data.serverState = serverState;
+                if (!player.compensatedWorld.hasPendingBlockPrediction(data.getPlacedPos())) data.revert();
             }
         }
     }
@@ -239,7 +208,6 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
 
         boolean isValid;
         boolean isReverted;
-        int ticks;
 
         public GhostData(
                 BlockPos placedPos, SimpleCollisionBox placedBox, int serverState, int clientState, BlockPlace place) {
@@ -267,10 +235,6 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
                     ghostData.revert();
                 }
             }
-        }
-
-        private void tick() {
-            ticks++;
         }
     }
 }

@@ -21,6 +21,18 @@ public record EntityMetadata(int id, List<Entry> packedItems) implements Clientb
             return bytes.asReadOnlyBuffer();
         }
 
+        /** EntityDataSerializers.BYTE is serializer 0 in every supported observed version. */
+        public static Entry byteValue(int index, byte value) {
+            return new Entry(
+                    index,
+                    value,
+                    ByteBuffer.allocate(3)
+                            .put((byte) index)
+                            .put((byte) 0)
+                            .put(value)
+                            .flip());
+        }
+
         /** Serializer IDs are source-verified for every supported observed version. */
         public static Entry health(int index, ac.cult.cultac.protocol.ProtocolVersion version, float value) {
             int serializer = switch (version) {

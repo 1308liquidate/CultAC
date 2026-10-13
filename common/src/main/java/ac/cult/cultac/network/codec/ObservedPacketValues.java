@@ -115,6 +115,8 @@ public final class ObservedPacketValues implements PacketValueAdapter {
             Wire.writeVarInt(output, toWire.blockState(block.state()));
         } else if (packet instanceof InventoryPackets.Slot slot) {
             inventory.writeSlot(output, slot);
+        } else if (packet instanceof InventoryPackets.Cursor cursor) {
+            inventory.writeCursor(output, cursor);
         } else if (packet instanceof EntityMetadata metadata) {
             Wire.writeVarInt(output, metadata.id());
             metadata.packedItems().forEach(entry -> output.writeBytes(entry.bytes()));

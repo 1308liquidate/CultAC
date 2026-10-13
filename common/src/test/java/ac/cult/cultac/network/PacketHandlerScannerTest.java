@@ -201,7 +201,7 @@ class PacketHandlerScannerTest {
     }
 
     static class WrongDirection {
-        @CultPacketHandler("clientbound.container_close")
+        @CultPacketHandler("clientbound.login_finished")
         void wrong(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {}
     }
 }

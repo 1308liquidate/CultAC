@@ -116,8 +116,10 @@ public final class BlockActionReconciler {
         var inventory = player.getInventory();
         var updates = new ArrayList<BlockPredictionAckSender.TrackedBlockUpdate>();
         for (BlockPos pos : correction.positions) {
-            if (!world.isChunkLoaded(pos.x() >> 4, pos.z() >> 4)) continue;
-            updates.add(new BlockPredictionAckSender.TrackedBlockUpdate(pos, world.getServerBlockStateIdAt(pos)));
+            // Later server updates may still be in flight; this correction is written after them.
+            int state = world.getServerSentBlockStateIdAt(pos);
+            if (state == CompensatedWorld.UNKNOWN_SERVER_STATE) continue;
+            updates.add(new BlockPredictionAckSender.TrackedBlockUpdate(pos, state));
         }
         var slots = new ArrayList<InventoryPackets.Slot>();
         for (int slot : correction.slots) {

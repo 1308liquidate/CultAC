@@ -1195,6 +1195,24 @@ public class CultPlayer implements GrimUser {
         return platformPlayer != null && platformPlayer.hasPermission(s, defaultIfUnset);
     }
 
+    // The player's own shared-flags metadata entry as most recently sent by the server.
+    public volatile ac.cult.cultac.network.packet.EntityMetadata.Entry serverSentSelfSharedFlags;
+
+    /**
+     * Resends the server's shared flags for this player. The client keeps its locally predicted
+     * fall-flying flag until the server's value replaces it, so this ends an unconfirmed glide.
+     */
+    public void resyncPose() {
+        runSafely(() -> {
+            var flags = serverSentSelfSharedFlags;
+            if (flags == null) {
+                flags = ac.cult.cultac.network.packet.EntityMetadata.Entry.byteValue(
+                        ac.cult.cultac.utils.nmsutil.WatchableIndexUtil.ENTITY_SHARED_FLAGS, (byte) 0);
+            }
+            user.write(new ac.cult.cultac.network.packet.EntityMetadata(entityID, List.of(flags)));
+        });
+    }
+
     public void onEndOfTickEvent() {
         tick++;
         for (Runnable task : endOfTickTasks) task.run();

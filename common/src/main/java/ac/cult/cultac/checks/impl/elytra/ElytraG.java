@@ -5,7 +5,6 @@ import ac.cult.cultac.checks.CheckData;
 import ac.cult.cultac.checks.type.PostPredictionListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
-import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
 import ac.cult.cultac.protocol.value.MovementEffect;
@@ -40,7 +39,7 @@ public class ElytraG extends Check implements PostPredictionListener {
             if (shouldModifyPackets()) {
                 event.setCancelled(true);
                 player.onPacketCancel();
-                resyncPose();
+                player.resyncPose();
             }
         }
     }
@@ -51,12 +50,6 @@ public class ElytraG extends Check implements PostPredictionListener {
         if (setback) {
             setbackIfAboveSetbackVL();
             setback = false;
-        }
-    }
-
-    private void resyncPose() {
-        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_14) && player.platformPlayer != null) {
-            player.platformPlayer.setSneaking(!player.platformPlayer.isSneaking());
         }
     }
 }

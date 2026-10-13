@@ -46,6 +46,11 @@ final class ModelInventoryValues {
         };
     }
 
+    /** ClientboundSetCursorItemPacket: one optional item. */
+    void writeCursor(ByteBuf output, InventoryPackets.Cursor packet) {
+        values.write(output, packet.item());
+    }
+
     /** ClientboundContainerSetSlotPacket: container/state VarInts, slot short, optional item. */
     void writeSlot(ByteBuf output, InventoryPackets.Slot packet) {
         Wire.writeVarInt(output, packet.windowId());
@@ -76,9 +81,7 @@ final class ModelInventoryValues {
     }
 
     private SimItemStack clickItem(ByteBuf input) {
-        return version.atLeast(ProtocolVersion.V1_21_5)
-                ? values.hashedItem(input)
-                : values.item(input, false);
+        return version.atLeast(ProtocolVersion.V1_21_5) ? values.hashedItem(input) : values.item(input, false);
     }
 
     private InventoryPackets.Offers offers(ByteBuf input) {

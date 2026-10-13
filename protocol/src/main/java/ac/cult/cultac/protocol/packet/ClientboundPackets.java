@@ -201,7 +201,11 @@ public final class ClientboundPackets {
             PLAY.add("ticking_step", ClientboundTickingStep.class, new TickingStepCodec());
 
     // Inventory. Source-version layouts are audited for every supported release.
-    public static final PacketType<Opaque> CONTAINER_CLOSE = PLAY.ignored("container_close");
+    public static final PacketType<ac.cult.cultac.protocol.packet.clientbound.ClientboundContainerClose>
+            CONTAINER_CLOSE = PLAY.add(
+                    "container_close",
+                    ac.cult.cultac.protocol.packet.clientbound.ClientboundContainerClose.class,
+                    new ac.cult.cultac.protocol.codec.connection.ContainerCloseCodecs.Clientbound());
     public static final PacketType<ClientboundSetHeldSlot> SET_HELD_SLOT =
             PLAY.add("set_held_slot", ClientboundSetHeldSlot.class, new SetHeldSlotCodec());
     public static final PacketType<ClientboundMountScreenOpen> MOUNT_SCREEN_OPEN = PLAY.renamed(

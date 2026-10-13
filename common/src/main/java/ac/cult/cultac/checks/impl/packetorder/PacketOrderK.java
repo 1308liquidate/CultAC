@@ -6,7 +6,6 @@ import ac.cult.cultac.checks.type.PostPredictionListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundClientCommand;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.inventory.InventoryClick;
@@ -61,8 +60,11 @@ public class PacketOrderK extends Check implements PostPredictionListener {
         onClickOrClose(event, player, KIND_CLICK);
     }
 
-    @CultPacketHandler("serverbound.container_close")
-    public void onContainerClose(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {
+    @CultPacketHandler
+    public void onContainerClose(
+            PacketReceiveEvent<ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose> event,
+            CultPlayer player,
+            ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose packet) {
         onClickOrClose(event, player, KIND_CLOSE);
     }
 

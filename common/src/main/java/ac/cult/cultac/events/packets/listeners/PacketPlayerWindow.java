@@ -5,7 +5,6 @@ import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMountScreenOpen;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundOpenScreen;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
@@ -46,8 +45,11 @@ public class PacketPlayerWindow {
             player.openWindow.onClientOpenOrCloseWindow(true);
     }
 
-    @CultPacketHandler("serverbound.container_close")
-    public void onServerboundContainerClose(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {
+    @CultPacketHandler
+    public void onServerboundContainerClose(
+            PacketReceiveEvent<ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose> event,
+            CultPlayer player,
+            ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose packet) {
         if (player.isBedrockMovement()) handleInventory(player, false);
         else player.openWindow.onClientOpenOrCloseWindow(false);
     }
@@ -106,8 +108,11 @@ public class PacketPlayerWindow {
         player.latencyUtils.addRealTimeTaskNow(openInventory);
     }
 
-    @CultPacketHandler("clientbound.container_close")
-    public void onClientboundContainerClose(PacketSendEvent<Opaque> event, CultPlayer player, Opaque packet) {
+    @CultPacketHandler
+    public void onClientboundContainerClose(
+            PacketSendEvent<ac.cult.cultac.protocol.packet.clientbound.ClientboundContainerClose> event,
+            CultPlayer player,
+            ac.cult.cultac.protocol.packet.clientbound.ClientboundContainerClose packet) {
         if (!player.isBedrockMovement()) {
             player.openWindow.onServerWindow(event, 0, null);
             return;

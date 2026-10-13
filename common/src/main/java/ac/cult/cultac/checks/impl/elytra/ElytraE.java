@@ -37,7 +37,7 @@ public class ElytraE extends Check implements PostPredictionListener {
             if (shouldModifyPackets()) {
                 event.setCancelled(true);
                 player.onPacketCancel();
-                resyncPose();
+                player.resyncPose();
             }
         }
     }
@@ -48,12 +48,6 @@ public class ElytraE extends Check implements PostPredictionListener {
         if (setback) {
             setback = false;
             setbackIfAboveSetbackVL();
-        }
-    }
-
-    private void resyncPose() {
-        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_14) && player.platformPlayer != null) {
-            player.platformPlayer.setSneaking(!player.platformPlayer.isSneaking());
         }
     }
 }

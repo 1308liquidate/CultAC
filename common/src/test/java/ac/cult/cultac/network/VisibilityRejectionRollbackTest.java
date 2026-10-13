@@ -56,7 +56,6 @@ class VisibilityRejectionRollbackTest {
             assertEquals(36, slot.slot());
             assertEquals(3, slot.item().count());
             assertTrue(packets.indexOf(slot) < packets.indexOf(new ClientboundBlockChangedAck(1)));
-            verify(player.platformPlayer, never()).getInventory();
             setup.confirm(packets);
             assertEquals(3, player.getInventory().getHeldItem().count());
         }

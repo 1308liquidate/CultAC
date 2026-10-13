@@ -2,51 +2,29 @@ package ac.cult.cultac.utils.lists;
 
 import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.cultac.CultAPI;
-import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.protocol.ProtocolVersion;
-import ac.cult.cultac.utils.inventory.Inventory;
 import ac.cult.cultac.utils.inventory.InventoryStorage;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * This is responsible for lag compensation of the player's inventory
- * Since I don't want to spend months finding version differences in inventory
- * Or copy (and debug) over around 5k lines of code to accomplish inventories
- * Cult uses a hybrid system for inventories - we lag compensate but rely on the server
- * for the ultimate source of truth, and resync if what we found is different from what the server sees
- * <p>
- * This also patches most desync's that happen with inventories on some versions like 1.8 or
- * other desync's introduced by mojang or viabackwards
+ * The player's inventory model, corrected against the server's observed inventory.
  *
- * <p>
- * To accomplish this we:
- * - Track items changed when the player swaps or moves items in a basic inventory
- * - Track items when the player has placed a block, for example
- * - Track other item predictions by the client
- * <p>
- * There is somewhat of a race condition
- * The server's inventory state can only truly be read at the start of the tick
- * However, we read inventories async for performance reasons
- * This shouldn't cause any negative issues in practice, but it technically is wrong
- * <p>
- * Apply this only to the player's inventory for simplicity reasons
- * Horses and stuff, the metadata for saddles is server authoritative
- * No inventory directly affects us other than the player's inventory.
+ * <p>Cult mirrors client predictions (clicks, placements, item use) into this model. Vanilla's
+ * container synchronizer corrects only slots where the server's contents differ from what it
+ * believes the client holds, so a prediction the server rejects without a correction leaves the
+ * client desynchronized (MC-99075). Once every inventory packet already sent has been applied, the
+ * server's observed contents are authoritative; a slot that still differs is resent from them.
+ * Nothing here reads the live server inventory.
  */
 public class CorrectingPlayerInventoryStorage extends InventoryStorage {
+    // Ticks to wait after a change so the server's response to the same prediction has been sent.
+    private static final int SETTLE_TICKS = 5;
+    private static final long RECENT_LOCAL_USE_MILLIS = 1000;
 
-    private static final ClientVersion SERVER_VERSION =
-            ClientVersion.fromProtocolVersion(ProtocolVersion.V26_3.protocol());
     private final CultPlayer player;
-    // The key for this map is the inventory slot ID
-    // The value for this map is the transaction that we care about
-    // Returns -1 if the entry is null
-    private final Map<Integer, Integer> serverIsCurrentlyProcessingThesePredictions = new ConcurrentHashMap<>();
-    // A list of predictions the client has made for inventory changes
-    // Remove if the server rejects these changes
+    // Slot ID -> tick at which a recently changed slot is compared with the server
     private final Map<Integer, Integer> pendingFinalizedSlot = new ConcurrentHashMap<>();
 
     public CorrectingPlayerInventoryStorage(CultPlayer player, int size) {
@@ -54,126 +32,51 @@ public class CorrectingPlayerInventoryStorage extends InventoryStorage {
         this.player = player;
     }
 
-    // 1.17+ clients send what slots they have changed.  This makes our jobs much easier.
-    // Required as server now only sends changes if client disagrees with them.
-    public void handleClientClaimedSlotSet(int slotID) {
-        if (slotID >= 0 && slotID <= Inventory.ITEMS_END) {
-            pendingFinalizedSlot.put(slotID, CultAPI.INSTANCE.getTickManager().currentTick + 5);
-        }
-    }
-
-    public void handleServerCorrectSlot(int slotID) {
-        if (slotID >= 0 && slotID <= Inventory.ITEMS_END) {
-            serverIsCurrentlyProcessingThesePredictions.put(slotID, player.lastTransactionSent.get());
-        }
-    }
-
-    // This is more meant for pre-1.17 clients, but mojang fucked up netcode AGAIN in 1.17, so
-    // we must use this for 1.17 clients as well... at least you tried Mojang.
     @Override
     public void setItem(int item, SimItemStack stack) {
-        // If there is a more recent change to this one, don't override it
-        int finalTransaction = serverIsCurrentlyProcessingThesePredictions.getOrDefault(item, -1);
-
-        // If the server is currently sending a packet to the player AND it is the final change to the slot
-        // OR, the client was in control of setting this slot
-        if (finalTransaction == -1 || player.lastTransactionReceived.get() >= finalTransaction) {
-            // This is the last change for this slot, try to resync this slot if possible
-            pendingFinalizedSlot.put(item, CultAPI.INSTANCE.getTickManager().currentTick + 5);
-            serverIsCurrentlyProcessingThesePredictions.remove(item);
-        }
-
+        pendingFinalizedSlot.put(item, CultAPI.INSTANCE.getTickManager().currentTick + SETTLE_TICKS);
         super.setItem(item, stack);
     }
 
-    /**
-     * Checks that the specified slot is in sync with the server's and resyncs if needed.
-     * @param slot the slot to check
-     */
-    private void checkThatBukkitIsSynced(int slot) {
-        // The player isn't fully logged in yet, don't bother checking
-        if (player.platformPlayer == null) return;
-
-        // Bukkit uses different slot ID's to vanilla
-        int bukkitSlot = getBukkitSlot(slot); // 8 -> 39, should be 36
-
-        if (bukkitSlot != -1) {
-            SimItemStack existing = getItem(slot);
-            SimItemStack serverside = player.platformPlayer.getInventory().getStack(bukkitSlot, slot);
-
-            if (existing.getItem() != serverside.getItem() || existing.getCount() != serverside.getCount()) {
-                CultAPI.INSTANCE
-                        .getScheduler()
-                        .getEntityScheduler()
-                        .execute(
-                                player.platformPlayer,
-                                CultAPI.INSTANCE.getGrimPlugin(),
-                                () -> player.platformPlayer.updateInventory(),
-                                null,
-                                0);
-                setItem(slot, serverside);
-            }
-        }
-    }
-
-    // Taken from https://www.spigotmc.org/threads/mapping-protocol-to-bukkit-slots.577724/
-    public static int getBukkitSlot(int packetSlot) {
-        // 0 -> 5 are crafting slots, don't exist in bukkit
-        if (packetSlot <= 4) {
-            return -1;
-        }
-        // 5 -> 8 are armor slots in protocol, ordered helmets to boots
-        if (packetSlot <= 8) {
-            // 36 -> 39 are armor slots in bukkit, ordered boots to helmet. tbh I got this from trial and error.
-            return (7 - packetSlot) + 36;
-        }
-        // By a coincidence, non-hotbar inventory slots match.
-        if (packetSlot <= 35) {
-            return packetSlot;
-        }
-        // 36 -> 44 are hotbar slots in protocol
-        if (packetSlot <= 44) {
-            // 0 -> 9 are hotbar slots in bukkit
-            return packetSlot - 36;
-        }
-        // 45 is offhand in packet, it is 40 in bukkit
-        if (SERVER_VERSION.isNewerThanOrEquals(ClientVersion.V_1_9) && packetSlot == 45) {
-            return 40;
-        }
-        return -1;
-    }
-
-    public void tickWithBukkit() {
-        if (player.platformPlayer == null) return;
-        if (!player.platformPlayer.hasServerAuthority()) {
+    /** Owner thread only: compares and corrects through the outbound proof path. */
+    public void tickServerView() {
+        if (player.isBedrockMovement()) {
             pendingFinalizedSlot.clear();
             return;
         }
 
-        // Loop all slot changes the client has predicted and check that the server has accepted them
         int tickID = CultAPI.INSTANCE.getTickManager().currentTick;
         for (Iterator<Map.Entry<Integer, Integer>> it =
                         pendingFinalizedSlot.entrySet().iterator();
                 it.hasNext(); ) {
             Map.Entry<Integer, Integer> entry = it.next();
-            // If x ticks have passed, check the slot is equal to the server slot and remove
-            if (entry.getValue() <= tickID) {
-                checkThatBukkitIsSynced(entry.getKey());
+            if (entry.getValue() <= tickID && checkThatServerIsSynced(entry.getKey())) {
                 it.remove();
             }
         }
 
-        // Every five ticks, we pull a new item for the player
-        // This means no desync will last longer than 10 seconds
-        // (Required as mojang has screwed up some things with inventories that we can't easily fix)
-        // Don't spam this as it could cause lag (I was getting 0.3 ms to query this, this is done async though)
-        if (tickID % 5 == 0) {
+        // Every five ticks, check one more slot so in-place stack changes are also reconciled.
+        // Skip right after a local placement or use: its stack change may be shrunk in place, and the
+        // server's echo of an accepted change can still be on its way.
+        boolean recentLocalUse = System.currentTimeMillis() - player.lastBlockPlaceUseItem < RECENT_LOCAL_USE_MILLIS;
+        if (tickID % 5 == 0 && !recentLocalUse) {
             int slotToCheck = (tickID / 5) % getSize();
-            // If both these things are true, there is nothing that should be broken.
-            if (!pendingFinalizedSlot.containsKey(slotToCheck)
-                    && !serverIsCurrentlyProcessingThesePredictions.containsKey(slotToCheck)) {
-                checkThatBukkitIsSynced(slotToCheck);
+            if (!pendingFinalizedSlot.containsKey(slotToCheck)) {
+                checkThatServerIsSynced(slotToCheck);
             }
         }
+    }
+
+    /** Returns false while server packets are still in flight, so the check is retried. */
+    private boolean checkThatServerIsSynced(int slot) {
+        SimItemStack serverside = player.getInventory().settledServerSlot(slot);
+        if (serverside == null) {
+            return !player.getInventory().hasPendingServerInventory();
+        }
+        SimItemStack existing = getItem(slot);
+        if (existing.getItem() != serverside.getItem() || existing.getCount() != serverside.getCount()) {
+            player.getInventory().correctPlayerSlot(slot);
+        }
+        return true;
     }
 }

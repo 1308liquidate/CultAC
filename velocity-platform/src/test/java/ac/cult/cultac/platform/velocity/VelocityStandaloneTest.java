@@ -104,12 +104,8 @@ class VelocityStandaloneTest {
         assertFalse(player.eject());
         assertFalse(player.teleportAsync(player.getLocation()).join());
         clearInvocations(nativePlayer, connection);
-        player.setSneaking(true);
         player.setGameMode(GameMode.SPECTATOR);
-        player.updateInventory();
-        player.closeInventory();
         player.clearActiveItem();
-        player.resendBlocks(0, 0, 0, 16, 256, 16);
         verifyNoInteractions(nativePlayer, connection);
     }
 

@@ -104,6 +104,8 @@ public class PacketPlayerRespawn {
         player.dimension = HolderSets.identifier(spawnInfo.dimension());
         player.world = spawnInfo.dimension();
         player.compensatedWorld.setLastClientboundDimension(player.world, dimensionType.dimension());
+        player.compensatedWorld.serverWorldChangeSent();
+        player.serverSentSelfSharedFlags = null;
         player.compensatedWorld.onClientLogin();
         player.compensatedWorld.setDimension(player.world, dimensionType);
         player.compensatedWorld.clientSeaLevel(spawnInfo.seaLevel());
@@ -125,6 +127,8 @@ public class PacketPlayerRespawn {
         String previousClientboundDimension =
                 player.compensatedWorld.getLastClientboundDimension().dimension();
         player.compensatedWorld.setLastClientboundDimension(worldName, dimensionType.dimension());
+        // The server's new player entity starts from default shared flags.
+        player.serverSentSelfSharedFlags = null;
 
         // Force the player to accept a teleport before respawning
         // (We won't process movements until they accept a teleport, we won't let movements though either)
@@ -135,6 +139,7 @@ public class PacketPlayerRespawn {
 
         if (worldChange) {
             player.compensatedEntities.serverPositionsMap.clear();
+            player.compensatedWorld.serverWorldChangeSent();
         }
 
         final boolean keepEntityData = packet.shouldKeep(ClientboundRespawn.KEEP_ENTITY_DATA);

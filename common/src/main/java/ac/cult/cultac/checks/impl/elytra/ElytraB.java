@@ -46,7 +46,7 @@ public class ElytraB extends Check implements PostPredictionListener {
                 if (shouldModifyPackets()) {
                     event.setCancelled(true);
                     player.onPacketCancel();
-                    resyncPose();
+                    player.resyncPose();
                 }
             }
         } else {
@@ -96,11 +96,5 @@ public class ElytraB extends Check implements PostPredictionListener {
     private boolean supportsEndTick() {
         return player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)
                 && SERVER_VERSION.isNewerThanOrEquals(ClientVersion.V_1_21_2);
-    }
-
-    private void resyncPose() {
-        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_14) && player.platformPlayer != null) {
-            player.platformPlayer.setSneaking(!player.platformPlayer.isSneaking());
-        }
     }
 }

@@ -113,7 +113,15 @@ public final class ClientPacketCodecs {
                 "container_set_content",
                 InventoryPackets.Content.class,
                 inventoryReader(names, "minecraft:container_set_content", true));
-        pinned.add("container_set_slot", InventoryPackets.Slot.class, inventorySlotCodec(names));
+        pinned.add(
+                "container_set_slot",
+                InventoryPackets.Slot.class,
+                writableInventoryCodec(names, "minecraft:container_set_slot", (output, items, packet) -> {
+                    Wire.writeVarInt(output, packet.windowId());
+                    Wire.writeVarInt(output, packet.stateId());
+                    output.writeShort(packet.slot());
+                    items.write(output, packet.item());
+                }));
         pinned.add(
                 "set_player_inventory",
                 InventoryPackets.PlayerInventory.class,
@@ -121,7 +129,10 @@ public final class ClientPacketCodecs {
         pinned.add(
                 "set_cursor_item",
                 InventoryPackets.Cursor.class,
-                inventoryReader(names, "minecraft:set_cursor_item", true));
+                writableInventoryCodec(
+                        names,
+                        "minecraft:set_cursor_item",
+                        (output, items, packet) -> items.write(output, packet.item())));
         pinned.add(
                 "set_equipment",
                 InventoryPackets.Equipment.class,
@@ -174,10 +185,14 @@ public final class ClientPacketCodecs {
                 .toList();
     }
 
-    private static WritablePacketCodec<InventoryPackets.Slot> inventorySlotCodec(
-            Function<ProtocolContext, RegistryNames> snapshots) {
-        var reader = ClientPacketCodecs.<InventoryPackets.Slot>inventoryReader(
-                snapshots, "minecraft:container_set_slot", true);
+    @FunctionalInterface
+    private interface ItemPacketWriter<T> {
+        void write(ByteBuf output, ModelItemValues items, T packet);
+    }
+
+    private static <T> WritablePacketCodec<T> writableInventoryCodec(
+            Function<ProtocolContext, RegistryNames> snapshots, String name, ItemPacketWriter<T> writer) {
+        var reader = ClientPacketCodecs.<T>inventoryReader(snapshots, name, true);
         return new WritablePacketCodec<>() {
             @Override
             public boolean requiresModelValues() {
@@ -190,12 +205,12 @@ public final class ClientPacketCodecs {
             }
 
             @Override
-            public InventoryPackets.Slot read(ByteBuf input, ProtocolContext context) {
+            public T read(ByteBuf input, ProtocolContext context) {
                 return reader.read(input, context);
             }
 
             @Override
-            public void write(ByteBuf output, ProtocolContext context, InventoryPackets.Slot packet) {
+            public void write(ByteBuf output, ProtocolContext context, T packet) {
                 requireModelWire(context);
                 var snapshot = snapshots.apply(context);
                 var names = new WireValueDecoder.Registries() {
@@ -209,15 +224,14 @@ public final class ClientPacketCodecs {
                         return snapshot.id(registry, name);
                     }
                 };
-                Wire.writeVarInt(output, packet.windowId());
-                Wire.writeVarInt(output, packet.stateId());
-                output.writeShort(packet.slot());
-                new ModelItemValues(
+                writer.write(
+                        output,
+                        new ModelItemValues(
                                 ProtocolCodecs.decoder(),
                                 MODEL_VERSION,
                                 names,
-                                ac.cult.cultac.utils.inventory.ItemUtil.modelItems())
-                        .write(output, packet.item());
+                                ac.cult.cultac.utils.inventory.ItemUtil.modelItems()),
+                        packet);
             }
         };
     }
