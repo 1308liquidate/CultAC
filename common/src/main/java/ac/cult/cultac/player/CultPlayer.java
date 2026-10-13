@@ -166,6 +166,9 @@ public class CultPlayer implements GrimUser {
     public int riptideSpinAttackTicks;
     private @MonotonicNonNull PacketTracker packetTracker;
     public final @NotNull PacketOrderProcessor packetOrderProcessor = new PacketOrderProcessor(this);
+    // Debug stimulus: drops interactions so the resync paths can be exercised.
+    public final ac.cult.cultac.utils.latency.InteractionPause interactionPause =
+            new ac.cult.cultac.utils.latency.InteractionPause(this);
     public final ac.cult.cultac.utils.latency.BlockActionReconciler blockActionReconciler =
             new ac.cult.cultac.utils.latency.BlockActionReconciler(this);
     public long rawTransactionPing = 0;
@@ -1236,6 +1239,11 @@ public class CultPlayer implements GrimUser {
     @Nullable
     public ac.cult.cultac.manager.tick.BackendTickEstimator backendTicks() {
         return user.getCultConnection().platform().backendTicks();
+    }
+
+    /** True when a debug interaction pause drops this serverbound packet. Owner thread only. */
+    public boolean discardsPausedInteraction(Object packet) {
+        return interactionPause.discards(packet);
     }
 
     /** An estimated server tick boundary: ends this tick and starts the next. Owner thread only. */

@@ -119,6 +119,9 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
                 var original = (ServerboundPacket) value.packet();
                 originalType = type;
                 originalPacket = original;
+                var pausing = connection.player();
+                // A debug interaction pause discards before Cult or the server sees the packet.
+                if (pausing != null && pausing.discardsPausedInteraction(original)) return null;
                 connection.prepare();
                 var event = new PacketReceiveEvent<>(connection.user(), phase, type, original);
                 if (route.receive() != null) connection.dispatcher().receive(event, route.receive());

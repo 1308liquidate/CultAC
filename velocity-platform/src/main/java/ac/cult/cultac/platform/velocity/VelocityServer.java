@@ -63,8 +63,7 @@ final class VelocityServer implements PlatformServer {
     }
 
     @Override
-    public void applyValidationBlock(
-            PlatformPlayer player, int x, int y, int z, String state, boolean packetOnly, Runnable applied) {
+    public void applyValidationBlock(PlatformPlayer player, int x, int y, int z, String state, Runnable applied) {
         throw new UnsupportedOperationException("A proxy cannot mutate server blocks");
     }
 }

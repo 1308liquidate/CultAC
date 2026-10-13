@@ -61,9 +61,8 @@ public class BukkitPlatformServer implements PlatformServer {
             int y,
             int z,
             String state,
-            boolean packetOnly,
             Runnable applied) {
-        BukkitValidationBlocks.apply(player, x, y, z, state, packetOnly, applied);
+        BukkitValidationBlocks.apply(player, x, y, z, state, applied);
     }
 
     @Override

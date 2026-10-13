@@ -115,7 +115,7 @@ class VelocityStandaloneTest {
         var platform = new VelocityServer(mock(ProxyServer.class), mock(VelocitySenders.class));
         assertThrows(
                 UnsupportedOperationException.class,
-                () -> platform.applyValidationBlock(player, 0, 64, 0, "minecraft:stone", false, callback));
+                () -> platform.applyValidationBlock(player, 0, 64, 0, "minecraft:stone", callback));
         verifyNoInteractions(callback);
         assertTrue(Double.isNaN(platform.getTPS()));
     }
