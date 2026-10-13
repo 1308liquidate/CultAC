@@ -131,6 +131,7 @@ final class VelocityTransport {
         if (!running) {
             return;
         }
+        if (VelocityProtocols.disconnectOutdatedClient(player, channel)) return;
         var pipeline = channel.pipeline();
         if (pipeline.get("minecraft-decoder") == null || pipeline.get("minecraft-encoder") == null) {
             throw new IllegalStateException("Unsupported Velocity client pipeline: " + pipeline.names());

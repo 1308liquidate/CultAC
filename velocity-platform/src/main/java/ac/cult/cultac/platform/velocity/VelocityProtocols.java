@@ -1,17 +1,28 @@
 package ac.cult.cultac.platform.velocity;
 
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import com.velocitypowered.api.proxy.Player;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import net.kyori.adventure.text.Component;
 
 /** The native codec format and the original handshake belong to one physical client channel. */
 final class VelocityProtocols {
     record Versions(ProtocolVersion observed, ProtocolVersion client) {}
 
     private VelocityProtocols() {}
+
+    static boolean disconnectOutdatedClient(Player player, Channel channel) {
+        // Check the raw protocol before resolving Cult's supported wire formats.
+        if (player.getProtocolVersion().getProtocol() >= ClientVersion.V_1_21_2.getProtocolVersion()) return false;
+        var pipeline = channel.pipeline();
+        if (pipeline.get("via-decoder") != null && pipeline.get("via-encoder") != null) return false;
+        player.disconnect(Component.text("Outdated client! Please use Minecraft 1.21.2 or newer."));
+        return true;
+    }
 
     static Versions read(Player player, Channel channel) {
         var pipeline = channel.pipeline();
