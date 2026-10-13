@@ -16,7 +16,8 @@ class InterpolationBoundsTest {
             int steps = 1 + random.nextInt(20);
             int low = random.nextInt(steps + 1);
             int high = low + random.nextInt(steps - low + 1);
-            assertSameBounds(legacy(from, to, steps, low, high),
+            assertSameBounds(
+                    legacy(from, to, steps, low, high),
                     ReachInterpolationData.combinedInterpolatedBounds(from, to, steps, low, high));
         }
     }
@@ -27,38 +28,42 @@ class InterpolationBoundsTest {
         for (double x : values) {
             var from = new SimpleCollisionBox(x, 64, x, x + 0.6F, 65.8F, x + 0.6F);
             var to = new SimpleCollisionBox(x, 64, x, x + 1.0, 65, x + 1.0);
-            for (int low = 0; low <= 3; low++) for (int high = low; high <= 3; high++) {
-                var result = ReachInterpolationData.combinedInterpolatedBounds(from, to, 3, low, high);
-                assertSameBounds(legacy(from, to, 3, low, high), result);
-                result.expand(10);
-                assertEquals(x, from.minX);
-                assertEquals(x, to.minX);
-            }
+            for (int low = 0; low <= 3; low++)
+                for (int high = low; high <= 3; high++) {
+                    var result = ReachInterpolationData.combinedInterpolatedBounds(from, to, 3, low, high);
+                    assertSameBounds(legacy(from, to, 3, low, high), result);
+                    result.expand(10);
+                    assertEquals(x, from.minX);
+                    assertEquals(x, to.minX);
+                }
         }
         var full = new SimpleCollisionBox(0, 0, 0, 1, 1, 1);
-        assertTrue(ReachInterpolationData.combinedInterpolatedBounds(full, full, 3, 0, 3).isFullBlock());
+        assertTrue(ReachInterpolationData.combinedInterpolatedBounds(full, full, 3, 0, 3)
+                .isFullBlock());
     }
 
     private static SimpleCollisionBox randomBox(Random random) {
         double x = (random.nextDouble() - 0.5) * 60000000;
         double y = (random.nextDouble() - 0.5) * 4000;
         double z = (random.nextDouble() - 0.5) * 60000000;
-        return new SimpleCollisionBox(x, y, z, x + random.nextDouble() * 16,
-                y + random.nextDouble() * 16, z + random.nextDouble() * 16);
+        return new SimpleCollisionBox(
+                x, y, z, x + random.nextDouble() * 16, y + random.nextDouble() * 16, z + random.nextDouble() * 16);
     }
 
-    private static SimpleCollisionBox legacy(SimpleCollisionBox from, SimpleCollisionBox to,
-            int steps, int low, int high) {
+    private static SimpleCollisionBox legacy(
+            SimpleCollisionBox from, SimpleCollisionBox to, int steps, int low, int high) {
         var boxes = new java.util.ArrayList<SimpleCollisionBox>();
-        for (int i = low; i <= high; i++) boxes.add(new SimpleCollisionBox(
-                from.minX + i * ((to.minX - from.minX) / steps),
-                from.minY + i * ((to.minY - from.minY) / steps),
-                from.minZ + i * ((to.minZ - from.minZ) / steps),
-                from.maxX + i * ((to.maxX - from.maxX) / steps),
-                from.maxY + i * ((to.maxY - from.maxY) / steps),
-                from.maxZ + i * ((to.maxZ - from.maxZ) / steps)));
+        for (int i = low; i <= high; i++)
+            boxes.add(new SimpleCollisionBox(
+                    from.minX + i * ((to.minX - from.minX) / steps),
+                    from.minY + i * ((to.minY - from.minY) / steps),
+                    from.minZ + i * ((to.minZ - from.minZ) / steps),
+                    from.maxX + i * ((to.maxX - from.maxX) / steps),
+                    from.maxY + i * ((to.maxY - from.maxY) / steps),
+                    from.maxZ + i * ((to.maxZ - from.maxZ) / steps)));
         var result = boxes.getFirst();
-        for (int i = 1; i < boxes.size(); i++) result = ReachInterpolationData.combineCollisionBox(result, boxes.get(i));
+        for (int i = 1; i < boxes.size(); i++)
+            result = ReachInterpolationData.combineCollisionBox(result, boxes.get(i));
         return result;
     }
 

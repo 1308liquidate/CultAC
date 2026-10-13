@@ -21,22 +21,36 @@ public final class SectionSnapshot {
         this.biomes = biomes;
     }
 
-    public static SectionSnapshot read(ByteBuf input, ProtocolVersion version, int sourceStates, int modelStates,
-            int sourceBiomes, int modelBiomes, IntUnaryOperator states, IntUnaryOperator biomes) {
+    public static SectionSnapshot read(
+            ByteBuf input,
+            ProtocolVersion version,
+            int sourceStates,
+            int modelStates,
+            int sourceBiomes,
+            int modelBiomes,
+            IntUnaryOperator states,
+            IntUnaryOperator biomes) {
         short nonEmpty = input.readShort();
         short fluids = version.atLeast(ProtocolVersion.V26_1) ? input.readShort() : 0;
-        return new SectionSnapshot(nonEmpty, fluids,
+        return new SectionSnapshot(
+                nonEmpty,
+                fluids,
                 PalettedSection.readBlocks(input, version, sourceStates).remap(states, modelStates),
                 PalettedSection.readBiomes(input, version, sourceBiomes).remap(biomes, modelBiomes));
     }
 
-    public static SectionSnapshot readBiomes(ByteBuf input, ProtocolVersion version,
-            int sourceBiomes, int modelBiomes, IntUnaryOperator biomes) {
-        return new SectionSnapshot((short) 0, (short) 0, null,
+    public static SectionSnapshot readBiomes(
+            ByteBuf input, ProtocolVersion version, int sourceBiomes, int modelBiomes, IntUnaryOperator biomes) {
+        return new SectionSnapshot(
+                (short) 0,
+                (short) 0,
+                null,
                 PalettedSection.readBiomes(input, version, sourceBiomes).remap(biomes, modelBiomes));
     }
 
-    public PalettedSection copyBlocks() { return blocks.copy(); }
+    public PalettedSection copyBlocks() {
+        return blocks.copy();
+    }
 
     public int[] copyBiomes() {
         int[] values = new int[64];
@@ -57,6 +71,8 @@ public final class SectionSnapshot {
                 section.biomes.write(output);
             }
             return ByteBuffer.wrap(ByteBufUtil.getBytes(output)).asReadOnlyBuffer();
-        } finally { output.release(); }
+        } finally {
+            output.release();
+        }
     }
 }

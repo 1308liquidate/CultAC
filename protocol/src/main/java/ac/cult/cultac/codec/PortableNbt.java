@@ -9,7 +9,9 @@ import java.util.HashMap;
 final class PortableNbt {
     private PortableNbt() {}
 
-    static <T> T read(Tag tag, NbtFactory<T> factory) { return read(tag, factory, 0); }
+    static <T> T read(Tag tag, NbtFactory<T> factory) {
+        return read(tag, factory, 0);
+    }
 
     private static <T> T read(Tag tag, NbtFactory<T> factory, int depth) {
         if (tag instanceof NumberTag number) {

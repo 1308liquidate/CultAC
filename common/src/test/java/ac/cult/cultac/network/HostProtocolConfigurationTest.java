@@ -2,13 +2,13 @@ package ac.cult.cultac.network;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.ProtocolRuntime;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.data.ProtocolData;
-import ac.cult.cultac.protocol.netty.CultEncoder;
 import ac.cult.cultac.protocol.netty.CultDecoder;
-import ac.cult.cultac.protocol.ConnectionPhase;
-import ac.cult.cultac.protocol.PacketDirection;
+import ac.cult.cultac.protocol.netty.CultEncoder;
 import ac.cult.cultac.protocol.wire.Wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -16,10 +16,10 @@ import io.netty.channel.*;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.channel.local.LocalChannel;
 import io.netty.util.concurrent.DefaultEventExecutor;
+import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -65,8 +65,11 @@ class HostProtocolConfigurationTest {
             // the owning movement executor forwards the first to the native decoder.
             for (int id : new int[] {1, 2}) {
                 ByteBuf frame = Unpooled.buffer();
-                Wire.writeVarInt(frame, runtime.data().packets(ConnectionPhase.CONFIGURATION, PacketDirection.SERVERBOUND)
-                        .id("minecraft:pong"));
+                Wire.writeVarInt(
+                        frame,
+                        runtime.data()
+                                .packets(ConnectionPhase.CONFIGURATION, PacketDirection.SERVERBOUND)
+                                .id("minecraft:pong"));
                 frame.writeInt(id);
                 channel.writeInbound(frame);
             }
@@ -105,23 +108,27 @@ class HostProtocolConfigurationTest {
         var configurationTask = new Object();
         try {
             io.register(channel).sync();
-            channel.eventLoop().submit(() -> {
-                channel.pipeline().addLast("decoder", new ChannelDuplexHandler() {
-                    @Override
-                    public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
-                        assertTrue(channel.eventLoop().inEventLoop());
-                        observed.complete(message);
-                        promise.setSuccess();
-                    }
-                });
-                channel.pipeline().addLast("encoder", new ChannelOutboundHandlerAdapter());
-                var runtime = ProtocolRuntime.create(ProtocolData.load(ProtocolVersion.V26_3));
-                var routes = new TestTransportRoutes(runtime);
-                var connection = new CultConnection(channel, routes.dispatcher,
-                        ignored -> separateOwner ? new PacketOwner(owner, null) : null);
-                connection.resolveOwner();
-                CultEncoder.install(connection);
-            }).get(5, TimeUnit.SECONDS);
+            channel.eventLoop()
+                    .submit(() -> {
+                        channel.pipeline().addLast("decoder", new ChannelDuplexHandler() {
+                            @Override
+                            public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
+                                assertTrue(channel.eventLoop().inEventLoop());
+                                observed.complete(message);
+                                promise.setSuccess();
+                            }
+                        });
+                        channel.pipeline().addLast("encoder", new ChannelOutboundHandlerAdapter());
+                        var runtime = ProtocolRuntime.create(ProtocolData.load(ProtocolVersion.V26_3));
+                        var routes = new TestTransportRoutes(runtime);
+                        var connection = new CultConnection(
+                                channel,
+                                routes.dispatcher,
+                                ignored -> separateOwner ? new PacketOwner(owner, null) : null);
+                        connection.resolveOwner();
+                        CultEncoder.install(connection);
+                    })
+                    .get(5, TimeUnit.SECONDS);
             owner.execute(() -> {
                 ownerBlocked.complete(null);
                 try {
@@ -132,7 +139,8 @@ class HostProtocolConfigurationTest {
             });
             ownerBlocked.get(5, TimeUnit.SECONDS);
             // Paper Connection.setupInboundProtocol does this synchronously in beginLogin.
-            channel.eventLoop().submit(() -> channel.writeAndFlush(configurationTask).syncUninterruptibly())
+            channel.eventLoop()
+                    .submit(() -> channel.writeAndFlush(configurationTask).syncUninterruptibly())
                     .get(5, TimeUnit.SECONDS);
             assertSame(configurationTask, observed.get(5, TimeUnit.SECONDS));
         } finally {

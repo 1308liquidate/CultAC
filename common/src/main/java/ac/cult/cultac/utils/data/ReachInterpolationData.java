@@ -364,8 +364,11 @@ public class ReachInterpolationData {
     public SimpleCollisionBox getPossibleMovementLocationCombined() {
         if (interpolationQueue != null) return steppedBox(steppedCurrent.position());
         return combinedInterpolatedBounds(
-                startingLocation, targetLocation, getInterpolationSteps(),
-                interpolationStepsLowBound, interpolationStepsHighBound);
+                startingLocation,
+                targetLocation,
+                getInterpolationSteps(),
+                interpolationStepsLowBound,
+                interpolationStepsHighBound);
     }
 
     /** Grim 2.0's endpoint union: every corner is monotone over the interpolation range. */

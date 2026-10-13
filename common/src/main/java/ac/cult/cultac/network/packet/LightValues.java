@@ -11,13 +11,23 @@ public final class LightValues {
     private final BitSet skyYMask, blockYMask, emptySkyYMask, emptyBlockYMask;
     private final List<Layer> sky, block;
 
-    public LightValues(BitSet skyYMask, BitSet blockYMask, BitSet emptySkyYMask,
-            BitSet emptyBlockYMask, List<byte[]> skyUpdates, List<byte[]> blockUpdates) {
+    public LightValues(
+            BitSet skyYMask,
+            BitSet blockYMask,
+            BitSet emptySkyYMask,
+            BitSet emptyBlockYMask,
+            List<byte[]> skyUpdates,
+            List<byte[]> blockUpdates) {
         this(layers(skyUpdates), layers(blockUpdates), skyYMask, blockYMask, emptySkyYMask, emptyBlockYMask);
     }
 
-    private LightValues(List<Layer> sky, List<Layer> block, BitSet skyYMask, BitSet blockYMask,
-            BitSet emptySkyYMask, BitSet emptyBlockYMask) {
+    private LightValues(
+            List<Layer> sky,
+            List<Layer> block,
+            BitSet skyYMask,
+            BitSet blockYMask,
+            BitSet emptySkyYMask,
+            BitSet emptyBlockYMask) {
         this.skyYMask = (BitSet) skyYMask.clone();
         this.blockYMask = (BitSet) blockYMask.clone();
         this.emptySkyYMask = (BitSet) emptySkyYMask.clone();
@@ -26,8 +36,13 @@ public final class LightValues {
         this.block = List.copyOf(block);
     }
 
-    public static LightValues ofLayers(BitSet skyYMask, BitSet blockYMask, BitSet emptySkyYMask,
-            BitSet emptyBlockYMask, List<Layer> sky, List<Layer> block) {
+    public static LightValues ofLayers(
+            BitSet skyYMask,
+            BitSet blockYMask,
+            BitSet emptySkyYMask,
+            BitSet emptyBlockYMask,
+            List<Layer> sky,
+            List<Layer> block) {
         return new LightValues(sky, block, skyYMask, blockYMask, emptySkyYMask, emptyBlockYMask);
     }
 
@@ -47,12 +62,29 @@ public final class LightValues {
         return result;
     }
 
-    public BitSet skyYMask() { return (BitSet) skyYMask.clone(); }
-    public BitSet blockYMask() { return (BitSet) blockYMask.clone(); }
-    public BitSet emptySkyYMask() { return (BitSet) emptySkyYMask.clone(); }
-    public BitSet emptyBlockYMask() { return (BitSet) emptyBlockYMask.clone(); }
-    public List<byte[]> skyUpdates() { return sky.stream().map(Layer::copyBytes).toList(); }
-    public List<byte[]> blockUpdates() { return block.stream().map(Layer::copyBytes).toList(); }
+    public BitSet skyYMask() {
+        return (BitSet) skyYMask.clone();
+    }
+
+    public BitSet blockYMask() {
+        return (BitSet) blockYMask.clone();
+    }
+
+    public BitSet emptySkyYMask() {
+        return (BitSet) emptySkyYMask.clone();
+    }
+
+    public BitSet emptyBlockYMask() {
+        return (BitSet) emptyBlockYMask.clone();
+    }
+
+    public List<byte[]> skyUpdates() {
+        return sky.stream().map(Layer::copyBytes).toList();
+    }
+
+    public List<byte[]> blockUpdates() {
+        return block.stream().map(Layer::copyBytes).toList();
+    }
 
     public boolean hasUpdate(boolean skyLight, int section) {
         return (skyLight ? skyYMask : blockYMask).get(section);
@@ -69,9 +101,11 @@ public final class LightValues {
     /** Immutable nibble storage, shared safely between the packet and compensated state. */
     public static final class Layer {
         private static final Layer[] UNIFORM = new Layer[16];
+
         static {
             for (int i = 0; i < UNIFORM.length; i++) UNIFORM[i] = new Layer(null, i);
         }
+
         private final byte[] data;
         private final int uniform;
 
@@ -80,7 +114,9 @@ public final class LightValues {
             this.uniform = uniform;
         }
 
-        public static Layer empty() { return UNIFORM[0]; }
+        public static Layer empty() {
+            return UNIFORM[0];
+        }
 
         /** Reads owned bytes only for nonuniform layers; inspection never advances the frame. */
         public static Layer read(ByteBuf input, int length) {

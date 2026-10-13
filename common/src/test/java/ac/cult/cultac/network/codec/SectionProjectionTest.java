@@ -186,19 +186,22 @@ class SectionProjectionTest {
                 int[] codes = new int[64];
                 for (int i = 0; i < codes.length; i++) codes[i] = i % 4;
                 palette(input, version, bits(70), null, codes);
-                var registries = new SectionProjection.Registries(MODEL_STATES, MODEL_STATES,
-                        70, 8, IntUnaryOperator.identity(), id -> id + 1);
+                var registries = new SectionProjection.Registries(
+                        MODEL_STATES, MODEL_STATES, 70, 8, IntUnaryOperator.identity(), id -> id + 1);
                 byte[] original = SectionProjection.biomes(input, version, 2, registries);
                 input.readerIndex(0);
                 var snapshots = SectionProjection.decodedBiomes(input, version, 2, registries);
                 assertFalse(input.isReadable());
                 var encoded = ac.cult.cultac.network.packet.SectionSnapshot.encode(snapshots);
-                byte[] bytes = new byte[encoded.remaining()]; encoded.get(bytes);
+                byte[] bytes = new byte[encoded.remaining()];
+                encoded.get(bytes);
                 assertArrayEquals(original, bytes);
                 assertArrayEquals(filled(64, 4), snapshots.getFirst().copyBiomes());
                 snapshots.getFirst().copyBiomes()[0] = 0;
                 assertEquals(4, snapshots.getFirst().copyBiomes()[0]);
-            } finally { input.release(); }
+            } finally {
+                input.release();
+            }
         }
     }
 
@@ -224,7 +227,8 @@ class SectionProjectionTest {
         var decoded = SectionProjection.decodedSections(input, version, count, registries);
         assertEquals(end, input.readerIndex());
         var encoded = ac.cult.cultac.network.packet.SectionSnapshot.encode(decoded);
-        byte[] bytes = new byte[encoded.remaining()]; encoded.get(bytes);
+        byte[] bytes = new byte[encoded.remaining()];
+        encoded.get(bytes);
         assertArrayEquals(original, bytes);
         var verification = Unpooled.wrappedBuffer(original);
         try {
@@ -238,7 +242,9 @@ class SectionProjectionTest {
                 directBlocks.getAndSet(0, before == 0 ? 1 : 0);
                 assertEquals(before, section.copyBlocks().get(0), "Cache mutation cannot alter the packet snapshot");
             }
-        } finally { verification.release(); }
+        } finally {
+            verification.release();
+        }
         return Unpooled.wrappedBuffer(original);
     }
 

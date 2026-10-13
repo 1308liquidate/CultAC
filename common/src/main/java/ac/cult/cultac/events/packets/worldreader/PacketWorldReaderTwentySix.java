@@ -83,7 +83,8 @@ public class PacketWorldReaderTwentySix extends BasePacketWorldReader {
             if (chunk.decodedSections() != null) {
                 if (chunk.decodedSections().size() != values.length)
                     throw new IllegalArgumentException("Biome section count differs from the received dimension");
-                for (int i = 0; i < values.length; i++) values[i] = chunk.decodedSections().get(i).copyBiomes();
+                for (int i = 0; i < values.length; i++)
+                    values[i] = chunk.decodedSections().get(i).copyBiomes();
             } else {
                 var bytes = Unpooled.wrappedBuffer(chunk.sections());
                 try {

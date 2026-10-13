@@ -49,6 +49,7 @@ public final class ItemStructureGuard {
     private final boolean templateFraming;
     /** 26.x optional templates carry an explicit present flag; earlier schemas fold it into the amount. */
     private final boolean optionalTemplate;
+
     private int depth;
     private int items;
     private int components;

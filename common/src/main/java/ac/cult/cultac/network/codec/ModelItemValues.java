@@ -111,15 +111,22 @@ public final class ModelItemValues {
     }
 
     /** Host item capture uses the same direct component bridge as packet decoding. */
-    public static ComponentPatch readPatch(WireValueDecoder decoder, ProtocolVersion version, ByteBuf input,
-            boolean creative, WireValueDecoder.Registries registries) {
+    public static ComponentPatch readPatch(
+            WireValueDecoder decoder,
+            ProtocolVersion version,
+            ByteBuf input,
+            boolean creative,
+            WireValueDecoder.Registries registries) {
         return patch(decoder.item(version, input, creative, registries, ModelNbtFactory.INSTANCE));
     }
 
     private static ComponentPatch patch(WireValueDecoder.DecodedItem<ac.cult.blocksim.data.nbt.NbtValue> value) {
-        var patch = value.components() == null ? ComponentPatch.EMPTY
-                : ComponentPatch.fromNbt((ac.cult.blocksim.data.nbt.NbtValue.Compound) value.components(),
-                        value.componentLayouts() == null ? new ac.cult.blocksim.data.nbt.NbtValue.Compound(java.util.Map.of())
+        var patch = value.components() == null
+                ? ComponentPatch.EMPTY
+                : ComponentPatch.fromNbt(
+                        (ac.cult.blocksim.data.nbt.NbtValue.Compound) value.components(),
+                        value.componentLayouts() == null
+                                ? new ac.cult.blocksim.data.nbt.NbtValue.Compound(java.util.Map.of())
                                 : (ac.cult.blocksim.data.nbt.NbtValue.Compound) value.componentLayouts());
         if (value.componentEncodings().isEmpty()) return patch;
         var encodings = new java.util.HashMap<String, ac.cult.blocksim.data.ComponentWireEncoding>();
@@ -151,7 +158,9 @@ public final class ModelItemValues {
         if (count <= 0) return items.empty();
         String key = registries.preserveIdentifiers()
                 ? registries.name("minecraft:item", id)
-                : ModelRegistryData.load(ProtocolVersion.V26_3).registry("minecraft:item").name(mappings.item(id));
+                : ModelRegistryData.load(ProtocolVersion.V26_3)
+                        .registry("minecraft:item")
+                        .name(mappings.item(id));
         var stack = items.stack(key, count, patch);
         if (wirePatch != null) stack.wirePatch(encoding(wirePatch));
         return stack;

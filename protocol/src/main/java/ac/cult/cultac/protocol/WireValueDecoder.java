@@ -127,22 +127,39 @@ public interface WireValueDecoder extends AutoCloseable {
     /** Builds the consumer's owned NBT tree directly, without a serialized transport copy. */
     interface NbtFactory<T> {
         T read(byte[] networkNbt);
+
         T number(int type, Number value);
+
         T text(String value);
+
         T array(int type, List<Long> values);
+
         T sequence(List<T> values);
+
         T compound(Map<String, T> values);
     }
 
-    record DecodedItem<T>(int id, int count, T components, T componentLayouts,
-            Map<String, ComponentEncoding> componentEncodings, ComponentEncoding wirePatch) {
-        public DecodedItem { componentEncodings = Map.copyOf(componentEncodings); }
+    record DecodedItem<T>(
+            int id,
+            int count,
+            T components,
+            T componentLayouts,
+            Map<String, ComponentEncoding> componentEncodings,
+            ComponentEncoding wirePatch) {
+        public DecodedItem {
+            componentEncodings = Map.copyOf(componentEncodings);
+        }
     }
 
     private static <T> DecodedItem<T> decoded(ItemValue item, NbtFactory<T> factory) {
         byte[] components = item.components(), layouts = item.componentLayouts();
-        return new DecodedItem<>(item.id(), item.count(), components == null ? null : factory.read(components),
-                layouts == null ? null : factory.read(layouts), item.componentEncodings(), item.wirePatch());
+        return new DecodedItem<>(
+                item.id(),
+                item.count(),
+                components == null ? null : factory.read(components),
+                layouts == null ? null : factory.read(layouts),
+                item.componentEncodings(),
+                item.wirePatch());
     }
 
     /** Unnamed network NBT, or null for a known-pack reference. Owns its bytes. */
@@ -170,15 +187,15 @@ public interface WireValueDecoder extends AutoCloseable {
 
     ItemValue item(ProtocolVersion version, ByteBuf input, boolean creative, Registries registries);
 
-    default <T> DecodedItem<T> item(ProtocolVersion version, ByteBuf input, boolean creative,
-            Registries registries, NbtFactory<T> factory) {
+    default <T> DecodedItem<T> item(
+            ProtocolVersion version, ByteBuf input, boolean creative, Registries registries, NbtFactory<T> factory) {
         return decoded(item(version, input, creative, registries), factory);
     }
 
     ItemValue itemCost(ProtocolVersion version, ByteBuf input, boolean optional, Registries registries);
 
-    default <T> DecodedItem<T> itemCost(ProtocolVersion version, ByteBuf input, boolean optional,
-            Registries registries, NbtFactory<T> factory) {
+    default <T> DecodedItem<T> itemCost(
+            ProtocolVersion version, ByteBuf input, boolean optional, Registries registries, NbtFactory<T> factory) {
         return decoded(itemCost(version, input, optional, registries), factory);
     }
 
@@ -186,11 +203,14 @@ public interface WireValueDecoder extends AutoCloseable {
 
     List<MetadataValue> metadata(ProtocolVersion version, ByteBuf input, Registries registries);
 
-    default <T> List<MetadataValue> metadata(ProtocolVersion version, ByteBuf input,
-            Registries registries, NbtFactory<T> factory) {
-        return metadata(version, input, registries).stream().map(value -> value.kind().equals("item")
-                ? new MetadataValue(value.index(), value.kind(), decoded((ItemValue) value.value(), factory), value.bytes())
-                : value).toList();
+    default <T> List<MetadataValue> metadata(
+            ProtocolVersion version, ByteBuf input, Registries registries, NbtFactory<T> factory) {
+        return metadata(version, input, registries).stream()
+                .map(value -> value.kind().equals("item")
+                        ? new MetadataValue(
+                                value.index(), value.kind(), decoded((ItemValue) value.value(), factory), value.bytes())
+                        : value)
+                .toList();
     }
 
     RegistryValues registry(ByteBuf input);

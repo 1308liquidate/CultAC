@@ -162,8 +162,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
     }
 
-    private void prepare(
-            ChannelHandlerContext ctx, Pending pending, Families activeFamilies, Output output) {
+    private void prepare(ChannelHandlerContext ctx, Pending pending, Families activeFamilies, Output output) {
         // Reentrant writes observe the emitted wire state, not an enclosing
         // group's planned delimiters. I/O cannot emit while this dispatch runs.
         var batch = new Batch(insideBundle);
@@ -244,8 +243,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     }
 
     /** Expands only packets. The caller decides whether this expansion needs a bundle. */
-    private boolean expandPacket(
-            ChannelHandlerContext ctx, Pending pending, Families activeFamilies, Batch batch) {
+    private boolean expandPacket(ChannelHandlerContext ctx, Pending pending, Families activeFamilies, Batch batch) {
         if (!(pending.message instanceof CultWrite write)) {
             return expandFrame(ctx, (ByteBuf) pending.message, pending.promise, false, activeFamilies, batch);
         }
@@ -526,8 +524,13 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         Frame first;
         ArrayDeque<Frame> tail;
 
-        boolean isEmpty() { return first == null; }
-        int size() { return first == null ? 0 : 1 + (tail == null ? 0 : tail.size()); }
+        boolean isEmpty() {
+            return first == null;
+        }
+
+        int size() {
+            return first == null ? 0 : 1 + (tail == null ? 0 : tail.size());
+        }
 
         void addLast(Frame frame) {
             if (first == null) first = frame;
@@ -555,6 +558,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             if (first != null) parts.add(first.promise);
             if (tail != null) for (Frame frame : tail) parts.add(frame.promise);
         }
+
         ArrayDeque<Runnable> tasks;
         List<GroupCompletion> groups;
         boolean flush;

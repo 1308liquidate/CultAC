@@ -110,11 +110,15 @@ public final class WorldPackets {
     }
 
     public record BiomeChunk(int x, int z, ByteBuffer sections, List<SectionSnapshot> decodedSections) {
-        public BiomeChunk(int x, int z, ByteBuffer sections) { this(x, z, sections, null); }
+        public BiomeChunk(int x, int z, ByteBuffer sections) {
+            this(x, z, sections, null);
+        }
+
         public BiomeChunk {
             sections = sections == null ? null : sections.asReadOnlyBuffer();
             decodedSections = decodedSections == null ? null : List.copyOf(decodedSections);
-            if ((sections == null) == (decodedSections == null)) throw new IllegalArgumentException("One section representation required");
+            if ((sections == null) == (decodedSections == null))
+                throw new IllegalArgumentException("One section representation required");
         }
 
         @Override
@@ -152,10 +156,17 @@ public final class WorldPackets {
             long[] motionBlocking,
             List<SectionSnapshot> decodedSections)
             implements ClientboundPacket {
-        public Chunk(int x, int z, ByteBuffer sections, List<BlockPos> tickerCandidates, LightValues light,
-                List<BlockEntityUpdate> blockEntities, long[] motionBlocking) {
+        public Chunk(
+                int x,
+                int z,
+                ByteBuffer sections,
+                List<BlockPos> tickerCandidates,
+                LightValues light,
+                List<BlockEntityUpdate> blockEntities,
+                long[] motionBlocking) {
             this(x, z, sections, tickerCandidates, light, blockEntities, motionBlocking, null);
         }
+
         public Chunk(int x, int z, ByteBuffer sections, List<BlockPos> tickerCandidates) {
             this(x, z, sections, tickerCandidates, null);
         }
@@ -177,7 +188,8 @@ public final class WorldPackets {
         public Chunk {
             sections = sections == null ? null : sections.asReadOnlyBuffer();
             decodedSections = decodedSections == null ? null : List.copyOf(decodedSections);
-            if ((sections == null) == (decodedSections == null)) throw new IllegalArgumentException("One section representation required");
+            if ((sections == null) == (decodedSections == null))
+                throw new IllegalArgumentException("One section representation required");
             tickerCandidates = List.copyOf(tickerCandidates);
             blockEntities = List.copyOf(blockEntities);
             motionBlocking = motionBlocking == null ? null : motionBlocking.clone();

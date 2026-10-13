@@ -73,7 +73,10 @@ final class ModelWorldValues {
         return finishChunk(input, version, types, x, z, motionBlocking, model, null);
     }
 
-    static WorldPackets.Chunk chunkDecoded(ByteBuf input, ProtocolVersion version, IntFunction<String> types,
+    static WorldPackets.Chunk chunkDecoded(
+            ByteBuf input,
+            ProtocolVersion version,
+            IntFunction<String> types,
             Function<ByteBuf, java.util.List<ac.cult.cultac.network.packet.SectionSnapshot>> sections) {
         int x = input.readInt(), z = input.readInt();
         long[] motionBlocking = MotionHeightmapValues.read(input, version);
@@ -81,8 +84,14 @@ final class ModelWorldValues {
         return finishChunk(input, version, types, x, z, motionBlocking, null, model);
     }
 
-    private static WorldPackets.Chunk finishChunk(ByteBuf input, ProtocolVersion version, IntFunction<String> types,
-            int x, int z, long[] motionBlocking, byte[] model,
+    private static WorldPackets.Chunk finishChunk(
+            ByteBuf input,
+            ProtocolVersion version,
+            IntFunction<String> types,
+            int x,
+            int z,
+            long[] motionBlocking,
+            byte[] model,
             java.util.List<ac.cult.cultac.network.packet.SectionSnapshot> decoded) {
         int count = Wire.readLength(input, input.readableBytes());
         var tickers = new ArrayList<BlockPos>();
@@ -95,8 +104,14 @@ final class ModelWorldValues {
             entities.add(new WorldPackets.BlockEntityUpdate(pos, type, NbtValueCodec.readBlockEntity(input, type)));
         }
         return new WorldPackets.Chunk(
-                x, z, model == null ? null : ByteBuffer.wrap(model), tickers,
-                LightValueCodec.read(input, version), entities, motionBlocking, decoded);
+                x,
+                z,
+                model == null ? null : ByteBuffer.wrap(model),
+                tickers,
+                LightValueCodec.read(input, version),
+                entities,
+                motionBlocking,
+                decoded);
     }
 
     static WorldPackets.ChunkBiomes biomes(ByteBuf input) {
@@ -114,8 +129,8 @@ final class ModelWorldValues {
         return new WorldPackets.ChunkBiomes(chunks);
     }
 
-    static WorldPackets.ChunkBiomes biomesDecoded(ByteBuf input,
-            Function<ByteBuf, java.util.List<ac.cult.cultac.network.packet.SectionSnapshot>> sections) {
+    static WorldPackets.ChunkBiomes biomesDecoded(
+            ByteBuf input, Function<ByteBuf, java.util.List<ac.cult.cultac.network.packet.SectionSnapshot>> sections) {
         int count = Wire.readLength(input, input.readableBytes());
         var chunks = new ArrayList<WorldPackets.BiomeChunk>(count);
         for (int i = 0; i < count; i++) {

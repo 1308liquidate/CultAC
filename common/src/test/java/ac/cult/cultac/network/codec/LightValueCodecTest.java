@@ -34,14 +34,17 @@ class LightValueCodecTest {
                 assertFalse(input.isReadable());
                 input.setZero(0, input.writerIndex());
                 for (int i = 0; i < 4096; i++) {
-                    assertEquals((bytes[i >> 1] >>> ((i & 1) * 4)) & 15,
+                    assertEquals(
+                            (bytes[i >> 1] >>> ((i & 1) * 4)) & 15,
                             values.update(true, 0).get(i & 15, i >> 8, (i >> 4) & 15));
                 }
                 values.skyYMask().clear();
                 values.skyUpdates().getFirst()[0] = 99;
                 assertTrue(values.hasUpdate(true, 0));
                 assertArrayEquals(bytes, values.skyUpdates().getFirst());
-            } finally { input.release(); }
+            } finally {
+                input.release();
+            }
         }
     }
 
@@ -59,16 +62,21 @@ class LightValueCodecTest {
                 assertSame(layer, LightValues.Layer.read(input, 2048));
                 input.setZero(0, 2048);
                 assertEquals(value, layer.get(15, 15, 15));
-            } finally { input.release(); }
+            } finally {
+                input.release();
+            }
         }
     }
 
     @Test
     void callerMutationCannotAlterSnapshots() {
-        var mask = new BitSet(); mask.set(0);
-        byte[] bytes = new byte[2048]; bytes[0] = 0x32;
+        var mask = new BitSet();
+        mask.set(0);
+        byte[] bytes = new byte[2048];
+        bytes[0] = 0x32;
         var values = new LightValues(mask, new BitSet(), new BitSet(), new BitSet(), List.of(bytes), List.of());
-        mask.clear(); bytes[0] = 0;
+        mask.clear();
+        bytes[0] = 0;
         assertTrue(values.hasUpdate(true, 0));
         assertEquals(2, values.update(true, 0).get(0, 0, 0));
         assertEquals(3, values.update(true, 0).get(1, 0, 0));

@@ -176,7 +176,9 @@ class ProjectedPacketsTest {
     @Test
     void borrowedFrameRestoresIndicesAndMarksAfterFailedReads() {
         var wire = ProtocolRuntime.create(ProtocolData.load(ProtocolVersion.V26_3));
-        try (var packets = new ProjectedPackets(wire, MODEL, () -> { throw new AssertionError(); })) {
+        try (var packets = new ProjectedPackets(wire, MODEL, () -> {
+            throw new AssertionError();
+        })) {
             var input = Unpooled.buffer();
             try {
                 input.writeByte(99);
@@ -185,7 +187,8 @@ class ProjectedPacketsTest {
                 Wire.writeVarInt(input, 42); // Missing the 26.3 position payload.
                 int end = input.writerIndex();
                 byte[] original = ByteBufUtil.getBytes(input, 0, end);
-                assertThrows(MalformedPacketException.class,
+                assertThrows(
+                        MalformedPacketException.class,
                         () -> packets.read(PLAY, SERVERBOUND, input, CodecState.EMPTY, ignored -> true));
                 assertEquals(1, input.readerIndex());
                 assertEquals(end, input.writerIndex());
@@ -193,10 +196,15 @@ class ProjectedPacketsTest {
                 assertEquals(1, input.readerIndex());
                 assertEquals(1, input.refCnt());
                 assertArrayEquals(original, ByteBufUtil.getBytes(input, 0, end));
-                assertThrows(IllegalStateException.class, () -> packets.read(PLAY, SERVERBOUND, input,
-                        CodecState.EMPTY, ignored -> { throw new IllegalStateException(); }));
+                assertThrows(
+                        IllegalStateException.class,
+                        () -> packets.read(PLAY, SERVERBOUND, input, CodecState.EMPTY, ignored -> {
+                            throw new IllegalStateException();
+                        }));
                 assertEquals(1, input.readerIndex());
-            } finally { input.release(); }
+            } finally {
+                input.release();
+            }
         }
     }
 

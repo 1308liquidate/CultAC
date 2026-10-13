@@ -67,13 +67,13 @@ public final class ClientComponentRegistries {
                 ? previous.states()
                 : ac.cult.cultac.protocol.data.ModelBlockStates.project(source, client, ProtocolVersion.V26_3);
         var simulator = ac.cult.blocksim.BlockSimulator.create(
-                        defaults.withEnabledFeatures(features),
-                        registries.items(),
-                        registries.interactions(),
-                        ac.cult.cultac.utils.blockplace.BlockSimulatorWorldView::placementUnobstructed,
-                        // Living-effect listeners have no field in the existing block-action result contract.
-                        new ac.cult.blocksim.behavior.ConsumableBehavior(contextUse -> {}),
-                        tags);
+                defaults.withEnabledFeatures(features),
+                registries.items(),
+                registries.interactions(),
+                ac.cult.cultac.utils.blockplace.BlockSimulatorWorldView::placementUnobstructed,
+                // Living-effect listeners have no field in the existing block-action result contract.
+                new ac.cult.blocksim.behavior.ConsumableBehavior(contextUse -> {}),
+                tags);
         simulationActions = new SimulationActions(
                 source, client, java.util.Set.copyOf(features), registries, tags, states, simulator);
         return simulationActions;
