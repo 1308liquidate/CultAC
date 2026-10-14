@@ -1,4 +1,4 @@
-package ac.cult.cultac.utils.latency;
+package ac.cult.reload.integrations;
 
 /** Geyser's callback FIFO, with a cursor separating written packets from queued packets.
  * Geyser can register callbacks off the tick loop. Registration also precedes Cloudburst's
@@ -11,6 +11,63 @@ public final class GeyserQueue extends java.util.AbstractQueue<Runnable> {
         Entry(Runnable callback) {
             this.callback = java.util.Objects.requireNonNull(callback);
         }
+    }
+
+    /** Host-owned indirection also fences callbacks already polled by Geyser onto another executor. */
+    private static final class Receipt implements Runnable {
+        private volatile Runnable callback;
+
+        Receipt(Runnable callback) {
+            this.callback = callback;
+        }
+
+        public void run() {
+            var action = callback;
+            callback = null;
+            if (action != null) action.run();
+        }
+    }
+
+    /** One tap's engine callbacks. Closing preserves their wire slots and every native Geyser callback. */
+    public final class Scope implements AutoCloseable {
+        private final java.util.Set<Receipt> receipts =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        private boolean closed;
+
+        private Receipt receipt(Runnable callback) {
+            if (closed) throw new IllegalStateException("Latency scope is closed");
+            receipts.removeIf(value -> value.callback == null);
+            var receipt = new Receipt(java.util.Objects.requireNonNull(callback));
+            receipts.add(receipt);
+            return receipt;
+        }
+
+        public void insert(Runnable callback, Runnable writePacket) {
+            synchronized (GeyserQueue.this) {
+                GeyserQueue.this.insert(receipt(callback), writePacket);
+            }
+        }
+
+        public void writeWithReceipt(java.util.function.Supplier<Runnable> writePacket) {
+            synchronized (GeyserQueue.this) {
+                GeyserQueue.this.writeWithReceipt(() -> {
+                    Runnable callback = writePacket.get();
+                    return callback == null ? null : receipt(callback);
+                });
+            }
+        }
+
+        public void close() {
+            synchronized (GeyserQueue.this) {
+                closed = true;
+                receipts.forEach(value -> value.callback = null);
+                receipts.clear();
+            }
+        }
+    }
+
+    public Scope scope() {
+        return new Scope();
     }
 
     private java.util.Queue<Runnable> originalQueue;

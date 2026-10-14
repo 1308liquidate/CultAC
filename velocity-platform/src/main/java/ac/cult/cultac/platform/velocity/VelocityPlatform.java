@@ -226,7 +226,23 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
         if (owner == null && new VelocityClientSupport(proxy).isBedrock(player.getUniqueId())) {
             throw new IllegalStateException("Bedrock session requires a Geyser bridge on this proxy");
         }
-        transport.attach(player, channel, owner);
+        transport.attach(player, channel, owner, null);
+    }
+
+    java.util.Map<String, Object> release(Channel channel) {
+        return transport.release(channel);
+    }
+
+    /** Adopts both halves of a translated session before forwarding its reconfiguration acknowledgement. */
+    void adopt(com.velocitypowered.api.proxy.Player player, Channel channel, java.util.Map<String, Object> state) {
+        if (state.get("bedrock") instanceof java.util.Map<?, ?> continued) {
+            var session = state.get("bedrock-session");
+            if (session == null || !ac.cult.cultac.runtime.RuntimeEnvironment.owns(session))
+                throw new IllegalStateException("Missing transferred Bedrock session");
+            GeyserBedrockBridgeRuntime.adoptSession(session, continued);
+        }
+        transport.attach(
+                player, channel, bedrockOwner(channel), ac.cult.cultac.network.ConnectionContinuation.from(state));
     }
 
     java.util.concurrent.CompletionStage<Void> disconnect(Channel channel) {

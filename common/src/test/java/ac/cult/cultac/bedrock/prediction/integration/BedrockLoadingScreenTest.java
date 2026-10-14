@@ -14,6 +14,23 @@ import org.junit.Test;
 
 public final class BedrockLoadingScreenTest {
     @Test
+    public void continuationPreservesActiveAndAnticipatedScreensWithoutReusingThem() {
+        var previous = new BedrockLoadingScreenState();
+        previous.startGame();
+        previous.changeDimension(42);
+        assertTrue(previous.accept(START_LOADING_SCREEN, null));
+        var continued = new BedrockLoadingScreenState();
+        continued.restore(previous.continuation());
+        assertTrue(continued.active());
+        assertFalse(continued.accept(END_LOADING_SCREEN, 42));
+        assertTrue(continued.accept(END_LOADING_SCREEN, null));
+        assertFalse(continued.accept(START_LOADING_SCREEN, null));
+        assertTrue(continued.accept(START_LOADING_SCREEN, 42));
+        assertTrue(continued.accept(END_LOADING_SCREEN, 42));
+        assertFalse(continued.accept(START_LOADING_SCREEN, 42));
+    }
+
+    @Test
     public void loadingRetainsExactStateAndTeleportUntilTheEndBoundary() {
         var loading = new BedrockLoadingScreenState();
         loading.startGame();

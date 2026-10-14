@@ -169,7 +169,7 @@ public final class InboundTransactionAcceptanceTest {
     public void nativeBoundariesCanPrecedeAnAlreadyAllocatedJavaPing() throws Exception {
         OfflineCultTestBootstrap.installConfig();
         CultPlayer player = OfflineBedrockReplayRunnerTest.offlinePlayer();
-        var replies = new ac.cult.cultac.utils.latency.GeyserQueue();
+        var replies = new ac.cult.reload.integrations.GeyserQueue();
         try {
             var first = createTrackedTransaction(player);
             player.markTrackedTransactionPacketSent(first);
@@ -215,7 +215,7 @@ public final class InboundTransactionAcceptanceTest {
     public void nativeReplyBeforeWriteCannotConfirmAnything() throws Exception {
         OfflineCultTestBootstrap.installConfig();
         CultPlayer player = OfflineBedrockReplayRunnerTest.offlinePlayer();
-        var replies = new ac.cult.cultac.utils.latency.GeyserQueue();
+        var replies = new ac.cult.reload.integrations.GeyserQueue();
         try {
             var marker = player.createBedrockTransactionAfterClientbound();
             var completed = new java.util.ArrayList<String>();
@@ -377,7 +377,7 @@ public final class InboundTransactionAcceptanceTest {
 
     @Test
     public void localReceiptFailureStillRunsTheOriginalWrittenCallbackOnce() {
-        var replies = new ac.cult.cultac.utils.latency.GeyserQueue();
+        var replies = new ac.cult.reload.integrations.GeyserQueue();
         var forwarded = new java.util.concurrent.atomic.AtomicInteger();
         replies.add(forwarded::incrementAndGet);
         replies.writeWithReceipt(() -> () -> {
@@ -453,7 +453,7 @@ public final class InboundTransactionAcceptanceTest {
     static final class DeferredJavaPing {
         final CultPlayer player;
         final CultPlayer.TrackedTransaction transaction;
-        final ac.cult.cultac.utils.latency.GeyserQueue replies = new ac.cult.cultac.utils.latency.GeyserQueue();
+        final ac.cult.reload.integrations.GeyserQueue replies = new ac.cult.reload.integrations.GeyserQueue();
         final java.util.Deque<org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundPongPacket>
                 pongs = new java.util.ArrayDeque<>();
         final org.geysermc.geyser.session.GeyserSession session;
@@ -539,7 +539,7 @@ public final class InboundTransactionAcceptanceTest {
         }
     }
 
-    private static void reply(ac.cult.cultac.utils.latency.GeyserQueue replies, long timestamp) {
+    private static void reply(ac.cult.reload.integrations.GeyserQueue replies, long timestamp) {
         var session = org.mockito.Mockito.mock(
                 org.geysermc.geyser.session.GeyserSession.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
         org.mockito.Mockito.when(session.getLatencyPingCache()).thenReturn(replies);

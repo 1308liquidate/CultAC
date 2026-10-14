@@ -122,13 +122,37 @@ public final class CultACBootstrapPlugin extends JavaPlugin implements TabExecut
                 sender.sendMessage("You do not have permission.");
                 return true;
             }
-            runtimes.status().forEach(sender::sendMessage);
+            runtimes(sender, args);
         } else {
             var targetName = CommandRouting.target(args);
             Object target = targetName == null ? sender : Bukkit.getPlayerExact(targetName);
             runtimes.execute(sender, "cult " + String.join(" ", args), target, CommandRouting.aggregate(args));
         }
         return true;
+    }
+
+    /** {@code /cult runtimes [id [command]]}; commands run as the sender, once per player of that runtime. */
+    private void runtimes(CommandSender sender, String[] args) {
+        if (args.length == 1) {
+            runtimes.status().forEach(sender::sendMessage);
+            return;
+        }
+        try {
+            var names = runtimes.players(args[1]).stream()
+                    .map(Bukkit::getPlayer)
+                    .filter(java.util.Objects::nonNull)
+                    .map(org.bukkit.entity.Player::getName)
+                    .toList();
+            if (args.length == 2) {
+                sender.sendMessage(runtimes.status(args[1]));
+                sender.sendMessage("Players: " + String.join(", ", names));
+                return;
+            }
+            for (String line : CommandRouting.perPlayer(args, names)) Bukkit.dispatchCommand(sender, line);
+            sender.sendMessage("Ran the command for " + names.size() + " player(s) on runtime " + args[1]);
+        } catch (IllegalArgumentException unknown) {
+            sender.sendMessage(unknown.getMessage());
+        }
     }
 
     @Override

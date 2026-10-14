@@ -1,0 +1,67 @@
+{
+  "passed": true,
+  "bedrockPlayers": 3,
+  "javaPeers": 2,
+  "transferDelaySeconds": 10.0,
+  "publications": 6,
+  "handoffs": 30,
+  "replayRounds": 27,
+  "measuredFrames": 11700,
+  "maxUntouchedPositionOffset": 0.0005035400390625,
+  "maxUntouchedRawPositionOffset": 0.0005035400390625,
+  "pluginSha256": "6ae94c9deee6773e6ebdf6071e15f9d5914348153fbd6b5e6e407d73f0f1e5f4",
+  "focusedTests": 111,
+  "focusedFailures": 0,
+  "fullCommonTests": 1095,
+  "fullCommonFailures": 11,
+  "offlineTests": 206,
+  "offlineFailures": 6,
+  "fullSuiteNote": "Existing movement assertions and three absent small-scenario fixture files prevent a clean full suite; these checks were preserved.",
+  "disconnectNote": "Cloudburst logged peer-close warnings at intentional final client disconnect; all sessions released and Geyser shut down successfully.",
+  "date": "2026-10-13",
+  "artifactDirectory": "build/hot-update-bedrock-switch/run-jx83qrgc",
+  "runtimeArtifacts": {
+    "paper": {
+      "version": "26.3",
+      "sha256": "580c266b6526bb34752e9c2c274be025f763af1ce5b3fa662fa2b3006f966c13"
+    },
+    "geyser": {
+      "version": "pr.6712",
+      "sha256": "ef9b9b14492d5138899a3a124be6c59d3f4c75fe66f48bb2fbe302113b1cc3ad"
+    },
+    "viaversion": {
+      "version": "5.12.1",
+      "sha256": "b8033807e7182c35003a45962352dd642c1e91880ca281da3a43cb6f481a95a2"
+    },
+    "viabackwards": {
+      "version": "5.12.1",
+      "sha256": "29d94d3a26c85c8a327574b2322db4078992ae457f0173325431a12aac384911"
+    },
+    "velocity": {
+      "version": "4.2.1-SNAPSHOT",
+      "sha256": "c51573c522cfff89e5deaba99d2e0cf1b7b2c1db75f2ff9c6b6a0a02d5fccd46"
+    }
+  },
+  "leaseSequence": [
+    [
+      6,
+      2
+    ],
+    [
+      4,
+      4
+    ],
+    [
+      2,
+      6
+    ],
+    [
+      1,
+      7
+    ],
+    [
+      0,
+      8
+    ]
+  ]
+}

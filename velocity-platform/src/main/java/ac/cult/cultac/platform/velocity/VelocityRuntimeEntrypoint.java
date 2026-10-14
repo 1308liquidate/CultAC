@@ -30,6 +30,14 @@ public final class VelocityRuntimeEntrypoint implements RuntimeEntrypoint {
                 platform.attach((Player) player, (Channel) channel);
             }
 
+            public java.util.Map<String, Object> release(Object channel) {
+                return platform.release((Channel) channel);
+            }
+
+            public void adopt(Object channel, Object player, java.util.Map<String, Object> state) {
+                platform.adopt((Player) player, (Channel) channel, state);
+            }
+
             protected CompletionStage<Void> disconnectChannel(Channel connection) {
                 return platform.disconnect(connection);
             }

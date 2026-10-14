@@ -104,7 +104,7 @@ final class VelocityTransport {
             attached = CompletableFuture.runAsync(
                     () -> {
                         if (running && channel.isActive()) {
-                            attach(player, channel, bedrock);
+                            attach(player, channel, bedrock, null);
                         }
                     },
                     channel.eventLoop());
@@ -127,7 +127,11 @@ final class VelocityTransport {
         }
     }
 
-    synchronized void attach(Player player, Channel channel, PacketOwner bedrock) {
+    synchronized void attach(
+            Player player,
+            Channel channel,
+            PacketOwner bedrock,
+            ac.cult.cultac.network.ConnectionContinuation continued) {
         if (!running) {
             return;
         }
@@ -144,6 +148,7 @@ final class VelocityTransport {
         adapter.bindProtocols(protocols);
         var connection = manager.createConnection(adapter, channel);
         adapter.attach(connection);
+        connection.continuation(continued);
         connection.phase(PacketDirection.SERVERBOUND, ConnectionPhase.CONFIGURATION);
         connection.phase(PacketDirection.CLIENTBOUND, ConnectionPhase.CONFIGURATION);
         connection.resolveOwner();
@@ -159,6 +164,37 @@ final class VelocityTransport {
             proxy.getEventManager().unregisterListener(plugin, this);
         return CompletableFuture.allOf(
                 manager.connections().stream().map(this::detach).toArray(CompletableFuture[]::new));
+    }
+
+    /**
+     * Releases a connection on its packet owner, before the acknowledgement reaches Velocity.
+     *
+     * @return the client state to continue, or null when this engine keeps the connection
+     */
+    java.util.Map<String, Object> release(Channel channel) {
+        var connection = manager.connection(channel);
+        if (connection == null
+                || !connection.owner().inEventLoop()
+                || connection.phase(PacketDirection.SERVERBOUND) != ConnectionPhase.PLAY
+                || connection.phase(PacketDirection.CLIENTBOUND) != ConnectionPhase.CONFIGURATION) return null;
+        var state = ac.cult.cultac.network.ConnectionContinuation.capture(connection);
+        if (connection.bedrockBridge() != null) {
+            var bedrock =
+                    ac.cult.cultac.bedrock.bridge.GeyserBedrockBridgeRuntime.releaseSession(connection.bedrockBridge());
+            if (bedrock == null) return null;
+            state.put("bedrock-session", connection.bedrockBridge());
+            state.put("bedrock", bedrock);
+        }
+        connection
+                .removeHandlers(() -> {
+                    ((VelocityConnectionAdapter) connection.platform()).closeBackendTicks();
+                    CultDecoder.uninstall(channel);
+                    CultEncoder.uninstall(channel);
+                })
+                .toCompletableFuture()
+                .join();
+        manager.release(channel);
+        return state;
     }
 
     CompletableFuture<Void> detach(CultConnection connection) {

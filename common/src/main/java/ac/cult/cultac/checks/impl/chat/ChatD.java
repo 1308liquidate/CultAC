@@ -11,10 +11,11 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundChatCommand;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundChatCommandSigned;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundClientInformation;
 import ac.cult.cultac.protocol.value.ChatVisibility;
+import ac.cult.cultac.protocol.value.ClientInformation;
 
 @CheckData(name = "ChatD", stableKey = "cult.exploit.chat_while_hidden", description = "Chatting while chat is hidden")
 public class ChatD extends Check implements CheckListener {
-    private boolean hidden;
+    private ClientInformation information;
 
     public ChatD(CultPlayer player) {
         super(player);
@@ -40,7 +41,10 @@ public class ChatD extends Check implements CheckListener {
     }
 
     private void check(PacketReceiveEvent event) {
-        if (hidden && flag() && shouldModifyPackets()) {
+        if (information != null
+                && information.chatVisibility() == ChatVisibility.HIDDEN
+                && flag()
+                && shouldModifyPackets()) {
             event.setCancelled(true);
             player.onPacketCancel();
         }
@@ -51,7 +55,14 @@ public class ChatD extends Check implements CheckListener {
             PacketReceiveEvent<ServerboundClientInformation> event,
             CultPlayer player,
             ServerboundClientInformation packet) {
+        observe(packet.information());
+    }
 
-        hidden = packet.information().chatVisibility() == ChatVisibility.HIDDEN;
+    public void observe(ClientInformation information) {
+        this.information = information;
+    }
+
+    public ClientInformation information() {
+        return information;
     }
 }

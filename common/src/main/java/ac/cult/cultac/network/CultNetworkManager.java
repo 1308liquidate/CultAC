@@ -151,6 +151,12 @@ public final class CultNetworkManager {
         return connection == null ? CompletableFuture.completedFuture(null) : connections.disconnect(connection);
     }
 
+    /** Ends this engine's session without ending the player's; call on its packet owner after removing handlers. */
+    public void release(Channel channel) {
+        var connection = connections.get(channel);
+        if (connection != null) connections.release(connection);
+    }
+
     public CompletionStage<Void> disconnect(User user) {
         return connections.disconnect(user.getCultConnection());
     }

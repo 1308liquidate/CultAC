@@ -107,8 +107,7 @@ public final class CultVelocityPlugin {
                             source.sendMessage(net.kyori.adventure.text.Component.text("You do not have permission."));
                             return;
                         }
-                        engine.status()
-                                .forEach(line -> source.sendMessage(net.kyori.adventure.text.Component.text(line)));
+                        runtimes(source, args);
                     } else {
                         String name = CommandRouting.target(args);
                         Object target =
@@ -141,12 +140,13 @@ public final class CultVelocityPlugin {
     public EventTask login(PostLoginEvent event) {
         if (engine == null) return null;
         try {
-            var channel = (Channel) channelMethod.invoke(connectionMethod.invoke(event.getPlayer()));
+            var player = event.getPlayer();
+            var channel = (Channel) channelMethod.invoke(connectionMethod.invoke(player));
             channel.closeFuture().addListener(ignored -> engine.disconnect(channel));
             return EventTask.resumeWhenComplete(CompletableFuture.runAsync(
                     () -> {
                         try {
-                            engine.attach(channel, event.getPlayer());
+                            engine.attach(channel, player);
                         } catch (Exception failure) {
                             throw new java.util.concurrent.CompletionException(failure);
                         }
@@ -154,6 +154,32 @@ public final class CultVelocityPlugin {
                     channel.eventLoop()));
         } catch (ReflectiveOperationException failure) {
             throw new IllegalStateException("Cannot access Velocity client channel", failure);
+        }
+    }
+
+    /** {@code /cult runtimes [id [command]]}; commands run as the sender, once per player of that runtime. */
+    private void runtimes(com.velocitypowered.api.command.CommandSource source, String[] args) {
+        if (args.length == 1) {
+            engine.status().forEach(line -> source.sendMessage(net.kyori.adventure.text.Component.text(line)));
+            return;
+        }
+        try {
+            var names = engine.players(args[1]).stream()
+                    .map(proxy::getPlayer)
+                    .flatMap(java.util.Optional::stream)
+                    .map(com.velocitypowered.api.proxy.Player::getUsername)
+                    .toList();
+            if (args.length == 2) {
+                source.sendMessage(net.kyori.adventure.text.Component.text(engine.status(args[1])));
+                source.sendMessage(net.kyori.adventure.text.Component.text("Players: " + String.join(", ", names)));
+                return;
+            }
+            for (String command : CommandRouting.perPlayer(args, names))
+                proxy.getCommandManager().executeAsync(source, command);
+            source.sendMessage(net.kyori.adventure.text.Component.text(
+                    "Ran the command for " + names.size() + " player(s) on runtime " + args[1]));
+        } catch (IllegalArgumentException unknown) {
+            source.sendMessage(net.kyori.adventure.text.Component.text(unknown.getMessage()));
         }
     }
 

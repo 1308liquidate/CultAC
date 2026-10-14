@@ -41,6 +41,7 @@ public final class FixtureEntrypoint implements RuntimeEntrypoint, RuntimeInstan
 
     public void start() {
         if (variant.equals("broken")) throw new IllegalStateException("Broken fixture");
+        block("start:" + variant);
         events.add(variant + ":start");
     }
 
@@ -48,7 +49,9 @@ public final class FixtureEntrypoint implements RuntimeEntrypoint, RuntimeInstan
         events.add(variant + ":close");
         if (controls.containsKey("close-fail:" + variant))
             return CompletableFuture.failedFuture(new IllegalStateException("Stop failed"));
-        return CompletableFuture.completedFuture(null);
+        @SuppressWarnings("unchecked")
+        var pending = (CompletionStage<Void>) controls.get("close:" + variant);
+        return pending == null ? CompletableFuture.completedFuture(null) : pending;
     }
 
     public void attach(Object connection, Object player) {
@@ -66,6 +69,20 @@ public final class FixtureEntrypoint implements RuntimeEntrypoint, RuntimeInstan
             users.put(uuid, user);
             host.bindUser(connection, uuid, player, user);
         }
+    }
+
+    public Map<String, Object> release(Object connection) {
+        events.add(variant + ":release:" + connection);
+        block("release:" + connection);
+        if (controls.containsKey("keep:" + connection)) return null;
+        host.unbindUser(connection);
+        return Map.of("from", variant);
+    }
+
+    public void adopt(Object connection, Object player, Map<String, Object> state) {
+        events.add(variant + ":adopt:" + connection + ":" + state.get("from"));
+        if (controls.containsKey("fail-adopt:" + connection)) throw new IllegalStateException("Adoption failed");
+        attach(connection, player);
     }
 
     public CompletionStage<Void> disconnect(Object connection) {

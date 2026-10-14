@@ -11,6 +11,7 @@ import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.network.protocol.util.viaversion.ViaVersionUtil;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.wire.Wire;
+import ac.cult.reload.integrations.ViaInputRouter;
 import com.viaversion.viaversion.api.Via;
 import com.viaversion.viaversion.api.connection.ProtocolInfo;
 import com.viaversion.viaversion.api.connection.UserConnection;
@@ -27,16 +28,15 @@ import java.util.List;
  * Preserves the identity of legacy input packets before ViaBackwards maps them
  * onto the 1.21.2+ input bitset. Sneaking must follow these original packets:
  * Via's periodically synthesized on-foot input can arrive after movement.
- * Via runs base protocols before translation, so this uses its protocol API
- * without adding a third Netty handler. Removal clears the weak user binding;
- * Via owns the passive protocol until its connection closes.
+ * Via runs base protocols before translation; the host's {@link ViaInputRouter}
+ * is that base protocol and routes the connection's input to its owning engine.
  */
-public final class LegacyViaInputBridge extends com.viaversion.viaversion.protocol.AbstractSimpleProtocol {
+public final class LegacyViaInputBridge implements ViaInputRouter.Observer {
 
     private static final String PLAYER_COMMAND = "PLAYER_COMMAND";
     private static final String PLAYER_INPUT = "PLAYER_INPUT";
 
-    private java.lang.ref.WeakReference<User> user;
+    private final java.lang.ref.WeakReference<User> user;
 
     private LegacyViaInputBridge(User user) {
         this.user = new java.lang.ref.WeakReference<>(user);
@@ -65,10 +65,9 @@ public final class LegacyViaInputBridge extends com.viaversion.viaversion.protoc
         Channel channel = (Channel) user.getChannel();
         Runnable remove = () -> {
             var pipeline = viaPipeline(channel);
-            if (pipeline != null) {
-                var observer = pipeline.getProtocol(LegacyViaInputBridge.class);
-                if (observer != null && observer.user.get() == user) observer.user.clear();
-            }
+            if (pipeline != null
+                    && ViaInputRouter.observer(pipeline) instanceof LegacyViaInputBridge bridge
+                    && bridge.user.get() == user) ViaInputRouter.release(pipeline, bridge);
         };
         if (channel.eventLoop().inEventLoop()) remove.run();
         else channel.eventLoop().execute(remove);
@@ -85,38 +84,21 @@ public final class LegacyViaInputBridge extends com.viaversion.viaversion.protoc
     private static void installOnEventLoop(User user, Channel channel) {
         var pipeline = viaPipeline(channel);
         if (pipeline == null || !pipeline.hasNonBaseProtocols()) return;
-        var observer = pipeline.getProtocol(LegacyViaInputBridge.class);
-        if (observer != null) observer.user = new java.lang.ref.WeakReference<>(user);
-        else pipeline.add(new LegacyViaInputBridge(user));
+        ViaInputRouter.route(
+                pipeline, ac.cult.cultac.runtime.RuntimeEnvironment.host(), new LegacyViaInputBridge(user));
     }
 
     @Override
-    public boolean isBaseProtocol() {
-        return true;
-    }
-
-    @Override
-    public void transform(
-            com.viaversion.viaversion.api.protocol.packet.Direction direction,
-            State state,
-            com.viaversion.viaversion.api.protocol.packet.PacketWrapper wrapper)
-            throws com.viaversion.viaversion.exception.CancelException {
-        if (direction != com.viaversion.viaversion.api.protocol.packet.Direction.SERVERBOUND || state != State.PLAY)
-            return;
+    public boolean reject(com.viaversion.viaversion.api.protocol.packet.PacketWrapper wrapper) {
         User current = user.get();
-        if (current == null) return;
+        if (current == null) return false;
         // Via's public add(baseProtocol) inserts this observer before translation.
         // Peeking its input leaves wrapper values and all other protocols untouched.
-        if (!(wrapper instanceof com.viaversion.viaversion.protocol.packet.PacketWrapperImpl frame)) return;
-        boolean rejected;
+        if (!(wrapper instanceof com.viaversion.viaversion.protocol.packet.PacketWrapperImpl frame)) return false;
         try {
-            rejected = inspect(current, wrapper.user(), wrapper.getId(), frame.getInputBuffer());
+            return inspect(current, wrapper.user(), wrapper.getId(), frame.getInputBuffer());
         } catch (RuntimeException unknownFrame) {
-            return;
-        }
-        if (rejected) {
-            wrapper.cancel();
-            throw com.viaversion.viaversion.exception.CancelException.generate();
+            return false;
         }
     }
 

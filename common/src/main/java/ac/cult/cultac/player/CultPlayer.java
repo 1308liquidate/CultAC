@@ -265,8 +265,6 @@ public class CultPlayer implements GrimUser {
     public long lastBlockPlaceUseItem = 0;
     public int totalFlyingPacketsSent;
     public final @NotNull AtomicInteger cancelledPackets = new AtomicInteger(0);
-    public boolean hasBrand = false;
-    public @NotNull String brand = "Unknown";
 
     public boolean isDead() {
         return compensatedEntities.getSelf().isDead;
@@ -1140,7 +1138,8 @@ public class CultPlayer implements GrimUser {
 
     @Override
     public String getBrand() {
-        return brand;
+        var check = checkManager.getCheck(ac.cult.cultac.checks.impl.misc.ClientBrand.class);
+        return check == null ? "Unknown" : check.getBrand();
     }
 
     private volatile ClientVersion resolvedClientVersion;

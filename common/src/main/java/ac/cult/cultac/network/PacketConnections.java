@@ -34,7 +34,7 @@ final class PacketConnections {
         if (connections.putIfAbsent(session.channel(), session) != null)
             throw new IllegalStateException("Already attached");
         session.initializer(this::prepare);
-        session.channel().closeFuture().addListener(ignored -> disconnect(session));
+        session.closeListener(ignored -> disconnect(session));
     }
 
     private void prepare(CultConnection session) {
@@ -55,6 +55,8 @@ final class PacketConnections {
             if (!session.channel().isActive()) return null;
             // Configuration packets already belong to the authenticated player.
             promote(user);
+            var continued = session.continuation();
+            if (continued != null && session.player() != null) continued.restore(session.player());
             if (ac.cult.cultac.network.protocol.util.viaversion.ViaVersionUtil.isAvailable()) {
                 ac.cult.cultac.network.packet.LegacyViaInputBridge.install(user);
             }
@@ -115,7 +117,18 @@ final class PacketConnections {
         return afterPackets(session.owner(), () -> session.runInModel(() -> finishDisconnect(session)));
     }
 
+    /** Hands the session to another engine within the caller's task on its packet owner. */
+    void release(CultConnection session) {
+        if (!session.owner().inEventLoop()) throw new IllegalStateException("Release requires the packet owner");
+        session.detachCloseListener();
+        session.runInModel(() -> finishDisconnect(session, true));
+    }
+
     private void finishDisconnect(CultConnection session) {
+        finishDisconnect(session, false);
+    }
+
+    private void finishDisconnect(CultConnection session, boolean transferred) {
         if (!session.markDisconnected()) return;
         session.stopPacketLog("disconnect");
         var user = session.user();
@@ -123,7 +136,7 @@ final class PacketConnections {
             if (user != null) {
                 currentByUuid.remove(user.getUUID(), session);
                 try {
-                    CultAPI.INSTANCE.getPlayerDataManager().onDisconnect(user);
+                    CultAPI.INSTANCE.getPlayerDataManager().onDisconnect(user, transferred);
                 } finally {
                     CultNetworkManager.clearChannelState(user);
                 }

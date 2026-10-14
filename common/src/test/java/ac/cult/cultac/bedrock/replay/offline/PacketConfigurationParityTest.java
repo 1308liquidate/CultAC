@@ -11,7 +11,6 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundCustomPayload;
 import ac.cult.cultac.protocol.value.ChatVisibility;
 import ac.cult.cultac.protocol.value.ClientInformation;
 import io.netty.channel.embedded.EmbeddedChannel;
-import java.lang.reflect.Field;
 import java.util.UUID;
 import org.junit.Test;
 
@@ -54,7 +53,7 @@ public final class PacketConfigurationParityTest {
 
             new PacketConfigurationListener().onClientInformation(event, player, packet);
 
-            assertTrue(booleanField(player.checkManager.getListener(ChatD.class), "hidden"));
+            assertTrue(player.checkManager.getListener(ChatD.class).information() == hidden);
         } finally {
             OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
         }
@@ -100,12 +99,6 @@ public final class PacketConfigurationParityTest {
                 false,
                 false,
                 ac.cult.cultac.protocol.value.ParticleStatus.ALL);
-    }
-
-    private static boolean booleanField(Object target, String name) throws Exception {
-        Field field = target.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.getBoolean(target);
     }
 
     private static CultPlayer offlineJavaPlayer() {

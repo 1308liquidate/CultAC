@@ -84,4 +84,10 @@ public class ClientBrand extends Check implements CheckListener {
 
         hasBrand = true;
     }
+
+    /** Keeps the brand this connection already reported to another engine; it was announced there. */
+    public void restore(String brand) {
+        this.brand = brand;
+        hasBrand = true;
+    }
 }

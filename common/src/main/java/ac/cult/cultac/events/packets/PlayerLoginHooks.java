@@ -24,6 +24,15 @@ public class PlayerLoginHooks implements ac.cult.cultac.network.UserLifecycleHoo
             LogUtil.info("Pipeline: " + pipeline);
         }
 
+        // An adopted connection keeps its alert subscriptions and session; only the session row is extended.
+        if (user.getCultConnection().continuation() != null) {
+            CultAPI.INSTANCE
+                    .getDataStoreLifecycle()
+                    .liveWriteHooks()
+                    .onJoinFromUserLogin(platformPlayer, user, System.currentTimeMillis());
+            return;
+        }
+
         PlayerToggleStore toggles = CultAPI.INSTANCE.getDataStoreLifecycle().playerToggleStore();
         applyToggle(
                 platformPlayer,

@@ -33,6 +33,8 @@ public final class CultConnection implements CodecState {
     private BiConsumer<Object, ChannelPromise> reentrantWriter;
     private volatile CompletableFuture<Void> removed;
     private volatile PacketLogObserver packetObserver = PacketLogObserver.NONE;
+    private io.netty.util.concurrent.GenericFutureListener<io.netty.util.concurrent.Future<? super Void>> closeListener;
+    private volatile ConnectionContinuation continuation;
 
     public void packetObserver(PacketLogObserver observer) {
         packetObserver = Objects.requireNonNull(observer);
@@ -298,8 +300,27 @@ public final class CultConnection implements CodecState {
         clientbound = ConnectionLifecycle.nextPhase(PacketDirection.CLIENTBOUND, clientbound, type, packet);
     }
 
+    /** Run before forwarding the ack to the host, which may immediately connect the next backend. */
+    public boolean handoffAtReconfiguration() {
+        if (!owner.inEventLoop()) throw new IllegalStateException("Hand-off requires the packet owner");
+        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+        if (host == null || !host.platform().equals("velocity")) return true;
+        var player = this.player;
+        try {
+            host.handoff(
+                    channel,
+                    player == null || player.platformPlayer == null ? null : player.platformPlayer.getNative());
+            return true;
+        } catch (Throwable failure) {
+            CultNetworkManager.reportFailure("runtime hand-off", failure);
+            channel.close();
+            return false;
+        }
+    }
+
     public java.util.concurrent.CompletionStage<Void> removeHandlers(Runnable remove) {
-        if (!channel.eventLoop().inEventLoop()) throw new IllegalStateException("Handler removal requires I/O");
+        if (!channel.eventLoop().inEventLoop() && !owner.inEventLoop())
+            throw new IllegalStateException("Handler removal requires I/O or the packet owner");
         if (removed != null) return removed;
         removed = new CompletableFuture<>();
         try {
@@ -311,6 +332,28 @@ public final class CultConnection implements CodecState {
             stopPacketLog("transport removal");
         }
         return removed;
+    }
+
+    void closeListener(
+            io.netty.util.concurrent.GenericFutureListener<io.netty.util.concurrent.Future<? super Void>> listener) {
+        closeListener = listener;
+        channel.closeFuture().addListener(listener);
+    }
+
+    /** The session no longer owns the channel; its closure must not reach this engine. */
+    void detachCloseListener() {
+        var listener = closeListener;
+        closeListener = null;
+        if (listener != null) channel.closeFuture().removeListener(listener);
+    }
+
+    /** State another engine received on this connection; set before the session prepares. */
+    public void continuation(ConnectionContinuation continuation) {
+        this.continuation = continuation;
+    }
+
+    public ConnectionContinuation continuation() {
+        return continuation;
     }
 
     public record WriteGroup(List<CultWrite> writes, boolean bundle) {}

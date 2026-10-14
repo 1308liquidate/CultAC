@@ -93,3 +93,4 @@ __pycache__/
 !/validation/velocity/
 /validation/velocity/*
 !/validation/velocity/harness/
+!/validation/velocity/bedrock-handoff/

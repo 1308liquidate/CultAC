@@ -31,6 +31,40 @@ import org.junit.jupiter.api.Test;
 class CultTransportTest {
     private static final ProtocolRuntime RUNTIME = ProtocolRuntime.create(ProtocolData.load(ProtocolVersion.V26_3));
 
+    @Test
+    void engineRequestsHandoffAfterAckListenersAndBeforeNativeDecoder() throws Exception {
+        var context = ac.cult.cultac.runtime.RuntimeEnvironment.class.getDeclaredField("context");
+        context.setAccessible(true);
+        Object previous = context.get(null);
+        try (var f = new Fixture(false)) {
+            var order = new ArrayList<String>();
+            var host = mock(ac.cult.reload.api.HostContext.class);
+            when(host.platform()).thenReturn("velocity");
+            when(host.handoff(f.channel, null)).thenAnswer(invocation -> {
+                f.assertOwner();
+                order.add("handoff");
+                return true;
+            });
+            f.routes.receive(ServerboundPackets.CONFIGURATION_ACKNOWLEDGED, event -> order.add("listeners"));
+            f.connection.phase(CLIENTBOUND, CONFIGURATION);
+            f.channel.pipeline().addAfter("decoder", "native-ack", new ChannelInboundHandlerAdapter() {
+                public void channelRead(ChannelHandlerContext ctx, Object message) {
+                    // The terminal is still encoded in PLAY when the native decoder consumes it.
+                    assertEquals(PLAY, f.connection.phase(SERVERBOUND));
+                    order.add("native");
+                    ctx.fireChannelRead(message);
+                }
+            });
+            context.set(null, host);
+            f.channel.writeInbound(f.frame(SERVERBOUND, PLAY, "configuration_acknowledged"));
+            ((ByteBuf) f.channel.readInbound()).release();
+            assertEquals(List.of("listeners", "handoff", "native"), order);
+            assertEquals(CONFIGURATION, f.connection.phase(SERVERBOUND));
+        } finally {
+            context.set(null, previous);
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void bedrockHandlersUseTheAssignedExecutorAndReentryKeepsItsQueuePosition(boolean encoderFirst) throws Exception {

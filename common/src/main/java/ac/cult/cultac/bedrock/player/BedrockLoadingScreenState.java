@@ -44,4 +44,20 @@ public final class BedrockLoadingScreenState {
     public boolean active() {
         return active;
     }
+
+    /** Connection state survives Geyser's backend switch; only JDK values cross engine loaders. */
+    public java.util.Map<String, Object> continuation() {
+        var state = new java.util.HashMap<String, Object>();
+        state.put("anticipated", new java.util.ArrayList<>(anticipated));
+        state.put("active", active);
+        if (activeId != null) state.put("active-id", activeId);
+        return java.util.Map.copyOf(state);
+    }
+
+    public void restore(java.util.Map<?, ?> state) {
+        anticipated.clear();
+        for (var id : (java.util.List<?>) state.get("anticipated")) anticipated.add((Integer) id);
+        active = (Boolean) state.get("active");
+        activeId = (Integer) state.get("active-id");
+    }
 }

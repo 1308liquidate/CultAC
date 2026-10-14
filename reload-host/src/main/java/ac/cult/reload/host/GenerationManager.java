@@ -41,6 +41,7 @@ public final class GenerationManager implements AutoCloseable {
     private boolean closing;
     private final CompletableFuture<Void> shutdown = new CompletableFuture<>();
     private final java.util.concurrent.atomic.AtomicInteger ticks = new java.util.concurrent.atomic.AtomicInteger();
+    private volatile java.time.Duration lifecycleTimeout = java.time.Duration.ofMinutes(2);
 
     public void tick() {
         ticks.incrementAndGet();
@@ -100,6 +101,20 @@ public final class GenerationManager implements AutoCloseable {
         });
     }
 
+    // Late completions of timed-out lifecycle calls can arrive after shutdown stopped the manager.
+    private void serial(Runnable task) {
+        try {
+            management.execute(task);
+        } catch (RejectedExecutionException stopped) {
+            task.run();
+        }
+    }
+
+    /** Bounds each hot engine load and start, and every stop; a call past it is fenced, never interrupted. */
+    void lifecycleTimeout(java.time.Duration timeout) {
+        lifecycleTimeout = Objects.requireNonNull(timeout);
+    }
+
     /** Paper calls this during load, before Geyser snapshots its connection initializer. */
     public void loadInitial(InputStream embedded) throws Exception {
         Files.createDirectories(directory.resolve("updates"));
@@ -128,7 +143,7 @@ public final class GenerationManager implements AutoCloseable {
                 Files.copy(embedded, selected, StandardCopyOption.REPLACE_EXISTING);
             }
         }
-        var generation = prepare(selected);
+        var generation = prepare(selected, false);
         synchronized (this) {
             current = generation;
         }
@@ -139,6 +154,7 @@ public final class GenerationManager implements AutoCloseable {
         synchronized (this) {
             generation = Objects.requireNonNull(current, "Runtime not loaded");
         }
+        // Platform startup runs on its own thread, which the engine may need; nothing older can take over anyway.
         invoke(generation, () -> {
             generation.runtime.start();
             return null;
@@ -168,7 +184,7 @@ public final class GenerationManager implements AutoCloseable {
                         synchronized (this) {
                             if (closing) throw new IllegalStateException("Host is stopping");
                         }
-                        var next = prepare(input);
+                        var next = prepare(input, true);
                         boolean duplicate;
                         synchronized (this) {
                             duplicate = current != null
@@ -188,7 +204,7 @@ public final class GenerationManager implements AutoCloseable {
                             return "Already running " + next.artifact.display();
                         }
                         try {
-                            invoke(next, () -> {
+                            lifecycle(next, "start", () -> {
                                 next.runtime.start();
                                 return null;
                             });
@@ -229,7 +245,8 @@ public final class GenerationManager implements AutoCloseable {
                 management);
     }
 
-    private Generation prepare(Path source) throws Exception {
+    /** @param hot an older generation keeps running, so a hung load is abandoned after the lifecycle timeout */
+    private Generation prepare(Path source, boolean hot) throws Exception {
         String id = UUID.randomUUID().toString();
         Path home = directory.resolve("runtime/generations").resolve(id);
         Files.createDirectories(home);
@@ -248,7 +265,7 @@ public final class GenerationManager implements AutoCloseable {
             generations.put(id, generation);
         }
         try {
-            invoke(generation, () -> {
+            CheckedSupplier<Void> load = () -> {
                 var entry = (RuntimeEntrypoint) loader.loadClass(descriptor.entrypoint())
                         .getConstructor()
                         .newInstance();
@@ -256,7 +273,9 @@ public final class GenerationManager implements AutoCloseable {
                 generation.runtime.load();
                 api.initialize(generation.id);
                 return null;
-            });
+            };
+            if (hot) lifecycle(generation, "load", load);
+            else invoke(generation, load);
             return generation;
         } catch (Throwable failure) {
             synchronized (this) {
@@ -292,7 +311,7 @@ public final class GenerationManager implements AutoCloseable {
             owner = pinned == null ? Objects.requireNonNull(current, "No active runtime") : pinned.owner;
             if (owner.state != State.CURRENT && owner.state != State.DRAINING)
                 throw new IllegalStateException("Runtime cannot accept a session");
-            sessions.put(connection, new Session(owner));
+            sessions.put(connection, new Session(owner, physicalUpstream));
             owner.leases++;
         }
         try {
@@ -303,6 +322,70 @@ public final class GenerationManager implements AutoCloseable {
         } catch (Throwable failure) {
             disconnect(connection);
             throw RuntimeFailures.detached(failure);
+        }
+    }
+
+    /**
+     * Moves a connection from a draining generation to the current one. Call on the connection's own thread at a
+     * protocol boundary where the client resends nothing the old owner observed; both steps run in that task.
+     *
+     * @return whether a newer generation adopted the connection
+     * @throws Exception when the move failed partway; the caller must close the connection
+     */
+    public boolean handoff(Object connection, Object nativePlayer) throws Exception {
+        Generation from, to;
+        Object physicalUpstream;
+        synchronized (this) {
+            var session = sessions.get(connection);
+            if (closing || session == null || session.disconnect != null) return false;
+            physicalUpstream = session.upstream;
+            from = session.owner;
+            to = current;
+            if (to == null || to == from || from.state != State.DRAINING || to.state != State.CURRENT) return false;
+            if (physicalUpstream != null) {
+                var physical = sessions.get(physicalUpstream);
+                if (physical == null || physical.owner != from || physical.disconnect != null) return false;
+            }
+            // A concurrent publication may make this target draining before adoption completes.
+            // Keep its session lifetime open across both engine calls.
+            to.handoffs++;
+        }
+        try {
+            var state = invoke(from, () -> from.runtime.release(connection));
+            if (state == null) return false;
+            synchronized (this) {
+                var session = sessions.get(connection);
+                if (session == null || session.owner != from || session.disconnect != null)
+                    throw new IllegalStateException("Connection ended during hand-off");
+                if (physicalUpstream != null) {
+                    var physical = sessions.get(physicalUpstream);
+                    if (physical == null || physical.owner != from || physical.disconnect != null)
+                        throw new IllegalStateException("Bedrock session ended during hand-off");
+                    sessions.put(physicalUpstream, new Session(to));
+                    from.leases--;
+                    to.leases++;
+                }
+                sessions.put(connection, new Session(to, physicalUpstream));
+                from.leases--;
+                to.leases++;
+            }
+            management.execute(() -> retire(from));
+            try {
+                invoke(to, () -> {
+                    to.runtime.adopt(connection, nativePlayer, Map.copyOf(state));
+                    return null;
+                });
+            } catch (Throwable failure) {
+                disconnect(connection);
+                if (physicalUpstream != null) disconnect(physicalUpstream);
+                throw RuntimeFailures.detached(failure);
+            }
+            return true;
+        } finally {
+            synchronized (this) {
+                to.handoffs--;
+            }
+            serial(() -> retire(to));
         }
     }
 
@@ -352,48 +435,73 @@ public final class GenerationManager implements AutoCloseable {
 
     private void retire(Generation generation) {
         synchronized (this) {
-            if (generation.state != State.DRAINING || generation.leases != 0) return;
+            if (generation.state != State.DRAINING || generation.leases != 0 || generation.handoffs != 0) return;
             generation.state = State.STOPPING;
         }
-        generation
+        // A timed-out call still holds its lease, so the runtime never stops under it.
+        var stopped = generation
                 .resources
                 .close()
-                .thenComposeAsync(
-                        ignored -> {
-                            try {
-                                return generation.runtime == null
-                                        ? CompletableFuture.<Void>completedFuture(null)
-                                        : finishInvoke(generation, () -> generation.runtime.close());
-                            } catch (Throwable error) {
-                                return CompletableFuture.<Void>failedFuture(error);
-                            }
-                        },
-                        management)
+                .toCompletableFuture()
+                .thenComposeAsync(ignored -> stopRuntime(generation), management);
+        stopped.copy()
+                .orTimeout(lifecycleTimeout.toMillis(), TimeUnit.MILLISECONDS)
                 .whenCompleteAsync(
                         (ignored, failure) -> {
-                            try {
-                                if (failure != null) throw new CompletionException(failure);
-                                api.detach(generation.id);
-                                ac.cult.cultac.manager.datastore.SharedVerboseTags.releaseDeclarations(
-                                        generation.loader);
-                                generation.loader.close();
-                                if (!generation.preserveArtifact) deleteHome(generation.home);
-                                synchronized (this) {
-                                    generation.runtime = null;
-                                    generation.state = State.CLOSED;
-                                    generations.remove(generation.id);
-                                }
-                                report.accept("Unloaded CultAC runtime " + generation.id);
-                                generation.closed.complete(null);
-                            } catch (Throwable error) {
-                                synchronized (this) {
-                                    generation.state = State.CLEANUP_FAILED;
-                                }
-                                report.accept("CultAC runtime " + generation.id + " cleanup failed: " + error);
-                                generation.closed.completeExceptionally(RuntimeFailures.detached(error));
+                            if (!(failure instanceof TimeoutException)) {
+                                unload(generation, failure);
+                                return;
                             }
+                            synchronized (this) {
+                                generation.state = State.CLEANUP_FAILED;
+                            }
+                            report.accept("CultAC runtime " + generation.id + " did not stop within "
+                                    + lifecycleTimeout.toSeconds()
+                                    + "s; its class loader stays open until its work finishes");
+                            generation.closed.completeExceptionally(RuntimeFailures.detached(failure));
+                            stopped.whenCompleteAsync((late, error) -> unload(generation, error), this::serial);
                         },
-                        management);
+                        this::serial);
+    }
+
+    private CompletableFuture<Void> stopRuntime(Generation generation) {
+        if (generation.runtime == null) return CompletableFuture.completedFuture(null);
+        var stopped = new CompletableFuture<Void>();
+        lifecycleThread(generation, "stop", () -> {
+            try {
+                finishInvoke(generation, () -> generation.runtime.close()).whenComplete((ignored, failure) -> {
+                    if (failure == null) stopped.complete(null);
+                    else stopped.completeExceptionally(failure);
+                });
+            } catch (Throwable failure) {
+                stopped.completeExceptionally(failure);
+            }
+        });
+        return stopped;
+    }
+
+    private void unload(Generation generation, Throwable failure) {
+        try {
+            if (failure != null) throw new CompletionException(failure);
+            api.detach(generation.id);
+            ac.cult.cultac.manager.datastore.SharedVerboseTags.releaseDeclarations(generation.loader);
+            generation.loader.close();
+            RecordMethodCaches.release();
+            if (!generation.preserveArtifact) deleteHome(generation.home);
+            synchronized (this) {
+                generation.runtime = null;
+                generation.state = State.CLOSED;
+                generations.remove(generation.id);
+            }
+            report.accept("Unloaded CultAC runtime " + generation.id);
+            generation.closed.complete(null);
+        } catch (Throwable error) {
+            synchronized (this) {
+                generation.state = State.CLEANUP_FAILED;
+            }
+            report.accept("CultAC runtime " + generation.id + " cleanup failed: " + error);
+            generation.closed.completeExceptionally(RuntimeFailures.detached(error));
+        }
     }
 
     private void persist(Generation generation) throws IOException {
@@ -416,11 +524,42 @@ public final class GenerationManager implements AutoCloseable {
                 StandardCopyOption.ATOMIC_MOVE);
     }
 
+    private static final java.time.format.DateTimeFormatter CREATED = java.time.format.DateTimeFormatter.ofPattern(
+                    "yyyy-MM-dd HH:mm:ss")
+            .withZone(java.time.ZoneId.systemDefault());
+
     public synchronized List<String> status() {
-        return generations.values().stream()
-                .map(g -> g.artifact.display() + " " + g.id + " " + g.state + " sessions=" + g.leases + " work="
-                        + g.resources.inFlight())
+        return generations.values().stream().map(GenerationManager::describe).toList();
+    }
+
+    private static String describe(Generation g) {
+        return "#" + g.order + " " + g.artifact.display() + " " + g.id + " " + g.state + " sessions=" + g.leases
+                + " work=" + g.resources.inFlight() + " created " + CREATED.format(g.created);
+    }
+
+    /** One runtime's status line, selected by its {@code #} number or its id. */
+    public synchronized String status(String selector) {
+        return describe(select(selector));
+    }
+
+    /** Accounts of the logged-in players the selected runtime inspects, in login order. */
+    public synchronized List<UUID> players(String selector) {
+        var generation = select(selector);
+        return users.values().stream()
+                .filter(binding -> binding.owner().equals(generation.id))
+                .sorted(Comparator.comparingLong(UserBinding::bindingOrder))
+                .map(UserBinding::uuid)
+                .distinct()
                 .toList();
+    }
+
+    private Generation select(String selector) {
+        String number = selector.startsWith("#") ? selector.substring(1) : selector;
+        var matches = generations.values().stream()
+                .filter(g -> Long.toString(g.order).equals(number) || g.id.equals(selector))
+                .toList();
+        if (matches.size() != 1) throw new IllegalArgumentException("No runtime " + selector);
+        return matches.getFirst();
     }
 
     private synchronized List<Generation> snapshot() {
@@ -624,6 +763,36 @@ public final class GenerationManager implements AutoCloseable {
         return generation.resources.call(action::get);
     }
 
+    /** Runs a lifecycle call off the manager thread; past the timeout the caller stops waiting for it. */
+    private <T> T lifecycle(Generation generation, String step, CheckedSupplier<T> action) throws Exception {
+        var result = new CompletableFuture<T>();
+        lifecycleThread(generation, step, () -> {
+            try {
+                result.complete(invoke(generation, action));
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+            }
+        });
+        try {
+            return result.get(lifecycleTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException late) {
+            result.whenComplete((ignored, failure) -> report.accept("CultAC runtime " + generation.id + " finished "
+                    + step + " after its timeout" + (failure == null ? "" : ": " + failure)));
+            throw new TimeoutException("CultAC runtime " + generation.artifact.display() + " did not finish " + step
+                    + " within " + lifecycleTimeout.toSeconds() + "s");
+        } catch (ExecutionException failure) {
+            if (failure.getCause() instanceof Exception error) throw error;
+            throw (Error) failure.getCause();
+        }
+    }
+
+    private static void lifecycleThread(Generation generation, String step, Runnable task) {
+        Thread.ofPlatform()
+                .daemon()
+                .name("cult-runtime-" + step + "-" + generation.id)
+                .start(task);
+    }
+
     /** The only unguarded engine invocation: its gate has drained before final stop. */
     private <T> T finishInvoke(Generation generation, CheckedSupplier<T> action) throws Exception {
         var thread = Thread.currentThread();
@@ -698,6 +867,7 @@ public final class GenerationManager implements AutoCloseable {
         for (var generation : all) retire(generation);
         Throwable promotionError = installationFailure;
         CompletableFuture.allOf(all.stream().map(g -> g.closed).toArray(CompletableFuture[]::new))
+                .orTimeout(lifecycleTimeout.toMillis(), TimeUnit.MILLISECONDS)
                 .whenCompleteAsync(
                         (ignored, failure) -> {
                             Throwable error = failure == null ? promotionError : RuntimeFailures.detached(failure);
@@ -719,7 +889,7 @@ public final class GenerationManager implements AutoCloseable {
                             else shutdown.completeExceptionally(error);
                             management.shutdown();
                         },
-                        management);
+                        this::serial);
     }
 
     private static void deleteHome(Path home) throws IOException {
@@ -808,6 +978,11 @@ public final class GenerationManager implements AutoCloseable {
             return GenerationManager.this.ownerOf(connection);
         }
 
+        public boolean handoff(Object connection, Object nativePlayer) throws Exception {
+            if (!owns(connection)) return false;
+            return GenerationManager.this.handoff(connection, nativePlayer);
+        }
+
         public void bindUser(Object connection, UUID uuid, Object nativePlayer, Object user) {
             GenerationManager.this.bindUser(generation, connection, uuid, nativePlayer, user);
         }
@@ -861,7 +1036,9 @@ public final class GenerationManager implements AutoCloseable {
         RuntimeInstance runtime;
         State state = State.PREPARING;
         int leases;
+        int handoffs;
         final long order;
+        final java.time.Instant created = java.time.Instant.now();
         boolean preserveArtifact;
 
         Generation(String id, Path home, RuntimeArtifact artifact, RuntimeClassLoader loader, long order) {
@@ -876,10 +1053,16 @@ public final class GenerationManager implements AutoCloseable {
 
     private static final class Session {
         final Generation owner;
+        final Object upstream;
         CompletableFuture<Void> disconnect;
 
         Session(Generation owner) {
+            this(owner, null);
+        }
+
+        Session(Generation owner, Object upstream) {
             this.owner = owner;
+            this.upstream = upstream;
         }
     }
 

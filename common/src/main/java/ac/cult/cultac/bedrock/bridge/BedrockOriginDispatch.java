@@ -63,6 +63,43 @@ final class BedrockOriginDispatch {
         return frame;
     }
 
+    /** Only JDK values and native packet identities cross the generation boundary. */
+    Map<String, Object> continuation() {
+        if (depth != 0 || !pending.isEmpty()) throw new IllegalStateException("GFP rewrite is still in progress");
+        var queued = new IdentityHashMap<BedrockPacket, Map<String, Object>>();
+        emissions.forEach((packet, emission) -> {
+            var fields = new java.util.HashMap<String, Object>(coordinates(emission.frame()));
+            if (emission.operation() != null) {
+                fields.put("operation-sequence", emission.operation().id());
+                fields.put("operation-source", emission.operation().provenance().name());
+            }
+            queued.put(packet, Map.copyOf(fields));
+        });
+        return Map.of("frame", coordinates(frame), "emissions", queued);
+    }
+
+    void restore(Map<?, ?> state) {
+        clear();
+        frame = coordinates((Map<?, ?>) state.get("frame"));
+        ((Map<?, ?>) state.get("emissions")).forEach((packet, value) -> {
+            var fields = (Map<?, ?>) value;
+            var operation = fields.get("operation-sequence") instanceof Long sequence
+                    ? new BedrockTeleportOperation(
+                            sequence, BedrockTeleportProvenance.valueOf((String) fields.get("operation-source")), null)
+                    : null;
+            emissions.put((BedrockPacket) packet, new Emission(coordinates(fields), operation));
+        });
+    }
+
+    private static Map<String, Object> coordinates(BedrockCoordinateFrame frame) {
+        return Map.of("origin-x", frame.originX(), "origin-z", frame.originZ(), "revision", frame.revision());
+    }
+
+    private static BedrockCoordinateFrame coordinates(Map<?, ?> fields) {
+        return new BedrockCoordinateFrame(
+                (Integer) fields.get("origin-x"), (Integer) fields.get("origin-z"), (Long) fields.get("revision"));
+    }
+
     void clear() {
         pending.clear();
         emissions.clear();

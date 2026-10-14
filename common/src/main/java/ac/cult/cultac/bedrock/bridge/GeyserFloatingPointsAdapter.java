@@ -35,6 +35,11 @@ final class GeyserFloatingPointsAdapter {
         this(session, enabledReflection());
     }
 
+    GeyserFloatingPointsAdapter(GeyserSession session, java.util.Map<?, ?> continuation)
+            throws ReflectiveOperationException {
+        this(session, enabledReflection(), continuation);
+    }
+
     private static GfpReflection enabledReflection() throws ReflectiveOperationException {
         Extension extension = GeyserApi.api().extensionManager().extension("geyserfloatingpoints");
         if (extension == null || !extension.isEnabled()) throw new IllegalStateException("GFP is not enabled");
@@ -42,8 +47,22 @@ final class GeyserFloatingPointsAdapter {
     }
 
     GeyserFloatingPointsAdapter(GeyserSession session, GfpReflection reflection) throws ReflectiveOperationException {
+        this(session, reflection, null);
+    }
+
+    private GeyserFloatingPointsAdapter(
+            GeyserSession session, GfpReflection reflection, java.util.Map<?, ?> continuation)
+            throws ReflectiveOperationException {
         this.session = session;
-        hooks = new GfpSessionHooks(this, session, reflection);
+        hooks = new GfpSessionHooks(this, session, reflection, continuation != null);
+        if (continuation != null) {
+            dispatch.restore((java.util.Map<?, ?>) continuation.get("dispatch"));
+            operationSequence = (Long) continuation.get("operation-sequence");
+            var offset = hooks.offset();
+            if (offset.getX() != dispatch.frame().originX()
+                    || offset.getZ() != dispatch.frame().originZ())
+                throw new IllegalStateException("GFP origin changed during hand-off");
+        }
         synchronized (this) {
             try {
                 hooks.attach();
@@ -161,6 +180,10 @@ final class GeyserFloatingPointsAdapter {
 
     synchronized BedrockCoordinateFrame coordinateFrame() {
         return dispatch.frame();
+    }
+
+    synchronized java.util.Map<String, Object> continuation() {
+        return java.util.Map.of("dispatch", dispatch.continuation(), "operation-sequence", operationSequence);
     }
 
     synchronized void close() {

@@ -147,6 +147,14 @@ public class PlayerDataManager {
      * its own session attachment and cannot be removed by this path.
      */
     public boolean onDisconnect(final User user) {
+        return onDisconnect(user, false);
+    }
+
+    /**
+     * @param transferred another engine continues this connection: the player's session, alert subscriptions and
+     *     toggles stay with the native connection
+     */
+    public boolean onDisconnect(final User user, boolean transferred) {
         if (user == null || user.getUUID() == null) {
             clearExemptions(user);
             return false;
@@ -163,11 +171,11 @@ public class PlayerDataManager {
             return false;
         }
 
-        cleanupOwnedSession(tracked);
+        cleanupOwnedSession(tracked, transferred);
         return true;
     }
 
-    private void cleanupOwnedSession(CultPlayer tracked) {
+    private void cleanupOwnedSession(CultPlayer tracked, boolean transferred) {
         User user = tracked.user;
         UUID uuid = user.getUUID();
 
@@ -176,7 +184,7 @@ public class PlayerDataManager {
         Channels.QUIT.fire(ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(tracked));
         if (ac.cult.cultac.runtime.RuntimeEnvironment.host() != null)
             ac.cult.cultac.runtime.RuntimeEnvironment.host().unbindUser(user.getChannel());
-        if (CultAPI.INSTANCE.getDataStoreLifecycle() != null) {
+        if (!transferred && CultAPI.INSTANCE.getDataStoreLifecycle() != null) {
             CultAPI.INSTANCE
                     .getDataStoreLifecycle()
                     .liveWriteHooks()
@@ -185,8 +193,9 @@ public class PlayerDataManager {
         }
 
         PlatformPlayer quittingPlayer = user.getPlayer();
-        boolean currentPlayer =
-                quittingPlayer != null && PlatformPlayerCache.getInstance().getPlayer(uuid) == quittingPlayer;
+        boolean currentPlayer = !transferred
+                && quittingPlayer != null
+                && PlatformPlayerCache.getInstance().getPlayer(uuid) == quittingPlayer;
         if (currentPlayer) {
             CultAPI.INSTANCE.getAlertManager().handlePlayerQuit(quittingPlayer);
         }

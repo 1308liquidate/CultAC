@@ -13,7 +13,7 @@ public final class User {
     private volatile PlatformPlayer player;
 
     private final Profile profile;
-    private final UUID connectionId = UUID.randomUUID();
+    private final UUID connectionId;
 
     public UUID getConnectionId() {
         return connectionId;
@@ -25,6 +25,9 @@ public final class User {
     public User(Profile profile, ac.cult.cultac.network.CultConnection connection) {
         this.profile = java.util.Objects.requireNonNull(profile);
         this.cultConnection = java.util.Objects.requireNonNull(connection);
+        var continued = connection.continuation();
+        connectionId =
+                continued != null && continued.connectionId() != null ? continued.connectionId() : UUID.randomUUID();
         connection.bind(this);
     }
 

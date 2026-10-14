@@ -27,19 +27,20 @@ final class GfpSessionHooks {
     private UpstreamHook upstreamHook;
     private JavaHook javaHook;
 
-    GfpSessionHooks(GeyserFloatingPointsAdapter owner, GeyserSession session, GfpReflection reflection)
+    GfpSessionHooks(
+            GeyserFloatingPointsAdapter owner, GeyserSession session, GfpReflection reflection, boolean continued)
             throws ReflectiveOperationException {
         this.owner = owner;
         this.session = session;
         this.reflection = reflection;
         user = reflection.user(session.getUpstream(), session);
-        if (!Vector3i.ZERO.equals(offset()))
+        if (!continued && !Vector3i.ZERO.equals(offset()))
             throw new IllegalStateException("GFP origin changed before CultAC attached");
         upstreamField = field(GeyserSession.class, "upstream");
         postStartGamePackets = field(UpstreamSession.class, "postStartGamePackets");
         immediatePacketsField = field(GeyserSession.class, "queuedImmediatelyPackets");
         immediatePackets = session.getQueuedImmediatelyPackets();
-        if (!immediatePackets.isEmpty())
+        if (!continued && !immediatePackets.isEmpty())
             throw new IllegalStateException("GFP tick-end packets queued before CultAC attached");
         immediateHook = new GeyserImmediatePacketQueue(immediatePackets, owner::enqueue);
     }

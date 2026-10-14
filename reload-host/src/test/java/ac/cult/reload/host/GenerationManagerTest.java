@@ -112,6 +112,224 @@ class GenerationManagerTest {
     }
 
     @Test
+    void handoffMovesDrainingConnectionToCurrentGeneration() throws Exception {
+        var manager = start();
+        try {
+            var uuid = UUID.randomUUID();
+            manager.attach("player", uuid);
+            artifact("v2.jar", "2", "v2", "paper");
+            await(manager.update("v2.jar"));
+            assertTrue(manager.handoff("player", uuid));
+            assertTrue(events.indexOf("initial:release:player") < events.indexOf("v2:adopt:player:initial"));
+            assertEquals(manager.currentId(), manager.ownerOf("player"));
+            assertEquals(manager.currentId(), manager.user(uuid).owner());
+            eventually(() -> events.contains("initial:close"));
+            eventually(() -> manager.status().size() == 1);
+            assertTrue(manager.status().getFirst().contains("sessions=1"));
+            assertFalse(manager.handoff("player", uuid));
+            await(manager.disconnect("player"));
+            assertTrue(events.contains("v2:disconnect:player"));
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
+    void runtimesAreSelectedByNumberOrIdAndListTheirPlayers() throws Exception {
+        var manager = start();
+        try {
+            var first = UUID.randomUUID();
+            var second = UUID.randomUUID();
+            manager.attach("first", first);
+            String initial = manager.ownerOf("first");
+            artifact("v2.jar", "2", "v2", "paper");
+            await(manager.update("v2.jar"));
+            manager.attach("second", second);
+            var lines = manager.status();
+            assertTrue(lines.get(0).startsWith("#1 ") && lines.get(0).contains(" created "));
+            assertTrue(lines.get(1).startsWith("#2 ") && lines.get(1).contains("CURRENT"));
+            assertEquals(List.of(first), manager.players("1"));
+            assertEquals(List.of(first), manager.players(initial));
+            assertEquals(List.of(second), manager.players("#2"));
+            assertEquals(lines.get(1), manager.status("2"));
+            assertThrows(IllegalArgumentException.class, () -> manager.players("3"));
+            assertEquals(
+                    List.of("tell Alex Proxy update in 15 minutes", "tell Sam Proxy update in 15 minutes"),
+                    CommandRouting.perPlayer(
+                            "runtimes 1 /tell %player% Proxy update in 15 minutes".split(" "), List.of("Alex", "Sam")));
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
+    void refusedReleaseKeepsConnectionOnDrainingGeneration() throws Exception {
+        var manager = start();
+        try {
+            manager.attach("player", null);
+            String initial = manager.ownerOf("player");
+            artifact("v2.jar", "2", "v2", "paper");
+            await(manager.update("v2.jar"));
+            controls.put("keep:player", true);
+            assertFalse(manager.handoff("player", null));
+            assertEquals(initial, manager.ownerOf("player"));
+            assertFalse(events.stream().anyMatch(event -> event.contains(":adopt:")));
+            assertFalse(events.contains("initial:close"));
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
+    void translatedHandoffMovesBothPinnedTransportsAndUserTogether() throws Exception {
+        var manager = start();
+        try {
+            var uuid = UUID.randomUUID();
+            manager.attach("bedrock", null);
+            controls.put("upstream:java", "bedrock");
+            manager.attach("java", uuid);
+            artifact("v2.jar", "2", "v2", "paper");
+            await(manager.update("v2.jar"));
+            // Resolution is an admission fact, not a fresh UUID/channel lookup during transfer.
+            controls.remove("upstream:java");
+            assertTrue(manager.handoff("java", uuid));
+            assertEquals(manager.currentId(), manager.ownerOf("java"));
+            assertEquals(manager.currentId(), manager.ownerOf("bedrock"));
+            assertEquals(manager.currentId(), manager.user(uuid).owner());
+            eventually(() -> events.contains("initial:close"));
+            eventually(() -> manager.status().size() == 1);
+            assertTrue(manager.status().getFirst().contains("sessions=2"));
+            await(manager.disconnect("java"));
+            assertEquals(manager.currentId(), manager.ownerOf("bedrock"));
+            await(manager.disconnect("bedrock"));
+            assertTrue(events.contains("v2:disconnect:bedrock"));
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
+    void pendingUpstreamDisconnectPreventsTranslatedHandoff() throws Exception {
+        var manager = start();
+        var pending = new CompletableFuture<Void>();
+        try {
+            manager.attach("bedrock", null);
+            controls.put("upstream:java", "bedrock");
+            manager.attach("java", null);
+            String initial = manager.ownerOf("java");
+            controls.put("disconnect:bedrock", pending);
+            manager.disconnect("bedrock");
+            artifact("v2.jar", "2", "v2", "paper");
+            await(manager.update("v2.jar"));
+            assertFalse(manager.handoff("java", null));
+            assertEquals(initial, manager.ownerOf("java"));
+            assertFalse(events.contains("initial:release:java"));
+        } finally {
+            pending.complete(null);
+            await(manager.stop());
+        }
+    }
+
+    @Test
+    void failedTranslatedAdoptionCleansBothTransports() throws Exception {
+        var manager = start();
+        try {
+            manager.attach("bedrock", null);
+            controls.put("upstream:java", "bedrock");
+            manager.attach("java", UUID.randomUUID());
+            artifact("v2.jar", "2", "v2", "paper");
+            await(manager.update("v2.jar"));
+            controls.put("fail-adopt:java", true);
+            assertThrows(RuntimeException.class, () -> manager.handoff("java", null));
+            eventually(() -> manager.ownerOf("java") == null && manager.ownerOf("bedrock") == null);
+            assertTrue(events.contains("v2:disconnect:java"));
+            assertTrue(events.contains("v2:disconnect:bedrock"));
+            eventually(() -> manager.status().size() == 1);
+            assertTrue(manager.status().getFirst().contains("sessions=0"));
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
+    void publicationDuringReleaseKeepsTheSelectedTargetOpenForBothTransports() throws Exception {
+        var manager = start();
+        var barrier = new CompletableFuture<Void>();
+        var entered = new CompletableFuture<Void>();
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            manager.attach("bedrock", null);
+            controls.put("upstream:java", "bedrock");
+            manager.attach("java", null);
+            artifact("v2.jar", "2", "v2", "paper");
+            await(manager.update("v2.jar"));
+            String selected = manager.currentId();
+            controls.put("release:java", barrier);
+            controls.put("entered:release:java", entered);
+            var transfer = executor.submit(() -> manager.handoff("java", null));
+            entered.get(10, TimeUnit.SECONDS);
+            artifact("v3.jar", "3", "v3", "paper");
+            await(manager.update("v3.jar"));
+            assertFalse(events.contains("v2:close"));
+            assertTrue(manager.status(selected).contains("sessions=0"));
+            barrier.complete(null);
+            assertTrue(transfer.get(10, TimeUnit.SECONDS));
+            assertEquals(selected, manager.ownerOf("java"));
+            assertEquals(selected, manager.ownerOf("bedrock"));
+            await(manager.disconnect("java"));
+            await(manager.disconnect("bedrock"));
+            eventually(() -> events.contains("v2:close"));
+        } finally {
+            barrier.complete(null);
+            executor.shutdownNow();
+            await(manager.stop());
+        }
+    }
+
+    @Test
+    void hungStartIsFencedWithoutBlockingLaterUpdates() throws Exception {
+        var manager = start();
+        try {
+            manager.lifecycleTimeout(java.time.Duration.ofMillis(300));
+            var hung = new CompletableFuture<Void>();
+            controls.put("start:hung", hung);
+            artifact("hung.jar", "2", "hung", "paper");
+            var error = assertThrows(ExecutionException.class, () -> await(manager.update("hung.jar")));
+            assertTrue(error.getCause().getMessage().contains("did not finish start"));
+            artifact("next.jar", "3", "next", "paper");
+            await(manager.update("next.jar"));
+            manager.attach("player", null);
+            assertTrue(events.contains("next:attach:player"));
+            assertFalse(events.contains("hung:close"));
+            hung.complete(null);
+            eventually(() -> events.contains("hung:close"));
+            eventually(() -> manager.status().size() == 1);
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
+    void hungStopKeepsLoaderOpenUntilItFinishes() throws Exception {
+        var manager = start();
+        try {
+            manager.lifecycleTimeout(java.time.Duration.ofMillis(300));
+            var stopping = new CompletableFuture<Void>();
+            controls.put("close:initial", stopping);
+            artifact("v2.jar", "2", "v2", "paper");
+            await(manager.update("v2.jar"));
+            eventually(() -> reports.stream().anyMatch(report -> report.contains("did not stop within")));
+            assertTrue(manager.status().stream().anyMatch(line -> line.contains("CLEANUP_FAILED")));
+            assertFalse(reports.stream().anyMatch(report -> report.startsWith("Unloaded")));
+            stopping.complete(null);
+            eventually(() -> manager.status().size() == 1);
+            assertTrue(reports.stream().anyMatch(report -> report.startsWith("Unloaded")));
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
     void descriptorVersionAndHashAreBothPartOfIdentity() throws Exception {
         var manager = start();
         try {
@@ -334,7 +552,7 @@ class GenerationManagerTest {
                         reports::add)) {
             restarted.loadInitial(archive.getInputStream(archive.getEntry(PluginInstaller.ENGINE)));
             restarted.startInitial();
-            assertTrue(restarted.status().getFirst().startsWith("2.7@"));
+            assertTrue(restarted.status().getFirst().startsWith("#1 2.7@"));
         }
     }
 

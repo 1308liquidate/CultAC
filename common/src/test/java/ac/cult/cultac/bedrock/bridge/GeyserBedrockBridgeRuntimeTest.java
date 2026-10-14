@@ -24,6 +24,135 @@ import org.mockito.Mockito;
 public final class GeyserBedrockBridgeRuntimeTest {
 
     @Test
+    public void continuedActorCreationCannotAcceptAnOldAuthTick() throws Exception {
+        var session = Mockito.mock(org.geysermc.geyser.session.GeyserSession.class);
+        var type = Class.forName(GeyserBedrockBridgeRuntime.class.getName() + "$PacketTapHandler");
+        var constructor = type.getDeclaredConstructor(
+                org.geysermc.geyser.session.GeyserSession.class,
+                org.cloudburstmc.protocol.bedrock.BedrockSession.class,
+                org.cloudburstmc.protocol.bedrock.packet.BedrockPacketHandler.class,
+                ac.cult.reload.integrations.GeyserQueue.class);
+        constructor.setAccessible(true);
+        var tap = constructor.newInstance(session, null, null, new ac.cult.reload.integrations.GeyserQueue());
+        var runtime = type.getDeclaredField("actorCreationRuntimeId");
+        runtime.setAccessible(true);
+        runtime.set(tap, 42L);
+        var floor = type.getDeclaredField("continuedMovementTick");
+        floor.setAccessible(true);
+        floor.set(tap, 500L);
+        var player = Mockito.mock(ac.cult.cultac.player.CultPlayer.class);
+        player.bedrockState = new ac.cult.cultac.bedrock.player.BedrockPlayerState(java.util.UUID.randomUUID());
+        player.checkManager = Mockito.mock(ac.cult.cultac.manager.player.CheckManager.class);
+        var processor = Mockito.mock(ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor.class);
+        Mockito.when(player.checkManager.getSimulationProcessor()).thenReturn(processor);
+        Mockito.doAnswer(call -> {
+                    player.bedrockState.recordActorCreation(call.getArgument(0));
+                    return null;
+                })
+                .when(processor)
+                .handleBedrockActorCreation(42L);
+        var initialize = type.getDeclaredMethod("initializeActor", ac.cult.cultac.player.CultPlayer.class);
+        initialize.setAccessible(true);
+        initialize.invoke(tap, player);
+        assertFalse(player.bedrockState.acceptMovementTick(500));
+        assertFalse(player.bedrockState.acceptMovementTick(499));
+        assertTrue(player.bedrockState.acceptMovementTick(501));
+        initialize.invoke(tap, player);
+        assertEquals(501, player.bedrockState.lastMovementTick());
+    }
+
+    @Test
+    public void queuedLatencyReplyReachesReplacementTapInItsOriginalTickLoopSlot() throws Exception {
+        var session = Mockito.mock(org.geysermc.geyser.session.GeyserSession.class);
+        var upstream = Mockito.mock(org.cloudburstmc.protocol.bedrock.BedrockSession.class);
+        var replacement = Mockito.mock(org.cloudburstmc.protocol.bedrock.packet.BedrockPacketHandler.class);
+        Mockito.when(upstream.getPacketHandler()).thenReturn(replacement);
+        Deque<Runnable> accepted = new ArrayDeque<>();
+        Mockito.doAnswer(call -> {
+                    accepted.add(call.getArgument(0));
+                    return null;
+                })
+                .when(session)
+                .ensureInEventLoop(Mockito.any(Runnable.class));
+        var type = Class.forName(GeyserBedrockBridgeRuntime.class.getName() + "$PacketTapHandler");
+        var constructor = type.getDeclaredConstructor(
+                org.geysermc.geyser.session.GeyserSession.class,
+                org.cloudburstmc.protocol.bedrock.BedrockSession.class,
+                org.cloudburstmc.protocol.bedrock.packet.BedrockPacketHandler.class,
+                ac.cult.reload.integrations.GeyserQueue.class);
+        constructor.setAccessible(true);
+        var old = (org.cloudburstmc.protocol.bedrock.packet.BedrockPacketHandler)
+                constructor.newInstance(session, upstream, null, new ac.cult.reload.integrations.GeyserQueue());
+        var reply = new org.cloudburstmc.protocol.bedrock.packet.NetworkStackLatencyPacket();
+        reply.setFromServer(true);
+        old.handlePacket(reply);
+        Mockito.verifyZeroInteractions(replacement);
+        var detached = type.getDeclaredField("detached");
+        detached.setAccessible(true);
+        ((java.util.concurrent.atomic.AtomicBoolean) detached.get(old)).set(true);
+        var handedOff = type.getDeclaredField("handedOff");
+        handedOff.setAccessible(true);
+        handedOff.set(old, true);
+        accepted.removeFirst().run();
+        Mockito.verify(replacement).handlePacket(reply);
+        assertTrue(accepted.isEmpty());
+    }
+
+    @Test
+    public void unfinishedSpawnCannotReleaseWithoutTheGuaranteedDimensionReset() {
+        var session = Mockito.mock(org.geysermc.geyser.session.GeyserSession.class, Mockito.RETURNS_DEEP_STUBS);
+        Mockito.when(session.getTickEventLoop().inEventLoop()).thenReturn(true);
+        assertNull(GeyserBedrockBridgeRuntime.releaseSession(session));
+        Mockito.verify(session, Mockito.never()).getUpstream();
+        Mockito.verify(session, Mockito.never()).disconnect(Mockito.anyString());
+    }
+
+    @Test
+    public void transferFencesEngineReceiptsWithoutChangingNativeLatencyOrder() {
+        var queue = new ac.cult.reload.integrations.GeyserQueue();
+        var old = queue.scope();
+        List<String> receipts = new ArrayList<>();
+        queue.add(() -> receipts.add("native-A"));
+        old.writeWithReceipt(() -> () -> receipts.add("old-receipt"));
+        old.insert(() -> receipts.add("old-engine"), () -> {});
+        queue.add(() -> receipts.add("native-B"));
+        // Geyser may already have polled a callback to dispatch onto its tick executor.
+        Runnable polled = queue.poll();
+        old.close();
+        var next = queue.scope();
+        next.writeWithReceipt(() -> () -> receipts.add("new-receipt"));
+        next.insert(() -> receipts.add("new-engine"), () -> {});
+        polled.run();
+        queue.poll().run();
+        assertEquals(List.of("native-A"), receipts);
+        queue.poll().run();
+        queue.poll().run();
+        assertEquals(List.of("native-A", "new-receipt", "native-B", "new-engine"), receipts);
+        assertTrue(queue.isEmpty());
+        assertTrue(queue.isTrackingWrites());
+    }
+
+    @Test
+    public void continuationRetainsShiftedOriginsForPacketsAwaitingCloudburstWrite() {
+        var previous = new BedrockOriginDispatch();
+        var packet = new MovePlayerPacket();
+        previous.begin();
+        previous.enqueue(packet, () -> {});
+        var operation = new ac.cult.cultac.bedrock.protocol.BedrockTeleportOperation(
+                42, ac.cult.cultac.bedrock.protocol.BedrockTeleportProvenance.GFP_REBASE, null);
+        previous.finish(16000000, -16000000, operation);
+        var continued = new BedrockOriginDispatch();
+        continued.restore(previous.continuation());
+        previous.clear();
+        assertEquals(
+                new ac.cult.cultac.bedrock.protocol.BedrockCoordinateFrame(16000000, -16000000, 1), continued.frame());
+        var emission = continued.take(packet);
+        assertEquals(continued.frame(), emission.frame());
+        assertEquals(operation, emission.operation());
+        assertNull(continued.take(packet));
+    }
+
+    @Test
     public void invalidMovementIsRejectedBeforeFrameCapture() {
         var packet = new PlayerAuthInputPacket();
         packet.setPosition(org.cloudburstmc.math.vector.Vector3f.ZERO);
@@ -155,7 +284,7 @@ public final class GeyserBedrockBridgeRuntimeTest {
 
     @Test
     public void mixedLatencyCallbacksFollowWireOrderRegardlessOfTimestamp() {
-        var queue = new ac.cult.cultac.utils.latency.GeyserQueue();
+        var queue = new ac.cult.reload.integrations.GeyserQueue();
         var session = Mockito.mock(org.geysermc.geyser.session.GeyserSession.class, Mockito.RETURNS_DEEP_STUBS);
         Mockito.when(session.getLatencyPingCache()).thenReturn(queue);
         List<String> completed = new ArrayList<>();
@@ -202,7 +331,7 @@ public final class GeyserBedrockBridgeRuntimeTest {
 
     @Test
     public void failedWriteLeavesCallbackUnconfirmedAndDetachPreservesGeyserCallbacks() {
-        var queue = new ac.cult.cultac.utils.latency.GeyserQueue();
+        var queue = new ac.cult.reload.integrations.GeyserQueue();
         Runnable callback = () -> {};
         queue.add(callback);
         org.junit.Assert.assertThrows(

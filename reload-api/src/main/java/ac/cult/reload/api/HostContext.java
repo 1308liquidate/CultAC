@@ -35,6 +35,11 @@ public interface HostContext {
     /** The pinned generation, or null for an unmanaged native connection. */
     String ownerOf(Object connection);
 
+    /** Called by the owning engine at the reconfiguration acknowledgement, on its packet thread. */
+    default boolean handoff(Object connection, Object nativePlayer) throws Exception {
+        return false;
+    }
+
     void bindUser(Object connection, UUID uuid, Object nativePlayer, Object user);
 
     void unbindUser(Object connection);

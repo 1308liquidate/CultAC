@@ -83,7 +83,12 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
                     // beginLogin can install its codec and resume LocalChannel reads before
                     // the handshake listener returns. Its next frame already belongs to LOGIN.
                     boolean handshake = output.type == ServerboundPackets.INTENTION;
+                    boolean reconfiguration = output.type == ServerboundPackets.CONFIGURATION_ACKNOWLEDGED;
                     if (handshake) forwarded(output);
+                    if (reconfiguration && !connection.handoffAtReconfiguration()) {
+                        output.frame.release();
+                        return;
+                    }
                     ctx.fireChannelRead(output.frame);
                     if (!handshake && output.type != null) forwarded(output);
                 }

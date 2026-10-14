@@ -14,6 +14,21 @@ public interface RuntimeInstance {
 
     CompletionStage<Void> disconnect(Object connection);
 
+    /**
+     * Gives a live connection to another generation, on the connection's own thread at a protocol boundary. The next
+     * owner adopts it within the same task.
+     *
+     * @return client state as JDK values and opaque native handles (no engine classes), or null to keep the connection
+     */
+    default java.util.Map<String, Object> release(Object connection) throws Exception {
+        return null;
+    }
+
+    /** Attaches a connection another generation released, continuing its session with the released state. */
+    default void adopt(Object connection, Object nativePlayer, java.util.Map<String, Object> state) throws Exception {
+        attach(connection, nativePlayer);
+    }
+
     Object api();
 
     default CompletionStage<Void> execute(Object sender, String command) {
