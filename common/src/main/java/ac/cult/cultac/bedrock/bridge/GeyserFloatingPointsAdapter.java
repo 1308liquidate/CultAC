@@ -13,6 +13,9 @@ import org.geysermc.geyser.session.cache.TeleportCache;
 import org.geysermc.mcprotocollib.network.Session;
 import org.geysermc.mcprotocollib.network.event.session.PacketSendingEvent;
 import org.geysermc.mcprotocollib.network.packet.Packet;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundFinishConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundStartConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundLoginFinishedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundMoveVehiclePacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
@@ -85,6 +88,7 @@ final class GeyserFloatingPointsAdapter {
 
     void receive(GfpSessionHooks.JavaHook hook, Session downstream, Packet packet) {
         session.ensureInEventLoop(() -> {
+            Packet stateSwitch = null;
             synchronized (this) {
                 if (closed) return;
                 TeleportCache beforeCache = session.getUnconfirmedTeleport();
@@ -93,7 +97,9 @@ final class GeyserFloatingPointsAdapter {
                 try {
                     var rewritten = hook.rewriter.receive(downstream, packet);
                     finishRewrite(hooks.offset(), operation);
-                    if (!rewritten.cancelled()) {
+                    if (switchesState(rewritten.packet())) {
+                        if (!rewritten.cancelled()) stateSwitch = rewritten.packet();
+                    } else if (!rewritten.cancelled()) {
                         dispatch.withOperation(
                                 operation,
                                 () -> hook.delegates.forEach(
@@ -104,7 +110,20 @@ final class GeyserFloatingPointsAdapter {
                     fail(failure);
                 }
             }
+            // ClientListener answers these with Session#switchOutboundState, which waits for the
+            // channel's event loop to write the acknowledgement. That write passes through send(),
+            // so delivering them under this monitor deadlocks. They carry no coordinates to rebase.
+            if (stateSwitch != null) {
+                Packet switched = stateSwitch;
+                hook.delegates.forEach(listener -> listener.packetReceived(downstream, switched));
+            }
         });
+    }
+
+    private static boolean switchesState(Packet packet) {
+        return packet instanceof ClientboundLoginFinishedPacket
+                || packet instanceof ClientboundStartConfigurationPacket
+                || packet instanceof ClientboundFinishConfigurationPacket;
     }
 
     synchronized void send(GfpSessionHooks.JavaHook hook, PacketSendingEvent event) {
