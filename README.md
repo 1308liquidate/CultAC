@@ -4,7 +4,7 @@ CultAC is an open source Minecraft anticheat designed to support the latest vers
 
 **This repository is a fork of upstream Grim.** It keeps the GPLv3 Grim 2.0-modern base
 (checks, commands, config system, platform SPI) but replaces the PacketEvents dependency
-with a raw-NMS (non-PacketEvents) networking pipeline, replaces the 2.0 prediction engine
+with a custom bytebuffer-based networking pipeline, replaces the 2.0 prediction engine
 with the 3.0 simulation engine written by DefineOutside in early 2023, and adds a dedicated Bedrock simulation engine bridged
 through Geyser.
 
@@ -14,16 +14,14 @@ Discord: https://discord.gg/nyeVp7UFau
 
 
 * Java client support: 1.21.2 though 26.3
-* Paper 1.21.2, 1.21.11, 26.2, or 26.3. Velocity is experimental
-
+  * Pre-1.21.2 players will be disconnected if ViaVersion is on the backend and Cult is on the proxy
+  * Pre-1.21.2 player support is deprecated
+* Paper 1.21.2, 1.21.11, 26.2, or 26.3.
+* Velocity
 
 Bedrock notes
 * GeyserFloatingPoints must be installed as a Geyser addon if players are > 3000 blocks from 0,0
-
-If you run the Bukkit anticheat behind Velocity or BungeeCord:
-- Geyser and Floodgate must be on the backend server so we may read the bedrock client's packets
-- If you use ViaVersion, it must be installed on the backend server (where Cult is) ONLY.
-  Cult does not support having ViaVersion installed on the proxy, even if it is also installed on the backend.
+* Cult must be installed on the proxy if using Geyser on the proxy
 
 ## Pull Requests
 
@@ -60,75 +58,6 @@ The native plugin stays loaded while each anticheat generation runs in its own c
 2. Run `/cult update <filename.jar>` with `cult.update` permission.
 3. Run `/cult runtimes` with `cult.runtimes` permission to see current and draining generations.
 
-For development on Velocity, `/cult devswap` loads `plugins/cultac/updates/CultAC-velocity.jar`
-and requires the separate `cult.devswap` permission. `/cult update` still requires a filename.
-That fixed-name staging entry can be a symlink to the build output. Wait for the build to finish
-before running the command; the loader snapshots each accepted version into its own immutable
-generation directory. Shutdown cleanup preserves the symlink and its build target.
-
-A version is the `plugin.yml` version (Velocity uses `velocity-plugin.json`) plus the runtime
-jar's complete SHA-256 digest. Commands display the first twelve digest characters.
-Two builds with the same descriptor version and different hashes are distinct versions;
-an identical engine is not activated twice. A complete plugin release is identified by its
-embedded engine, and its complete native jar is saved for installation on shutdown.
-
-Existing Java and Bedrock connections remain on their original generation until disconnect.
-New connections use the most recently activated generation. There is no fixed generation limit.
-The bootstrap records connection and user ownership explicitly; commands, placeholders, and
-GrimAPI handles use that same directory. Runtime ownership is not inferred from implementation
-classloaders. One resource scope tracks calls, callbacks, and accepted queued work. The manager
-alone cancels registrations, drains work, stops the engine, and closes its classloader.
-An old generation unloads after its connections, queued packet work, callbacks, and native
-registrations finish cleanup. Cleanup failures retain the generation and appear in `/cult runtimes`.
-Cached GrimAPI user/check handles detach when their session ends; acquire a new user after reconnect.
-
-`/cult reload` validates the configuration for every live generation before applying it.
-Startup failure, a wrong platform/host version, or an incompatible `cult-loader-version`
-rejects an update before publication. `cult-loader-version` is an explicit compatibility revision, configured with `cultLoaderVersion`
-in `gradle.properties` and included in both the native plugin and runtime descriptors. Increment
-it only for incompatible runtime/shared API changes. Compatible loader bug fixes keep the same
-revision and do not block engine updates; the updated native loader takes effect on the next
-normal shutdown/restart. An incompatible revision requires installing the complete plugin and
-restarting once.
-The current compatibility revision is `2`, covering the explicit ownership and lifetime SPI.
-
-On shutdown, Cult installs the latest selected version into its installed plugin jar **before
-final runtime unload**. For a runtime-only update it preserves the bootstrap and replaces the
-embedded engine; for a complete release it installs the saved release jar. It verifies the
-version and engine digest before an atomic replacement. After successful installation it
-removes regular files from `updates/`; it leaves subdirectories and symlinks alone. If installation
-fails, it retains both the immutable active artifact and staged updates, reports the failure,
-and keeps the restart marker pointing at the selected engine.
-
-Runtime-only artifacts are `bukkit-runtime/build/libs/CultAC-paper-runtime.jar` and
-`velocity-platform/build/libs/CultAC-velocity-runtime.jar`. Put them in `updates/`, not directly
-in the native `plugins/` folder. The complete distributable includes the bootstrap and its
-initial runtime.
-
-
-Loader unit tests: `./gradlew :reload-host:test :reload-services:test`.
-The separate lifecycle smoke runner is `scripts/smoketests/hot-update-lifecycle.py`;
-pass `--paper-jar <Paper 26.3 jar>` and optionally `--velocity-jar <Velocity jar>`.
-It starts isolated loopback servers, holds real Java login connections across an update,
-checks incompatibility rejection and retirement, verifies shutdown installation and cleanup,
-and restarts each server to verify the selected hash. It performs ten updates by default
-(`--iterations` changes that count). Run it separately with `--collect-loaders` to require
-loader collection using `jcmd`. Only that collection run clears soft metadata caches on GC;
-functional runs use normal JVM policy. Collection also waits for pending JIT compilation
-to release its loader handles. Production needs no additional JVM flags.
-Optional `--paper-geyser <jar>` and `--velocity-geyser <jar>` also start Geyser on
-isolated loopback ports and check bridge startup and retirement.
-
-`scripts/smoketests/hot-update-bedrock.py` reuses the existing BedrockPacketReplay CLI and
-observer with the immutable `elytra`, `elytra2`, and `longcourse` corpus. Pass `--replay-root`,
-`--scenarios`, `--paper-lock`, and optionally `--velocity-lock` for pinned native runtime
-artifacts. It updates during continuously replaying longcourse baseline and seed-42 mutation
-runs while holding a Java connection, then checks all three captures through three baseline
-rounds and their mutations on the selected runtime. It preserves every replay assertion,
-verifies shutdown installation/cleanup, and restarts the installed version. Artifacts are
-saved under `build/hot-update-bedrock/` by default. Use distinct `--java-port` and
-`--bedrock-port` values when other local servers are running.
-
 ## Compiling From Source
 
 Install JDK 25 and Git, and set `JAVA_HOME` to the JDK 25 installation.
@@ -147,19 +76,23 @@ separately; [Geyser's mappings-generator](https://github.com/GeyserMC/mappings-g
   * Written and validated to 0.001 accuracy without exemption scenarios
     * Tridents, elytra, slime, honey, water, lava, bubble columns, etc. all match bedrock client
   * Machine generated based upon replaying bedrock packets sequences thousands of times, human validated
-  * Listens to bedrock packets to increase accuracy
+  * Listens to bedrock packets directly to increase accuracy
+  * Supports client-sided bedrock vehicles such as boats and horses
 * Chunk section deduplication. Only one copy per unique chunk section is stored reducing memory usage in common areas.
   * Copy on write on shared chunk sections preserves packet-based blocks, version differences, and latency differences
   * Servers with many players in one area will see a substantial memory decrease
-* NMS based packets rather than PacketEvents
+* Bytebuffer based packets rather than PacketEvents
 * Lower allocation transaction scheduling
+* Lower allocation collision handling
 * Fork of Grim 3.0 engine
-* Uses native collision from the server to reduce maintenance burden
-* Uses native block placing logic to increase accuracy and reduce maintenance burden
-* Uses client-provided inventory changes to increase accuracy and reduce maintenance burden
 * Packet driven piston simulation
 * FairReach ported from Grim 3.0 to limit latency abuse for reach
 * Loss of Fabric and Spigot support. Fabric support may be re-added eventually
+
+## Major added checks from 2.0
+- Added visibility checks to prevent hitting through walls, placing through walls, and digging through walls
+- Added more resilient item use NoSlow checks
+- Added a KeepSprint check
 
 ## What's not done
 * Few additional checks compared to upstream Grim 2.0, the focus is on the bedrock and 3.0 simulation engine
@@ -229,30 +162,3 @@ What makes Cult stand out against other anticheats?
 
 * All systems are designed to be highly secure and mathematically impossible to bypass
 * For example, the prediction engine knows all possible movements and cannot be bypassed
-
-### Java packet logging
-
-Use `/cult debug javapacketlog [username]` to start or stop a readable packet capture for a connected player;
-without a username it captures the player running the command. The command requires `cult.debug` and also works through the `cultac`, `grim`, and `grimac` aliases.
-Use `/cult debug javapacketlog <username> --onjoin` to capture the next connection for that Java-side profile name,
-including the Floodgate prefix when applicable. Captures start when the authenticated profile is available,
-covering configuration and play traffic.
-
-Logs are saved under the plugin data folder in `javapacketlogs/`. They contain inbound packets before listener changes
-and outbound packets in their emitted order, including Geyser's translated Java traffic. The logger uses existing
-decoded fields and named empty packets; unread payloads are omitted and counted in the footer. Binary fields are
-summarized by size, and item stacks show type and quantity. Headers identify the observed and model protocols.
-Outbound records describe observed writes rather than client acknowledgements. Disconnecting stops the capture,
-and the command reports the path after saving.
-
-### Proxy tick diagnostics
-
-Use `/cult debug proxyticks [player]` on Velocity to show the observed tick-end hit and miss percentages,
-sample counts, total emitted tick ends, and estimator mode. The player defaults to yourself; console must
-name a player. Requires `cult.debug`. Add `--reset` to start a new measurement for that connection.
-
-A hit is a tracking wave followed by a proxy tick end. A miss is another update for the same tracked entity,
-or a time synchronization starting the next tick, before the previous wave received a tick end. A late
-corrective tick end still counts as a miss. In timer mode, a backend burst alone does not count as a hit.
-Percentages cover observed tracking waves since connection or reset; empty tick ends do not improve them.
-This is an estimate: ticks without tracking evidence and extra boundaries within one wave cannot be judged.
