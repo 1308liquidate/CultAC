@@ -19,6 +19,7 @@ public class PacketServerTickingState extends CultProcessor implements CheckList
     @CultPacketHandler
     public void onTickingState(
             PacketSendEvent<ClientboundTickingState> event, CultPlayer player, ClientboundTickingState packet) {
+        player.itemUseBurst.tickRateSent(packet.tickRate());
         deferToClient(event, () -> {
             boolean wasTickingNormally = isTickingNormally(
                     player.packetStateData.serverTickRate,

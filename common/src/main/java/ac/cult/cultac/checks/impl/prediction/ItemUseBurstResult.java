@@ -1,8 +1,9 @@
 package ac.cult.cultac.checks.impl.prediction;
 
-/** Post-completion comparison for the statistical policy; it never declares use mandatory. */
-public record ItemUseBurstResult(double legalOffset, double slowedOffset) {
-    public boolean unslowed(double threshold) {
-        return legalOffset <= threshold && slowedOffset > threshold;
-    }
-}
+import ac.cult.cultac.network.protocol.ClientVersion;
+
+/**
+ * Residual movement input of one reality, captured at travel. It is evaluated against the
+ * server-view use slowdown once that use is known; it never changes the legal movement.
+ */
+public record ItemUseBurstResult(double x, double z, double speed, float sneak, ClientVersion version) {}

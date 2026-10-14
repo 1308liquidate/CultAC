@@ -187,7 +187,7 @@ public final class ClientItemUseState {
         return remaining == Integer.MIN_VALUE ? remaining : remaining - 1;
     }
 
-    private static int duration(SimItemStack stack) {
+    static int duration(SimItemStack stack) {
         // Item overrides precede generic components, including a consumable
         // component attached to a trident. Unknown instrument holders are not
         // assigned a guessed duration; action prediction supplies their timer.
@@ -206,7 +206,7 @@ public final class ClientItemUseState {
                 : 0;
     }
 
-    private static ItemComponents.UseEffects effects(SimItemStack stack, ClientVersion version) {
+    static ItemComponents.UseEffects effects(SimItemStack stack, ClientVersion version) {
         return version.isNewerThanOrEquals(ClientVersion.V_1_21_11)
                 ? ItemComponents.useEffects(stack.components())
                 : ItemComponents.UseEffects.DEFAULT;

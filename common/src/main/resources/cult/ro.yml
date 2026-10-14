@@ -68,13 +68,15 @@ cult:
       max-percent: 20
       history-ticks: 100
 
-    # Corecții statistice pentru rafale scurte și repetate de mișcare după folosirea unui obiect.
-    # Nu înregistrează abateri pentru trișare. Creditul se reface doar în tickurile cu încetinire
-    # corectă, conform item-use-desync.max-percent. Oprirea folosirii obiectului
-    # și perioadele de inactivitate nu resetează datoria acumulată.
-    item-use-burst-balance:
-      max-credit-ticks: 8
-      setback-debt-ticks: 4
+    # Compară timpul real în care serverul folosește un obiect (mâncat, băut,
+    # încărcat) cu tick-urile încetinite declarate de client în acest timp. O datorie
+    # peste max-debt-ticks semnalează ItemUseBurst; valoarea implicită acoperă un cadru
+    # întârziat al clientului (10 tick-uri) plus rotunjirea. Creditul provine doar din tick-uri încetinite suplimentare.
+    item-use-burst:
+      max-debt-ticks: 11
+      max-credit-ticks: 2
+      # Procentul din fiecare tick de utilizare așteptat care trebuie plătit cu un tick încetinit.
+      charge-percent: 95
 
     # Pingul maxim al tranzacțiilor sau timpul maxim tolerat fără pachete de mișcare
     # cât timp se așteaptă reacția la respingere, în milisecunde.

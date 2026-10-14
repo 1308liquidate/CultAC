@@ -69,13 +69,15 @@ cult:
       max-percent: 20
       history-ticks: 100
 
-    # Statistische correcties voor herhaalde korte bewegingspieken na voorwerpgebruik.
-    # Registreert geen cheatovertredingen. Tegoed wordt alleen aangevuld tijdens ticks met
-    # de juiste vertraging, op basis van item-use-desync.max-percent. Stoppen met het gebruik
-    # en inactiviteit wissen de opgebouwde schuld niet.
-    item-use-burst-balance:
-      max-credit-ticks: 8
-      setback-debt-ticks: 4
+    # Vergelijkt de echte tijd waarin de server een voorwerp gebruikt (eten, drinken,
+    # spannen) met de vertraagde clientticks in die tijd. Schuld boven max-debt-ticks
+    # markeert ItemUseBurst; de standaard dekt één late clientframe (10 ticks) plus
+    # afronding. Tegoed ontstaat alleen door extra vertraagde ticks.
+    item-use-burst:
+      max-debt-ticks: 11
+      max-credit-ticks: 2
+      # Percentage van elke verwachte gebruikstick dat met een vertraagde tick betaald moet worden.
+      charge-percent: 95
 
     # Maximaal toegestane transactieping of tijd zonder bewegingspakketten terwijl
     # terugslag in behandeling is, in milliseconden.

@@ -69,13 +69,15 @@ cult:
       max-percent: 20
       history-ticks: 100
 
-    # Statistische Korrekturen für wiederholte kurze Bewegungsschübe nach der Gegenstandsnutzung.
-    # Es werden keine Cheat-Verstöße erfasst. Das Guthaben erholt sich nur in Ticks mit
-    # korrekter Verlangsamung, gemäß item-use-desync.max-percent. Das Beenden der Nutzung
-    # und Leerlaufzeiten setzen die angesammelten Schulden nicht zurück.
-    item-use-burst-balance:
-      max-credit-ticks: 8
-      setback-debt-ticks: 4
+    # Vergleicht die echte Zeit, in der der Server einen Gegenstand benutzt (Essen,
+    # Trinken, Spannen), mit den verlangsamten Client-Ticks in dieser Zeit. Schulden über
+    # max-debt-ticks lösen ItemUseBurst aus; der Standard deckt einen verspäteten
+    # Client-Frame (10 Ticks) plus Rundung ab. Guthaben entsteht nur durch zusätzliche verlangsamte Ticks.
+    item-use-burst:
+      max-debt-ticks: 11
+      max-credit-ticks: 2
+      # Prozent jedes erwarteten Nutzungsticks, der mit einem verlangsamten Tick bezahlt werden muss.
+      charge-percent: 95
 
     # Maximal tolerierter Transaktions-Ping oder Zeitraum ohne Bewegungspakete,
     # während Rückstoß aussteht, in Millisekunden.

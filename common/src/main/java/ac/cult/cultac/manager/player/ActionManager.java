@@ -93,10 +93,7 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
 
     public void releaseItem() {
         this.releasing = true;
-        if (player.usesModernJavaItemUse()) {
-            player.getItemUseDesync().onUseCompleted();
-            player.clientItemUse.release();
-        }
+        if (player.usesModernJavaItemUse()) player.clientItemUse.release();
         this.blocking = false;
         player.packetStateData.setSlowedByUsingItem(false);
     }
@@ -256,6 +253,7 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
             CultPlayer player,
             ClientboundSetHeldSlot packet) {
         this.blocking = false;
+        player.itemUseBurst.serverHeldSlot(packet.slot());
         if (!player.usesModernJavaItemUse()) player.packetStateData.setSlowedByUsingItem(false);
     }
 

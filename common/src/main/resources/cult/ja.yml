@@ -68,13 +68,15 @@ cult:
       max-percent: 20
       history-ticks: 100
 
-    # アイテム使用後に短い移動バーストが繰り返される場合に、統計に基づいて補正します。
-    # チートによる違反としては記録しません。許容量は、正しく減速した tick でのみ、
-    # item-use-desync.max-percent に基づいて回復します。使用を中断したり、
-    # 何もせずに待ったりしても、累積した超過分はリセットされません。
-    item-use-burst-balance:
-      max-credit-ticks: 8
-      setback-debt-ticks: 4
+    # サーバーがアイテムを使用していた実時間（食べる、飲む、引き絞るなど）と、
+    # その間にクライアントが申告した減速 tick 数を比較します。max-debt-ticks を超える
+    # 不足は ItemUseBurst として検知されます。既定値は遅れたクライアントフレーム 1 回分
+    # （10 tick）と丸め誤差を許容します。余剰分は追加の減速 tick からのみ得られます。
+    item-use-burst:
+      max-debt-ticks: 11
+      max-credit-ticks: 2
+      # 想定される使用 tick ごとに、減速 tick で支払う必要がある割合（パーセント）。
+      charge-percent: 95
 
     # ノックバックへの応答を待っている間に許容する、トランザクションの応答遅延、
     # または移動パケットが届かない時間の上限です。単位はミリ秒です。

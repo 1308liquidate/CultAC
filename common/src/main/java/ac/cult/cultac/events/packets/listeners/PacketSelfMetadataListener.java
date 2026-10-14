@@ -152,9 +152,9 @@ public class PacketSelfMetadataListener {
 
                 if (player.usesModernJavaItemUse()) {
                     var proof = player.appendTrailingProofTransaction(event);
+                    player.itemUseBurst.serverFlags((byte) handValue, proof);
                     if (proof != null) {
                         if (player.supportsBundles() && !event.isInsideBundle()) event.bundle();
-                        player.itemUseBurst.expectProof(proof.transaction());
                         player.latencyUtils.addRealTimeTask(proof.transaction(), () -> {
                             player.isRiptidePose = isRiptiding;
                             player.refreshPlayerPose();

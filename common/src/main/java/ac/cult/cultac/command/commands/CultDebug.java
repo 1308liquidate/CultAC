@@ -57,7 +57,7 @@ public class CultDebug implements BuildableCommand {
 
         commandManager.command(cultCommand
                 .literal("debug")
-                .literal("itemslow", Description.of("Toggle item slowdown balance rewards and debits"))
+                .literal("itemslow", Description.of("Toggle item-use balance and server-view use tracking"))
                 .permission("cult.debug")
                 .optional("target", arguments.singlePlayerSelectorParser())
                 .handler(this::handleDebugItemSlow));
@@ -168,8 +168,9 @@ public class CultDebug implements BuildableCommand {
             sender.sendMessage(Component.text(
                     (enabled ? "Enabled" : "Disabled") + " item slowdown debugging for " + target.getName()
                             + (enabled
-                                    ? ": " + target.getItemUseDesync().describeBurstBalance()
-                                            + ". Positive balance is credit; run " + stopCommand + " again to stop."
+                                    ? ": " + target.itemUseBurst.describe()
+                                            + ". Positive balance is unpaid use ticks; VIEW lines trace the"
+                                            + " server-view use; run " + stopCommand + " again to stop."
                                     : "."),
                     NamedTextColor.GRAY));
         });

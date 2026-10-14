@@ -67,12 +67,14 @@ cult:
       max-percent: 20
       history-ticks: 100
 
-    # 对物品使用结束后反复出现的短暂突发移动进行统计纠正。
-    # 不记录作弊违规。额度仅在按要求减速的 tick 中根据 item-use-desync.max-percent 恢复；
-    # 停止使用物品或闲置等待都不会清除累计欠额。
-    item-use-burst-balance:
-      max-credit-ticks: 8
-      setback-debt-ticks: 4
+    # 比较服务器使用物品（进食、饮用、蓄力）所用的真实时间，与客户端在此期间
+    # 声明的减速 tick 数。超过 max-debt-ticks 的欠账会触发 ItemUseBurst；默认值
+    # 允许一次延迟的客户端帧（10 tick）加上取整误差。盈余只来自额外的减速 tick。
+    item-use-burst:
+      max-debt-ticks: 11
+      max-credit-ticks: 2
+      # 每个预期使用 tick 中需要用减速 tick 支付的百分比。
+      charge-percent: 95
 
     # 等待击退响应期间，允许的最大事务确认延迟或未收到移动数据包的时长，单位为毫秒。
     # 因延迟进行位置纠正前，会额外给予固定的 50 毫秒余量。

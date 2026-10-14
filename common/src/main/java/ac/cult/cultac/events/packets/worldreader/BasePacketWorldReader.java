@@ -105,6 +105,7 @@ public class BasePacketWorldReader {
     public void onBlockChangedAck(
             PacketSendEvent<ClientboundBlockChangedAck> event, CultPlayer player, ClientboundBlockChangedAck packet) {
         player.getGhostBlockMitigator().onServerAckSent(packet.sequence());
+        player.itemUseBurst.serverAck(packet.sequence());
         CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
         if (transaction != null) {
             player.compensatedWorld.handlePredictionConfirmation(packet.sequence(), transaction);

@@ -1,5 +1,6 @@
 package ac.cult.cultac.checks.impl.prediction.checks;
 
+import ac.cult.cultac.checks.impl.prediction.ItemUseBurstResult;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.utils.math.Vec3;
@@ -9,12 +10,24 @@ public final class ItemUseInput {
     private ItemUseInput() {}
 
     public static double offset(PredictionResult result, float multiplier) {
+        return offset(residual(result), multiplier);
+    }
+
+    public static ItemUseBurstResult residual(PredictionResult result) {
         var context = result.getSimulationContext();
         Vec3 residual =
                 result.getTarget().subtract(result.getAcceptedClosestToTarget()).multiply(1, 0, 1);
         Vec3 input = HorizontalAnalyzer.getBestTheoreticalPlayerInput(residual, context.getXRot());
-        double speed = context.getMaxSprintInputSpeed(result.getPlayer());
-        return offset(input.x, input.z, speed, multiplier, result.getSneakingInputMultiplier(), context.getVersion());
+        return new ItemUseBurstResult(
+                input.x,
+                input.z,
+                context.getMaxSprintInputSpeed(result.getPlayer()),
+                result.getSneakingInputMultiplier(),
+                context.getVersion());
+    }
+
+    public static double offset(ItemUseBurstResult input, float multiplier) {
+        return offset(input.x(), input.z(), input.speed(), multiplier, input.sneak(), input.version());
     }
 
     public static double offset(double x, double z, double speed, float multiplier) {

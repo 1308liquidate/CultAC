@@ -383,6 +383,7 @@ public class CheckManager {
                 new SuperDebug(player),
                 new NoSlow(player),
                 player.getItemUseDesync(),
+                player.itemUseBurst,
                 new Phase(player),
                 new PostCheck(player),
                 new NegativeTimerCheck(player),
@@ -454,7 +455,6 @@ public class CheckManager {
         return listenerMap(List.<CheckListener>of(
                 new TimerCheck(player),
                 new TickTimer(player),
-                player.itemUseBurst,
                 new DumbTimer(player),
                 new CrashA(player),
                 new CrashB(player),
@@ -536,7 +536,8 @@ public class CheckManager {
 
         registerPreReceive(registrations, prePredictionChecks.get(TimerCheck.class));
         registerPreReceive(registrations, prePredictionChecks.get(TickTimer.class));
-        registerPreReceive(registrations, prePredictionChecks.get(ItemUseBurst.class));
+        // Use, release and slot packets are timed at arrival, before other handlers mutate state.
+        registerPreReceive(registrations, postPredictionCheck.get(ItemUseBurst.class));
         registerPreReceive(registrations, prePredictionChecks.get(DumbTimer.class));
         registerPreReceive(registrations, prePredictionChecks.get(CrashA.class));
         registerPreReceive(registrations, prePredictionChecks.get(CrashC.class));
@@ -606,6 +607,7 @@ public class CheckManager {
         registerTickEnd(packetChecks.get(PacketEntityReplication.class));
         registerTickEnd(packetChecks.get(SimulationProcessor.class));
         registerTickEnd(postPredictionCheck.get(ItemUseDesync.class));
+        registerTickEnd(postPredictionCheck.get(ItemUseBurst.class));
         registerTickEnd(packetChecks.get(AutoclickerLimit.class));
         registerTickEnd(packetChecks.get(PacketWorldBorder.class));
         registerTickEnd(positionCheck.get(CompensatedCooldown.class));

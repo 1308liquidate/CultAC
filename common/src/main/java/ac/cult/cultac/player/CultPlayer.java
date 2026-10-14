@@ -455,7 +455,7 @@ public class CultPlayer implements GrimUser {
             rawTransactionPing = System.nanoTime() - current.sentAt();
             transPings.add(rawTransactionPing);
             playerClockAtLeast = current.sentAt();
-            if (usesModernJavaItemUse()) itemUseBurst.acknowledge(current.transaction(), current.sentAt());
+            if (usesModernJavaItemUse()) itemUseBurst.acknowledge(current.transaction());
             if (current instanceof BedrockTransaction bedrock) {
                 // Drain ordinary compensation before callbacks on this exact wire boundary.
                 latencyUtils.handleNettySyncTransaction(current.transaction());
@@ -1077,6 +1077,11 @@ public class CultPlayer implements GrimUser {
     @Override
     public int getLastTransactionSent() {
         return lastTransactionSent.get();
+    }
+
+    /** Send time of the latest acknowledged transaction: a lower bound on the client's clock. */
+    public long playerClockAtLeast() {
+        return playerClockAtLeast;
     }
 
     public long getClockBehindInMs() {

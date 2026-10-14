@@ -34,7 +34,6 @@ public final class ItemUseInventory {
     }
 
     public static void metadata(CultPlayer player, byte flags) {
-        if ((flags & 1) == 0) player.getItemUseDesync().onUseCompleted();
         player.clientItemUse.serverFlags(
                 (flags & 1) != 0,
                 (flags & 2) != 0 ? Hand.OFF_HAND : Hand.MAIN_HAND,

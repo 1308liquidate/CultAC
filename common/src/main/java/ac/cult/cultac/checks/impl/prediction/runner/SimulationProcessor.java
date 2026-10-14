@@ -1681,7 +1681,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 player.getScale());
         if (player.usesModernJavaItemUse()) {
             context.setItemUse(ac.cult.cultac.utils.data.ItemUseInventory.prepare(player));
-            context.setPostUseMultiplier(player.getItemUseDesync().postUseMultiplier());
+            context.setServerUseTracked(player.itemUseBurst.tracking());
         }
         context.setSprintModifier(this.sprintModifierAtTravel(player, riding));
         context.setProfileCarry(this.profileCarry);

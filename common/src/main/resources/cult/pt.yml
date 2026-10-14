@@ -68,13 +68,15 @@ cult:
       max-percent: 20
       history-ticks: 100
 
-    # Correções estatísticas para rajadas curtas e repetidas de movimento após o uso de um item.
-    # Não registra infrações por trapaça. O crédito só se recupera em ticks com a desaceleração
-    # correta, conforme item-use-desync.max-percent. Interromper o uso do item
-    # e os períodos de inatividade não zeram a dívida.
-    item-use-burst-balance:
-      max-credit-ticks: 8
-      setback-debt-ticks: 4
+    # Compara o tempo real em que o servidor usa um item (comer, beber, carregar)
+    # com os ticks desacelerados declarados pelo cliente nesse período. Dívida acima de
+    # max-debt-ticks sinaliza ItemUseBurst; o padrão cobre um frame atrasado do cliente
+    # (10 ticks) mais arredondamento. O crédito só vem de ticks desacelerados adicionais.
+    item-use-burst:
+      max-debt-ticks: 11
+      max-credit-ticks: 2
+      # Percentagem de cada tick de uso esperado que deve ser pago com um tick desacelerado.
+      charge-percent: 95
 
     # Ping de transação ou tempo máximo sem pacotes de movimento tolerado
     # enquanto se aguarda a reação à repulsão, em milissegundos.

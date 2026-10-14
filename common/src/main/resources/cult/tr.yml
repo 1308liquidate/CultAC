@@ -68,13 +68,15 @@ cult:
       max-percent: 20
       history-ticks: 100
 
-    # Eşya kullanımından sonra tekrarlanan kısa hareket patlamaları için istatistiksel düzeltmeler.
-    # Hile ihlali kaydedilmez. Kredi yalnızca doğru yavaşlamanın uygulandığı tiklerde,
-    # item-use-desync.max-percent değerine göre yenilenir. Kullanımı durdurmak
-    # ve hareketsiz beklemek birikmiş borcu sıfırlamaz.
-    item-use-burst-balance:
-      max-credit-ticks: 8
-      setback-debt-ticks: 4
+    # Sunucunun bir eşyayı kullandığı gerçek süreyi (yeme, içme, germe) istemcinin
+    # bu sürede bildirdiği yavaşlatılmış tick'lerle karşılaştırır. max-debt-ticks
+    # değerini aşan borç ItemUseBurst olarak işaretlenir; varsayılan değer gecikmiş bir
+    # istemci karesini (10 tick) ve yuvarlamayı kapsar. Alacak yalnızca ek yavaşlatılmış tick'lerden gelir.
+    item-use-burst:
+      max-debt-ticks: 11
+      max-credit-ticks: 2
+      # Beklenen her kullanım tick'inin yavaşlatılmış bir tick ile ödenmesi gereken yüzdesi.
+      charge-percent: 95
 
     # Geri itmeye tepki beklenirken izin verilen en yüksek işlem onayı gecikmesi veya
     # hareket paketi alınmadan geçen süre, milisaniye cinsinden.

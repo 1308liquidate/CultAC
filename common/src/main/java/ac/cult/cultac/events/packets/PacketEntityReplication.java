@@ -942,10 +942,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             // precise client tick, retaining only the unreported selected-slot/active-use ambiguity.
             var proof = player.appendTrailingProofTransaction(event);
             if (proof != null && player.supportsBundles() && !event.isInsideBundle()) event.bundle();
-            if (proof != null && player.usesModernJavaItemUse()) player.itemUseBurst.expectProof(proof.transaction());
+            player.itemUseBurst.serverComplete(proof);
             Runnable apply = () -> {
                 if (player.usesModernJavaItemUse()) {
-                    player.getItemUseDesync().onUseCompleted();
                     ac.cult.cultac.utils.blockplace.ClientBlockActions.completeUse(player);
                     player.clientItemUse.release();
                 }

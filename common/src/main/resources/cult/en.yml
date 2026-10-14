@@ -68,12 +68,15 @@ cult:
       max-percent: 20
       history-ticks: 100
 
-    # Statistical corrections for repeated partial bursts after item use.
-    # No cheating violations. Credit recovers only on compliant slowed ticks,
-    # using item-use-desync.max-percent; releases and idle time do not reset debt.
-    item-use-burst-balance:
-      max-credit-ticks: 8
-      setback-debt-ticks: 4
+    # Balances the real time the server spent using an item (eating, drinking,
+    # charging) against the slowed client ticks claimed meanwhile. Debt above
+    # max-debt-ticks flags ItemUseBurst; the default covers one late client frame
+    # (10 ticks) plus rounding. Credit only comes from extra slowed ticks.
+    item-use-burst:
+      max-debt-ticks: 11
+      max-credit-ticks: 2
+      # Percent of each expected use tick that must be paid with a slowed tick.
+      charge-percent: 95
 
     # Maximum transaction ping or movement-packet silence tolerated
     # while knockback is pending, in milliseconds.

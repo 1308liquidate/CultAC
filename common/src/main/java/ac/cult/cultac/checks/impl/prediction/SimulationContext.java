@@ -33,9 +33,9 @@ public class SimulationContext {
     ac.cult.cultac.utils.data.ClientItemUseState.Snapshot itemUse =
             ac.cult.cultac.utils.data.ClientItemUseState.Snapshot.NONE;
 
-    // Counterfactual input bound for statistical corrections only, after a proven release.
+    // Residual input is recorded for the server-view item-use balance; evidence only.
     @Setter
-    float postUseMultiplier = 1;
+    boolean serverUseTracked;
 
     Vec3 start;
 

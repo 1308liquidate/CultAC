@@ -68,13 +68,15 @@ cult:
       max-percent: 20
       history-ticks: 100
 
-    # Korekty statystyczne dla powtarzających się krótkich serii ruchów po użyciu przedmiotu.
-    # Nie rejestruje naruszeń za oszustwa. Zapas odnawia się tylko w tickach z prawidłowym
-    # spowolnieniem, zgodnie z item-use-desync.max-percent. Przerwanie używania przedmiotu
-    # i bezczynność nie zerują zadłużenia.
-    item-use-burst-balance:
-      max-credit-ticks: 8
-      setback-debt-ticks: 4
+    # Porównuje rzeczywisty czas używania przedmiotu przez serwer (jedzenie, picie,
+    # naciąganie) ze spowolnionymi tickami klienta w tym czasie. Dług powyżej
+    # max-debt-ticks oznacza ItemUseBurst; domyślna wartość obejmuje jedną spóźnioną
+    # klatkę klienta (10 ticków) i zaokrąglenie. Kredyt pochodzi tylko z dodatkowych spowolnionych ticków.
+    item-use-burst:
+      max-debt-ticks: 11
+      max-credit-ticks: 2
+      # Procent każdego oczekiwanego ticku użycia, który musi zostać opłacony spowolnionym tickiem.
+      charge-percent: 95
 
     # Maksymalny tolerowany ping transakcji lub czas bez pakietów ruchu,
     # gdy oczekiwana jest reakcja na odrzut, w milisekundach.

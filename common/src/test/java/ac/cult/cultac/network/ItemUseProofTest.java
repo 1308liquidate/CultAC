@@ -114,7 +114,6 @@ class ItemUseProofTest {
             assertSame(old, ItemUseInventory.prepare(player));
             player.packetStateData.acceptedClientTick++;
             assertFalse(ItemUseInventory.prepare(player).required());
-            assertEquals(0.2F, player.getItemUseDesync().postUseMultiplier());
         }
     }
 
