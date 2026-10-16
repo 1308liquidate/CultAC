@@ -52,6 +52,7 @@ public class CloudCommandService implements CommandService {
         manager = commandManager;
         new CultDebug().register(commandManager, commandArguments);
         new CultDebugVelocity().register(commandManager, commandArguments);
+        new CultDebugExplosion().register(commandManager, commandArguments);
         new CultGeyserPacketLog().register(commandManager, commandArguments);
         new CultJavaPacketLog().register(commandManager, commandArguments);
         new CultAlerts().register(commandManager, commandArguments);

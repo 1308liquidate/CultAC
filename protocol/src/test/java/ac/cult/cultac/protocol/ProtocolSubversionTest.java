@@ -2,9 +2,11 @@ package ac.cult.cultac.protocol;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import ac.cult.cultac.protocol.data.ModelRegistryData;
 import ac.cult.cultac.protocol.data.ProtocolData;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundExplode;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerInfoUpdate;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSpectatorAction;
 import ac.cult.cultac.protocol.testing.CodecFixture;
@@ -165,6 +167,25 @@ class ProtocolSubversionTest {
                 assertEquals(
                         new Vec3d(0.25, -0.5, 1),
                         read(version, ClientboundPackets.EXPLODE, bytes).knockback());
+
+                bytes.clear().writeDouble(1).writeDouble(2).writeDouble(3);
+                if (compact) bytes.writeFloat(4).writeInt(0);
+                bytes.writeBoolean(true).writeDouble(0.25).writeDouble(-0.5).writeDouble(1);
+                Wire.writeVarInt(
+                        bytes,
+                        ModelRegistryData.load(version)
+                                .registry("minecraft:particle_type")
+                                .id("minecraft:explosion"));
+                Wire.writeVarInt(bytes, 0);
+                Wire.writeString(bytes, "minecraft:entity.generic.explode", 32767);
+                bytes.writeBoolean(false);
+                if (compact) Wire.writeVarInt(bytes, 0);
+                if (version.atLeast(ProtocolVersion.V26_3)) bytes.writeBoolean(true);
+                assertWrittenBytes(
+                        version,
+                        ClientboundPackets.EXPLODE,
+                        new ClientboundExplode(new Vec3d(1, 2, 3), new Vec3d(0.25, -0.5, 1)),
+                        bytes);
 
                 bytes.clear().writeFloat(90);
                 if (compact) bytes.writeBoolean(true);
