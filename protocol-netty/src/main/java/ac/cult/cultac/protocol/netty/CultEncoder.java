@@ -4,6 +4,7 @@ import ac.cult.cultac.network.CultConnection;
 import ac.cult.cultac.network.CultNetworkManager;
 import ac.cult.cultac.network.CultWrite;
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.UnsupportedOnVersionException;
@@ -298,16 +299,17 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             Batch batch) {
         var phase = connection.phase(PacketDirection.CLIENTBOUND);
         boolean requested = false;
+        PacketType<?>[] untracked = {null};
         PacketType<?> forwardedType = null;
         try {
-            var values = connection
-                    .packets()
-                    .read(
-                            phase,
-                            PacketDirection.CLIENTBOUND,
-                            bytes,
-                            connection,
-                            type -> connection.dispatcher().get(type) != null);
+            var values = connection.packets().read(phase, PacketDirection.CLIENTBOUND, bytes, connection, type -> {
+                if (connection.dispatcher().get(type) == null) return false;
+                if (phase != ConnectionPhase.PLAY || tracked()) return true;
+                untracked[0] = type;
+                return false;
+            });
+            if (untracked[0] != null)
+                forwardedType = connection.dispatcher().get(untracked[0]).type();
             for (var value : values) {
                 var route = connection.dispatcher().get(value.type());
                 forwardedType = route.type();
@@ -358,6 +360,16 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         } finally {
             if (bytes != null) bytes.release();
         }
+    }
+
+    /**
+     * Send routes dispatch only to an attached player, so an untracked connection's play values
+     * would be decoded and discarded; its frames still forward unchanged. The player's model
+     * supplies older-wire world values, so decoding them without one cannot succeed.
+     */
+    private boolean tracked() {
+        connection.prepare();
+        return connection.player() != null;
     }
 
     private void appendReplacement(

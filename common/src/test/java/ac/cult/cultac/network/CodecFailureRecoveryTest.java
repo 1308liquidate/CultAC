@@ -86,6 +86,27 @@ class CodecFailureRecoveryTest {
 
     @ParameterizedTest
     @EnumSource(value = ProtocolVersion.class, names = "V26_3", mode = EnumSource.Mode.EXCLUDE)
+    void untrackedPlayValuesForwardWithoutOlderWireDecoding(ProtocolVersion version) throws Exception {
+        try (var fixture = RecordReceiveFixture.olderHost(version, false)) {
+            var type = fixture.connection.packets().writableType(update());
+            var calls = new AtomicInteger();
+            fixture.registrar.register(batch -> batch.sendRoute(
+                    type, PacketListenerPriority.NORMAL, (event, player, packet) -> calls.incrementAndGet()));
+            var original = frame(fixture, type);
+            String bytes = ByteBufUtil.hexDump(original);
+            var reads = countReads(fixture);
+            assertTrue(fixture.channel.writeAndFlush(original).isSuccess());
+            ByteBuf forwarded = fixture.channel.readOutbound();
+            assertEquals(bytes, ByteBufUtil.hexDump(forwarded));
+            forwarded.release();
+            assertEquals(0, original.refCnt());
+            assertEquals(0, reads.get());
+            assertEquals(0, calls.get());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProtocolVersion.class, names = "V26_3", mode = EnumSource.Mode.EXCLUDE)
     void authoredEncodeFailureFailsOnlyThatWriteAndTheNextWriteIsInspected(ProtocolVersion version) throws Exception {
         try (var fixture = RecordReceiveFixture.olderHost(version)) {
             var type = fixture.connection.packets().writableType(update());
@@ -144,6 +165,27 @@ class CodecFailureRecoveryTest {
                 .encode(ConnectionPhase.PLAY, type, update(), UnpooledByteBufAllocator.DEFAULT, fixture.connection)
                 .frames()
                 .getFirst();
+    }
+
+    private static AtomicInteger countReads(RecordReceiveFixture fixture) throws Exception {
+        var field = CultConnection.class.getDeclaredField("platform");
+        field.setAccessible(true);
+        var platform = (PlatformConnection) field.get(fixture.connection);
+        var delegate = platform.packetValues(fixture.connection);
+        var reads = new AtomicInteger();
+        when(platform.packetValues(fixture.connection)).thenReturn(new PacketValueAdapter() {
+            @Override
+            public Object read(ByteBuf input, ProtocolContext context) {
+                reads.incrementAndGet();
+                return delegate.read(input, context);
+            }
+
+            @Override
+            public void write(ByteBuf output, ProtocolContext context, Object packet) {
+                delegate.write(output, context, packet);
+            }
+        });
+        return reads;
     }
 
     private static void installFailingAdapter(RecordReceiveFixture fixture, boolean reading) throws Exception {
