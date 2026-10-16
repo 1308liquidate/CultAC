@@ -44,6 +44,12 @@ public class CollideAxisData {
     public static class CollideResult {
         boolean isLikelyCollide;
         double result;
+        // Direction (+1/-1) the horizontal result was probed in, since a flush result of 0 has no sign; 0 if unknown.
+        int side;
+
+        public CollideResult(boolean isLikelyCollide, double result) {
+            this(isLikelyCollide, result, 0);
+        }
 
         @Override
         public String toString() {
@@ -53,6 +59,11 @@ public class CollideAxisData {
         public CollideResult combine(CollideResult newResult) {
             isLikelyCollide = isLikelyCollide || newResult.isLikelyCollide;
             boolean areWeGreater = Math.abs(result) > Math.abs(newResult.result);
+            if (areWeGreater) {
+                side = newResult.side;
+            } else if (Math.abs(result) == Math.abs(newResult.result) && side != newResult.side) {
+                side = 0;
+            }
             result = areWeGreater ? newResult.result : result;
             return this;
         }

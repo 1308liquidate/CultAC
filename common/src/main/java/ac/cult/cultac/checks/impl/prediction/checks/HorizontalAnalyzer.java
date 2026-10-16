@@ -11,6 +11,7 @@ import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.NumFormatter;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.data.StuckEdgeData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.CultMath;
@@ -108,7 +109,14 @@ public class HorizontalAnalyzer implements EngineCheck {
         if (isSlowed) {
             double maxDirLength = getSneakingMaxInputAxis(
                     playerSpeed, sprintMultiplier, result.getSimulationContext().getSwiftSneakLevel());
-            speedFlagAmount = Math.max(absInput.x - maxDirLength, absInput.z - maxDirLength);
+            double requiredAxis = Math.min(
+                    Math.max(absInput.x, absInput.z),
+                    minimumFlushInputAxis(
+                            horizDiffForInputs,
+                            result.getSimulationContext().getXRot(),
+                            result.getCollideAxisData(),
+                            target));
+            speedFlagAmount = requiredAxis - maxDirLength;
 
             if (!result.getSimulationContext().getWorldData().maybeInLiquid() && speedFlagAmount > 0.001) {
                 result.addFlag(
@@ -263,6 +271,49 @@ public class HorizontalAnalyzer implements EngineCheck {
         degrees -= 90; // Minecraft's rotation doesn't match how math works
         if (degrees < 0) degrees += 360;
         return degrees;
+    }
+
+    // Entity#collide clips any further movement into a wall the movement ends flush against, so the residual on
+    // that axis only bounds the input's movement from one side. Rotating the residual alone can then overstate an
+    // input axis; return the smallest largest input axis over that one-sided range, or MAX_VALUE without a wall.
+    static double minimumFlushInputAxis(Vec3 residual, float yaw, CollideAxisData collide, Vec3 target) {
+        int sideX = flushSide(collide.getX(), target.x);
+        int sideZ = flushSide(collide.getZ(), target.z);
+        if (sideX == 0 && sideZ == 0) return Double.MAX_VALUE;
+
+        double best = Double.MAX_VALUE;
+        float radians = yaw * 0.017453292f;
+        float[][] tables = {
+            {VanillaMath.sin(radians), VanillaMath.cos(radians)},
+            {OptifineFastMath.sin(radians), OptifineFastMath.cos(radians)}
+        };
+        for (float[] table : tables) {
+            float sin = table[0], cos = table[1];
+            double x = residual.x * cos + residual.z * sin;
+            double z = residual.z * cos - residual.x * sin;
+            // A world X/Z unit rotates to these input-space directions
+            if (sideX != 0) best = Math.min(best, minimumMaxAxisAlong(x, z, sideX * cos, -sideX * sin));
+            if (sideZ != 0) best = Math.min(best, minimumMaxAxisAlong(x, z, sideZ * sin, sideZ * cos));
+        }
+        return best;
+    }
+
+    private static int flushSide(CollideAxisData.CollideResult collide, double movement) {
+        if (collide == null || !collide.isLikelyCollide()) return 0;
+        if (Math.abs(movement - collide.getResult()) > SimpleCollisionBox.COLLISION_EPSILON) return 0;
+        return collide.getSide();
+    }
+
+    // max(|x + t * dx|, |z + t * dz|) over t >= 0 is piecewise linear and convex, so its minimum is at t = 0 or at a
+    // point where either term is zero or both are equal in magnitude.
+    private static double minimumMaxAxisAlong(double x, double z, double dx, double dz) {
+        double[] candidates = {0, -x / dx, -z / dz, (z - x) / (dx - dz), -(x + z) / (dx + dz)};
+        double best = Double.MAX_VALUE;
+        for (double t : candidates) {
+            if (!(t >= 0) || Double.isInfinite(t)) continue;
+            best = Math.min(best, Math.max(Math.abs(x + t * dx), Math.abs(z + t * dz)));
+        }
+        return best;
     }
 
     public static Vec3 getBestTheoreticalPlayerInput(Vec3 wantedMovement, float f2) {

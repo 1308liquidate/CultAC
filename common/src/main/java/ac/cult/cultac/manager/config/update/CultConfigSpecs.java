@@ -130,14 +130,25 @@ public final class CultConfigSpecs {
     public static @NotNull ConfigUpdater.Spec cultConfig(String resourceDirectory) {
         ConfigUpdater.Spec.Builder builder = ConfigUpdater.Spec.builder(
                         resourceDirectory,
-                        resourceDirectory.equals("/punishments/") ? 2 : 0,
+                        resourceDirectory.equals("/punishments/") ? 3 : 0,
                         ConfigUpdater.ConfigFlavor.V2)
                 .cultVersioning();
         if (resourceDirectory.equals("/punishments/")) {
             builder.migration(1, CultConfigSpecs::addBedrockPunishment)
-                    .migration(2, CultConfigSpecs::addMissingCheckPunishments);
+                    .migration(2, CultConfigSpecs::addMissingCheckPunishments)
+                    .migration(3, CultConfigSpecs::addNoSneakSlowPunishment);
         }
         return builder.build();
+    }
+
+    private static void addNoSneakSlowPunishment(MigrationContext ctx) {
+        addPunishmentChecks(
+                ctx,
+                "Misc",
+                List.of("NoSlow"),
+                List.of("NoSneakSlow"),
+                List.of("10:5 [alert]", "1:1 [log]", "20:10 [webhook]", "20:10 [proxy]"),
+                "NoSlow");
     }
 
     private static void addMissingCheckPunishments(MigrationContext ctx) {
@@ -161,6 +172,17 @@ public final class CultConfigSpecs {
             List<String> selectors,
             List<String> additions,
             List<String> defaultCommands) {
+        addPunishmentChecks(ctx, defaultGroup, selectors, additions, defaultCommands, null);
+    }
+
+    /** Inserts additions right after the {@code insertAfter} entry when the target group has it, else appends. */
+    private static void addPunishmentChecks(
+            MigrationContext ctx,
+            String defaultGroup,
+            List<String> selectors,
+            List<String> additions,
+            List<String> defaultCommands,
+            @Nullable String insertAfter) {
         Map<String, Object> groups = ctx.output().getMap("Punishments");
         if (groups == null) return;
         String target = groups.containsKey(defaultGroup) ? defaultGroup : null;
@@ -181,6 +203,10 @@ public final class CultConfigSpecs {
             List<?> existing = ctx.output().getList("Punishments." + target + ".checks");
             if (existing != null) checks.addAll(existing);
         }
+        int insertAt = -1;
+        for (int i = 0; insertAfter != null && i < checks.size(); i++) {
+            if (insertAfter.equalsIgnoreCase(String.valueOf(checks.get(i)))) insertAt = i + 1;
+        }
         boolean changed = false;
         for (String addition : additions) {
             String name = addition.toLowerCase(Locale.ROOT);
@@ -199,7 +225,11 @@ public final class CultConfigSpecs {
                             && !text.startsWith("!")
                             && name.contains(text.toLowerCase(Locale.ROOT)));
             if (excluded || covered) continue;
-            checks.add(addition);
+            if (insertAt >= 0) {
+                checks.add(insertAt++, addition);
+            } else {
+                checks.add(addition);
+            }
             changed = true;
         }
         if (!changed) return;

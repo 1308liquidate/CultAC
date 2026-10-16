@@ -350,7 +350,8 @@ public class CollisionModifier implements UncertaintyHandler {
         }
 
         boolean didCollide = pos != null && pos.isCollide() || neg != null && neg.isCollide();
-        return new CollideAxisData.CollideResult(didCollide, selected.getResult() * multiplier);
+        int side = selected.isCollide() ? (selected == pos ? 1 : -1) : 0;
+        return new CollideAxisData.CollideResult(didCollide, selected.getResult() * multiplier, side);
     }
 
     private AxisResult selectHorizontalAxisResult(

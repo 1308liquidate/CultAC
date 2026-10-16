@@ -87,6 +87,7 @@ Punishments:
     checks:
       - "Vehicle"
       - "NoSlow"
+      - "NoSneakSlow"
       - "Sprint"
       - "MultiActions"
       - "Place"
@@ -120,4 +121,4 @@ Punishments:
       - "20:40 [alert]"
       - "1:1 [log]"
 
-cult-config-version: 2
+cult-config-version: 3
