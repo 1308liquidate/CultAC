@@ -1058,7 +1058,7 @@ public final class GeyserBedrockBridgeRuntime {
                 entityAttributes.boundary(player, transaction);
                 context.write(
                         BedrockPacketWrapper.create(
-                                0, source.getSenderSubClientId(), source.getTargetSubClientId(), marker, null),
+                                0, BedrockSubClients.sender(source), BedrockSubClients.target(source), marker, null),
                         context.voidPromise());
             });
         }
@@ -1095,7 +1095,11 @@ public final class GeyserBedrockBridgeRuntime {
                     })),
                     () -> context.write(
                             BedrockPacketWrapper.create(
-                                    0, source.getSenderSubClientId(), source.getTargetSubClientId(), marker, null),
+                                    0,
+                                    BedrockSubClients.sender(source),
+                                    BedrockSubClients.target(source),
+                                    marker,
+                                    null),
                             context.voidPromise()));
         }
 
@@ -1496,8 +1500,8 @@ public final class GeyserBedrockBridgeRuntime {
                             context,
                             BedrockPacketWrapper.create(
                                     0,
-                                    wrapper.getSenderSubClientId(),
-                                    wrapper.getTargetSubClientId(),
+                                    BedrockSubClients.sender(wrapper),
+                                    BedrockSubClients.target(wrapper),
                                     attributes,
                                     null),
                             context.newPromise());
@@ -1520,7 +1524,11 @@ public final class GeyserBedrockBridgeRuntime {
                     write(
                             context,
                             BedrockPacketWrapper.create(
-                                    0, wrapper.getSenderSubClientId(), wrapper.getTargetSubClientId(), separate, null),
+                                    0,
+                                    BedrockSubClients.sender(wrapper),
+                                    BedrockSubClients.target(wrapper),
+                                    separate,
+                                    null),
                             context.newPromise());
                     attributes.setAttributes(attributes.getAttributes().stream()
                             .filter(a -> a.getName().equals("minecraft:movement"))
@@ -1576,7 +1584,11 @@ public final class GeyserBedrockBridgeRuntime {
                     write(
                             context,
                             BedrockPacketWrapper.create(
-                                    0, wrapper.getSenderSubClientId(), wrapper.getTargetSubClientId(), other, null),
+                                    0,
+                                    BedrockSubClients.sender(wrapper),
+                                    BedrockSubClients.target(wrapper),
+                                    other,
+                                    null),
                             context.newPromise());
                     for (var key : other.getMetadata().keySet())
                         metadata.getMetadata().remove(key);
@@ -1886,7 +1898,11 @@ public final class GeyserBedrockBridgeRuntime {
                 write(
                         context,
                         BedrockPacketWrapper.create(
-                                0, wrapper.getSenderSubClientId(), wrapper.getTargetSubClientId(), definition, null),
+                                0,
+                                BedrockSubClients.sender(wrapper),
+                                BedrockSubClients.target(wrapper),
+                                definition,
+                                null),
                         context.newPromise());
             }
         }
@@ -2108,8 +2124,8 @@ public final class GeyserBedrockBridgeRuntime {
                 BedrockOriginDispatch.Emission emission) {
             CultPlayer player = owner.currentPlayer();
             if (player == null) return;
-            int sender = source.getSenderSubClientId();
-            int target = source.getTargetSubClientId();
+            int sender = BedrockSubClients.sender(source);
+            int target = BedrockSubClients.target(source);
             Consumer<BedrockPacket> writer = packet -> {
                 var wrapper = BedrockPacketWrapper.create(0, sender, target, packet, null);
                 var promise = context.newPromise();
