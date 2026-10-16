@@ -60,6 +60,15 @@ public class CompensatedEntities {
         playerEntity.setClientTickOrder(LOCAL_PLAYER_CLIENT_TICK_ORDER);
     }
 
+    /** A replacement ClientLevel cannot retain remote entities or their queued values. */
+    public void clearClientLevel() {
+        entityMap.clear();
+        pendingAttributes.clear();
+        pendingEquipment.clear();
+        fishingRodPulls.clear();
+        resetClientTickOrder();
+    }
+
     public void tick() {
         this.playerEntity.setPositionRaw(player.boundingBox);
         updatePassengerPositions();

@@ -6,9 +6,9 @@ import org.junit.Test;
 
 public final class OfflineBedrockReplayFixtureExportToolTest {
     private static final Path REGION_DIR =
-            Path.of("/home/hunter/Downloads/actest/world/dimensions/minecraft/overworld/region");
+            Path.of("/home/hunter/acdev/servers/actest/world/dimensions/minecraft/overworld/region");
     private static final Path SCENARIOS =
-            Path.of("/home/hunter/Downloads/CultAC/bedrock-smoketest-scenarios/small-scenarios");
+            Path.of("/home/hunter/acdev/archive/CultAC-old/bedrock-smoketest-scenarios/small-scenarios");
 
     @Test
     public void exportMissingFixturesFromActestWorld() throws Exception {

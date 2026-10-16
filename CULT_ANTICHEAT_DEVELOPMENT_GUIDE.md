@@ -23,7 +23,7 @@ Cult movement code should mirror the vanilla client pipeline.
 Use MCP-Reborn as the source of truth:
 
 ```text
-/home/hunter/Downloads/MCP-Reborn/src/main/java/net/minecraft/
+/home/hunter/acdev/ref/MCP-Reborn/src/main/java/net/minecraft/
 ```
 
 Read source before writing assumptions. Important sources:

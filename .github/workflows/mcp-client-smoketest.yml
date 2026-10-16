@@ -53,7 +53,7 @@ jobs:
             cultac_source="/tmp/cultac-source"
           fi
           if ! git -C "$cultac_source" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            echo "act validation requires running from /home/hunter/Downloads/CultAC/CultAC or mounting it at /tmp/cultac-source" >&2
+            echo "act validation requires running from /home/hunter/acdev/CultAC or mounting it at /tmp/cultac-source" >&2
             exit 1
           fi
           mkdir -p cultac
@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -d /tmp/mcp-client-smoketest ]; then
-            echo "act validation requires -v /home/hunter/Downloads/CultAC/mcp-client-smoketest:/tmp/mcp-client-smoketest:ro" >&2
+            echo "act validation requires -v /home/hunter/acdev/mcp-client-smoketest:/tmp/mcp-client-smoketest:ro" >&2
             exit 1
           fi
           if ! git -C /tmp/mcp-client-smoketest rev-parse --is-inside-work-tree >/dev/null 2>&1; then

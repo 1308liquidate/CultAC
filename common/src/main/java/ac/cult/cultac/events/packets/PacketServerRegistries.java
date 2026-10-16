@@ -46,6 +46,13 @@ public class PacketServerRegistries {
 
     @CultPacketHandler("clientbound.finish_configuration")
     public void onFinishConfiguration(PacketSendEvent<Opaque> event, CultPlayer player, Opaque packet) {
+        if (!player.isBedrockMovement()
+                && !event.isCancelled()
+                && event.getPhase() == ac.cult.cultac.protocol.ConnectionPhase.CONFIGURATION) {
+            // Invalidate only after the actual server terminal was written. A client
+            // acknowledgement cannot authorize a new player or discard its state.
+            event.getTasksAfterSend().add(() -> player.packetStateData.javaLocalPlayerPresent = false);
+        }
         if (!player.isBedrockMovement()) {
             player.compensatedWorld.resetClientClocks();
             player.compensatedEntities.clientPlayerModes.clear();

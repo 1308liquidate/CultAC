@@ -6,6 +6,8 @@ import ac.cult.cultac.utils.math.Vec3;
 // This is to keep all the packet data out of the main player class
 // Helps clean up the player class and makes devs aware they are sync'd to the netty thread
 public class PacketStateData {
+    // A completed server configuration installs a new Java PLAY listener/player.
+    public boolean javaLocalPlayerPresent;
     public boolean packetPlayerOnGround = false;
     public boolean lastPacketWasTeleport = false;
     // Vanilla 1.17 through 1.20.6 can emit a redundant PosRot packet at the

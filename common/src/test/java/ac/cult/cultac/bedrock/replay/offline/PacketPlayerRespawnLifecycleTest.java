@@ -27,6 +27,123 @@ import org.junit.Test;
 
 public final class PacketPlayerRespawnLifecycleTest {
     @Test
+    public void configurationReplacementWaitsForLoginReceiptAndPreservesAccounting() throws Exception {
+        OfflineCultTestBootstrap.installConfig();
+        CultPlayer player = offlineJavaPlayer();
+        try {
+            player.packetStateData.javaLocalPlayerPresent = true;
+            player.onGround = player.lastOnGround = player.packetStateData.packetPlayerOnGround = true;
+            player.isSneaking = player.isGliding = player.isInBed = true;
+            player.clientItemUse.start(
+                    ac.cult.cultac.protocol.value.Hand.MAIN_HAND, OfflineCultTestBootstrap.item("minecraft:shield"));
+            player.packetStateData.setSlowedByUsingItem(true);
+            var history = player.getItemUseDesync().history();
+            history.add(true);
+            history.add(false);
+            Field balanceField = player.itemUseBurst.getClass().getDeclaredField("balance");
+            balanceField.setAccessible(true);
+            var balance = (ac.cult.cultac.utils.data.ItemUseBurstBalance) balanceField.get(player.itemUseBurst);
+            assertFalse(balance.add(5));
+            Field viewField = player.itemUseBurst.getClass().getDeclaredField("view");
+            viewField.setAccessible(true);
+            var view = (ac.cult.cultac.utils.data.ServerItemUseView) viewField.get(player.itemUseBurst);
+            long start = System.nanoTime();
+            view.use(false, 1, start, java.util.List.of(OfflineCultTestBootstrap.item("minecraft:shield")));
+            view.serverFlags(true, false, 1, start);
+            assertTrue(view.tracking());
+            player.compensatedEntities.entityMap.put(
+                    99, mock(ac.cult.cultac.utils.data.packetentity.PacketEntity.class));
+            player.compensatedEntities.serverPositionsMap.put(
+                    99,
+                    new ac.cult.cultac.utils.data.TrackerData(
+                            0, 64, 0, 0, 0, ac.cult.blocksim.entity.EntityTypeIds.PLAYER, 0));
+
+            var type = ClientboundPackets.FINISH_CONFIGURATION;
+            var terminal = new ac.cult.cultac.protocol.packet.Opaque(type);
+            var finish = new PacketSendEvent<>(player.user, ConnectionPhase.CONFIGURATION, type, terminal, false);
+            var registries = new ac.cult.cultac.events.packets.PacketServerRegistries();
+            registries.onFinishConfiguration(finish, player, terminal);
+            assertTrue(
+                    "Unwritten server packets cannot authorize replacement",
+                    player.packetStateData.javaLocalPlayerPresent);
+            finish.tasksAfter().forEach(Runnable::run);
+            assertFalse(player.packetStateData.javaLocalPlayerPresent);
+
+            var login = loginPacket(true);
+            var loginEvent = sendEvent(player, ClientboundPackets.LOGIN, login);
+            new PacketPlayerRespawn().onLogin(loginEvent, player, login);
+            assertTrue(player.compensatedEntities.serverPositionsMap.isEmpty());
+            assertTrue(
+                    "Old client entities remain until receipt", player.compensatedEntities.entityMap.containsKey(99));
+            assertTrue("LOGIN send is not proof of receipt", player.onGround);
+            assertTrue(player.clientItemUse.definitelyUsing());
+            assertTrue("The old server use remains until LOGIN is written", view.tracking());
+            loginEvent.tasksAfter().forEach(Runnable::run);
+            assertFalse("LOGIN send replaces the server-view player", view.tracking());
+            player.lastTransactionReceived.set(1);
+            player.latencyUtils.handleNettySyncTransaction(1);
+            assertFalse(player.onGround);
+            assertFalse(player.lastOnGround);
+            assertFalse(player.packetStateData.packetPlayerOnGround);
+            assertFalse(player.isSneaking);
+            assertFalse(player.isGliding);
+            assertFalse(player.isInBed);
+            assertFalse(player.clientItemUse.definitelyUsing());
+            assertFalse(player.clientItemUse.hasObligation());
+            assertFalse("The new player cannot inherit the old server use", view.tracking());
+            assertFalse(player.packetStateData.isSlowedByUsingItem());
+            assertTrue(player.compensatedEntities.entityMap.isEmpty());
+            assertEquals(2, history.size());
+            assertEquals(1, history.desynced());
+            assertEquals(5, balance.balance(), 0);
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
+    @Test
+    public void newServerUseSentAfterLoginSurvivesLoginReceipt() throws Exception {
+        OfflineCultTestBootstrap.installConfig();
+        CultPlayer player = offlineJavaPlayer();
+        try {
+            Field viewField = player.itemUseBurst.getClass().getDeclaredField("view");
+            viewField.setAccessible(true);
+            var view = (ac.cult.cultac.utils.data.ServerItemUseView) viewField.get(player.itemUseBurst);
+            var login = loginPacket(true);
+            var event = sendEvent(player, ClientboundPackets.LOGIN, login);
+            new PacketPlayerRespawn().onLogin(event, player, login);
+            event.tasksAfter().forEach(Runnable::run);
+            long start = System.nanoTime();
+            view.use(false, 1, start, java.util.List.of(OfflineCultTestBootstrap.item("minecraft:shield")));
+            view.serverFlags(true, false, 2, start);
+            assertTrue(view.tracking());
+            player.lastTransactionReceived.set(1);
+            player.latencyUtils.handleNettySyncTransaction(1);
+            assertTrue("A new server use is ordered after LOGIN", view.tracking());
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
+    @Test
+    public void clientConfigurationAcknowledgementsCannotAuthorizeReplacement() {
+        OfflineCultTestBootstrap.installConfig();
+        CultPlayer player = offlineJavaPlayer();
+        try {
+            player.packetStateData.javaLocalPlayerPresent = true;
+            var connection = player.user.getCultConnection();
+            for (int i = 0; i < 3; i++) {
+                connection.forwarded(
+                        ac.cult.cultac.protocol.packet.ServerboundPackets.CONFIGURATION_ACKNOWLEDGED, null);
+                connection.forwarded(ac.cult.cultac.protocol.packet.ServerboundPackets.FINISH_CONFIGURATION, null);
+            }
+            assertTrue(player.packetStateData.javaLocalPlayerPresent);
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
+    @Test
     public void loginSeedsClientVisibleDeathScreenOption() throws Exception {
         OfflineCultTestBootstrap.installConfig();
         CultPlayer player = offlineJavaPlayer();

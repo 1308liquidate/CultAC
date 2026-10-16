@@ -64,6 +64,15 @@ public class PacketPlayerRespawn {
         // handles transaction split between JOIN_GAME and server teleport
 
         player.packetStateData.showsDeathScreen = packet.showDeathScreen();
+        final boolean newJavaLocalPlayer =
+                !player.isBedrockMovement() && !player.packetStateData.javaLocalPlayerPresent;
+        event.getTasksAfterSend().add(() -> {
+            if (!player.isBedrockMovement()) player.packetStateData.javaLocalPlayerPresent = true;
+            // The server-view use belongs to the former player. Clear it at LOGIN send,
+            // before new self metadata can start another use; receipt resets only client state.
+            // reset() preserves accumulated debt.
+            if (newJavaLocalPlayer) player.itemUseBurst.reset();
+        });
 
         var spawnInfo = packet.spawnInfo();
         var dimensionType = player.getWorldRegistries().dimension(spawnInfo.dimensionTypeId());
@@ -75,6 +84,7 @@ public class PacketPlayerRespawn {
         // ClientPacketListener.handleLogin sets the local player's ID from this packet.
         // A proxy may rewrite it independently of the backend's native entity ID.
         player.entityID = packet.playerId();
+        if (!player.isBedrockMovement()) player.compensatedEntities.serverPositionsMap.clear();
         player.compensatedEntities.vehicles.clearServerVehicle();
         final PacketEntitySelf freshSelf = new PacketEntitySelf(player);
         player.compensatedEntities.playerEntity = freshSelf;
@@ -105,6 +115,26 @@ public class PacketPlayerRespawn {
         player.world = spawnInfo.dimension();
         player.compensatedWorld.setLastClientboundDimension(player.world, dimensionType.dimension());
         player.compensatedWorld.serverWorldChangeSent();
+        // handleLogin creates a fresh ClientLevel, including same-dimension switches.
+        // Its replacement player has no prior travel carry, ground state or active use.
+        // Apply only when the ping after LOGIN proves that ordered client processing.
+        if (!player.isBedrockMovement()) {
+            player.latencyUtils.addRealTimeTaskNext(() -> {
+                player.compensatedWorld.clearChunks();
+                player.compensatedWorld.clearPistonLikeState();
+                player.compensatedEntities.clearClientLevel();
+                if (newJavaLocalPlayer) {
+                    player.actionManager.onJavaPlayerReplacement();
+                    player.onGround = player.lastOnGround = false;
+                    player.isSneaking = false;
+                    player.isGliding = false;
+                    player.isInBed = false;
+                    player.packetStateData.packetPlayerOnGround = false;
+                    player.checkManager.getSimulationProcessor().handleRespawn();
+                }
+            });
+            event.getTasksAfterSend().add(player::sendTransaction);
+        }
         player.serverSentSelfSharedFlags = null;
         player.compensatedWorld.onClientLogin();
         player.compensatedWorld.setDimension(player.world, dimensionType);

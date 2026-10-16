@@ -272,6 +272,16 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
         player.packetStateData.setSlowedByUsingItem(false);
     }
 
+    /** The Java client constructed another player; accumulated anti-abuse accounting survives. */
+    public void onJavaPlayerReplacement() {
+        player.clientItemUse.reset();
+        this.target = null;
+        this.lastTargetId = 0;
+        this.targetId = 0;
+        this.blocking = false;
+        player.packetStateData.setSlowedByUsingItem(false);
+    }
+
     private void clearMainHandUseAfterSlotChange() {
         if (player.usesModernJavaItemUse()) return;
         if (player.packetStateData.isSlowedByUsingItem()
