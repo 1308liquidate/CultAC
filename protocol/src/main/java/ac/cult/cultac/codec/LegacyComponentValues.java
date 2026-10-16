@@ -69,7 +69,8 @@ final class LegacyComponentValues {
         var material = holder.value();
         var result = new CompoundTag();
         result.putString("asset_name", material.assetName());
-        result.putString("ingredient", context.registryAccess().item(material.itemId()).toString());
+        result.putString(
+                "ingredient", context.registryAccess().item(material.itemId()).toString());
         // 1.21.4 removed item_model_index and keyed overrides by equipment asset.
         if (!assets) result.putFloat("item_model_index", material.itemModelIndex());
         if (!material.overrideArmorMaterials().isEmpty()) {
@@ -89,7 +90,8 @@ final class LegacyComponentValues {
         var pattern = holder.value();
         var result = new CompoundTag();
         result.putString("asset_id", pattern.assetName());
-        result.putString("template_item", context.registryAccess().item(pattern.itemId()).toString());
+        result.putString(
+                "template_item", context.registryAccess().item(pattern.itemId()).toString());
         result.put("description", pattern.description());
         // fieldOf("decal").orElse(false) only defaults on decode; encode always writes it.
         result.putBoolean("decal", pattern.decal());

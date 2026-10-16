@@ -201,15 +201,8 @@ final class ComponentValues {
         // including a null/end tag, is ignored by the client and represents Unit.
         if (name.equals("intangible_projectile")) return new CompoundTag();
         if (name.equals("container_loot")) return ComponentWrites.containerLoot((CompoundTag) value);
-        if (value instanceof AttributeModifiers1_21 modifiers && data.key().type() == AttributeModifiers1_21.TYPE1_21) {
-            // ItemAttributeModifiers.FULL_CODEC through 1.21.4 wraps its entries
-            // and retains show_in_tooltip (default true). Via's legacy type only
-            // supplies a wire writer, so construct the native persistent record.
-            var attributes = new CompoundTag();
-            attributes.put("modifiers", NbtOps.serialize(context, AttributeModifiers1_21.TYPE1_21_5, modifiers));
-            if (!modifiers.showInTooltip()) attributes.putBoolean("show_in_tooltip", false);
-            return attributes;
-        }
+        var legacy = LegacyComponentValues.component(data, name, context);
+        if (legacy != null) return legacy;
         // The modern writer accepts the same decoded records and emits their current persistent shape.
         if (value instanceof AdventureModePredicate predicate) return PredicateValues.adventure(predicate, context);
         // Via's generic item NBT writer omits nested removals. Keep complete patches,
