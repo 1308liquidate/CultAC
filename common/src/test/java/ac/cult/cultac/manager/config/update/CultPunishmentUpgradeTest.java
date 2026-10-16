@@ -73,8 +73,8 @@ class CultPunishmentUpgradeTest {
 
     @Test
     void respectsExplicitExclusionsAcrossGroupsIncludingBroadSelectors() throws Exception {
-        Path file = write(
-                ORIGINAL.replace("[NoSlow, Sprint, Place, Break]", "[NoSlow, Sprint, Place, Break, '!AttackMob', '!KeepSprint']"));
+        Path file = write(ORIGINAL.replace(
+                "[NoSlow, Sprint, Place, Break]", "[NoSlow, Sprint, Place, Break, '!AttackMob', '!KeepSprint']"));
         upgrade(file);
         var data = read(file);
         assertEquals(List.of("Knockback", "Explosion"), checks(data, "Knockback"));
