@@ -2,6 +2,7 @@ package ac.cult.cultac.checks.impl.prediction.runner;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckInfo;
+import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.checks.EngineCheck;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfiles;
@@ -51,8 +52,8 @@ public class PacketModHandler extends Check implements EngineCheck, PostPredicti
     public void handleResult(CultPlayer player, PredictionResult result, PredictionResult lastResult) {
         if (firstBread == null && secondBread == null) return;
 
-        // The player could have skipped this velocity
-        boolean isPointThree = result.getInitialStartingVel().isKnockback()
+        PredVector start = result.getInitialStartingVel();
+        boolean isPointThree = (start.hasPacketModifier(firstBread) || start.hasPacketModifier(secondBread))
                 && result.getSimulationContext().isTestingPointThree()
                 && result.getOffset() < player.getMovementThreshold();
 
