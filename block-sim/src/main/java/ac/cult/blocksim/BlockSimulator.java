@@ -53,6 +53,9 @@ public final class BlockSimulator {
             received -> create(defaults, items, registries, obstruction, consumables, received));
     }
 
+    /** Player#getDestroySpeed resolved against this binding's received tags. */
+    public MiningSpeed miningSpeed() { return mining; }
+
     /** Cache the returned immutable simulator at the connection's received-tag boundary. */
     public BlockSimulator withTags(HolderSets.Overlay received) {
         if (tags.equals(received)) return this;

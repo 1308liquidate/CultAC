@@ -18,6 +18,7 @@ import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.utils.anticheat.update.BlockPlace;
 import ac.cult.cultac.utils.latency.BlockSimulatorInventory;
 import ac.cult.cultac.utils.latency.ClientComponentRegistries;
+import ac.cult.cultac.utils.nmsutil.ClientMiningState;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
 import java.util.List;
 import java.util.Map;
@@ -114,16 +115,21 @@ public final class ClientBlockActions {
         return prediction.result().decline() == null && prediction.result().accepted();
     }
 
-    /** Read-only action preparation, also usable by the off-git shadow comparison. */
-    public static Prediction predict(CultPlayer player, SimAction action, float yaw, float pitch) {
+    /** This connection's simulator for its current received registry, tag and feature generation. */
+    public static ClientComponentRegistries.SimulationActions binding(CultPlayer player) {
         if (player.registryState == null) player.registryState = new ClientComponentRegistries();
         var source =
                 player.user.getCultConnection().dispatcher().runtime().data().version();
         var client = player.isBedrockMovement()
                 ? source
                 : ProtocolVersion.of(player.getClientVersion().getProtocolVersion());
-        var binding = player.registryState.blockSimulatorActions(
+        return player.registryState.blockSimulatorActions(
                 source, client, player.compensatedWorld.clientFeatures(), DataTables.defaults());
+    }
+
+    /** Read-only action preparation, also usable by the off-git shadow comparison. */
+    public static Prediction predict(CultPlayer player, SimAction action, float yaw, float pitch) {
+        var binding = binding(player);
         var items = binding.registries().items();
         boolean destroying = action instanceof SimAction.DestroyBlock;
         var inventory = destroying
@@ -174,10 +180,11 @@ public final class ClientBlockActions {
                 world,
                 owner,
                 player.checkManager.getCompensatedCooldown().blockSimulatorSnapshot(),
-                null,
+                ClientMiningState.of(player),
                 BreakSession.State.initial(items.empty()),
                 binding.tags(),
-                ac.cult.blocksim.engine.BlockSimClientVersion.of(client.protocol()));
+                ac.cult.blocksim.engine.BlockSimClientVersion.of(
+                        binding.client().protocol()));
         var result = binding.simulator().simulate(action, input);
         var writes = result.writes().stream()
                 .map(write -> Map.entry(

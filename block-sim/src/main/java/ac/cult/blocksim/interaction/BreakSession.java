@@ -46,7 +46,7 @@ public final class BreakSession {
             int block = level.stateAt(pos);
             boolean notAir = !level.registry().facts(block).has(StateFacts.AIR);
             if (notAir && state.progress() == 0.0F) level.behavior(block).attack(level, block, pos, player);
-            if (notAir && mining.progress(player.hand(Hand.MAIN_HAND), block, speed) >= 1.0F) {
+            if (notAir && mining.progress(player.hand(Hand.MAIN_HAND), block, speed, level.clientVersion()) >= 1.0F) {
                 driver.destroyBlock(level, player, pos);
             } else {
                 state = new State(true, pos, face, player.hand(Hand.MAIN_HAND), 0.0F, 0.0F, state.delay());
@@ -72,7 +72,7 @@ public final class BreakSession {
             state = new State(false, state.pos(), state.direction(), state.item(), state.progress(), state.ticks(), state.delay());
             return result(false, List.of());
         }
-        float progress = state.progress() + mining.progress(player.hand(Hand.MAIN_HAND), block, speed);
+        float progress = state.progress() + mining.progress(player.hand(Hand.MAIN_HAND), block, speed, level.clientVersion());
         if (progress >= 1.0F) {
             driver.destroyBlock(level, player, pos);
             state = new State(false, state.pos(), null, state.item(), 0.0F, 0.0F, 5);

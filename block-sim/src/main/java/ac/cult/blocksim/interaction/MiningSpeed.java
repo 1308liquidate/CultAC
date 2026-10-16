@@ -3,6 +3,7 @@ package ac.cult.blocksim.interaction;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.ItemComponents;
 import ac.cult.blocksim.data.StateFacts;
+import ac.cult.blocksim.engine.BlockSimClientVersion;
 import ac.cult.blocksim.engine.SimItemStack;
 
 /** Tool rules and Player.getDestroySpeed's float operations in vanilla order. */
@@ -29,19 +30,22 @@ public final class MiningSpeed {
         return false;
     }
 
-    public float speed(SimItemStack stack, int state, State player) {
+    /** {@code fatigue} selects the Mining Fatigue form: 26.3 computes it, earlier clients use a table. */
+    public float speed(SimItemStack stack, int state, State player, BlockSimClientVersion fatigue) {
         float speed = toolSpeed(stack, state);
         if (speed > 1.0F) speed += (float)player.efficiency();
         if (player.haste() >= 0 || player.conduitPower() >= 0) speed *= 1.0F + (Math.max(player.haste(), player.conduitPower()) + 1) * 0.2F;
-        if (player.fatigue() >= 0) speed *= (float)Math.pow(0.3, player.fatigue() + 1);
+        if (player.fatigue() >= 0) speed *= fatigue.atLeast(BlockSimClientVersion.V26_3)
+                ? (float)Math.pow(0.3, player.fatigue() + 1)
+                : switch (player.fatigue()) { case 0 -> 0.3F; case 1 -> 0.09F; case 2 -> 0.0027F; default -> 8.1E-4F; };
         speed *= (float)player.blockBreakSpeed();
         if (player.eyesInWater()) speed *= (float)player.submergedSpeed();
         if (!player.onGround()) speed /= 5.0F;
         return speed;
     }
 
-    public float progress(SimItemStack stack, int state, State player) {
+    public float progress(SimItemStack stack, int state, State player, BlockSimClientVersion fatigue) {
         float hardness = data.registry().facts(state).destroyTime();
-        return hardness == -1.0F ? 0.0F : speed(stack, state, player) / hardness / (correctTool(stack, state) ? 30 : 100);
+        return hardness == -1.0F ? 0.0F : speed(stack, state, player, fatigue) / hardness / (correctTool(stack, state) ? 30 : 100);
     }
 }
