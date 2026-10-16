@@ -377,6 +377,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private void sendVehicleProtocolResync(VehicleMountResyncState resyncState) {
+        if (!player.canSendPlayPackets()) return;
         CultPlayer.TrackedTransaction proof = player.createTrackedTransactionPacketForBundle();
         if (proof == null) {
             return;

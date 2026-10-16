@@ -562,6 +562,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
     }
 
     private void sendSetback(SetBackData data, boolean simulateVehicle, boolean dismounted) {
+        // Nothing is tracked for a correction that cannot reach the client; login sends a new position.
+        if (!player.canSendPlayPackets()) return;
         if (!player.isBedrockMovement() && !player.user.isPreparingWrites()) {
             // Block movement as soon as the correction is requested. Allocate its
             // proofs and dispatch its packets together at their outbound position,

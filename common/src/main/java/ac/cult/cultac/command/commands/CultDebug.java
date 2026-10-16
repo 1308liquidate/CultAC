@@ -377,7 +377,8 @@ public class CultDebug implements BuildableCommand {
             sender.sendMessage(Component.text("That block's chunk is not loaded for the player", NamedTextColor.RED));
             return;
         }
-        CultPlayer.TrackedTransaction transaction = target.createTrackedTransactionPacketForBundle();
+        CultPlayer.TrackedTransaction transaction =
+                target.canSendPlayPackets() ? target.createTrackedTransactionPacketForBundle() : null;
         if (transaction == null) {
             sender.sendMessage(Component.text("Player is not in play yet", NamedTextColor.RED));
             return;

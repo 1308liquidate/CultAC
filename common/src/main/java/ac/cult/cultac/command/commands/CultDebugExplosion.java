@@ -85,6 +85,10 @@ public final class CultDebugExplosion implements BuildableCommand {
         player.runSafely(() -> {
             // Never deliver an old command to a new connection with the same UUID.
             if (CultAPI.INSTANCE.getPlayerDataManager().getPlayer(sender.getUniqueId()) != player) return;
+            if (!player.canSendPlayPackets()) {
+                sender.sendMessage(Component.text("Player is not in play", NamedTextColor.RED));
+                return;
+            }
             // ClientPacketListener#handleExplosion -> LocalPlayer#addDeltaMovement adds to the
             // client's velocity, even while riding. The center only places the sound and particle.
             var packet = new ClientboundExplode(

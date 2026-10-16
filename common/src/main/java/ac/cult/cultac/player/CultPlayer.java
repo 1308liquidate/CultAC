@@ -521,6 +521,14 @@ public class CultPlayer implements GrimUser {
         user.write(transaction.packet());
     }
 
+    /**
+     * ClientPacketListener#handleConfigurationStart clears the client level, and the clientbound
+     * protocol has no play packets until the next login. Read on the connection owner.
+     */
+    public boolean canSendPlayPackets() {
+        return user.getEncoderState() == ConnectionPhase.PLAY;
+    }
+
     private boolean canSendTransactionNow() {
         var phase = user.getEncoderState();
         return user.getPlayer() != null && (phase == ConnectionPhase.PLAY || phase == ConnectionPhase.CONFIGURATION);
@@ -1231,6 +1239,7 @@ public class CultPlayer implements GrimUser {
      */
     public void resyncPose() {
         runSafely(() -> {
+            if (!canSendPlayPackets()) return;
             var flags = serverSentSelfSharedFlags;
             if (flags == null) {
                 flags = ac.cult.cultac.network.packet.EntityMetadata.Entry.byteValue(

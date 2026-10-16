@@ -42,6 +42,7 @@ public final class BlockPredictionAckSender {
             Collection<InventoryPackets.Slot> slots,
             SimItemStack cursor) {
         if (updates.isEmpty() && slots.isEmpty() && cursor == null && !acknowledge) return;
+        if (!player.canSendPlayPackets()) return;
         CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForBundle();
         if (transaction == null) {
             for (TrackedBlockUpdate update : updates) {

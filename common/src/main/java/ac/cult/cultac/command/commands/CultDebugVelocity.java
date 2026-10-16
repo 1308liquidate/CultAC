@@ -113,6 +113,10 @@ public final class CultDebugVelocity implements BuildableCommand {
                         message -> sender.sendMessage(Component.text(message, NamedTextColor.GRAY)));
                 return;
             }
+            if (!player.canSendPlayPackets()) {
+                sender.sendMessage(Component.text("Player is not in play", NamedTextColor.RED));
+                return;
+            }
             // ClientPacketListener#handleSetEntityMotion -> Entity#lerpMotion replaces
             // client velocity. Sending only the packet avoids a second Bukkit velocity broadcast.
             Integer vehicleId = player.compensatedEntities.vehicles.serverPlayerVehicle;
