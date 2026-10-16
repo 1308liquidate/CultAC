@@ -4,7 +4,6 @@ import ac.cult.blocksim.engine.BlockSimClientVersion;
 import ac.cult.blocksim.interaction.MiningSpeed;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.MovementEffect;
-import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.latency.ClientComponentRegistries;
 
 /** Player#getDestroySpeed's player inputs as this client last received them. */
@@ -18,7 +17,7 @@ public final class ClientMiningState {
     public static MiningSpeed.State of(CultPlayer player) {
         var self = player.compensatedEntities.getSelf();
         return new MiningSpeed.State(
-                onGround(player),
+                player.packetStateData.packetPlayerOnGround,
                 eyeInWater(player),
                 self.miningEfficiency,
                 self.blockBreakSpeed,
@@ -46,17 +45,5 @@ public final class ClientMiningState {
         double surface =
                 (float) Math.floor(eye) + player.compensatedWorld.getWaterFluidLevelAt(player.x, eye, player.z);
         return eye < surface;
-    }
-
-    private static boolean onGround(CultPlayer player) {
-        if (player.packetStateData.packetPlayerOnGround) {
-            return true;
-        }
-
-        // Vanilla uses Player#onGround for the mining penalty. If the latest
-        // movement packet has not refreshed it, only use the grounded branch
-        // when the compensated world proves the current pose is supported.
-        return player.boundingBox != null
-                && Collisions.collide(player, 0.0D, -SimpleCollisionBox.COLLISION_EPSILON, 0.0D).y == 0.0D;
     }
 }
