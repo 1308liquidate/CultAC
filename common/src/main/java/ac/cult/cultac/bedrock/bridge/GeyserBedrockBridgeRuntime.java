@@ -1445,13 +1445,16 @@ public final class GeyserBedrockBridgeRuntime {
         @Override
         public void write(ChannelHandlerContext context, Object message, ChannelPromise promise) throws Exception {
             if (owner.detached.get() || !(message instanceof BedrockPacketWrapper wrapper)) {
-                // Writes accepted before the swap can still reach this removed context. Native callbacks
-                // must keep their FIFO position even though this tap's engine receipts are fenced.
-                if (message instanceof BedrockPacketWrapper stale
+                if (owner.handedOff
+                        && message instanceof BedrockPacketWrapper stale
                         && stale.getPacket() instanceof NetworkStackLatencyPacket latency
                         && latency.isFromServer()) {
-                    owner.latencyQueue.write(() -> context.write(message, promise));
-                    return;
+                    synchronized (owner.latencyQueue) {
+                        if (!owner.connection.isClosed() && owner.latencyQueue.isTrackingWrites()) {
+                            owner.latencyQueue.write(() -> context.write(message, promise));
+                            return;
+                        }
+                    }
                 }
                 context.write(message, promise);
                 return;

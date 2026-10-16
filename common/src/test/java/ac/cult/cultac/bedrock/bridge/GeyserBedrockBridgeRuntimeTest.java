@@ -4,10 +4,13 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import ac.cult.reload.integrations.GeyserQueue;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.embedded.EmbeddedChannel;
 import java.net.InetSocketAddress;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -16,8 +19,11 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import org.cloudburstmc.math.vector.Vector3f;
 import org.cloudburstmc.protocol.bedrock.data.PlayerAuthInputData;
+import org.cloudburstmc.protocol.bedrock.netty.BedrockPacketWrapper;
 import org.cloudburstmc.protocol.bedrock.packet.MovePlayerPacket;
+import org.cloudburstmc.protocol.bedrock.packet.NetworkStackLatencyPacket;
 import org.cloudburstmc.protocol.bedrock.packet.PlayerAuthInputPacket;
+import org.geysermc.geyser.session.GeyserSession;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -130,6 +136,150 @@ public final class GeyserBedrockBridgeRuntimeTest {
         assertEquals(List.of("native-A", "new-receipt", "native-B", "new-engine"), receipts);
         assertTrue(queue.isEmpty());
         assertTrue(queue.isTrackingWrites());
+    }
+
+    @Test
+    public void detachedTeardownForwardsPendingLatencyBeforeAndAfterTrackingStops() throws Exception {
+        try (var outbound = new OutboundFixture()) {
+            List<String> completed = new ArrayList<>();
+            outbound.queue.add(() -> completed.add("first"));
+            outbound.queue.add(() -> completed.add("second"));
+            outbound.detach(false);
+
+            outbound.forwardLatency();
+            assertNull(outbound.queue.poll());
+            outbound.queue.stopTrackingWrites();
+            outbound.forwardLatency();
+
+            outbound.queue.poll().run();
+            outbound.queue.poll().run();
+            assertEquals(List.of("first", "second"), completed);
+            assertTrue(outbound.queue.isEmpty());
+        }
+    }
+
+    @Test
+    public void transferredTapForwardsPendingLatencyAfterTheQueueIsRetired() throws Exception {
+        try (var outbound = new OutboundFixture()) {
+            Runnable callback = () -> {};
+            outbound.queue.add(callback);
+            outbound.detach(true);
+            // The replacement tap can also detach before this old context drains.
+            outbound.queue.stopTrackingWrites();
+
+            outbound.forwardLatency();
+
+            assertSame(callback, outbound.queue.poll());
+            assertTrue(outbound.queue.isEmpty());
+        }
+    }
+
+    @Test
+    public void closedSessionForwardsPendingLatencyAfterItsQueueIsCleared() throws Exception {
+        try (var outbound = new OutboundFixture()) {
+            outbound.queue.add(() -> {});
+            outbound.detach(true);
+            Mockito.when(outbound.session.isClosed()).thenReturn(true);
+            outbound.queue.clear();
+
+            outbound.forwardLatency();
+
+            assertTrue(outbound.queue.isEmpty());
+        }
+    }
+
+    @Test
+    public void transferredTapTracksPendingNativeLatencyAndFencesRetiredEngineReceipts() throws Exception {
+        try (var outbound = new OutboundFixture()) {
+            List<String> completed = new ArrayList<>();
+            outbound.queue.add(() -> completed.add("native-A"));
+            outbound.scope.writeWithReceipt(() -> () -> completed.add("retired-receipt"));
+            outbound.scope.insert(() -> completed.add("retired-engine"), () -> {});
+            outbound.queue.add(() -> completed.add("native-B"));
+            outbound.detach(true);
+
+            outbound.forwardLatency();
+            outbound.queue.scope().insert(() -> completed.add("new-engine"), () -> {});
+            while (!outbound.queue.isEmpty()) outbound.queue.poll().run();
+
+            assertEquals(List.of("native-A", "native-B", "new-engine"), completed);
+            assertTrue(outbound.queue.isTrackingWrites());
+        }
+    }
+
+    @Test
+    public void transferredTapStillRejectsLatencyWithoutANativeCallback() throws Exception {
+        try (var outbound = new OutboundFixture()) {
+            outbound.detach(true);
+            var wrapper = latencyPacket();
+            try {
+                var failure = assertThrows(IllegalStateException.class, () -> outbound.wire.writeOutbound(wrapper));
+                assertEquals("Latency write has no Geyser callback", failure.getMessage());
+                assertNull(outbound.wire.readOutbound());
+            } finally {
+                wrapper.release();
+            }
+        }
+    }
+
+    private static BedrockPacketWrapper latencyPacket() {
+        var packet = new NetworkStackLatencyPacket();
+        packet.setFromServer(true);
+        return BedrockPacketWrapper.create(0, 0, 0, packet, null);
+    }
+
+    private static final class OutboundFixture implements AutoCloseable {
+        final GeyserSession session = Mockito.mock(GeyserSession.class);
+        final GeyserQueue queue = new GeyserQueue();
+        final GeyserQueue.Scope scope;
+        final EmbeddedChannel wire;
+        private final Class<?> tapType;
+        private final Object tap;
+
+        OutboundFixture() throws Exception {
+            tapType = Class.forName(GeyserBedrockBridgeRuntime.class.getName() + "$PacketTapHandler");
+            var constructor = tapType.getDeclaredConstructor(
+                    GeyserSession.class,
+                    org.cloudburstmc.protocol.bedrock.BedrockSession.class,
+                    org.cloudburstmc.protocol.bedrock.packet.BedrockPacketHandler.class,
+                    GeyserQueue.class);
+            constructor.setAccessible(true);
+            tap = constructor.newInstance(session, null, null, queue);
+            var scopeField = tapType.getDeclaredField("latencyScope");
+            scopeField.setAccessible(true);
+            scope = (GeyserQueue.Scope) scopeField.get(tap);
+            var outboundType = Class.forName(GeyserBedrockBridgeRuntime.class.getName() + "$OutboundPacketTap");
+            var outboundConstructor = outboundType.getDeclaredConstructor(tapType);
+            outboundConstructor.setAccessible(true);
+            wire = new EmbeddedChannel((ChannelHandler) outboundConstructor.newInstance(tap));
+        }
+
+        void detach(boolean transferred) throws Exception {
+            var detached = tapType.getDeclaredField("detached");
+            detached.setAccessible(true);
+            ((java.util.concurrent.atomic.AtomicBoolean) detached.get(tap)).set(true);
+            var handedOff = tapType.getDeclaredField("handedOff");
+            handedOff.setAccessible(true);
+            handedOff.set(tap, transferred);
+            scope.close();
+        }
+
+        void forwardLatency() {
+            var wrapper = latencyPacket();
+            try {
+                assertTrue(wire.writeOutbound(wrapper));
+                assertSame(wrapper, wire.readOutbound());
+                assertNull(wire.readOutbound());
+            } finally {
+                wrapper.release();
+            }
+        }
+
+        @Override
+        public void close() {
+            scope.close();
+            wire.finishAndReleaseAll();
+        }
     }
 
     @Test
