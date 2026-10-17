@@ -34,6 +34,12 @@ public final class CloudServerIds {
         return id;
     }
 
+    /** {@code id} with {@code suffix} appended, cut short first so the whole stays within {@link #MAX_LENGTH}. */
+    static String withSuffix(String id, String suffix) {
+        if (suffix.isEmpty()) return id;
+        return id.substring(0, Math.min(id.length(), MAX_LENGTH - suffix.length())) + suffix;
+    }
+
     /** The values {@code template} uses, as a collision warning names them. */
     static String input(String template, String proxy, String server) {
         boolean usesProxy = template.contains("{proxy}");

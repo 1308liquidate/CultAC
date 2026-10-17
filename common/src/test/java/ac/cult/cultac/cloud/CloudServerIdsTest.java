@@ -29,6 +29,15 @@ class CloudServerIdsTest {
     }
 
     @Test
+    void aDrainSuffixFollowsTheIdWithinItsLength() {
+        assertEquals("edge-1.lobby", CloudServerIds.withSuffix("edge-1.lobby", ""));
+        assertEquals("edge-1.lobby-drain-1a2b3c4d", CloudServerIds.withSuffix("edge-1.lobby", "-drain-1a2b3c4d"));
+        String id = CloudServerIds.withSuffix("x".repeat(CloudServerIds.MAX_LENGTH), "-drain-1a2b3c4d");
+        assertEquals(CloudServerIds.MAX_LENGTH, id.length());
+        assertTrue(id.endsWith("x-drain-1a2b3c4d"));
+    }
+
+    @Test
     void idsKeepToTheServicesAlphabetAndLength() {
         assertEquals("edge-1.survival_2-", CloudServerIds.resolve("{proxy}.{server}", "Edge 1", "Survival_2!"));
         assertEquals("a.b", CloudServerIds.resolve("{proxy}.{server}", "..a", "b"));

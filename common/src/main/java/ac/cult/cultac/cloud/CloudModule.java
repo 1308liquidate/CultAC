@@ -15,7 +15,7 @@ import java.util.function.Function;
 public final class CloudModule {
     /** A config has named the upload: calls reach {@link CloudService} from here on. */
     private static volatile boolean loaded;
-    /** A newer runtime generation owns the upload; this one never loads it. */
+    /** A newer runtime generation took over; an upload this one has not loaded stays unloaded. */
     private static volatile boolean superseded;
 
     private static volatile Runnable turnedOn = () -> {};
@@ -25,8 +25,8 @@ public final class CloudModule {
 
     /** Applies the config's {@code cloud} section; at startup and after each reload. */
     public static void configReloaded() {
-        if (superseded) return;
         if (!loaded) {
+            if (superseded) return;
             ConfigManager config = CultAPI.INSTANCE.getConfigManager().getConfig();
             if (setting(config, System::getenv, "cloud.url", "CULTAC_CLOUD_URL", "")
                             .isEmpty()
@@ -70,10 +70,13 @@ public final class CloudModule {
         if (loaded) CloudService.shutdown();
     }
 
-    /** A newer runtime generation took over; blocks for at most {@code detachMillis}. */
-    public static void superseded(long detachMillis) {
+    /**
+     * A newer runtime generation took over: the players still here keep streaming under server ids ending in
+     * {@code drainSuffix}, and a reload still applies. Does not block.
+     */
+    public static void superseded(String drainSuffix) {
         superseded = true;
-        if (loaded) CloudService.superseded(detachMillis);
+        if (loaded) CloudService.superseded(drainSuffix);
     }
 
     /** The upload's status, one line each. */

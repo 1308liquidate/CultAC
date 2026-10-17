@@ -20,11 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -40,8 +36,6 @@ public final class CloudService {
     private static final Object CONFIGURING = new Object();
     /** The turn-on hook ran last, not the turn-off hook; guarded by {@link #CONFIGURING}. */
     private static boolean hooksOn;
-    /** A newer runtime generation owns the upload; this one never opens a socket again. */
-    private static volatile boolean superseded;
     /** The findings the service sent, while the upload is configured on. */
     private static volatile @Nullable FindingsLog findings;
 
@@ -68,7 +62,6 @@ public final class CloudService {
     }
 
     private static void configureNow(ConfigManager config, boolean proxy) {
-        if (superseded) return;
         CloudSettings settings = proxy
                 ? CloudSettings.read(config, CloudSettings.PROXY_PROTOCOLS, CloudSettings.DEFAULT_SERVER_ID)
                 : CloudSettings.read(config, CloudSettings.SERVER_PROTOCOLS, CloudSettings.OWN_SERVER_ID);
@@ -158,7 +151,7 @@ public final class CloudService {
     static void playerRegistered(CultPlayer player) {
         FindingsLog log = findings;
         if (log != null) log.joined(player.getUniqueId());
-        if (superseded || !UPLINKS.enabled()) return;
+        if (!UPLINKS.enabled()) return;
         CloudCapture.reconfigure(player);
     }
 
@@ -206,23 +199,15 @@ public final class CloudService {
     }
 
     /**
-     * A newer runtime generation took over while this one drains: every capture leaves, each socket sends what is
-     * queued and closes, and none opens again, so the two never contend for one server id. Blocks the calling thread
-     * for at most {@code detachMillis} while the captures leave.
+     * A newer runtime generation took over while this one drains its players. The intake keeps one socket per server
+     * id, so this one's sockets send what is queued and close, and its captures move to sockets under ids ending in
+     * {@code drainSuffix}, which the newer one never uses. A player streams from one generation at a time: a hand-off
+     * releases the capture here before the newer one installs its own. Does not block.
      */
-    static void superseded(long detachMillis) {
-        superseded = true;
-        CONNECTIONS.freeze();
-        List<CompletableFuture<Void>> leaving = new ArrayList<>();
-        for (CloudCapture capture : INSTALLED) leaving.add(capture.detach());
-        try {
-            CompletableFuture.allOf(leaving.toArray(CompletableFuture[]::new)).get(detachMillis, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-        } catch (ExecutionException | TimeoutException late) {
-        }
-        CONNECTIONS.retireAll();
-        UPLINKS.clear();
+    static void superseded(String drainSuffix) {
+        UPLINKS.drain(drainSuffix);
+        CONNECTIONS.retireOpen();
+        reconfigureCaptures();
     }
 
     /** The sockets, held frames and counters, one line each. */
@@ -231,8 +216,9 @@ public final class CloudService {
         CloudSettings settings = CONNECTIONS.settings();
         lines.add(
                 CONNECTIONS.available()
-                        ? "Cloud upload on, protocols " + settings.protocols() + ", " + INSTALLED.size() + " captures"
-                        : superseded ? "Cloud upload off: a newer runtime took over" : "Cloud upload off");
+                        ? "Cloud upload on" + UPLINKS.draining() + ", protocols " + settings.protocols() + ", "
+                                + INSTALLED.size() + " captures"
+                        : "Cloud upload off");
         lines.addAll(CONNECTIONS.summaries());
         lines.addAll(CONNECTIONS.diagnosticsSummaries());
         lines.add(CloudCapture.summary());
@@ -257,9 +243,21 @@ public final class CloudService {
     static final class ConnectionUplinks implements CloudCapture.Uplinks {
         private final CloudConnections connections;
         private final Map<String, Integer> users = new HashMap<>();
+        /** Appended to every server id once a newer runtime took over; empty until then. */
+        private volatile String drainSuffix = "";
 
         ConnectionUplinks(CloudConnections connections) {
             this.connections = connections;
+        }
+
+        void drain(String suffix) {
+            drainSuffix = suffix;
+        }
+
+        /** The status line's note on a draining generation; empty otherwise. */
+        String draining() {
+            String suffix = drainSuffix;
+            return suffix.isEmpty() ? "" : " for draining players under server ids ending " + suffix;
         }
 
         @Override
@@ -278,6 +276,7 @@ public final class CloudService {
             if (!connections.available()) return null;
             String id = CloudServerIds.resolve(settings.serverIdTemplate(), settings.proxyId(), serverName);
             if (id == null) return null;
+            id = CloudServerIds.withSuffix(id, drainSuffix);
             synchronized (users) {
                 CloudConnection connection = connections.forServer(id);
                 if (connection == null) return null;

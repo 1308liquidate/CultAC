@@ -185,6 +185,19 @@ public final class CloudConnections {
         retiring.forEach(CloudConnection::retire);
     }
 
+    /**
+     * Another writer is taking these sockets' server ids: each sends what is queued, closes normally and never
+     * reconnects, while the upload stays on and {@link #forServer} opens fresh sockets. Does not block.
+     */
+    public void retireOpen() {
+        List<CloudConnection> retiring;
+        synchronized (this) {
+            retiring = new ArrayList<>(connections.values());
+            connections.clear();
+        }
+        retiring.forEach(CloudConnection::retire);
+    }
+
     /** One line per socket: what is queued, being compressed and refused; empty without one. */
     public List<String> summaries() {
         List<String> lines = new ArrayList<>();

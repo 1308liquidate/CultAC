@@ -10,9 +10,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 
 public abstract class EngineRuntime implements RuntimeInstance {
-    /** How long a replaced generation waits for its captures to leave before its sockets retire. */
-    private static final long SUPERSEDED_DETACH_MILLIS = 2000;
-
     protected abstract Sender sender(Object nativeSender);
 
     protected abstract CompletionStage<Void> disconnectChannel(Channel channel);
@@ -26,7 +23,9 @@ public abstract class EngineRuntime implements RuntimeInstance {
 
     @Override
     public void superseded() {
-        CloudModule.superseded(SUPERSEDED_DETACH_MILLIS);
+        var host = RuntimeEnvironment.host();
+        String generation = host == null ? "0" : host.generationId();
+        CloudModule.superseded("-drain-" + generation.substring(0, Math.min(8, generation.length())));
     }
 
     @Override
