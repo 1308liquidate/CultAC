@@ -87,10 +87,11 @@ public final class UnknownCollisionProvider {
                     && !happyGhast.isBaby
                     && !happyGhast.isDead
                     && !happyGhast.hasPassenger(player.compensatedEntities.getSelf())) {
-                SimpleCollisionBox box = happyGhast.getPossibleCollisionBoxes(entityBox, scratch);
+                SimpleCollisionBox box = happyGhast.getPossibleMovementCollisionBoxes(entityBox, scratch);
                 // MCP-Reborn HappyGhast#canBeCollidedWith is client-only for a
-                // Player whose position is at or above the ghast's top, and
-                // otherwise follows the synced still-timeout state.
+                // Player whose position is at or above the top of the ghast's
+                // concrete bounding box, and otherwise follows the synced
+                // still-timeout state.
                 if (happyGhast.staysStill || playerPos.y >= box.maxY - SimpleCollisionBox.COLLISION_EPSILON) {
                     addIntersecting(boxes, box, queryBox);
                 }
