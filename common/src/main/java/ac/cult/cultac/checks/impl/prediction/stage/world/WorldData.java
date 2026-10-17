@@ -40,7 +40,10 @@ public class WorldData {
     DesyncStatus climbing;
 
     int numColliding;
+
+    @Setter
     int numCollidingTickingAfterPlayer;
+
     int numPushing;
     int numCarriedPushing;
     CarriedPush carriedPush;

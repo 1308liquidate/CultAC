@@ -490,13 +490,7 @@ public class WorldStageBuilder {
 
         // Players in vehicles do not have collisions
         if (context.getVehicle() == null) {
-            Vec3 from = context.getStart();
-
-            // Calculate the offset of the player to colliding other stuff
-            SimpleCollisionBox playerBox =
-                    GetBoundingBox.getBoundingBoxFromPosAndSize(from.x, from.y, from.z, 0.6f, 1.8f);
-            playerBox.union(context.getToMaximumExtent());
-            playerBox.expand(0.2); // bit more because why not
+            SimpleCollisionBox playerBox = pusherContactBox(context);
             SimpleCollisionBox entityBounds = new SimpleCollisionBox();
             SimpleCollisionBox entityScratch = new SimpleCollisionBox();
             CompensatedEntities entities = context.getEntities();
@@ -526,6 +520,37 @@ public class WorldStageBuilder {
                 hardCollidingEntityCollisions == null ? List.of() : List.copyOf(hardCollidingEntityCollisions));
 
         return numColliding;
+    }
+
+    /** The box an entity must touch to push or collide with the player through the context's movement. */
+    private static SimpleCollisionBox pusherContactBox(SimulationContext context) {
+        Vec3 from = context.getStart();
+        SimpleCollisionBox playerBox = GetBoundingBox.getBoundingBoxFromPosAndSize(from.x, from.y, from.z, 0.6f, 1.8f);
+        playerBox.union(context.getToMaximumExtent());
+        playerBox.expand(0.2); // bit more because why not
+        return playerBox;
+    }
+
+    /**
+     * Recounts {@code prediction}'s colliding entities that tick after the player once the client tick has ended.
+     * Each one's LivingEntity#pushEntities runs after its own move in ClientLevel#tickEntities, so it pushes the
+     * player from where its interpolation step that tick left it, not from where it was when the player moved.
+     */
+    public static void recountCollidingTickingAfterPlayer(PredictionResult prediction) {
+        SimulationContext context = prediction.getSimulationContext();
+        if (context == null || context.getVehicle() != null) return;
+        SimpleCollisionBox playerBox = pusherContactBox(context);
+        SimpleCollisionBox entityBounds = new SimpleCollisionBox();
+        SimpleCollisionBox entityScratch = new SimpleCollisionBox();
+        CompensatedEntities entities = context.getEntities();
+        long playerTickOrder = entities.getSelf().getClientTickOrder();
+        int tickingAfterPlayer = 0;
+        for (PacketEntity entity : entities.entityMap.values()) {
+            if (entities.clientTickOrder(entity) < playerTickOrder) continue;
+            if (collidingPusherBox(entities, entity, playerBox, entityBounds, entityScratch) != null)
+                tickingAfterPlayer++;
+        }
+        context.getWorldData().setNumCollidingTickingAfterPlayer(tickingAfterPlayer);
     }
 
     /**

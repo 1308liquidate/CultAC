@@ -5,6 +5,8 @@ import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.prediction.integration.BedrockVehicleControl;
 import ac.cult.cultac.checks.CultProcessor;
 import ac.cult.cultac.checks.impl.combat.FairReach;
+import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.stage.world.WorldStageBuilder;
 import ac.cult.cultac.checks.type.CheckListener;
 import ac.cult.cultac.checks.type.ClientTickEndListener;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
@@ -355,10 +357,18 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     @Override
     public void onPlayerTickEnd(PacketReceiveEvent event) {
         tickEntityInterpolationAtClientTickEnd();
+        recountPushersAfterPlayer();
         player.compensatedEntities.vehicles.onClientTickEnd();
         player.compensatedEntities.vehicles.updateServerControlledSafeSetbackPositionOnTickEnd();
         transformTick++;
         if (packetHandlerEntityTransforms.size() > MAX_REUSED_TRANSFORMS) packetHandlerEntityTransforms.clear();
+    }
+
+    private void recountPushersAfterPlayer() {
+        if (player.isBedrockMovement()) return;
+        PredictionResult lastPrediction =
+                player.checkManager.getSimulationProcessor().getLastPrediction();
+        if (lastPrediction != null) WorldStageBuilder.recountCollidingTickingAfterPlayer(lastPrediction);
     }
 
     private void tickEntityInterpolationAtClientTickEnd() {

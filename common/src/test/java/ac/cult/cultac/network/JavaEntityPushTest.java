@@ -33,6 +33,11 @@ class JavaEntityPushTest {
     private static final double SECOND_FALL = fall(FIRST_FALL);
     private static final Vec3 CONTACT = START.add(0, FIRST_FALL, 0);
     private static final Vec3 AWAY = new Vec3(4.5, FLOOR_Y, 4.5);
+    /** Out of reach of the player's contact box until its first interpolation step lands it on {@link #TOUCHING}. */
+    private static final Vec3 STEPPING_FROM = TOUCHING.add(0, 0, 0.4);
+    /** Three interpolation steps of -0.4 each. */
+    private static final double STEPPING_DZ = -1.2;
+
     private static final RelativeFlag ALL_DELTAS =
             keep(RelativeFlag.DELTA_X, RelativeFlag.DELTA_Y, RelativeFlag.DELTA_Z, RelativeFlag.ROTATE_DELTA);
 
@@ -56,6 +61,21 @@ class JavaEntityPushTest {
             entity(f, 100, TOUCHING);
 
             assertExact(f.tick(START.add(0, FIRST_FALL, 0), false));
+            assertExact(f.tick(START.add(0, FIRST_FALL + SECOND_FALL, PUSH), false));
+        }
+    }
+
+    /** LivingEntity#aiStep runs the interpolation step before pushEntities: the push comes from where it stepped to. */
+    @Test
+    void anEntityTickingAfterThePlayerPushesFromWhereItsInterpolationStepLeftIt() throws Exception {
+        try (var f = falling()) {
+            PacketEntity entity = entity(f, 100, STEPPING_FROM);
+            entity.onFirstTransaction(true, true, 0, 0, STEPPING_DZ, f.player);
+            entity.onSecondTransaction();
+
+            PredictionResult first = f.tick(START.add(0, FIRST_FALL, 0), false);
+            assertExact(first);
+            assertEquals(0, first.getSimulationContext().getWorldData().getNumPushing());
             assertExact(f.tick(START.add(0, FIRST_FALL + SECOND_FALL, PUSH), false));
         }
     }
