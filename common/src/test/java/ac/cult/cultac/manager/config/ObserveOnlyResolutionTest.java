@@ -13,12 +13,15 @@ import org.junit.jupiter.api.Test;
 
 class ObserveOnlyResolutionTest {
     @Test
-    void theConfigWinsAndTheEnvironmentOnlyFillsAnAbsentKey() {
-        assertFalse(BaseConfigManager.resolveObserveOnly(configured(false), env("true")));
-        assertTrue(BaseConfigManager.resolveObserveOnly(configured(true), env("false")));
-        assertTrue(BaseConfigManager.resolveObserveOnly(absent(), env(" 1 ")));
+    void theEnvironmentWinsWhenItNamesAValueAndTheConfigDecidesOtherwise() {
+        assertTrue(BaseConfigManager.resolveObserveOnly(configured(false), env("true")));
+        assertFalse(BaseConfigManager.resolveObserveOnly(configured(true), env("false")));
+        assertTrue(BaseConfigManager.resolveObserveOnly(configured(false), env(" 1 ")));
         assertTrue(BaseConfigManager.resolveObserveOnly(absent(), env("YES")));
-        assertFalse(BaseConfigManager.resolveObserveOnly(absent(), env("no")));
+        assertFalse(BaseConfigManager.resolveObserveOnly(configured(true), env("no")));
+        assertTrue(BaseConfigManager.resolveObserveOnly(configured(true), env(null)));
+        assertTrue(BaseConfigManager.resolveObserveOnly(configured(true), env(" ")));
+        assertTrue(BaseConfigManager.resolveObserveOnly(configured(true), env("maybe")));
         assertFalse(BaseConfigManager.resolveObserveOnly(absent(), env(null)));
     }
 
