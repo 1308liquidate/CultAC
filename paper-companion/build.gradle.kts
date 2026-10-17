@@ -1,3 +1,5 @@
+import linkage.PaperLinkageCheck
+
 plugins {
     java
     cult.`format-conventions`
@@ -63,3 +65,23 @@ tasks.shadowJar {
 }
 
 tasks.assemble { dependsOn(tasks.shadowJar) }
+
+// The oldest server the companion runs on: production backends are Paper 1.21.11. -PpaperLinkageServer names a
+// directory holding a Mojang-mapped server, e.g. a Paper 1.21.11 paperclip run with -Dpaperclip.patchonly=true
+// (its versions/ and libraries/); without it the check is skipped.
+val paperLinkageServer = providers.gradleProperty("paperLinkageServer")
+val checkPaperLinkage = tasks.register<PaperLinkageCheck>("checkPaperLinkage") {
+    group = "verification"
+    description = "Fails on server references in the companion jar that do not link against the baseline server."
+    onlyIf("-PpaperLinkageServer is set") { paperLinkageServer.isPresent }
+    classes.from(tasks.shadowJar.flatMap { it.archiveFile })
+    if (paperLinkageServer.isPresent) {
+        baseline.from(fileTree(paperLinkageServer.get()) { include("versions/**/*.jar", "libraries/**/*.jar") })
+    }
+    packages.set(setOf(
+        "net/minecraft/", "com/mojang/", "io/netty/", "net/kyori/adventure/",
+        "io/papermc/paper/", "org/bukkit/", "com/destroystokyo/paper/"
+    ))
+    excluded.set(emptySet())
+}
+tasks.check { dependsOn(checkPaperLinkage) }

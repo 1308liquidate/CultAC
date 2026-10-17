@@ -11,5 +11,6 @@ dependencies {
     implementation(libs.spotless)
     implementation(libs.lombok)
     implementation(libs.shadow)
+    implementation("org.ow2.asm:asm:9.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
 }
