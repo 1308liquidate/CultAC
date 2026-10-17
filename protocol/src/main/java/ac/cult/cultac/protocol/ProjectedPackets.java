@@ -32,6 +32,15 @@ public final class ProjectedPackets implements AutoCloseable {
         return observed.data().version() != model.data().version();
     }
 
+    /** The model family of observed wire packet {@code id}; null when the model has none. */
+    public PacketType<?> type(ConnectionPhase phase, PacketDirection direction, int id) {
+        var bound = observed.binding(phase, direction, id);
+        return bound == null
+                ? model.typeForKey(direction.name().toLowerCase(java.util.Locale.ROOT) + "."
+                        + observed.data().packets(phase, direction).name(id).replace("minecraft:", ""))
+                : bound.type();
+    }
+
     /** Borrows the physical frame; no generated frames or mirrored observations exist. */
     public List<Value> read(
             ConnectionPhase phase,
@@ -76,11 +85,7 @@ public final class ProjectedPackets implements AutoCloseable {
         try {
             var input = physical;
             int id = Wire.readVarInt(input);
-            var bound = observed.binding(phase, direction, id);
-            PacketType<?> type = bound == null
-                    ? model.typeForKey(direction.name().toLowerCase(java.util.Locale.ROOT) + "."
-                            + observed.data().packets(phase, direction).name(id).replace("minecraft:", ""))
-                    : bound.type();
+            PacketType<?> type = type(phase, direction, id);
             if (type == null || !consumed.test(type)) return null;
             if (type.codec().forwardsUndecoded(input, input.readerIndex())) return null;
             Object packet;
