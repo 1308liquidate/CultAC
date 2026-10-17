@@ -35,7 +35,11 @@ public class KnockbackHandler extends PacketModHandler implements PostPrediction
             return -1;
         }
         var motion = velocity;
-        PacketEntity vehicle = player.compensatedEntities.vehicles.getVelocityMovementVehicle();
+        // The client handles a sent dismount before this packet, so the player's own velocity moves the player.
+        PacketEntity vehicle =
+                motion.entityId() == player.entityID && player.compensatedEntities.vehicles.hasPendingServerDismount()
+                        ? null
+                        : player.compensatedEntities.vehicles.getVelocityMovementVehicle();
         int movementEntityId = vehicle != null ? vehicle.getEntityId() : player.entityID;
         if (motion.entityId() != movementEntityId) {
             return -1;
