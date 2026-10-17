@@ -213,7 +213,7 @@ public final class BridgeService implements BridgeSessions, AutoCloseable {
             }
             if (malformedPlayers.add(playerId)) {
                 logger.warning("Closing the CultAC bridge for " + playerId + " on " + session.serverName()
-                        + ": malformed frame (" + failure.getMessage() + ")");
+                        + ": malformed frame (" + printable(failure.getMessage(), MAX_LOGGED_REASON_CHARS) + ")");
             }
             session.close("malformed frame");
             return;
@@ -348,6 +348,11 @@ public final class BridgeService implements BridgeSessions, AutoCloseable {
         listeners.add(listener);
     }
 
+    @Override
+    public void removeListener(BridgeMessageListener listener) {
+        listeners.remove(listener);
+    }
+
     /** TPS last reported by the companion on the player's backend, or NaN. */
     public double tps(UUID player) {
         var session = current(player);
@@ -408,7 +413,8 @@ public final class BridgeService implements BridgeSessions, AutoCloseable {
         missingServers.remove(server);
         rejections.remove(server);
         if (activeServers.add(server)) {
-            logger.info("CultAC bridge active on " + server + " (" + session.serverVersion() + "), capabilities "
+            logger.info("CultAC bridge active on " + server + " ("
+                    + printable(session.serverVersion(), MAX_LOGGED_REASON_CHARS) + "), capabilities "
                     + describe(session));
         }
         for (var listener : listeners) {

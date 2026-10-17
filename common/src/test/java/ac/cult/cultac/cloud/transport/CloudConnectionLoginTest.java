@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ac.cult.cultac.cloud.CloudSettings;
 import ac.cult.cultac.cloud.capture.CaptureStream;
 import ac.cult.cultac.cloud.capture.PlayerText;
+import ac.cult.cultac.cloud.findings.FindingsLog;
 import ac.cult.cultac.cloud.intake.v3.Capture;
 import ac.cult.cultac.cloud.intake.v3.Event;
 import ac.cult.cultac.cloud.intake.v3.IntakeMessage;
@@ -49,6 +50,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -243,6 +245,49 @@ class CloudConnectionLoginTest {
             await(() -> connection.summary().endsWith(", 2 findings received"), "both findings counted");
             assertTrue(player.replies.isEmpty());
         }
+    }
+
+    @Test
+    void aSocketTakesFindingsOnlyForPlayersJoinedOnIt() throws Exception {
+        AtomicLong now = new AtomicLong(System.nanoTime());
+        CloudConnection.Timing timing = new CloudConnection.Timing(Long.MAX_VALUE / 4, Long.MAX_VALUE / 4, now::get);
+        try (Globals globals = new Globals();
+                Receiver receiver = new Receiver(timing)) {
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            List<UUID> found = new CopyOnWriteArrayList<>();
+            receiver.connections.onFinding(event -> found.add(event.player()));
+            CloudConnection a = receiver.connections.forServer("proxy.a");
+            UUID onA = new UUID(5, 6);
+            Recorder joinedOnA = new Recorder();
+            a.register(onA, joinedOnA);
+            receiver.allowConnect();
+            long generation = joinedOnA.next(joinedOnA.connected);
+            receiver.connections.forServer("proxy.b").register(PLAYER, new Recorder());
+            WebSocket.Listener replies = listener(a, generation);
+            WebSocket open = socket(a);
+
+            replies.onBinary(open, ByteBuffer.wrap(event(PLAYER)), true);
+            replies.onBinary(open, ByteBuffer.wrap(event(onA)), true);
+            assertEquals(List.of(onA), found);
+
+            a.unregister(onA, joinedOnA);
+            now.addAndGet(TimeUnit.MILLISECONDS.toNanos(FindingsLog.RETENTION_MILLIS));
+            replies.onBinary(open, ByteBuffer.wrap(event(onA)), true);
+            assertEquals(List.of(onA, onA), found, "a finding after the player left is kept for the retention");
+            now.addAndGet(TimeUnit.MILLISECONDS.toNanos(1));
+            replies.onBinary(open, ByteBuffer.wrap(event(onA)), true);
+            assertEquals(2, found.size());
+        }
+    }
+
+    private static byte[] event(UUID player) {
+        return Replies.newBuilder()
+                .addReplies(Reply.newBuilder()
+                        .setEvent(Event.newBuilder()
+                                .setPlayer(ByteString.copyFrom(IntakeWire.uuid(player)))
+                                .setCheckId("speed")))
+                .build()
+                .toByteArray();
     }
 
     @Test

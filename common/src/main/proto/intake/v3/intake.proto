@@ -624,7 +624,8 @@ message Slot {
   uint32 amount = 3;
 }
 
-// A message from the service.
+// A message from the service: at most 4 MiB, 4,096 replies of at most 32 KiB each, 1,024 packet ids per list and no
+// groups. CultAC drops a message past any of these.
 message Replies {
   repeated Reply replies = 1;
 }

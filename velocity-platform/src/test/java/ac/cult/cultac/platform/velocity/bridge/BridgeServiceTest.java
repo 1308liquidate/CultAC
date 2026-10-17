@@ -10,6 +10,7 @@ import ac.cult.cultac.bridge.protocol.BridgeMessage.Auth;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Challenge;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Close;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Hello;
+import ac.cult.cultac.bridge.protocol.BridgeMessage.PlayerFacts;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.PlayerState;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.PlayerStateResult;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Ready;
@@ -37,10 +38,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -62,6 +65,7 @@ class BridgeServiceTest {
     private final UUID playerId = UUID.randomUUID();
     private final FakeBackend backend = new FakeBackend("lobby");
     private final RecordingListener listener = new RecordingListener();
+    private String serverVersion = "Paper 26.3";
     private BridgeService service = service(1000, 1000);
 
     @AfterEach
@@ -137,7 +141,7 @@ class BridgeServiceTest {
                     frame(new Ready(
                             BridgeAuth.backendHmac(secret, playerId, backendNonce, hello.proxyNonce()),
                             CAPABILITIES,
-                            "Paper 26.3",
+                            serverVersion,
                             UUID.randomUUID(),
                             "world",
                             0b1)));
@@ -638,6 +642,63 @@ class BridgeServiceTest {
         await(() -> session.state() == BridgeSession.State.CLOSED);
         assertEquals(new Close("malformed frame"), backend.next());
         await(() -> listener.closed == 1);
+    }
+
+    @Test
+    void backendTextIsLoggedOnOneBoundedLine() throws Exception {
+        List<String> logged = new CopyOnWriteArrayList<>();
+        Handler capture = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                logged.add(record.getMessage());
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        Logger logger = Logger.getLogger("BridgeServiceTest");
+        logger.addHandler(capture);
+        try {
+            serverVersion = "Paper\r\n[INFO] forged version";
+            var session = readySession();
+            byte[] facts = frame(new PlayerFacts(Map.of("x\n[INFO] forged staff action" + "y".repeat(4000), "")));
+            byte[] repeated = new byte[facts.length * 2 - 2];
+            System.arraycopy(facts, 0, repeated, 0, facts.length);
+            System.arraycopy(facts, 2, repeated, facts.length, facts.length - 2);
+            repeated[1] = 2;
+            service.receiveFrame(playerId, repeated);
+            await(() -> session.state() == BridgeSession.State.CLOSED);
+        } finally {
+            logger.removeHandler(capture);
+        }
+
+        List<String> backendLines = logged.stream()
+                .filter(line -> line.contains("bridge active") || line.contains("malformed frame"))
+                .toList();
+        assertEquals(2, backendLines.size(), logged.toString());
+        for (String line : backendLines) {
+            assertTrue(line.chars().noneMatch(Character::isISOControl), line);
+            assertTrue(line.length() < 2 * BridgeService.MAX_LOGGED_REASON_CHARS, line);
+        }
+        assertTrue(backendLines.getFirst().contains("(Paper??[INFO] forged version)"), backendLines.getFirst());
+    }
+
+    @Test
+    void aRemovedListenerHearsNothing() throws Exception {
+        RecordingListener kept = new RecordingListener();
+        service.addListener(kept);
+        service.removeListener(listener);
+
+        readySession();
+        service.receiveFrame(playerId, frame(new World(UUID.randomUUID(), "world_nether")));
+        await(() -> kept.messages >= 1);
+
+        assertEquals(1, kept.ready);
+        assertEquals(0, listener.ready);
+        assertEquals(0, listener.messages);
     }
 
     @Test

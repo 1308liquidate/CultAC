@@ -31,9 +31,11 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.InvalidProtocolBufferException;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -409,7 +411,7 @@ class IntakeWireTest {
 
     @Test
     void anOversizedFindingIsCutBeforeItIsKept() {
-        String huge = "x".repeat(8 * 1024 * 1024);
+        String huge = "x".repeat(4096);
         byte[] replies = Replies.newBuilder()
                 .addReplies(Reply.newBuilder()
                         .setEvent(Event.newBuilder()
@@ -428,6 +430,36 @@ class IntakeWireTest {
     }
 
     @Test
+    void theKeyIsMaskedInWhatTheServiceSaysBeforeItIsCut() {
+        String key = "issued-token-0123456789";
+        String straddling = "x".repeat(IntakeWire.MAX_DETAIL_BYTES - 8) + key;
+        byte[] replies = Replies.newBuilder()
+                .addReplies(Reply.newBuilder()
+                        .setRefused(
+                                Refused.newBuilder().setPlayer(PLAYER_BYTES).setReason("Authorization: Bearer " + key)))
+                .addReplies(Reply.newBuilder()
+                        .setRefused(Refused.newBuilder().setPlayer(PLAYER_BYTES).setReason(straddling)))
+                .addReplies(Reply.newBuilder()
+                        .setEvent(Event.newBuilder()
+                                .setPlayer(PLAYER_BYTES)
+                                .setCheckId(key)
+                                .setCategory("x".repeat(120) + key)
+                                .setDetail(straddling)))
+                .build()
+                .toByteArray();
+
+        List<IntakeWire.Reply> read = IntakeWire.replies(replies, key);
+
+        assertEquals("Authorization: Bearer <api-key>", ((IntakeWire.Refused) read.get(0)).reason());
+        IntakeWire.Event event = (IntakeWire.Event) read.get(2);
+        assertEquals("<api-key>", event.checkId());
+        for (String text : List.of(
+                ((IntakeWire.Refused) read.get(1)).reason(), event.checkId(), event.category(), event.detail())) {
+            assertFalse(text.contains(key.substring(0, 6)), text);
+        }
+    }
+
+    @Test
     void aReplyForAPlayerThatIsNotSixteenBytesIsUnreadable() {
         byte[] replies = Replies.newBuilder()
                 .addReplies(
@@ -435,6 +467,180 @@ class IntakeWireTest {
                 .build()
                 .toByteArray();
         assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(replies));
+    }
+
+    @Test
+    void sixteenMebibytesOfEmptyRepliesAreUnreadable() {
+        byte[] message = new byte[16 * 1024 * 1024];
+        for (int i = 0; i < message.length; i += 2) message[i] = 0x0A;
+        assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(message));
+    }
+
+    @Test
+    void repliesAreCappedInCount() {
+        assertTrue(IntakeWire.replies(emptyReplies(IntakeWire.MAX_REPLIES)).isEmpty());
+        assertThrows(
+                IllegalArgumentException.class, () -> IntakeWire.replies(emptyReplies(IntakeWire.MAX_REPLIES + 1)));
+    }
+
+    @Test
+    void unknownFieldsAreCappedInCount() {
+        byte[] message = new byte[2 * (IntakeWire.MAX_REPLY_FIELDS + 1)];
+        for (int i = 0; i < message.length; i += 2) message[i] = 0x10;
+        assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(message));
+        assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(new byte[] {0x13, 0x14}));
+    }
+
+    @Test
+    void aCaptureListIsCappedInIds() throws IOException {
+        List<Integer> most = new ArrayList<>();
+        for (int i = 0; i < IntakeWire.MAX_CAPTURE_IDS; i++) most.add(i % 1000);
+        IntakeWire.Capture read = (IntakeWire.Capture)
+                IntakeWire.replies(capture(most, List.of())).get(0);
+        assertEquals(IntakeWire.MAX_CAPTURE_IDS, read.serverbound().length);
+
+        List<Integer> over = new ArrayList<>(most);
+        over.add(1);
+        assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(capture(over, List.of())));
+        assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(capture(List.of(), over)));
+        List<Integer> million = new ArrayList<>(Collections.nCopies(1_000_000, 1));
+        assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(capture(List.of(), million)));
+
+        ByteArrayOutputStream unpacked = new ByteArrayOutputStream();
+        unpacked.writeBytes(Capture.newBuilder().setPlayer(PLAYER_BYTES).build().toByteArray());
+        for (int i = 0; i <= IntakeWire.MAX_CAPTURE_IDS; i++) unpacked.writeBytes(new byte[] {0x18, 0x01});
+        byte[] message = field(1, field(1, unpacked.toByteArray()));
+        assertEquals(
+                IntakeWire.MAX_CAPTURE_IDS + 1,
+                Replies.parseFrom(message).getReplies(0).getCapture().getClientboundCount());
+        assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(message));
+    }
+
+    @Test
+    void repeatedCaptureFieldsShareTheIdCap() throws IOException {
+        List<Integer> most = Collections.nCopies(IntakeWire.MAX_CAPTURE_IDS, 1);
+        byte[] packed = field(
+                1,
+                Capture.newBuilder()
+                        .setPlayer(PLAYER_BYTES)
+                        .addAllServerbound(most)
+                        .build()
+                        .toByteArray());
+        byte[] packedMore =
+                field(1, Capture.newBuilder().addServerbound(2).build().toByteArray());
+        byte[] unpackedMore = field(1, new byte[] {0x10, 0x02});
+        for (byte[] more : List.of(packedMore, unpackedMore)) {
+            byte[] message = field(1, concat(packed, more));
+            assertEquals(
+                    IntakeWire.MAX_CAPTURE_IDS + 1,
+                    Replies.parseFrom(message).getReplies(0).getCapture().getServerboundCount());
+            assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(message));
+        }
+
+        byte[] half = field(
+                1,
+                Capture.newBuilder()
+                        .setPlayer(PLAYER_BYTES)
+                        .addAllServerbound(Collections.nCopies(IntakeWire.MAX_CAPTURE_IDS / 2, 1))
+                        .build()
+                        .toByteArray());
+        IntakeWire.Capture read = (IntakeWire.Capture)
+                IntakeWire.replies(field(1, concat(half, half))).get(0);
+        assertEquals(IntakeWire.MAX_CAPTURE_IDS, read.serverbound().length);
+    }
+
+    @Test
+    void aFrameBuilderShrinksBackAfterALargeFrame() {
+        IntakeWire.FrameBuilder builder = new IntakeWire.FrameBuilder();
+        byte[] payload = {1, 2};
+        for (int i = 0; i < 100_000; i++) builder.add(IntakeWire.SERVERBOUND, 1, payload, 2, 0, 0, 0);
+        builder.build(PLAYER, 1);
+        builder.clear();
+        assertEquals(IntakeWire.FrameBuilder.RESTING_RECORDS, builder.capacity());
+
+        for (int i = 0; i < 100_000; i++) builder.add(IntakeWire.SERVERBOUND, 1, payload, 2, 0, 0, 0);
+        builder.clear();
+        assertEquals(IntakeWire.FrameBuilder.RESTING_RECORDS, builder.capacity());
+
+        for (int i = 0; i < 500; i++) builder.add(IntakeWire.SERVERBOUND, 1, payload, 2, 0, 0, 0);
+        builder.clear();
+        int grown = builder.capacity();
+        assertTrue(grown >= 500, grown + " slots");
+        for (int i = 0; i < 500; i++) builder.add(IntakeWire.SERVERBOUND, 1, payload, 2, 0, 0, 0);
+        builder.clear();
+        assertEquals(grown, builder.capacity(), "a frame of a few hundred records keeps its slots");
+
+        for (int i = 0; i < 5_000; i++) builder.add(IntakeWire.SERVERBOUND, 1, payload, 2, 0, 0, 0);
+        builder.clear();
+        assertEquals(IntakeWire.FrameBuilder.RESTING_RECORDS, builder.capacity());
+        add(builder, IntakeWire.SERVERBOUND, 1, payload);
+        assertTrue(builder.bytes() > 0);
+    }
+
+    private static byte[] concat(byte[] first, byte[] second) {
+        byte[] both = Arrays.copyOf(first, first.length + second.length);
+        System.arraycopy(second, 0, both, first.length, second.length);
+        return both;
+    }
+
+    private static byte[] field(int number, byte[] body) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        CodedOutputStream stream = CodedOutputStream.newInstance(out);
+        stream.writeByteArray(number, body);
+        stream.flush();
+        return out.toByteArray();
+    }
+
+    @Test
+    void aReplyOverItsSizeIsUnreadable() {
+        byte[] replies = Replies.newBuilder()
+                .addReplies(Reply.newBuilder()
+                        .setEvent(Event.newBuilder()
+                                .setPlayer(PLAYER_BYTES)
+                                .setDetail("x".repeat(IntakeWire.MAX_REPLY_ENTRY_BYTES))))
+                .build()
+                .toByteArray();
+        assertThrows(IllegalArgumentException.class, () -> IntakeWire.replies(replies));
+    }
+
+    @Test
+    void serviceTextIsReadAsOneLine() {
+        byte[] replies = Replies.newBuilder()
+                .addReplies(Reply.newBuilder()
+                        .setEvent(Event.newBuilder()
+                                .setPlayer(PLAYER_BYTES)
+                                .setCheckId("reach\n[Server] approved")
+                                .setCategory("AIM\r x")
+                                .setDetail("a\u2029b\u0007c\u202ed \u00a7c<b>literal</b>")))
+                .addReplies(Reply.newBuilder()
+                        .setRefused(Refused.newBuilder().setPlayer(PLAYER_BYTES).setReason("full\r\nINFO: ok")))
+                .build()
+                .toByteArray();
+
+        List<IntakeWire.Reply> read = IntakeWire.replies(replies);
+
+        IntakeWire.Event event = (IntakeWire.Event) read.get(0);
+        assertEquals("reach?[Server] approved", event.checkId());
+        assertEquals("AIM??x", event.category());
+        assertEquals("a?b?c?d ?c<b>literal</b>", event.detail());
+        assertEquals("full??INFO: ok", ((IntakeWire.Refused) read.get(1)).reason());
+    }
+
+    private static byte[] emptyReplies(int count) {
+        byte[] message = new byte[2 * count];
+        for (int i = 0; i < message.length; i += 2) message[i] = 0x0A;
+        return message;
+    }
+
+    private static byte[] capture(List<Integer> serverbound, List<Integer> clientbound) {
+        return Replies.newBuilder()
+                .addReplies(Reply.newBuilder()
+                        .setCapture(Capture.newBuilder()
+                                .setPlayer(PLAYER_BYTES)
+                                .addAllServerbound(serverbound)
+                                .addAllClientbound(clientbound)))
+                .build()
+                .toByteArray();
     }
 
     @Test

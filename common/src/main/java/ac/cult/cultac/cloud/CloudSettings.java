@@ -24,6 +24,8 @@ public record CloudSettings(
     public static final List<Integer> PROXY_PROTOCOLS = List.of(5);
 
     private static final Pattern LOOPBACK_V4 = Pattern.compile("127(\\.(25[0-5]|2[0-4]\\d|1?\\d?\\d)){3}");
+    /** Visible ASCII only, so the key always makes a valid {@code Authorization} header. */
+    private static final Pattern API_KEY = Pattern.compile("[\\x21-\\x7E]+");
 
     public static final CloudSettings OFF = new CloudSettings("", "", DEFAULT_SERVER_ID, "", List.of());
 
@@ -48,9 +50,17 @@ public record CloudSettings(
                     + " user info, query or fragment");
             url = "";
         }
+        String apiKey = config.getStringElse("cloud.api-key", "");
+        if (apiKey != null
+                && !apiKey.isBlank()
+                && !API_KEY.matcher(apiKey.strip()).matches()) {
+            LogUtil.warn("Cloud upload off: cloud.api-key has characters that cannot be sent in an HTTP header;"
+                    + " copy the key again");
+            apiKey = "";
+        }
         return new CloudSettings(
                 url,
-                config.getStringElse("cloud.api-key", ""),
+                apiKey,
                 serverId.isBlank() ? defaultServerId : serverId,
                 config.getStringElse("cloud.proxy-id", ""),
                 protocols);
@@ -88,5 +98,12 @@ public record CloudSettings(
     /** Whether the upload runs: a service, a key and a protocol to offer. */
     public boolean enabled() {
         return !url.isEmpty() && !apiKey.isEmpty() && !protocols.isEmpty();
+    }
+
+    /** Every setting but the key, which is only ever sent in the {@code Authorization} header. */
+    @Override
+    public String toString() {
+        return "CloudSettings[url=" + url + ", apiKey=" + (apiKey.isEmpty() ? "" : "<set>") + ", serverIdTemplate="
+                + serverIdTemplate + ", proxyId=" + proxyId + ", protocols=" + protocols + "]";
     }
 }

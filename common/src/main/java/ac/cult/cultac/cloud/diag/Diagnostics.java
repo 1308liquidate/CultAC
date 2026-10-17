@@ -239,7 +239,12 @@ public final class Diagnostics {
         reserved += watch.ringBytes;
         refusals.remove(player);
         ensureThread();
-        command(() -> known.add(watch));
+        if (!command(() -> known.add(watch))) {
+            watches.remove(player, watch);
+            reserved -= watch.ringBytes;
+            refusals.put(player, "busy");
+            return null;
+        }
         return watch;
     }
 

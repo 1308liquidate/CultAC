@@ -14,13 +14,15 @@ import ac.cult.cultac.cloud.intake.v3.Registry;
 import ac.cult.cultac.cloud.intake.v3.Replies;
 import ac.cult.cultac.cloud.intake.v3.Unstreamed;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.anticheat.LogThrottle;
 import com.github.luben.zstd.EndDirective;
 import com.github.luben.zstd.Zstd;
 import com.github.luben.zstd.ZstdCompressCtx;
 import com.github.luben.zstd.util.Native;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.CodedInputStream;
 import com.google.protobuf.CodedOutputStream;
-import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.protobuf.WireFormat;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
@@ -159,6 +161,19 @@ public final class IntakeWire {
     public static final int MAX_DETAIL_BYTES = 512;
     /** Flags one VERDICT carries at most; later ones in the tick are left out. */
     public static final int MAX_FLAGS = 32;
+    /** Replies one service message carries at most; past it the message is unreadable. */
+    static final int MAX_REPLIES = 4096;
+    /** The largest encoded reply: a capture of three full id lists, five bytes an id, with room to spare. */
+    static final int MAX_REPLY_ENTRY_BYTES = 32 * 1024;
+    /** Fields one service message carries at most, packed and repeated packet ids aside. */
+    static final int MAX_REPLY_FIELDS = 16 * MAX_REPLIES;
+    /** Packet ids one capture list carries at most, the most a capture policy reads. */
+    static final int MAX_CAPTURE_IDS = 1024;
+    // Field numbers of intake.proto: Replies.replies; Reply's kinds, capture first; Capture's three id lists.
+    private static final int REPLIES_REPLY = 1;
+    private static final int REPLY_CAPTURE = 1;
+    private static final int REPLY_LAST_KIND = 6;
+    private static final int CAPTURE_FIRST_IDS = 2;
 
     private IntakeWire() {}
 
@@ -719,6 +734,11 @@ public final class IntakeWire {
      * there. Reusable after {@link #clear()}; {@link #compact} writes protocol 5's fields.
      */
     public static final class FrameBuilder {
+        /** Record slots a builder starts again with once a frame past {@link #MAX_KEPT_RECORDS} is cleared. */
+        static final int RESTING_RECORDS = 256;
+        /** The most record slots kept between frames, 128 KiB. */
+        static final int MAX_KEPT_RECORDS = 4096;
+
         private int count;
         private int[] kinds = new int[32];
         private long[] sinceLast = new long[32];
@@ -826,10 +846,24 @@ public final class IntakeWire {
         }
 
         public void clear() {
-            Arrays.fill(payloads, 0, count, null);
+            if (kinds.length > MAX_KEPT_RECORDS) {
+                kinds = new int[RESTING_RECORDS];
+                sinceLast = new long[RESTING_RECORDS];
+                payloads = new byte[RESTING_RECORDS][];
+                lengths = new int[RESTING_RECORDS];
+                tickDeltas = new int[RESTING_RECORDS];
+                pingKinds = new int[RESTING_RECORDS];
+                skips = new int[RESTING_RECORDS];
+            } else {
+                Arrays.fill(payloads, 0, count, null);
+            }
             count = 0;
             bytes = 0;
             serverTick = -1;
+        }
+
+        int capacity() {
+            return kinds.length;
         }
     }
 
@@ -977,10 +1011,16 @@ public final class IntakeWire {
 
     /** A whole message from the service. Kinds this client does not know are skipped. */
     public static List<Reply> replies(byte[] message) {
+        return replies(message, "");
+    }
+
+    /** As {@link #replies(byte[])}, with {@code apiKey} masked in the service's text before it is cut. */
+    public static List<Reply> replies(byte[] message, String apiKey) {
         Replies parsed;
         try {
+            checkShape(message);
             parsed = Replies.parseFrom(message);
-        } catch (InvalidProtocolBufferException malformed) {
+        } catch (IOException malformed) {
             throw new IllegalArgumentException("malformed replies: " + malformed.getMessage());
         }
         List<Reply> replies = new ArrayList<>(parsed.getRepliesCount());
@@ -997,16 +1037,16 @@ public final class IntakeWire {
                 case REFUSED ->
                     replies.add(new Refused(
                             uuid(reply.getRefused().getPlayer()),
-                            reply.getRefused().getReason()));
+                            text(reply.getRefused().getReason(), apiKey, MAX_DETAIL_BYTES)));
                 case EVENT -> {
                     var event = reply.getEvent();
                     replies.add(new Event(
                             uuid(event.getPlayer()),
                             event.getTick(),
-                            truncate(event.getCheckId(), MAX_STRING_BYTES),
-                            truncate(event.getCategory(), MAX_STRING_BYTES),
+                            text(event.getCheckId(), apiKey, MAX_STRING_BYTES),
+                            text(event.getCategory(), apiKey, MAX_STRING_BYTES),
                             event.getConfidence(),
-                            truncate(event.getDetail(), MAX_DETAIL_BYTES)));
+                            text(event.getDetail(), apiKey, MAX_DETAIL_BYTES)));
                 }
                 case DIAG_LIMITS -> replies.add(new DiagLimitsReply(limits(reply.getDiagLimits())));
                 case DIAG_WATCH -> {
@@ -1035,6 +1075,95 @@ public final class IntakeWire {
             }
         }
         return replies;
+    }
+
+    /**
+     * Refuses a message past {@link #MAX_REPLIES}, {@link #MAX_REPLY_ENTRY_BYTES}, {@link #MAX_REPLY_FIELDS} or
+     * {@link #MAX_CAPTURE_IDS} from its wire bytes, before any of it is built. Groups, which no reply has, are refused.
+     */
+    private static void checkShape(byte[] message) throws IOException {
+        CodedInputStream in = CodedInputStream.newInstance(message);
+        int replies = 0;
+        int fields = 0;
+        while (!in.isAtEnd()) {
+            int tag = in.readTag();
+            if (++fields > MAX_REPLY_FIELDS) throw new IllegalArgumentException("over " + MAX_REPLY_FIELDS + " fields");
+            if (!message(tag) || WireFormat.getTagFieldNumber(tag) != REPLIES_REPLY) {
+                skip(in, tag);
+                continue;
+            }
+            if (++replies > MAX_REPLIES) throw new IllegalArgumentException("over " + MAX_REPLIES + " replies");
+            int reply = enter(in, MAX_REPLY_ENTRY_BYTES);
+            // Repeated capture fields merge into one capture, so their ids count together.
+            int[] ids = new int[3];
+            while (!in.isAtEnd()) {
+                int kindTag = in.readTag();
+                if (++fields > MAX_REPLY_FIELDS) {
+                    throw new IllegalArgumentException("over " + MAX_REPLY_FIELDS + " fields");
+                }
+                if (!message(kindTag) || WireFormat.getTagFieldNumber(kindTag) > REPLY_LAST_KIND) {
+                    skip(in, kindTag);
+                    continue;
+                }
+                boolean capture = WireFormat.getTagFieldNumber(kindTag) == REPLY_CAPTURE;
+                int kind = enter(in, MAX_REPLY_ENTRY_BYTES);
+                while (!in.isAtEnd()) {
+                    int fieldTag = in.readTag();
+                    int list = WireFormat.getTagFieldNumber(fieldTag) - CAPTURE_FIRST_IDS;
+                    if (capture && list >= 0 && list < ids.length) {
+                        ids[list] += packetIds(in, fieldTag);
+                        if (ids[list] > MAX_CAPTURE_IDS) {
+                            throw new IllegalArgumentException("capture of over " + MAX_CAPTURE_IDS + " ids");
+                        }
+                        continue;
+                    }
+                    if (++fields > MAX_REPLY_FIELDS) {
+                        throw new IllegalArgumentException("over " + MAX_REPLY_FIELDS + " fields");
+                    }
+                    skip(in, fieldTag);
+                }
+                in.popLimit(kind);
+            }
+            in.popLimit(reply);
+        }
+    }
+
+    private static boolean message(int tag) {
+        return WireFormat.getTagWireType(tag) == WireFormat.WIRETYPE_LENGTH_DELIMITED;
+    }
+
+    /** Reads a length and limits {@code in} to it; the limit to restore after. */
+    private static int enter(CodedInputStream in, int maxBytes) throws IOException {
+        int length = in.readRawVarint32();
+        if (length < 0 || length > maxBytes) throw new IllegalArgumentException("reply over " + maxBytes + " bytes");
+        return in.pushLimit(length);
+    }
+
+    /** The packet ids of one capture list field, packed or not, read past. */
+    private static int packetIds(CodedInputStream in, int tag) throws IOException {
+        if (WireFormat.getTagWireType(tag) == WireFormat.WIRETYPE_VARINT) {
+            in.readRawVarint64();
+            return 1;
+        }
+        if (WireFormat.getTagWireType(tag) != WireFormat.WIRETYPE_LENGTH_DELIMITED) {
+            throw new IllegalArgumentException("capture ids of wire type " + WireFormat.getTagWireType(tag));
+        }
+        int limit = enter(in, MAX_REPLY_ENTRY_BYTES);
+        int count = 0;
+        while (!in.isAtEnd()) {
+            in.readRawVarint64();
+            count++;
+        }
+        in.popLimit(limit);
+        return count;
+    }
+
+    private static void skip(CodedInputStream in, int tag) throws IOException {
+        int type = WireFormat.getTagWireType(tag);
+        if (type == WireFormat.WIRETYPE_START_GROUP || type == WireFormat.WIRETYPE_END_GROUP) {
+            throw new IllegalArgumentException("a group in a reply");
+        }
+        in.skipField(tag);
     }
 
     /** {@code DiagLimits} as this build takes it: every value clamped to its compiled maximum. */
@@ -1089,6 +1218,12 @@ public final class IntakeWire {
         } catch (IOException impossible) {
             throw new UncheckedIOException(impossible);
         }
+    }
+
+    /** The service's {@code text} on one line within {@code maxBytes}, {@code apiKey} masked first. */
+    private static String text(String text, String apiKey, int maxBytes) {
+        String masked = apiKey.isEmpty() ? text : text.replace(apiKey, "<api-key>");
+        return LogThrottle.oneLine(truncate(masked, maxBytes), maxBytes);
     }
 
     private static String truncate(String value, int maxBytes) {

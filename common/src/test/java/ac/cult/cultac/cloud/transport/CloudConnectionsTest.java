@@ -101,6 +101,14 @@ class CloudConnectionsTest {
     }
 
     @Test
+    void aSocketKeyDoesNotPrintTheApiKey() {
+        String text =
+                new CloudConnections.Key("https://intake.example", "issued-token-0123456789", "proxy.a").toString();
+        assertFalse(text.contains("issued-token-0123456789"), text);
+        assertTrue(text.contains("proxy.a"), text);
+    }
+
+    @Test
     void aReconfigureReplacesEverySocket() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
@@ -173,12 +181,12 @@ class CloudConnectionsTest {
             CloudConnection connection = connections.forServer("proxy.a");
             assertNotNull(connection);
             CloudConnectionLoginTest.Recorder recorder = new CloudConnectionLoginTest.Recorder();
-            connection.register(new UUID(3, 4), recorder);
+            UUID player = new UUID(1, 2);
+            connection.register(player, recorder);
             receiver.allowConnect();
             Channel socket = receiver.handshakes.poll(5, TimeUnit.SECONDS);
             assertNotNull(socket);
             recorder.next(recorder.connected);
-            UUID player = new UUID(1, 2);
             byte[] event = Replies.newBuilder()
                     .addReplies(Reply.newBuilder()
                             .setEvent(Event.newBuilder()

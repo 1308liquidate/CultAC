@@ -73,6 +73,9 @@ class VelocityServerTest {
 
             @Override
             public void addListener(BridgeMessageListener listener) {}
+
+            @Override
+            public void removeListener(BridgeMessageListener listener) {}
         });
     }
 

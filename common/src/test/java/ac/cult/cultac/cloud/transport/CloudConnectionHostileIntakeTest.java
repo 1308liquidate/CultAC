@@ -12,9 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ac.cult.cultac.cloud.CloudSettings;
 import ac.cult.cultac.cloud.transport.ConnectionFixture.Globals;
 import ac.cult.cultac.cloud.transport.ConnectionFixture.Receiver;
+import ac.cult.cultac.utils.anticheat.LogThrottle;
 import io.netty.channel.Channel;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.net.http.WebSocket;
@@ -44,14 +46,89 @@ class CloudConnectionHostileIntakeTest {
         assertFalse(CloudConnection.answerAllowed(loopback, "ws://user@127.0.0.1:8080/intake"));
         assertFalse(CloudConnection.answerAllowed(
                 URI.create("http://intake.example/api/v1/connect"), "ws://replica.example/intake"));
+        assertTrue(CloudConnection.answerAllowed(loopback, "ws://localhost:8081/intake"));
+        assertTrue(CloudConnection.answerAllowed(loopback, "ws://[::1]:8081/intake"));
+        assertFalse(CloudConnection.answerAllowed(loopback, "ws://replica.example/intake"));
+        assertFalse(CloudConnection.answerAllowed(loopback, "ws://192.0.2.1:8081/intake"));
+        assertFalse(CloudConnection.answerAllowed(loopback, "ws://127.0.0.1.example/intake"));
+    }
+
+    @Test
+    void aPlainSocketUrlOffThisMachineIsNeverOpened() throws Exception {
+        try (Globals globals = new Globals();
+                Receiver receiver = new Receiver()) {
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.forServer("proxy.a");
+            receiver.answerConnect(
+                    HttpResponseStatus.OK,
+                    "{\"url\":\"ws://203.0.113.9:1/intake\",\"protocol\":3,\"maxMessageBytes\":2097152}"
+                            .getBytes(StandardCharsets.UTF_8));
+            LogRecord warning = awaitLog(globals, "Cloud connection to");
+            assertTrue(warning.getMessage().contains("may not carry the key"), warning.getMessage());
+            assertNotNull(receiver.connects.poll(5, TimeUnit.SECONDS), "retried");
+            assertTrue(receiver.handshakes.isEmpty());
+        }
+    }
+
+    @Test
+    void transportFailuresNeverLogTheKey() throws Exception {
+        try (Globals globals = new Globals();
+                Receiver receiver = new Receiver()) {
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            CloudConnection connection = receiver.connections.forServer("proxy.a");
+            receiver.answerConnect(
+                    HttpResponseStatus.SERVICE_UNAVAILABLE,
+                    "Authorization: Bearer test-key".getBytes(StandardCharsets.UTF_8));
+            String connect = awaitLog(globals, "Cloud connection to").getMessage();
+            assertFalse(connect.contains("test-key"), connect);
+
+            receiver.allowConnect();
+            assertNotNull(receiver.handshakes.poll(5, TimeUnit.SECONDS));
+            Field field = CloudConnection.class.getDeclaredField("socket");
+            field.setAccessible(true);
+            await(() -> socket(field, connection) != null, "connected");
+            WebSocket open = socket(field, connection);
+            var constructor = Class.forName(CloudConnection.class.getName() + "$Replies")
+                    .getDeclaredConstructor(CloudConnection.class, long.class);
+            constructor.setAccessible(true);
+            WebSocket.Listener listener = (WebSocket.Listener) constructor.newInstance(connection, 1L);
+            listener.onError(open, new IOException("invalid header value: \"Bearer test-key\"\r\n[INFO] forged"));
+            String closed = awaitLog(globals, "Cloud socket closed").getMessage();
+            assertFalse(closed.contains("test-key"), closed);
+            assertFalse(closed.contains("\n") || closed.contains("\r"), closed);
+        }
+    }
+
+    @Test
+    void aSocketUrlNeverLogsTheKey() throws Exception {
+        try (Globals globals = new Globals();
+                Receiver receiver = new Receiver()) {
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.forServer("proxy.a");
+            String refused = "ws://203.0.113.9:1/" + "a".repeat(LogThrottle.MAX_CLIPPED - 23) + "test-key";
+            receiver.answerConnect(HttpResponseStatus.OK, connectAnswer(refused));
+            String warning = awaitLog(globals, "Cloud connection to").getMessage();
+            assertTrue(warning.contains("may not carry the key"), warning);
+            assertFalse(warning.contains("test-"), warning);
+
+            receiver.answerConnect(HttpResponseStatus.OK, connectAnswer(receiver.socketUrl() + "/test-key"));
+            assertNotNull(receiver.handshakes.poll(5, TimeUnit.SECONDS));
+            String connected = awaitLog(globals, "Cloud connected to").getMessage();
+            assertTrue(connected.contains("127.0.0.1"), connected);
+            assertFalse(connected.contains("test-key"), connected);
+        }
+    }
+
+    private static byte[] connectAnswer(String socketUrl) {
+        return ("{\"url\":\"" + socketUrl + "\",\"protocol\":3,\"maxMessageBytes\":2097152}")
+                .getBytes(StandardCharsets.UTF_8);
     }
 
     @Test
     void loggedUrlsKeepOnlySchemeHostPortAndPath() {
         assertEquals(
                 "wss://replica.example:9443/intake",
-                CloudConnection.loggable("wss://user:secret@replica.example:9443/intake?token=x#y"));
-        assertEquals("an unreadable URL", CloudConnection.loggable("not a url"));
+                CloudConnection.loggable(URI.create("wss://user:secret@replica.example:9443/intake?token=x#y")));
     }
 
     @Test
@@ -199,6 +276,14 @@ class CloudConnectionHostileIntakeTest {
                         .toList();
                 assertEquals(1, warnings.size(), String.valueOf(warnings));
             }
+        }
+    }
+
+    private static WebSocket socket(Field field, CloudConnection connection) {
+        try {
+            return (WebSocket) field.get(connection);
+        } catch (IllegalAccessException inaccessible) {
+            throw new AssertionError(inaccessible);
         }
     }
 

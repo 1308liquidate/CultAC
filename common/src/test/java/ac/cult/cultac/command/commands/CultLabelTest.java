@@ -4,13 +4,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.cultac.cloud.labels.LabelClient;
 import ac.cult.cultac.cloud.labels.LabelRequest;
 import ac.cult.cultac.platform.api.sender.Sender;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.incendo.cloud.CommandManager;
 import org.incendo.cloud.context.CommandContext;
@@ -65,6 +71,27 @@ class CultLabelTest {
             throw new IllegalStateException("boom");
         });
         assertEquals(List.of("The label command failed: IllegalStateException."), sent);
+    }
+
+    @Test
+    void aListedLabelIsOneBoundedLineAndOnlyAUuidIsOfferedForRevoke() {
+        JsonObject label = new JsonObject();
+        label.addProperty("id", "/op me");
+        label.addProperty("cheat", "x".repeat(10_000) + "\n[Server] approved");
+        label.addProperty("labeller", "Mod" + Character.toString(0x2028) + "Admin\r\n");
+        label.add("source", JsonParser.parseString("{\"nested\":\"" + "y".repeat(10_000) + "\"}"));
+        LabelClient.Reply reply = new LabelClient.Reply(200, "");
+        Component line = CultLabel.listed(label, reply);
+        String plain = PlainTextComponentSerializer.plainText().serialize(line);
+        assertTrue(plain.length() < 6 * LabelClient.MAX_FIELD, plain.length() + " characters");
+        assertTrue(plain.chars().noneMatch(c -> c == '\n' || c == '\r' || c == 0x2028), plain);
+        assertNull(line.children().get(0).clickEvent());
+
+        UUID id = UUID.fromString("6a1f3c2e-5b4d-4e8f-9a0b-1c2d3e4f5a6b");
+        label.addProperty("id", id.toString());
+        assertEquals(
+                ClickEvent.suggestCommand("/cult label revoke " + id + " "),
+                CultLabel.listed(label, reply).children().get(0).clickEvent());
     }
 
     @Test

@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * its sections in range sent as {@link Sections} decides, into the open frame. On protocol 3 they go out as packets.
  */
 public final class CaptureStream {
-    /** Where records go, and the server's shared budget for frames held before JOIN or its answer. */
+    /** Where records go, and the server's shared budget for every frame retained until it is sent or dropped. */
     public interface Sink {
         /** Queues a record; false when it was dropped. */
         boolean send(byte[] record);
@@ -193,8 +193,6 @@ public final class CaptureStream {
         IntakeWire.Engine engine;
         int lostBefore;
         long reserved;
-        /** The part of {@code reserved} taken from the sink's shared budget. */
-        long shared;
 
         Tick(List<Raw> records, long bytes, long nanos, long index, boolean dropped) {
             this.records = records;
@@ -234,10 +232,6 @@ public final class CaptureStream {
     private long firstNanos = Long.MIN_VALUE;
     private int preJoinFrames;
     private long frameReserved;
-    /** The part of {@link #frameReserved} taken from the sink's shared budget. */
-    private long frameShared;
-    /** Bytes taken from the sink's shared budget and not yet given back. */
-    private long sharedHeld;
     /** The socket can only speak protocol 5: chunk packets are never kept, even before JOIN. */
     private boolean sectionsOnly;
     /** The client was sent a world while the open frame was open. */
@@ -316,6 +310,8 @@ public final class CaptureStream {
     private Sections.Terrain terrain;
     /** What takes player-written text out of packets before they are kept; null until set. */
     private PlayerText text;
+
+    private final PlayerText.TeamNames teams = new PlayerText.TeamNames();
 
     private final Sections sections = new Sections();
     /** The open frame's terrain records, in the order put; each record's id is its index here. */
@@ -555,7 +551,7 @@ public final class CaptureStream {
             // Before JOIN the socket's textStripped is unknown: such a packet waits for it in the held frames.
             unstripped = preparing && text.unstripped(!serverbound, id);
             boolean stripped = textStripped && !unstripped;
-            bytes = serverbound ? text.serverbound(id, bytes, stripped) : text.clientbound(id, bytes, stripped);
+            bytes = serverbound ? text.serverbound(id, bytes, stripped) : text.clientbound(id, bytes, stripped, teams);
             if (bytes == null) return;
         }
         if (kind == IntakeWire.SERVERBOUND && !terrainFull) terrainFull = !sections.check(terrainOut, nanos);
@@ -687,31 +683,24 @@ public final class CaptureStream {
                 Math.min(
                         MAX_OPEN_FRAME_BYTES - frameBytes - (long) frame.size() * RECORD_OVERHEAD_BYTES,
                         (long) sink.maxFrameBytes() - RELEASE_HEADROOM - frameBytes),
-                Math.min(MAX_PRE_JOIN_BYTES - heldBytes, policy == null ? sink.holdRoom() : Long.MAX_VALUE)
-                        - VERDICT_BYTES);
+                Math.min(MAX_PRE_JOIN_BYTES - heldBytes, sink.holdRoom()) - VERDICT_BYTES);
     }
 
     /**
-     * Takes {@code bytes} for the open frame from the player's budget and, until the service answers the JOIN, the
-     * server's shared one; false when either is spent, and the open frame is dropped, unless only the shared one is
-     * spent and {@code waits}.
+     * Takes {@code bytes} for the open frame from the player's budget and the server's shared one; false when either
+     * is spent, and the open frame is dropped, unless only the shared one is spent and {@code waits}.
      */
     private boolean reserve(long bytes, boolean waits) {
-        boolean shared = policy == null;
         if (heldBytes + bytes > MAX_PRE_JOIN_BYTES) {
             dropOpen();
             return false;
         }
-        if (shared && !sink.hold(bytes)) {
+        if (!sink.hold(bytes)) {
             if (!waits) dropOpen();
             return false;
         }
         heldBytes += bytes;
         frameReserved += bytes;
-        if (shared) {
-            sharedHeld += bytes;
-            frameShared += bytes;
-        }
         return true;
     }
 
@@ -739,11 +728,9 @@ public final class CaptureStream {
     }
 
     private void releaseOpen() {
-        if (frameShared != 0) sink.release(frameShared);
-        sharedHeld -= frameShared;
+        if (frameReserved != 0) sink.release(frameReserved);
         heldBytes -= frameReserved;
         frameReserved = 0;
-        frameShared = 0;
     }
 
     /**
@@ -811,7 +798,6 @@ public final class CaptureStream {
         else frame = new ArrayList<>(Math.clamp(records.size(), MIN_FRAME_RECORDS, MAX_PRESIZED_RECORDS));
         Tick tick = new Tick(records, frameBytes, nanos, index, overflow);
         tick.reserved = frameReserved;
-        tick.shared = frameShared;
         tick.terrain = framedTerrain;
         tick.world = frameWorld;
         tick.actions = cutActions;
@@ -821,7 +807,6 @@ public final class CaptureStream {
         }
         frameBytes = 0;
         frameReserved = 0;
-        frameShared = 0;
         overflow = false;
         frameWorld = false;
         framedTerrain = NO_TERRAIN;
@@ -880,11 +865,9 @@ public final class CaptureStream {
     }
 
     private void release(Tick tick) {
-        if (tick.shared != 0) sink.release(tick.shared);
-        sharedHeld -= tick.shared;
+        if (tick.reserved != 0) sink.release(tick.reserved);
         heldBytes -= tick.reserved;
         tick.reserved = 0;
-        tick.shared = 0;
     }
 
     /** A frame's terrain records are done with: those it did not carry to the service are owed again. */
@@ -1336,6 +1319,7 @@ public final class CaptureStream {
     /** Ends the capture: nothing cut or held so far goes out. */
     public void reset() {
         generation++;
+        builder.clear();
         lose(actions);
         actions = NO_ACTIONS;
         lastServerbound = -1;
@@ -1352,7 +1336,6 @@ public final class CaptureStream {
         firstNanos = Long.MIN_VALUE;
         preJoinFrames = 0;
         frameReserved = 0;
-        frameShared = 0;
         frameWorld = false;
         owedWorld = false;
         terrainFull = false;
@@ -1371,10 +1354,9 @@ public final class CaptureStream {
         frameBytes = 0;
         overflow = false;
         awaiting.clear();
-        if (sink != null && sharedHeld != 0) sink.release(sharedHeld);
+        if (sink != null && heldBytes != 0) sink.release(heldBytes);
         held.clear();
         heldBytes = 0;
-        sharedHeld = 0;
         terms = CloudConnection.Terms.PROTOCOL_3;
         textStripped = true;
         sink = null;

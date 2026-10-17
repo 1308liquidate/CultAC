@@ -17,7 +17,12 @@ import org.jetbrains.annotations.Nullable;
  * made when the upload is configured on.
  */
 public final class CloudConnections {
-    private record Key(String url, String apiKey, String serverId) {}
+    record Key(String url, String apiKey, String serverId) {
+        @Override
+        public String toString() {
+            return "Key[url=" + url + ", serverId=" + serverId + "]";
+        }
+    }
 
     private final CloudConnection.Timing timing;
     private final Map<Key, CloudConnection> connections = new ConcurrentHashMap<>();

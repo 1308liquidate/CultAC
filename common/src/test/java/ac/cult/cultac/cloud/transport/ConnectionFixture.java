@@ -160,7 +160,8 @@ public final class ConnectionFixture {
                                                     ctx.fireChannelRead(message);
                                                 }
                                             },
-                                            new WebSocketServerProtocolHandler("/intake", null, true, 2 * 1024 * 1024),
+                                            new WebSocketServerProtocolHandler(
+                                                    "/intake", null, true, 2 * 1024 * 1024, false, true),
                                             new WebSocketFrameAggregator(2 * 1024 * 1024),
                                             new SimpleChannelInboundHandler<BinaryWebSocketFrame>() {
                                                 public void userEventTriggered(ChannelHandlerContext ctx, Object event)

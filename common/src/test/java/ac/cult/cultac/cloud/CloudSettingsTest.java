@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -66,6 +68,45 @@ class CloudSettingsTest {
                         .noneMatch(record -> record.getMessage().contains("u:p")));
             }
         }
+    }
+
+    @Test
+    void aKeyThatIsNotAHeaderValueLeavesTheUploadOffAndIsNeverLogged() throws Exception {
+        try (Globals globals = new Globals()) {
+            for (String key : List.of(
+                    "issued-token-0123456789\u007f", "issued-token\n0123456789", "issued-token\u200b0123456789")) {
+                CloudSettings settings = read(
+                        Map.of(
+                                "cloud.url", "https://intake.example",
+                                "cloud.api-key", key,
+                                "cloud.proxy-id", "lobby"),
+                        CloudSettings.SERVER_PROTOCOLS);
+                assertEquals("", settings.apiKey());
+                assertFalse(settings.enabled());
+            }
+            CloudSettings fine = read(
+                    Map.of("cloud.url", "https://intake.example", "cloud.api-key", " issued-token_0123456789= "),
+                    CloudSettings.SERVER_PROTOCOLS);
+            assertEquals("issued-token_0123456789=", fine.apiKey());
+            synchronized (globals.logs) {
+                assertEquals(3, globals.logs.size());
+                for (LogRecord record : globals.logs) {
+                    assertEquals(Level.WARNING, record.getLevel());
+                    assertEquals(globals.logs.get(0).getMessage(), record.getMessage());
+                    assertFalse(record.getMessage().contains("issued-token"), record.getMessage());
+                    assertFalse(record.getMessage().contains("0123456789"), record.getMessage());
+                }
+            }
+        }
+    }
+
+    @Test
+    void theKeyIsNotInToString() {
+        CloudSettings settings =
+                new CloudSettings("https://intake.example", "issued-token-0123456789", "{server}", "lobby", List.of(5));
+        String text = settings.toString();
+        assertFalse(text.contains("issued-token-0123456789"), text);
+        assertTrue(text.contains("https://intake.example"), text);
     }
 
     private static CloudSettings read(String url) {

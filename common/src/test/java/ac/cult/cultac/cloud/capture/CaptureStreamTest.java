@@ -288,17 +288,17 @@ class CaptureStreamTest {
     }
 
     @Test
-    void afterTheServiceAnswersFramesTakeNothingFromTheSharedBudget() {
+    void afterTheServiceAnswersFramesStillTakeFromTheSharedBudget() {
         TestSink sink = new TestSink(new TestBudget(20_000));
         CaptureStream stream = answered(sink);
         packet(stream, 100);
         stream.cut(150);
-        assertEquals(0, sink.used);
+        assertTrue(sink.used > 0);
         stream.tap(IntakeWire.CLIENTBOUND, CLIENTBOUND_ID, new byte[25_000], 200, -64, 384, SESSION);
-        assertEquals(0, sink.used);
         stream.cut(250);
         verdict(stream, 2, 2, 0);
-        assertEquals(2, frames(sink).size());
+        assertEquals(1, frames(sink).size(), "the frame past the budget is dropped");
+        assertEquals(0, sink.used);
         stream.leave(300);
         assertEquals(0, sink.used);
     }

@@ -51,12 +51,20 @@ class WireValueDecoderTest {
                     assertEquals(0, id);
                     return "test:wide";
                 }
+                if (registry.equals("minecraft:trim_pattern")) {
+                    assertEquals(0, id);
+                    return "minecraft:sentry";
+                }
                 return data.registry(registry).name(id);
             }
 
             public int id(String registry, String name) {
                 if (registry.equals("minecraft:enchantment")) {
                     assertEquals("minecraft:efficiency", name);
+                    return 0;
+                }
+                if (registry.equals("minecraft:trim_pattern")) {
+                    assertEquals("minecraft:sentry", name);
                     return 0;
                 }
                 return data.registry(registry).id(name);
@@ -756,6 +764,72 @@ class WireValueDecoderTest {
                     input.release();
                 }
             }
+        }
+    }
+
+    @Test
+    void largeTrimOverrideMapsAreRejectedBeforeMaterialization() {
+        for (var version : ProtocolVersion.values()) {
+            // 26.3 trim materials carry no overrides.
+            if (version.atLeast(ProtocolVersion.V26_3)) continue;
+            int trim = componentId(version, "minecraft:trim");
+            int provides = componentId(version, "minecraft:provides_trim_material");
+            for (boolean creative : List.of(false, true)) {
+                boolean lengthPrefixed = creative && version.atLeast(ProtocolVersion.V1_21_5);
+                if (creative && !lengthPrefixed) continue;
+                for (int overrides : new int[] {2, 8192}) {
+                    List<byte[]> stacks = new ArrayList<>();
+                    stacks.add(stackItem(version, trim, trim(version, overrides), lengthPrefixed));
+                    if (provides >= 0) {
+                        byte[] material = trimMaterial(version, overrides);
+                        if (!version.atLeast(ProtocolVersion.V26_1)) material = concat(new byte[] {1}, material);
+                        stacks.add(stackItem(version, provides, material, lengthPrefixed));
+                    }
+                    for (byte[] stack : stacks) {
+                        var input = Unpooled.wrappedBuffer(stack);
+                        String what = version + " creative=" + creative + " overrides=" + overrides;
+                        try {
+                            if (overrides > ItemStructureGuard.MAX_TRIM_OVERRIDES) {
+                                assertThrows(
+                                        PacketResourceLimitException.class,
+                                        () -> decoder.item(version, input, creative, names(version)),
+                                        what);
+                            } else {
+                                decoder.item(version, input, creative, names(version));
+                                assertFalse(input.isReadable(), what);
+                            }
+                        } finally {
+                            input.release();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** A trim of a direct material with {@code overrides} armour overrides and a pattern by registry id. */
+    private static byte[] trim(ProtocolVersion version, int overrides) {
+        byte[] trim = concat(trimMaterial(version, overrides), varInt(1));
+        return version.atLeast(ProtocolVersion.V1_21_5) ? trim : concat(trim, new byte[] {1});
+    }
+
+    /** A direct trim material holder with {@code overrides} armour overrides and an empty description. */
+    private static byte[] trimMaterial(ProtocolVersion version, int overrides) {
+        var out = Unpooled.buffer();
+        try {
+            Wire.writeVarInt(out, 0);
+            Wire.writeString(out, "evil", 32767);
+            if (!version.atLeast(ProtocolVersion.V1_21_5)) Wire.writeVarInt(out, itemId(version, "minecraft:stone"));
+            if (!version.atLeast(ProtocolVersion.V1_21_4)) out.writeFloat(0.5f);
+            Wire.writeVarInt(out, overrides);
+            for (int i = 0; i < overrides; i++) {
+                Wire.writeString(out, "%04x".formatted(i), 32767);
+                Wire.writeString(out, "x", 32767);
+            }
+            out.writeBytes(new byte[] {8, 0, 0});
+            return ByteBufUtil.getBytes(out);
+        } finally {
+            out.release();
         }
     }
 

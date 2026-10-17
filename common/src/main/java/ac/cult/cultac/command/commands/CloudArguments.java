@@ -27,6 +27,7 @@ final class CloudArguments {
     static final String LABEL = "cult.cloud.label";
     static final String NOT_CONFIGURED = "Cloud is not configured on this server.";
     static final String CRACKED = "Labeling is disabled on offline-mode servers.";
+    static final int MAX_SUGGESTIONS = 100;
 
     record Target(UUID id, String name) {}
 
@@ -115,12 +116,17 @@ final class CloudArguments {
     }
 
     private static SuggestionProvider<Sender> startingWith(Supplier<Collection<String>> values) {
-        return SuggestionProvider.blocking((context, input) -> {
-            String partial = input.peekString().toLowerCase(Locale.ROOT);
-            return values.get().stream()
-                    .filter(value -> value.toLowerCase(Locale.ROOT).startsWith(partial))
-                    .map(Suggestion::suggestion)
-                    .toList();
-        });
+        return SuggestionProvider.blocking((context, input) -> matching(values.get(), input.peekString()).stream()
+                .map(Suggestion::suggestion)
+                .toList());
+    }
+
+    /** The values starting with {@code partial}, ignoring case: at most {@link #MAX_SUGGESTIONS} of them. */
+    static List<String> matching(Collection<String> values, String partial) {
+        String lower = partial.toLowerCase(Locale.ROOT);
+        return values.stream()
+                .filter(value -> value.toLowerCase(Locale.ROOT).startsWith(lower))
+                .limit(MAX_SUGGESTIONS)
+                .toList();
     }
 }

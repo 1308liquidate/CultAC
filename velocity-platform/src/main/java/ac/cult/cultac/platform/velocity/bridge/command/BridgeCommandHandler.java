@@ -22,6 +22,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.jetbrains.annotations.Nullable;
@@ -38,6 +39,11 @@ final class BridgeCommandHandler implements BridgeMessageListener {
 
     /** The loader runs these before CultAC sees them, with the sender's own proxy permissions. */
     private static final List<String> LOADER_COMMANDS = List.of("update", "devswap", "runtimes");
+
+    /** These act with the proxy's cloud key and data, which no backend may reach on behalf of anyone. */
+    private static final List<String> CLOUD_COMMANDS = List.of("cloud", "findings", "top", "label");
+
+    private static final Pattern WORD_BREAK = Pattern.compile("[\\p{javaWhitespace}\\p{Z}]+");
 
     private final CommandManager commands;
     private final Predicate<String> ownedRoot;
@@ -149,15 +155,18 @@ final class BridgeCommandHandler implements BridgeMessageListener {
     }
 
     /**
-     * Whether a line without its slash has a CultAC root CultAC still owns on the proxy, no loader command and no
-     * control characters, which Velocity trims before the loader reads its arguments.
+     * Whether a line without its slash has a CultAC root CultAC still owns on the proxy, no loader or cloud command and
+     * no control characters, which Velocity trims before the loader reads its arguments. Words split on any Unicode
+     * whitespace or space, as CultAC's command parser skips them.
      */
     static boolean forwardable(String line, Predicate<String> ownedRoot) {
         if (line.chars().anyMatch(Character::isISOControl)) return false;
         String root = root(line);
         if (!BridgeProtocol.COMMAND_ROOTS.contains(root) || !ownedRoot.test(root)) return false;
-        String[] words = line.split("\\s+", 3);
-        return words.length < 2 || LOADER_COMMANDS.stream().noneMatch(words[1]::equalsIgnoreCase);
+        String[] words = WORD_BREAK.split(line, 3);
+        return words.length < 2
+                || (LOADER_COMMANDS.stream().noneMatch(words[1]::equalsIgnoreCase)
+                        && CLOUD_COMMANDS.stream().noneMatch(words[1]::equalsIgnoreCase));
     }
 
     private static String root(String line) {

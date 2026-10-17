@@ -23,10 +23,7 @@ import java.util.function.Predicate;
 public final class CultDecoder extends ChannelInboundHandlerAdapter {
     public static final String NAME = "cult-decoder";
     private static final String HOST_FLOW_NAME = NAME + "-host-flow";
-    private static final long FAILURE_LOG_INTERVAL_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
     private final CultConnection connection;
-    private long lastFailureLog;
-    private int suppressedFailures;
     private final Predicate<PacketType<?>> routed;
 
     public CultDecoder(CultConnection connection) {
@@ -194,7 +191,7 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
             frame = null;
             return output;
         } catch (Throwable failure) {
-            reportDecodeFailure("inbound packet decoding", failure);
+            CultNetworkManager.reportFailure("inbound packet decoding", failure);
             if (frame != originalFrame) frame.release();
             frame = null;
             if (failure instanceof DroppedPacketException) return null;
@@ -204,19 +201,6 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
             if (frame != null && frame != originalFrame) frame.release();
             if (releaseOriginal) originalFrame.release();
         }
-    }
-
-    /** Hostile input can fail every frame; log the first failure and then at most one per second. */
-    private void reportDecodeFailure(String operation, Throwable failure) {
-        long now = System.nanoTime();
-        if (lastFailureLog != 0 && now - lastFailureLog < FAILURE_LOG_INTERVAL_NANOS) {
-            suppressedFailures++;
-            return;
-        }
-        String suffix = suppressedFailures == 0 ? "" : " (" + suppressedFailures + " similar failures suppressed)";
-        suppressedFailures = 0;
-        lastFailureLog = now;
-        CultNetworkManager.reportFailure(operation + suffix, failure);
     }
 
     private void forwarded(Forward output) {

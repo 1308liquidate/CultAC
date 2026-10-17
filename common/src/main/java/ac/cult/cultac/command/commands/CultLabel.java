@@ -5,7 +5,6 @@ import ac.cult.cultac.cloud.labels.LabelRequest;
 import ac.cult.cultac.command.BuildableCommand;
 import ac.cult.cultac.platform.api.manager.cloud.CloudPlatformCommandArguments;
 import ac.cult.cultac.platform.api.sender.Sender;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.List;
 import java.util.UUID;
@@ -106,11 +105,11 @@ public class CultLabel implements BuildableCommand {
             sender.sendMessage(Component.text("Labelling " + input + "…", NamedTextColor.GRAY));
             CloudArguments.resolve(sender, input, target -> {
                 JsonObject label = request.body(target.id(), System.currentTimeMillis(), sender.getName(), labellerId);
-                call(sender, client.post(label), body -> {
-                    List<String> ids = LabelClient.ids(body);
+                call(sender, client.post(label), reply -> {
+                    List<String> ids = LabelClient.ids(reply.body());
                     sender.sendMessage(
                             Component.text(labelledMessage(target.name(), request, ids.size()), NamedTextColor.GRAY));
-                    for (String id : ids) sender.sendMessage(id(id));
+                    for (String id : ids) sender.sendMessage(id(reply.mask().apply(id)));
                 });
             });
         });
@@ -132,16 +131,19 @@ public class CultLabel implements BuildableCommand {
             CloudArguments.resolve(
                     sender,
                     input,
-                    target -> call(sender, client.list(target.id()), body -> {
-                        List<JsonObject> labels = LabelClient.labels(body);
+                    target -> call(sender, client.list(target.id()), reply -> {
+                        List<JsonObject> labels = LabelClient.labels(reply.body());
                         if (labels.isEmpty()) {
                             sender.sendMessage(
                                     Component.text("No labels for " + target.name() + ".", NamedTextColor.GRAY));
                             return;
                         }
+                        String count = labels.size() < LabelClient.MAX_RESULTS
+                                ? String.valueOf(labels.size())
+                                : "the first " + labels.size();
                         sender.sendMessage(Component.text(
-                                "Labels for " + target.name() + " (" + labels.size() + ")", NamedTextColor.GRAY));
-                        for (JsonObject label : labels) sender.sendMessage(listed(label));
+                                "Labels for " + target.name() + " (" + count + ")", NamedTextColor.GRAY));
+                        for (JsonObject label : labels) sender.sendMessage(listed(label, reply));
                     }));
         });
     }
@@ -166,7 +168,7 @@ public class CultLabel implements BuildableCommand {
             call(
                     sender,
                     client.revoke(id, sender.getName(), labellerId, reason),
-                    body -> sender.sendMessage(Component.text("Revoked label " + id + ".", NamedTextColor.GRAY)));
+                    reply -> sender.sendMessage(Component.text("Revoked label " + id + ".", NamedTextColor.GRAY)));
         });
     }
 
@@ -193,7 +195,8 @@ public class CultLabel implements BuildableCommand {
         }
     }
 
-    private static void call(Sender sender, CompletableFuture<LabelClient.Reply> call, Consumer<String> success) {
+    private static void call(
+            Sender sender, CompletableFuture<LabelClient.Reply> call, Consumer<LabelClient.Reply> success) {
         call.whenComplete((reply, error) -> answering(sender, () -> {
             if (error != null) {
                 sender.sendMessage(Component.text(
@@ -202,34 +205,32 @@ public class CultLabel implements BuildableCommand {
                 sender.sendMessage(
                         Component.text("Label request failed: " + LabelClient.failure(reply), NamedTextColor.RED));
             } else {
-                success.accept(reply.body());
+                success.accept(reply);
             }
         }));
     }
 
+    /** A label id, offered for revoking only when it is a UUID. */
     private static Component id(String id) {
+        if (!LabelClient.isId(id)) return Component.text("  " + id, NamedTextColor.WHITE);
         return Component.text("  " + id, NamedTextColor.WHITE)
                 .clickEvent(ClickEvent.suggestCommand("/cult label revoke " + id + " "))
                 .hoverEvent(HoverEvent.showText(Component.text("Click to revoke", NamedTextColor.GRAY)));
     }
 
-    /** A label as {@code list} shows it: cheat, value, source, labeller, and whether it is revoked. */
-    private static Component listed(JsonObject label) {
-        String line = text(label, "cheat") + " " + text(label, "value") + " · " + text(label, "source") + " by "
-                + text(label, "labeller") + " · " + text(label, "createdAt");
+    /**
+     * A label from {@code reply} as {@code list} shows it: cheat, value, source, labeller, and whether it is revoked.
+     */
+    static Component listed(JsonObject label, LabelClient.Reply reply) {
+        String line = LabelClient.field(label, "cheat", reply) + " " + LabelClient.field(label, "value", reply) + " · "
+                + LabelClient.field(label, "source", reply) + " by " + LabelClient.field(label, "labeller", reply)
+                + " · " + LabelClient.field(label, "createdAt", reply);
         boolean revoked = label.has("revokedAt") && !label.get("revokedAt").isJsonNull();
         return Component.text()
-                .append(id(text(label, "id")))
+                .append(id(LabelClient.field(label, "id", reply)))
                 .append(Component.text(
                         " " + line + (revoked ? " (revoked)" : ""),
                         revoked ? NamedTextColor.DARK_GRAY : NamedTextColor.GRAY))
                 .build();
-    }
-
-    private static String text(JsonObject object, String key) {
-        JsonElement value = object.get(key);
-        return value == null || value.isJsonNull()
-                ? "?"
-                : value.isJsonPrimitive() ? value.getAsString() : value.toString();
     }
 }

@@ -4,8 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.cultac.cloud.intake.v3.IntakeMessage;
 import ac.cult.cultac.cloud.transport.CloudConnection;
 import ac.cult.cultac.cloud.wire.IntakeWire;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
@@ -110,6 +112,49 @@ class CaptureStreamBudgetTest {
     }
 
     @Test
+    void framesAwaitingTheirVerdictShareTheServersBudget() {
+        long limit = 1024 * 1024;
+        TestBudget budget = new TestBudget(limit);
+        List<TestSink> sinks = new ArrayList<>();
+        List<CaptureStream> streams = new ArrayList<>();
+        for (int player = 0; player < 32; player++) {
+            UUID id = new UUID(9, player);
+            TestSink sink = sink(budget, CloudConnection.Terms.PROTOCOL_3);
+            CaptureStream stream = new CaptureStream(id);
+            stream.start(0);
+            stream.join(sink, IntakeWire.join(id, 777, "vanilla", -64, 384, null, null, 0), 0, SESSION);
+            stream.capture(new int[] {MOVE}, new int[0], new int[0]);
+            sinks.add(sink);
+            streams.add(stream);
+        }
+        long at = 0;
+        for (int tick = 1; tick <= 20; tick++) {
+            for (CaptureStream stream : streams) {
+                for (int i = 0; i < 10; i++) stream.tap(IntakeWire.SERVERBOUND, MOVE, new byte[1000], ++at, 0, 0, null);
+                stream.cut(++at);
+            }
+        }
+        long used = sinks.stream().mapToLong(sink -> sink.used).sum();
+        assertTrue(used > limit / 2 && used <= limit, used + " B held");
+
+        for (CaptureStream stream : streams) {
+            for (int tick = 1; tick <= 20; tick++) stream.verdict(tick, tick, 0, List.of(), null, List.of(), null);
+        }
+        long sent = sinks.stream()
+                .flatMap(sink -> sink.entries(IntakeMessage.KindCase.FRAME).stream())
+                .mapToLong(entry -> entry.length)
+                .sum();
+        assertTrue(sent < 2 * limit, sent + " B sent");
+        for (TestSink sink : sinks) assertEquals(0, sink.used);
+        assertEquals(limit, budget.remaining());
+
+        streams.get(0).tap(IntakeWire.SERVERBOUND, MOVE, new byte[500], ++at, 0, 0, null);
+        assertEquals(500 + CaptureStream.RECORD_OVERHEAD_BYTES, sinks.get(0).used);
+        for (CaptureStream stream : streams) stream.reset();
+        assertEquals(limit, budget.remaining());
+    }
+
+    @Test
     void framesHeldAcrossTheAnswerGiveBackExactlyWhatTheyTook() {
         TestBudget budget = new TestBudget(LIMIT);
         TestSink sink = sink(budget, CloudConnection.Terms.PROTOCOL_3);
@@ -123,7 +168,7 @@ class CaptureStreamBudgetTest {
         assertTrue(open > 500 + CaptureStream.VERDICT_BYTES);
         stream.capture(new int[] {MOVE}, new int[0], new int[0]);
         stream.tap(IntakeWire.SERVERBOUND, MOVE, new byte[500], 4, 0, 0, null);
-        assertEquals(open, sink.used);
+        assertEquals(open + 500 + CaptureStream.RECORD_OVERHEAD_BYTES, sink.used);
         sink.refuse = Integer.MAX_VALUE;
         stream.cut(5);
         stream.verdict(1, 1, 0, List.of(), null, List.of(), null);

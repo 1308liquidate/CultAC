@@ -7,6 +7,7 @@ import ac.cult.cultac.cloud.diag.DiagUpload;
 import ac.cult.cultac.cloud.diag.DiagWire;
 import ac.cult.cultac.cloud.diag.Diagnostics;
 import ac.cult.cultac.cloud.diag.Limits;
+import ac.cult.cultac.cloud.findings.FindingsLog;
 import ac.cult.cultac.cloud.wire.IntakeWire;
 import ac.cult.cultac.utils.anticheat.LogThrottle;
 import ac.cult.cultac.utils.anticheat.LogUtil;
@@ -32,6 +33,8 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -50,6 +53,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.LongSupplier;
+import org.yaml.snakeyaml.Yaml;
 
 /**
  * One server id's socket to the intake service. {@code POST /api/v1/connect} through the load balancer hands out a
@@ -131,14 +135,26 @@ public final class CloudConnection {
     private static final long QUIET_NANOS = TimeUnit.SECONDS.toNanos(30);
     /** Diagnostic parts wait while more than this many record bytes, two messages' worth, are queued for the socket. */
     static final long DIAG_LOW_WATERMARK = 2L * MAX_WRITE_BYTES;
-    /** The most bytes one reply message may gather across its fragments; past it the socket is dropped. */
-    static final int MAX_REPLY_BYTES = 16 * 1024 * 1024;
+    /**
+     * The most bytes one reply message may gather across its fragments; past it the socket is dropped. A full message of
+     * the most replies one may carry, captures and findings as the service sends them, fits several times over.
+     */
+    static final int MAX_REPLY_BYTES = 4 * 1024 * 1024;
+    /** Players who left a connection whose late findings it still takes, the longest gone forgotten first. */
+    static final int MAX_DEPARTED = 4096;
+
+    private static final long DEPARTED_NANOS = TimeUnit.MILLISECONDS.toNanos(FindingsLog.RETENTION_MILLIS);
 
     private static final LogThrottle REPLY_FAILURES = new LogThrottle();
     private static final AtomicBoolean ZSTD_WARNED = new AtomicBoolean();
     private static final AtomicBoolean RADIUS_WARNED = new AtomicBoolean();
     /** The config files that decide what CultAC does, hashed for the service's record of each session. */
     private static final List<String> CONFIG_FILES = List.of("config.yml", "cult.yml", "punishments.yml");
+    /** The config keys that hold credentials, which the config hash leaves out. */
+    private static final List<List<String>> SECRET_KEYS =
+            List.of(List.of("bridge", "secret"), List.of("cloud", "api-key"));
+
+    private static final String SECRET_MARKER = "<secret>";
 
     private final URI connect;
     private final String apiKey;
@@ -147,6 +163,9 @@ public final class CloudConnection {
     private final Owner owner;
     private final HttpClient http;
     private final Map<UUID, Stream> streams = new ConcurrentHashMap<>();
+    /** When each player who left this connection left, oldest first; guarded by itself. */
+    private final Map<UUID, Long> departed = new LinkedHashMap<>();
+
     private final ConcurrentLinkedQueue<Queued> queue = new ConcurrentLinkedQueue<>();
     private final QueuedBytes queuedBytes;
     private final AtomicLong refused = new AtomicLong();
@@ -421,8 +440,31 @@ public final class CloudConnection {
     }
 
     public void unregister(UUID player, Stream stream) {
-        streams.remove(player, stream);
+        if (streams.remove(player, stream)) departed(player);
         touch();
+    }
+
+    private void departed(UUID player) {
+        long now = clock.getAsLong();
+        synchronized (departed) {
+            departed.remove(player);
+            departed.put(player, now);
+            Iterator<Long> oldest = departed.values().iterator();
+            while (oldest.hasNext()) {
+                long left = oldest.next();
+                if (departed.size() <= MAX_DEPARTED && now - left <= DEPARTED_NANOS) break;
+                oldest.remove();
+            }
+        }
+    }
+
+    /** Whether the service may send findings for {@code player} here: joined now, or left within the retention. */
+    private boolean joinedHere(UUID player) {
+        if (streams.containsKey(player)) return true;
+        synchronized (departed) {
+            Long left = departed.get(player);
+            return left != null && clock.getAsLong() - left <= DEPARTED_NANOS;
+        }
     }
 
     /** The largest frame record the socket takes, headroom included; 0 until connected. */
@@ -522,7 +564,7 @@ public final class CloudConnection {
                         closed = true;
                         break;
                     }
-                    LogUtil.warn("Cloud connection failed: " + failure);
+                    LogUtil.warn("Cloud connection failed: " + redacted(String.valueOf(failure)));
                     LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(1));
                 }
             }
@@ -608,8 +650,7 @@ public final class CloudConnection {
                     info -> new CappedBody(MAX_CONNECT_BODY_BYTES));
             if (closed || frozen) return;
             if (response.statusCode() == UNPROCESSABLE) {
-                owner.unavailable(
-                        this, "connect took none of protocols " + offered + ": " + LogThrottle.clip(response.body()));
+                owner.unavailable(this, "connect took none of protocols " + offered + ": " + redacted(response.body()));
                 return;
             }
             if (response.statusCode() != 200) {
@@ -622,7 +663,7 @@ public final class CloudConnection {
                 return;
             }
             if (!answerAllowed(connect, connected.url)) {
-                retry("connect answered a socket URL that may not carry the key: " + loggable(connected.url));
+                retry("connect answered a socket URL that may not carry the key: " + origin(connected.url));
                 return;
             }
             if (connected.maxMessageBytes < MIN_MESSAGE_BYTES) {
@@ -653,11 +694,12 @@ public final class CloudConnection {
             socket = webSocket;
             webSocket.request(1);
             failing = false;
-            LogUtil.info("Cloud connected to " + loggable(connected.url) + " on intake protocol " + terms.protocol()
-                    + (terms.sections()
-                            ? " (chunk radius " + terms.chunkRadius() + ", section radius " + terms.sectionRadius()
-                                    + ")"
-                            : ""));
+            LogUtil.info(
+                    "Cloud connected to " + redacted(origin(connected.url)) + " on intake protocol " + terms.protocol()
+                            + (terms.sections()
+                                    ? " (chunk radius " + terms.chunkRadius() + ", section radius "
+                                            + terms.sectionRadius() + ")"
+                                    : ""));
             for (Stream stream : streams.values()) {
                 try {
                     stream.connected(opened);
@@ -710,8 +752,8 @@ public final class CloudConnection {
     }
 
     /**
-     * Whether the socket URL connect answered may be sent the key: {@code wss}, or {@code ws} when the connect itself
-     * went over {@code http} to a loopback host, with a host and no user info.
+     * Whether the socket URL connect answered may be sent the key: {@code wss}, or {@code ws} to a loopback host when the
+     * connect itself went over {@code http} to a loopback host, with a host and no user info.
      */
     static boolean answerAllowed(URI connect, String answer) {
         URI socket;
@@ -723,20 +765,25 @@ public final class CloudConnection {
         if (socket.getScheme() == null || socket.getHost() == null || socket.getRawUserInfo() != null) return false;
         return switch (socket.getScheme().toLowerCase(Locale.ROOT)) {
             case "wss" -> true;
-            case "ws" -> "http".equalsIgnoreCase(connect.getScheme()) && CloudSettings.loopback(connect.getHost());
+            case "ws" ->
+                "http".equalsIgnoreCase(connect.getScheme())
+                        && CloudSettings.loopback(connect.getHost())
+                        && CloudSettings.loopback(socket.getHost());
             default -> false;
         };
     }
 
-    /** {@code url} as {@code scheme://host:port/path}, clipped, for a log line: never its user info or query. */
-    static String loggable(String url) {
+    /** A URL the service names, for a log line: only its scheme, host and port, since its path may echo the key. */
+    static String origin(String url) {
         try {
-            return loggable(new URI(url));
-        } catch (URISyntaxException | RuntimeException malformed) {
+            URI uri = new URI(url);
+            return uri.getScheme() + "://" + uri.getHost() + (uri.getPort() < 0 ? "" : ":" + uri.getPort());
+        } catch (URISyntaxException malformed) {
             return "an unreadable URL";
         }
     }
 
+    /** {@code uri} as {@code scheme://host:port/path}, clipped, for a log line: never its user info or query. */
     static String loggable(URI uri) {
         String port = uri.getPort() < 0 ? "" : ":" + uri.getPort();
         String path = uri.getRawPath() == null ? "" : uri.getRawPath();
@@ -744,13 +791,13 @@ public final class CloudConnection {
     }
 
     /** Reads a response body as UTF-8, failing once it passes {@code limit} bytes. */
-    static final class CappedBody implements HttpResponse.BodySubscriber<String> {
+    public static final class CappedBody implements HttpResponse.BodySubscriber<String> {
         private final CompletableFuture<String> result = new CompletableFuture<>();
         private final ReplyAssembler body;
         private final int limit;
         private Flow.Subscription subscription;
 
-        CappedBody(int limit) {
+        public CappedBody(int limit) {
             this.body = new ReplyAssembler(limit);
             this.limit = limit;
         }
@@ -882,20 +929,44 @@ public final class CloudConnection {
 
     /**
      * SHA-256 over the config files, each behind its name and length: the file on disk, or for a missing file the
-     * bundled default in {@code language} (else English) that it falls back to; null when one cannot be read.
+     * bundled default in {@code language} (else English) that it falls back to; null when one cannot be read. Each is
+     * hashed as its parsed YAML written back out, every {@link #SECRET_KEYS} value replaced by one marker, so the hash
+     * tells nothing about a secret, its length included.
      */
     static String configHash(File folder, String language) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             for (String name : CONFIG_FILES) {
                 File file = new File(folder, name);
-                byte[] content = file.isFile() ? Files.readAllBytes(file.toPath()) : bundledDefault(name, language);
+                byte[] raw = file.isFile() ? Files.readAllBytes(file.toPath()) : bundledDefault(name, language);
+                byte[] content = withoutSecrets(raw);
                 digest.update((name + '\n' + content.length + '\n').getBytes(StandardCharsets.UTF_8));
                 digest.update(content);
             }
             return HexFormat.of().formatHex(digest.digest());
         } catch (IOException | NoSuchAlgorithmException | RuntimeException unreadable) {
             return null;
+        }
+    }
+
+    /** {@code yaml} parsed and written back out, each of {@link #SECRET_KEYS} that is present set to a marker. */
+    private static byte[] withoutSecrets(byte[] yaml) {
+        Object tree = new Yaml().load(new String(yaml, StandardCharsets.UTF_8));
+        if (tree instanceof Map<?, ?> root) {
+            for (List<String> path : SECRET_KEYS) redact(root, path);
+        }
+        return new Yaml().dump(tree).getBytes(StandardCharsets.UTF_8);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void redact(Map<?, ?> root, List<String> path) {
+        Object node = root;
+        for (int i = 0; i < path.size() - 1; i++) {
+            if (!(node instanceof Map<?, ?> map)) return;
+            node = map.get(path.get(i));
+        }
+        if (node instanceof Map<?, ?> parent && parent.containsKey(path.get(path.size() - 1))) {
+            ((Map<Object, Object>) parent).put(path.get(path.size() - 1), SECRET_MARKER);
         }
     }
 
@@ -912,11 +983,15 @@ public final class CloudConnection {
     /** Waits out the backoff; warns on the first failure in a row, not on every retry. */
     private void retry(String why) {
         if (!failing) {
-            LogUtil.warn(
-                    "Cloud connection to " + loggable(connect) + " failed: " + LogThrottle.clip(why) + "; retrying");
+            LogUtil.warn("Cloud connection to " + loggable(connect) + " failed: " + redacted(why) + "; retrying");
         }
         failing = true;
         await(backoff.failed());
+    }
+
+    /** Text from the transport or the service made safe to log: the key masked, then clipped. */
+    private String redacted(String text) {
+        return LogThrottle.clip(apiKey.isEmpty() || text == null ? text : text.replace(apiKey, "<api-key>"));
     }
 
     /** Parks the sender for {@code wait}, or until the connection closes or retires. */
@@ -1086,7 +1161,7 @@ public final class CloudConnection {
         socket = null;
         long ended = generation;
         if (why == null) LogUtil.info("Cloud socket closed (server id " + serverId + ")");
-        else LogUtil.warn("Cloud socket closed: " + why + " (server id " + serverId + ")");
+        else LogUtil.warn("Cloud socket closed: " + redacted(why) + " (server id " + serverId + ")");
         gone.abort();
         diagnostics.socketClosed(ended);
         for (Stream stream : streams.values()) {
@@ -1160,7 +1235,7 @@ public final class CloudConnection {
             if (last) {
                 List<IntakeWire.Reply> replies = List.of();
                 try {
-                    replies = IntakeWire.replies(partial.finish());
+                    replies = IntakeWire.replies(partial.finish(), apiKey);
                 } catch (RuntimeException malformed) {
                     REPLY_FAILURES.warn("unreadable", "Cloud sent an unreadable reply", malformed);
                 }
@@ -1168,7 +1243,7 @@ public final class CloudConnection {
                     try {
                         if (reply instanceof IntakeWire.Event event) {
                             events.incrementAndGet();
-                            owner.finding(event);
+                            if (joinedHere(event.player())) owner.finding(event);
                             continue;
                         }
                         if (reply instanceof IntakeWire.DiagLimitsReply limits) {

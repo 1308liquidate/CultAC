@@ -37,16 +37,16 @@ public final class CloudService {
     private static final Set<CloudCapture> INSTALLED = ConcurrentHashMap.newKeySet();
 
     private static final ConnectionUplinks UPLINKS = new ConnectionUplinks(CONNECTIONS);
+    private static final Object CONFIGURING = new Object();
+    /** The turn-on hook ran last, not the turn-off hook; guarded by {@link #CONFIGURING}. */
+    private static boolean hooksOn;
     /** A newer runtime generation owns the upload; this one never opens a socket again. */
     private static volatile boolean superseded;
     /** The findings the service sent, while the upload is configured on. */
     private static volatile @Nullable FindingsLog findings;
 
     static {
-        CONNECTIONS.onTurnedOff(() -> {
-            reconfigureCaptures();
-            hook("turn-off", CloudModule.turnedOff());
-        });
+        CONNECTIONS.onTurnedOff(CloudService::turnedOff);
         CONNECTIONS.onFinding(CloudService::finding);
     }
 
@@ -57,10 +57,18 @@ public final class CloudService {
         configure(CultAPI.INSTANCE.getConfigManager().getConfig(), CultAPI.INSTANCE.getPlatform() == Platform.VELOCITY);
     }
 
-    /** {@code proxy} picks a proxy's protocols and server-id default over a server's own. */
+    /**
+     * {@code proxy} picks a proxy's protocols and server-id default over a server's own. Calls run one at a time, each
+     * reading the config inside, so the last to run applies the latest config.
+     */
     static void configure(ConfigManager config, boolean proxy) {
+        synchronized (CONFIGURING) {
+            configureNow(config, proxy);
+        }
+    }
+
+    private static void configureNow(ConfigManager config, boolean proxy) {
         if (superseded) return;
-        boolean wasOn = UPLINKS.enabled();
         CloudSettings settings = proxy
                 ? CloudSettings.read(config, CloudSettings.PROXY_PROTOCOLS, CloudSettings.DEFAULT_SERVER_ID)
                 : CloudSettings.read(config, CloudSettings.SERVER_PROTOCOLS, CloudSettings.OWN_SERVER_ID);
@@ -81,9 +89,30 @@ public final class CloudService {
         CONNECTIONS.configure(settings);
         CloudCapture.uplinks(UPLINKS);
         boolean on = UPLINKS.enabled();
-        if (!wasOn && on) hook("turn-on", CloudModule.turnedOn());
+        if (on && !hooksOn) {
+            hooksOn = true;
+            hook("turn-on", CloudModule.turnedOn());
+        }
         reconfigureCaptures();
-        if (wasOn && !on) hook("turn-off", CloudModule.turnedOff());
+        if (!on) turnOffHook();
+    }
+
+    /**
+     * The service or zstd turned the upload off, on the thread that did. A notice that arrives after a configure has
+     * turned it on again, or has already run the turn-off hook, changes nothing.
+     */
+    static void turnedOff() {
+        synchronized (CONFIGURING) {
+            if (UPLINKS.enabled()) return;
+            reconfigureCaptures();
+            turnOffHook();
+        }
+    }
+
+    private static void turnOffHook() {
+        if (!hooksOn) return;
+        hooksOn = false;
+        hook("turn-off", CloudModule.turnedOff());
     }
 
     private static void hook(String which, Runnable hook) {
@@ -119,8 +148,13 @@ public final class CloudService {
         return UPLINKS.enabled();
     }
 
-    /** {@code player} is tracked: their capture is made and installs when the upload is on. Any thread. */
+    /**
+     * {@code player} is tracked: their kept findings are no longer gone, and their capture is made and installs when the
+     * upload is on. Any thread.
+     */
     static void playerRegistered(CultPlayer player) {
+        FindingsLog log = findings;
+        if (log != null) log.joined(player.getUniqueId());
         if (superseded || !UPLINKS.enabled()) return;
         CloudCapture.reconfigure(player);
     }
