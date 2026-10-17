@@ -33,6 +33,16 @@ public class CollisionModifier implements UncertaintyHandler {
     private final SimpleCollisionBox probeEntityScratch = new SimpleCollisionBox();
     private final AxisResult positiveResult = new AxisResult(0, false);
     private final AxisResult negativeResult = new AxisResult(0, false);
+    private final boolean javaTravelInput;
+
+    public CollisionModifier() {
+        this(true);
+    }
+
+    /** {@code javaTravelInput}: the setPos guard measures Java LivingEntity#travel's horizontal input. */
+    public CollisionModifier(boolean javaTravelInput) {
+        this.javaTravelInput = javaTravelInput;
+    }
 
     @Override
     public MovementTrace handleMovementTrace(
@@ -56,16 +66,16 @@ public class CollisionModifier implements UncertaintyHandler {
                         : trace.position().multiply(stuckSpeed));
         Vec3 collisionBaseOffset = trace.collisionBaseOffset();
         if (collisionBaseOffset.lengthSqr() <= 1.0E-14) {
-            return trace.withPosition(
-                    transformWithCollisions(context, result.getCollideAxisData(), trace.position(), end));
+            return trace.withPosition(transformWithCollisions(
+                    context, result.getCollideAxisData(), trace.position(), end, inputSource(result)));
         }
 
         // Piston/shulker shoves are separate position-only Entity#move calls.
         // Collision clipping applies to the player's movement vector, then the
         // already-proven external base displacement is re-applied once.
         Vec3 movementOnlyTarget = end.subtract(collisionBaseOffset);
-        PredVector clippedMovement =
-                transformWithCollisions(context, result.getCollideAxisData(), trace.position(), movementOnlyTarget);
+        PredVector clippedMovement = transformWithCollisions(
+                context, result.getCollideAxisData(), trace.position(), movementOnlyTarget, inputSource(result));
         return trace.withPosition(clippedMovement.add(collisionBaseOffset, "external movement collision base"));
     }
 
@@ -80,11 +90,24 @@ public class CollisionModifier implements UncertaintyHandler {
             Vec3 end) {
         if (valid != null && valid.isTestingMaxStartingVelExtents(end)) return start;
 
-        return transformWithCollisions(context, result.getCollideAxisData(), start, end);
+        return transformWithCollisions(context, result.getCollideAxisData(), start, end, inputSource(result));
     }
 
+    private PredictionResult inputSource(PredictionResult result) {
+        return javaTravelInput ? result : null;
+    }
+
+    /**
+     * Clips {@code start} like Entity#collide, then applies Entity#move's setPos guard. The guard sees the
+     * horizontal input that {@code inputSource}'s circular input allowance adds towards {@code end}; a null
+     * {@code inputSource} means no input.
+     */
     public static PredVector transformWithCollisions(
-            SimulationContext context, CollideAxisData collide, PredVector start, Vec3 end) {
+            SimulationContext context,
+            CollideAxisData collide,
+            PredVector start,
+            Vec3 end,
+            PredictionResult inputSource) {
         PredVector attempted = start;
         // Collisions mean that movement from the start of the collision to the max extent is possible
         if (isValidCollision(collide.getX(), start.x, end.x)) {
@@ -114,9 +137,28 @@ public class CollisionModifier implements UncertaintyHandler {
             double clamped = CultMath.clamp(end.y, start.y, collide.getYPos().getResult());
             start = start.withY(clamped, "collide +y");
         }
-        Vec3 packetVisibleMovement =
-                applyEntityMovePositionCommitGuard(attempted, start, attempted.collisionStuckSpeedMultiplier(context));
-        return packetVisibleMovement == start ? start : start.with(packetVisibleMovement, "Entity#move setPos guard");
+        Vec3 stuckSpeed = attempted.collisionStuckSpeedMultiplier(context);
+        if (applyEntityMovePositionCommitGuard(attempted, start, stuckSpeed) == start) return start;
+        // LivingEntity#travel adds moveRelative's input before Entity#move; the guard measures the full delta.
+        Vec3 input = horizontalInputTowards(start, end, inputSource);
+        if (input != Vec3.ZERO
+                && applyEntityMovePositionCommitGuard(attempted.add(input), start.add(input), stuckSpeed)
+                        != Vec3.ZERO) {
+            return start;
+        }
+        return start.with(Vec3.ZERO, "Entity#move setPos guard");
+    }
+
+    private static Vec3 horizontalInputTowards(Vec3 movement, Vec3 end, PredictionResult inputSource) {
+        if (inputSource == null || inputSource.getSimulationContext() == null) return Vec3.ZERO;
+        double dx = end.x - movement.x;
+        double dz = end.z - movement.z;
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        if (!Double.isFinite(distance) || distance < 1.0E-5F) return Vec3.ZERO;
+        double radius = inputSource.getHorizontalInputRadius();
+        if (!(radius > 0.0D)) return Vec3.ZERO;
+        double scale = Math.min(radius, distance) / distance;
+        return new Vec3(dx * scale, 0.0D, dz * scale);
     }
 
     private static Vec3 applyEntityMovePositionCommitGuard(

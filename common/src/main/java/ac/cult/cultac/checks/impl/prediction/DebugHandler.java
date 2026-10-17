@@ -163,9 +163,17 @@ public class DebugHandler extends CultProcessor implements PostPredictionListene
                 Vec3 min = validStarting.min();
 
                 max = CollisionModifier.transformWithCollisions(
-                        result.getSimulationContext(), result.getCollideAxisData(), new PredVector(max), target);
+                        result.getSimulationContext(),
+                        result.getCollideAxisData(),
+                        new PredVector(max),
+                        target,
+                        result);
                 min = CollisionModifier.transformWithCollisions(
-                        result.getSimulationContext(), result.getCollideAxisData(), new PredVector(min), target);
+                        result.getSimulationContext(),
+                        result.getCollideAxisData(),
+                        new PredVector(min),
+                        target,
+                        result);
 
                 if (!max.equals(min)) {
                     player.sendMessage(uncertaintyColor + NumFormatter.formatVector(min));
