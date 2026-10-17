@@ -19,6 +19,11 @@ object VersionUtil {
         }
 
         val commitHash = getGitCommitHash(project)
+        val buildNumber = System.getenv("CULT_BUILD_NUMBER")?.trim()?.takeIf { it.matches(Regex("[0-9]+")) }
+        if (buildNumber != null) {
+            val branch = sanitizeBranch(getGitBranch(project, true) ?: "unknown")
+            return "$baseVersion-b$buildNumber-$branch-$commitHash"
+        }
         val branch = getGitBranch(project)
 
         val modifiers = buildList {
@@ -62,11 +67,7 @@ object VersionUtil {
 
         if (raw) return rawBranch
 
-        val branch = rawBranch
-            .replace(Regex("[^a-zA-Z0-9_.-]+"), "_")
-            .replace(Regex("_{2,}"), "_")
-            .trim(' ', '.', '_', '-')
-            .removePrefix("heads_")
+        val branch = sanitizeBranch(rawBranch)
 
         val mainBranch = System.getenv("CULT_MAIN_BRANCH") ?: "main"
 
@@ -75,6 +76,12 @@ object VersionUtil {
             else -> branch
         }
     }
+
+    private fun sanitizeBranch(rawBranch: String): String = rawBranch
+        .replace(Regex("[^a-zA-Z0-9_.-]+"), "_")
+        .replace(Regex("_{2,}"), "_")
+        .trim(' ', '.', '_', '-')
+        .removePrefix("heads_")
 
     fun getGitUser(project: Project): String {
         return try {

@@ -4,6 +4,7 @@
  * Build Flags:
  * -Prelocate=false - Adds 'no_relocate' modifier
  * -Prelease=true   - Removes commit/modifiers for release build
+ * CULT_BUILD_NUMBER - Numbered build: <base>-b<N>-<branch>-<commit>
  *
  * Logic in: buildSrc/versioning/BuildConfig.kt & VersionUtil.kt
  */
