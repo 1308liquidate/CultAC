@@ -47,7 +47,7 @@ public class NegativeTimerCheck extends AbstractTimerCheck implements PostPredic
             // On 1.8 I think some weird client screwed a bit with the tick loop
             // flag("-" + lostMS);
 
-            timerBalanceRealTime += 50e6;
+            timerBalanceRealTime += ONE_CLIENT_TICK;
         }
     }
 
