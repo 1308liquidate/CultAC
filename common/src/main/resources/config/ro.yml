@@ -72,7 +72,7 @@ ignore-duplicate-packet-rotation: false
 max-clicks-per-tick: 3
 
 # Flag and alert without acting: no punishment commands, setbacks, packet cancels or kicks. Client packets reach the server as sent.
-# Without this key, CULTAC_OBSERVE_ONLY (true, 1 or yes) turns it on. /cult reload applies a change.
+# CULTAC_OBSERVE_ONLY wins over this key when it is true, 1 or yes, or false, 0 or no. /cult reload applies a change.
 observe-only: false
 
 Simulation:

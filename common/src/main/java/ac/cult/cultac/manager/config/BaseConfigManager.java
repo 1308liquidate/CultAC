@@ -189,15 +189,21 @@ public class BaseConfigManager {
         bedrockMovementSetbacksEnabled = config.getBooleanElse("cult.checks.bedrock-movement.enable-setbacks", true);
     }
 
-    /** {@code observe-only} when set, else {@code CULTAC_OBSERVE_ONLY}'s true/1/yes. */
+    /** {@code CULTAC_OBSERVE_ONLY} when it reads true/1/yes or false/0/no, else {@code observe-only}. */
     static boolean resolveObserveOnly(ConfigManager config, Function<String, String> env) {
         String value = env.apply("CULTAC_OBSERVE_ONLY");
-        boolean envDefault = value != null
-                && switch (value.strip().toLowerCase(Locale.ROOT)) {
-                    case "true", "1", "yes" -> true;
-                    default -> false;
-                };
-        return config.getBooleanElse("observe-only", envDefault);
+        if (value != null) {
+            switch (value.strip().toLowerCase(Locale.ROOT)) {
+                case "true", "1", "yes" -> {
+                    return true;
+                }
+                case "false", "0", "no" -> {
+                    return false;
+                }
+                default -> {}
+            }
+        }
+        return config.getBooleanElse("observe-only", false);
     }
 
     // ran on start, can be used to handle things that can't be done while loading
