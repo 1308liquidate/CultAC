@@ -56,6 +56,42 @@ class CloudConnectionRetireTest {
     }
 
     @Test
+    void retiringTheOpenSocketsKeepsTheUploadOnForOthers() throws Exception {
+        try (Globals globals = new Globals();
+                Receiver receiver = new Receiver()) {
+            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(3)));
+            CloudConnection connection = receiver.connections.forServer("proxy.a");
+            assertNotNull(connection);
+            AtomicLong generation = new AtomicLong(-1);
+            connection.register(PLAYER, new CloudConnection.Stream() {
+                public void connected(long connected) {
+                    generation.set(connected);
+                }
+
+                public void disconnected(long ended) {}
+
+                public void reply(long replied, IntakeWire.Reply reply) {}
+            });
+            receiver.allowConnect("\"protocol\":3");
+            await(() -> generation.get() > 0, "connected");
+
+            receiver.connections.retireOpen();
+            assertEquals(WebSocket.NORMAL_CLOSURE, receiver.closes.poll(5, TimeUnit.SECONDS));
+            await(connection::closed, "closed");
+            assertTrue(receiver.connections.available());
+
+            CloudConnection draining = receiver.connections.forServer("proxy.a-drain-1a2b3c4d");
+            assertNotNull(draining);
+            assertNotSame(connection, draining);
+            receiver.allowConnect("\"protocol\":3");
+            assertTrue(receiver.connectBodies.stream().anyMatch(body -> body.contains("proxy.a-drain-1a2b3c4d")));
+            assertFalse(
+                    receiver.connectBodies.stream().skip(1).anyMatch(body -> body.contains("\"proxy.a\"")),
+                    "the retired socket never reconnects");
+        }
+    }
+
+    @Test
     void aRetiredSocketWaitingToReconnectStops() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {

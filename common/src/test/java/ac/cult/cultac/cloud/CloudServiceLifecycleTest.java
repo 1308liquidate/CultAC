@@ -50,6 +50,57 @@ class CloudServiceLifecycleTest {
     }
 
     @Test
+    void aSupersededGenerationStreamsItsPlayersUnderDrainIdsUntilTheyMove() throws Exception {
+        try (CaptureFixture fixture = new CaptureFixture(Host.SERVER, false);
+                Receiver receiver = new Receiver()) {
+            CloudCapture.segmentBinder((player, bind, playing) -> bind.accept("a"));
+            Map<String, String> on =
+                    Map.of("cloud.url", receiver.url(), "cloud.api-key", "test-key", "cloud.proxy-id", "a");
+            CloudService.configure(config(on), false);
+            awaitOnLoop(
+                    fixture,
+                    () -> receiver.connectBodies.stream().anyMatch(body -> body.contains("\"serverId\":\"a\"")));
+
+            CloudService.superseded("-drain-1a2b3c4d");
+            awaitOnLoop(
+                    fixture,
+                    () -> receiver.connectBodies.stream()
+                            .anyMatch(body -> body.contains("\"serverId\":\"a-drain-1a2b3c4d\"")));
+            assertNotNull(fixture.channel.pipeline().get(CloudCapture.INBOUND), "the player still streams");
+            assertTrue(CloudService.status()
+                    .get(0)
+                    .startsWith("Cloud upload on for draining players under server ids ending -drain-1a2b3c4d"));
+
+            fixture.channel.eventLoop().execute(() -> CloudCapture.release(fixture.player));
+            awaitOnLoop(fixture, () -> fixture.channel.pipeline().get(CloudCapture.INBOUND) == null);
+            assertTrue(CloudService.enabled(), "a hand-off moves one player and leaves the upload on");
+
+            CloudService.configure(config(Map.of()), false);
+            assertEquals("Cloud upload off", CloudService.status().get(0), "a reload still turns it off");
+        } finally {
+            CloudService.superseded("");
+        }
+    }
+
+    @Test
+    void aReloadReachesADrainingGeneration() throws Exception {
+        try (CaptureFixture fixture = new CaptureFixture(Host.SERVER, false);
+                Receiver receiver = new Receiver()) {
+            CloudCapture.segmentBinder((player, bind, playing) -> bind.accept("a"));
+            Map<String, String> on =
+                    Map.of("cloud.url", receiver.url(), "cloud.api-key", "test-key", "cloud.proxy-id", "a");
+            CloudService.configure(config(on), false);
+            awaitOnLoop(fixture, () -> fixture.channel.pipeline().get(CloudCapture.INBOUND) != null);
+            CloudService.superseded("-drain-1a2b3c4d");
+            CloudService.configure(config(Map.of()), false);
+            awaitOnLoop(fixture, () -> fixture.channel.pipeline().get(CloudCapture.INBOUND) == null);
+            assertFalse(CloudService.enabled());
+        } finally {
+            CloudService.superseded("");
+        }
+    }
+
+    @Test
     void thePlatformHooksRunOnlyWhenAConfigureTurnsTheUploadOnOrOff() {
         int[] ons = {0};
         int[] offs = {0};
