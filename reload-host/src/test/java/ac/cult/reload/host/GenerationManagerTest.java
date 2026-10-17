@@ -1,13 +1,20 @@
 package ac.cult.reload.host;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import ac.cult.cultac.fixture.FixtureEntrypoint;
 import ac.grim.grimac.api.GrimAbstractAPI;
 import ac.grim.grimac.api.GrimUser;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.BooleanSupplier;
@@ -27,6 +34,10 @@ class GenerationManagerTest {
     final List<String> reports = new CopyOnWriteArrayList<>();
 
     private GenerationManager start() throws Exception {
+        return start(artifact("initial.jar", "1.0", "initial", "paper"));
+    }
+
+    private GenerationManager start(Path bundled) throws Exception {
         controls.put("events", events);
         var manager = new GenerationManager(
                 directory.resolve("CultAC"),
@@ -37,7 +48,7 @@ class GenerationManagerTest {
                 getClass().getClassLoader(),
                 reports::add);
         manager.connectionResolver(connection -> controls.get("upstream:" + connection));
-        manager.loadInitial(Files.newInputStream(artifact("initial.jar", "1.0", "initial", "paper")));
+        manager.loadInitial(Files.newInputStream(bundled));
         manager.startInitial();
         return manager;
     }
@@ -568,6 +579,144 @@ class GenerationManagerTest {
             marker.load(input);
         }
         assertTrue(Files.exists(directory.resolve("CultAC/runtime").resolve(marker.getProperty("artifact"))));
+    }
+
+    @Test
+    void leftoverRuntimeIsIgnoredWhenThePluginBundlesAnotherRuntime() throws Exception {
+        stopAfterUpdateToV2();
+        Path generations = directory.resolve("CultAC/runtime/generations");
+        Files.createDirectories(generations.resolve("leftover"));
+        var restarted = start(artifact("installed.jar", "3", "installed", "paper"));
+        try {
+            restarted.attach("player", null);
+            assertTrue(events.contains("installed:attach:player"));
+            try (var homes = Files.list(generations)) {
+                assertEquals(1, homes.count());
+            }
+        } finally {
+            await(restarted.stop());
+        }
+    }
+
+    @Test
+    void leftoverRuntimeIsKeptWhileThePluginBundlesTheSameRuntime() throws Exception {
+        stopAfterUpdateToV2();
+        var restarted = start(directory.resolve("CultAC/updates/initial.jar"));
+        try {
+            restarted.attach("player", null);
+            assertTrue(events.contains("v2:attach:player"));
+        } finally {
+            await(restarted.stop());
+        }
+    }
+
+    @Test
+    void leftoverRuntimeThatCannotBeDeletedDoesNotFailStartup() throws Exception {
+        await(start().stop());
+        Path orphan = Files.createDirectories(directory.resolve("CultAC/runtime/generations/orphan"));
+        Path stuck = Files.writeString(orphan.resolve("runtime.jar"), "x");
+        assertTrue(stuck.toFile().setReadOnly());
+        orphan.toFile().setWritable(false);
+        boolean windows = System.getProperty("os.name").startsWith("Windows");
+        assumeTrue(windows || !Files.isWritable(orphan), "deletion cannot be blocked for this user");
+        try {
+            var restarted = start();
+            try {
+                restarted.attach("player", null);
+                assertTrue(events.contains("initial:attach:player"));
+                assertTrue(reports.stream().anyMatch(line -> line.contains("orphan")));
+            } finally {
+                await(restarted.stop());
+            }
+        } finally {
+            orphan.toFile().setWritable(true);
+            stuck.toFile().setWritable(true);
+        }
+    }
+
+    @Test
+    void leftoverRuntimeThatCannotBeListedDoesNotFailStartup() throws Exception {
+        await(start().stop());
+        Path locked = Files.createDirectories(directory.resolve("CultAC/runtime/generations/orphan/locked"));
+        Files.writeString(locked.resolve("runtime.jar"), "x");
+        var acl = Files.getFileAttributeView(locked, AclFileAttributeView.class);
+        List<AclEntry> original = acl == null ? null : acl.getAcl();
+        if (acl != null) {
+            var denied = new ArrayList<AclEntry>();
+            denied.add(AclEntry.newBuilder()
+                    .setType(AclEntryType.DENY)
+                    .setPrincipal(acl.getOwner())
+                    .setPermissions(AclEntryPermission.READ_DATA)
+                    .build());
+            denied.addAll(original);
+            acl.setAcl(denied);
+        } else {
+            locked.toFile().setReadable(false);
+        }
+        try {
+            assumeTrue(cannotList(locked), "listing cannot be blocked for this user");
+            var restarted = start();
+            try {
+                restarted.attach("player", null);
+                assertTrue(events.contains("initial:attach:player"));
+                assertTrue(reports.stream().anyMatch(line -> line.contains("cleanup failed for orphan")));
+            } finally {
+                await(restarted.stop());
+            }
+        } finally {
+            if (acl != null) acl.setAcl(original);
+            else locked.toFile().setReadable(true);
+        }
+    }
+
+    private static boolean cannotList(Path directory) {
+        try (var entries = Files.list(directory)) {
+            entries.toList();
+            return false;
+        } catch (IOException | UncheckedIOException failure) {
+            return true;
+        }
+    }
+
+    @Test
+    void incompatibleLeftoverRuntimeFallsBackToTheBundledRuntime() throws Exception {
+        stopAfterUpdateToV2();
+        var marker = new Properties();
+        try (var input = Files.newInputStream(directory.resolve("CultAC/runtime/current.properties"))) {
+            marker.load(input);
+        }
+        rewriteDescriptor(
+                directory.resolve("CultAC/runtime").resolve(marker.getProperty("artifact")),
+                "name: CultAC\nversion: '2'\ncult-loader-version: '3'\n");
+        var restarted = start(directory.resolve("CultAC/updates/initial.jar"));
+        try {
+            restarted.attach("player", null);
+            assertTrue(events.contains("initial:attach:player"));
+            assertTrue(reports.stream().anyMatch(line -> line.contains("cult-loader-version 3")));
+        } finally {
+            await(restarted.stop());
+        }
+    }
+
+    @Test
+    void unlinkableLeftoverRuntimeFallsBackToTheBundledRuntime() throws Exception {
+        stopAfterUpdateToV2();
+        controls.put("unlinked:v2", true);
+        var restarted = start(directory.resolve("CultAC/updates/initial.jar"));
+        try {
+            restarted.attach("player", null);
+            assertTrue(events.contains("initial:attach:player"));
+            assertTrue(reports.stream().anyMatch(line -> line.contains("NoClassDefFoundError")));
+        } finally {
+            await(restarted.stop());
+        }
+    }
+
+    private void stopAfterUpdateToV2() throws Exception {
+        var manager = start();
+        artifact("v2.jar", "2", "v2", "paper");
+        await(manager.update("v2.jar"));
+        await(manager.stop());
     }
 
     @Test

@@ -1,6 +1,7 @@
 package ac.cult.cultac.platform.bukkit;
 
 import ac.cult.cultac.CultAPI;
+import ac.cult.cultac.checks.CheckPermissions;
 import ac.cult.cultac.command.CloudCommandService;
 import ac.cult.cultac.manager.init.Initable;
 import ac.cult.cultac.manager.init.start.StartableInitable;
@@ -34,6 +35,7 @@ import ac.grim.grimac.api.plugin.GrimPlugin;
 import ac.grim.grimac.internal.platform.bukkit.resolver.BukkitResolverRegistrar;
 import java.util.concurrent.Executor;
 import lombok.Getter;
+import org.bukkit.Bukkit;
 import org.bukkit.command.BlockCommandSender;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
@@ -102,6 +104,7 @@ public final class CultACBukkitLoaderPlugin implements PlatformLoader {
             (StartableInitable) ac.cult.cultac.events.packets.ProxyAlertMessenger::new,
             new BukkitEventManager(),
             new BukkitLuckPermsInitable(),
+            (StartableInitable) this::registerCheckPermissions,
             (StartableInitable) () -> {
                 if (BukkitMessagePlaceHolderManager.hasPlaceholderAPI) {
                     if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
@@ -109,6 +112,12 @@ public final class CultACBukkitLoaderPlugin implements PlatformLoader {
                 }
             }
         };
+    }
+
+    // Bukkit's permission registry is not thread-safe; a runtime swapped in while the server runs starts elsewhere.
+    private void registerCheckPermissions() {
+        if (Bukkit.isPrimaryThread()) CheckPermissions.register(permissionManager);
+        else getScheduler().getGlobalRegionScheduler().run(plugin, () -> CheckPermissions.register(permissionManager));
     }
 
     public void onEnable() {

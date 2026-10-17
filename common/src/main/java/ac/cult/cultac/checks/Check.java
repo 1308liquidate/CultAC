@@ -9,6 +9,7 @@ import ac.grim.grimac.api.storage.verbose.Verbose;
 import ac.grim.grimac.api.storage.verbose.VerboseBuf;
 import ac.grim.grimac.api.storage.verbose.VerboseRenderContext;
 import ac.grim.grimac.internal.storage.verbose.VerboseRegistry;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Supplier;
 import lombok.Getter;
@@ -123,10 +124,15 @@ public class Check extends CultProcessor implements AbstractCheck {
 
     public final void updatePermissions() {
         if (configName == null) return;
-        final String id = configName.toLowerCase();
+        final String id = permissionId(configName);
         exemptPermission = player.hasPermission("cult.exempt." + id);
         noSetbackPermission = player.hasPermission("cult.nosetback." + id);
         noModifyPacketPermission = player.hasPermission("cult.nomodifypacket." + id);
+    }
+
+    /** The lower-case check id in this check's permission nodes, whatever the default locale. */
+    public static String permissionId(String configName) {
+        return configName.toLowerCase(Locale.ROOT);
     }
 
     public final boolean flag() {

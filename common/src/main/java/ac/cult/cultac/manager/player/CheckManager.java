@@ -73,7 +73,6 @@ import ac.cult.cultac.network.PacketSendRoute;
 import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
-import ac.cult.cultac.platform.api.permissions.PermissionDefaultValue;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketDirection;
@@ -104,7 +103,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public class CheckManager {
     private static final List<Class<? extends CheckListener>> SEND_DISPATCH_LISTENER_TYPES = List.of(
@@ -213,28 +211,6 @@ public class CheckManager {
                 check.reload();
             } else if (listener instanceof CultProcessor processor) {
                 processor.reload();
-            }
-        }
-
-        registerCheckPermissionsOnce();
-    }
-
-    private static final AtomicBoolean checkPermissionsRegistered = new AtomicBoolean(false);
-
-    private void registerCheckPermissionsOnce() {
-        if (checkPermissionsRegistered.getAndSet(true)) return;
-
-        final String[] permissions = {
-            "cult.exempt.", "cult.nosetback.", "cult.nomodifypacket.",
-        };
-
-        for (final Check check : allChecks.values()) {
-            if (check.getConfigName() == null) continue;
-            final String id = check.getConfigName().toLowerCase();
-            for (String permissionName : permissions) {
-                CultAPI.INSTANCE
-                        .getPermissionManager()
-                        .registerPermission(permissionName + id, PermissionDefaultValue.FALSE);
             }
         }
     }
