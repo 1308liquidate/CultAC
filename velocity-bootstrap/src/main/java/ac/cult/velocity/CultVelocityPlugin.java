@@ -1,11 +1,16 @@
 package ac.cult.velocity;
 
 import ac.cult.reload.api.RuntimeInstance;
+import ac.cult.reload.host.BuildUpdates;
 import ac.cult.reload.host.CommandRouting;
 import ac.cult.reload.host.GenerationManager;
+import ac.cult.reload.host.UpdateSettings;
+import ac.cult.reload.host.UpdateState;
+import ac.cult.reload.host.UpdateWebhook;
 import ac.grim.grimac.api.GrimAPIProvider;
 import ac.grim.grimac.api.GrimAbstractAPI;
 import com.google.inject.Inject;
+import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.event.EventTask;
 import com.velocitypowered.api.event.PostOrder;
@@ -16,13 +21,18 @@ import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.plugin.Dependency;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
+import com.velocitypowered.api.proxy.ConsoleCommandSource;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import io.netty.channel.Channel;
+import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
 import net.kyori.adventure.text.Component;
 import org.slf4j.Logger;
 
@@ -40,6 +50,11 @@ import org.slf4j.Logger;
         })
 public final class CultVelocityPlugin {
     private static final Component REFUSED = Component.text(RuntimeInstance.CONNECTION_REFUSED);
+    /** The proxy does not listen before initialization ends, so this is all a slow download can delay startup. */
+    private static final Duration BOOT_UPDATE_LIMIT = Duration.ofSeconds(10);
+
+    private static final String UPDATE_USAGE =
+            "Usage: /cult update <build> | latest [branch] | builds [branch] | <filename.jar>";
 
     private final ProxyServer proxy;
     private final Logger logger;
@@ -48,6 +63,8 @@ public final class CultVelocityPlugin {
     private volatile boolean stopping;
     private java.lang.reflect.Method connectionMethod, channelMethod;
     private BridgeChannelGuard bridgeGuard;
+    private final UpdateWebhook webhook = new UpdateWebhook();
+    private volatile String bundledVersion = "";
 
     @Inject
     public CultVelocityPlugin(ProxyServer proxy, Logger logger, @DataDirectory Path directory) {
@@ -88,7 +105,16 @@ public final class CultVelocityPlugin {
                     ac.cult.reload.host.LoaderVersions.read(
                             getClass().getResourceAsStream("/velocity-plugin.json"), "velocity"));
             engine.connectionResolver(ac.cult.reload.integrations.GeyserConnections::upstream);
-            engine.loadInitial(getClass().getResourceAsStream("/cult-runtime/default.jar"));
+            Path bootBuild = null;
+            try {
+                bundledVersion = BuildUpdates.descriptorVersion(
+                        getClass().getResourceAsStream("/velocity-plugin.json"), "velocity");
+                bootBuild = new BuildUpdates(updateSettings(), bundledVersion)
+                        .boot(engine.loaderVersion(), engine.updates(), BOOT_UPDATE_LIMIT, logger::info, logger::warn);
+            } catch (IOException | RuntimeException failure) {
+                logger.warn("Starting the bundled CultAC runtime; the update settings are unusable: " + failure);
+            }
+            engine.loadInitial(getClass().getResourceAsStream("/cult-runtime/default.jar"), bootBuild);
             engine.startInitial();
             proxy.getScheduler()
                     .buildTask(this, engine::tick)
@@ -109,6 +135,10 @@ public final class CultVelocityPlugin {
                         boolean devSwap = args[0].equalsIgnoreCase("devswap");
                         if (!source.hasPermission(devSwap ? "cult.devswap" : "cult.update")) {
                             source.sendMessage(net.kyori.adventure.text.Component.text("You do not have permission."));
+                            return;
+                        }
+                        if (!devSwap) {
+                            update(source, args);
                             return;
                         }
                         if (args.length != (devSwap ? 1 : 2)) {
@@ -195,6 +225,65 @@ public final class CultVelocityPlugin {
         }
         logger.error(problem + "; disconnecting", failure);
         player.disconnect(REFUSED);
+    }
+
+    private UpdateSettings updateSettings() {
+        return UpdateSettings.read(directory, CultBuildVersion.REPOSITORY, System::getenv);
+    }
+
+    /**
+     * {@code /cult update <build> | latest [branch] | builds [branch] | <filename.jar>}. A build install ends in one
+     * console line, also posted to the update webhook; the network work runs off the proxy's threads.
+     */
+    private void update(CommandSource source, String[] args) {
+        String target = args.length > 1 ? args[1] : "";
+        if (args.length == 2 && target.endsWith(".jar")) {
+            engine.update(target).whenComplete((message, failure) -> {
+                if (failure == null) {
+                    try {
+                        UpdateState.clear(updateSettings().stateFile());
+                    } catch (IOException | RuntimeException cleanup) {
+                        logger.warn("The next boot may start the last installed build instead: " + cleanup);
+                    }
+                }
+                source.sendMessage(
+                        Component.text(failure == null ? message : "Update failed: " + failure.getMessage()));
+            });
+            return;
+        }
+        UpdateSettings settings;
+        try {
+            settings = updateSettings();
+        } catch (RuntimeException unusable) {
+            logger.warn("update refused: " + unusable);
+            if (!(source instanceof ConsoleCommandSource))
+                source.sendMessage(Component.text("update refused: " + unusable));
+            return;
+        }
+        var updates = new BuildUpdates(settings, bundledVersion);
+        Executor worker =
+                task -> Thread.ofPlatform().daemon().name("cult-update").start(task);
+        if (args.length == 2 && target.matches("[0-9]{1,18}")) {
+            report(source, settings, updates.install(engine, Long.parseLong(target), worker));
+        } else if ((args.length == 2 || args.length == 3) && target.equalsIgnoreCase("latest")) {
+            report(
+                    source,
+                    settings,
+                    updates.latest(engine, args.length == 3 ? args[2] : CultBuildVersion.BRANCH, worker));
+        } else if ((args.length == 2 || args.length == 3) && target.equalsIgnoreCase("builds")) {
+            updates.builds(args.length == 3 ? args[2] : null, engine.currentBuild(), worker)
+                    .thenAccept(lines -> lines.forEach(line -> source.sendMessage(Component.text(line))));
+        } else {
+            source.sendMessage(Component.text(UPDATE_USAGE));
+        }
+    }
+
+    private void report(CommandSource source, UpdateSettings settings, CompletionStage<String> result) {
+        result.thenAccept(line -> {
+            logger.info(line);
+            if (!(source instanceof ConsoleCommandSource)) source.sendMessage(Component.text(line));
+            webhook.post(settings.webhook(), line, logger::warn);
+        });
     }
 
     /** {@code /cult runtimes [id [command]]}; commands run as the sender, once per player of that runtime. */

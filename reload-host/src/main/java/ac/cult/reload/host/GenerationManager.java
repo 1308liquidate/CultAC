@@ -118,6 +118,14 @@ public final class GenerationManager implements AutoCloseable {
 
     /** Paper calls this during load, before Geyser snapshots its connection initializer. */
     public void loadInitial(InputStream embedded) throws Exception {
+        loadInitial(embedded, null);
+    }
+
+    /**
+     * @param bootBuild a verified build to start in place of the persisted or bundled runtime; deleted once read, and
+     *     the others take over when it fails to load
+     */
+    public void loadInitial(InputStream embedded, Path bootBuild) throws Exception {
         Files.createDirectories(directory.resolve("updates"));
         Files.createDirectories(directory.resolve("runtime"));
         Path bundled = directory.resolve("runtime/default.jar");
@@ -128,8 +136,21 @@ public final class GenerationManager implements AutoCloseable {
         bundledDigest =
                 RuntimeArtifact.inspect(bundled, platform, loaderVersion).digest();
         Generation generation = null;
+        if (bootBuild != null) {
+            try {
+                generation = prepare(bootBuild, false);
+            } catch (Exception failure) {
+                report.accept("Starting the bundled CultAC runtime; the boot build failed to load: " + failure);
+            } finally {
+                try {
+                    Files.deleteIfExists(bootBuild);
+                } catch (IOException | RuntimeException cleanup) {
+                    report.accept("Cannot delete the boot build " + bootBuild + ": " + cleanup);
+                }
+            }
+        }
         Path marker = directory.resolve("runtime/current.properties");
-        if (Files.exists(marker)) {
+        if (generation == null && Files.exists(marker)) {
             try {
                 generation = loadPersisted(marker);
             } catch (Exception failure) {
@@ -568,6 +589,29 @@ public final class GenerationManager implements AutoCloseable {
 
     public synchronized List<String> status() {
         return generations.values().stream().map(GenerationManager::describe).toList();
+    }
+
+    /** The build new sessions attach to; null before a runtime is loaded. */
+    public synchronized String currentBuild() {
+        return current == null ? null : current.artifact.build();
+    }
+
+    /** The installed loader's {@code cult-loader-version}. */
+    public String loaderVersion() {
+        return loaderVersion;
+    }
+
+    /** Where {@link #update} takes its jars from. */
+    public Path updates() {
+        return directory.resolve("updates");
+    }
+
+    /** Sessions still on runtimes a newer one replaced. */
+    public synchronized int drainingSessions() {
+        return generations.values().stream()
+                .filter(g -> g.state == State.DRAINING)
+                .mapToInt(g -> g.leases)
+                .sum();
     }
 
     private static String describe(Generation g) {
