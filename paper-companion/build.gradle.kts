@@ -84,4 +84,4 @@ val checkPaperLinkage = tasks.register<PaperLinkageCheck>("checkPaperLinkage") {
     ))
     excluded.set(emptySet())
 }
-tasks.check { dependsOn(checkPaperLinkage) }
+if (paperLinkageServer.isPresent) tasks.check { dependsOn(checkPaperLinkage) }
