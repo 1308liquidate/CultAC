@@ -238,6 +238,7 @@ class JavaClientTickTest {
 
             entityEvent(f, f.player.entityID, 3);
             entityEvent(f, 100, 3);
+            f.pongThrough(f.player.lastTransactionSent.get());
 
             assertFalse(f.player.compensatedEntities.getSelf().isDead);
             assertTrue(f.player.compensatedEntities.getEntity(100).isDead);
