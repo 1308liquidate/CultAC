@@ -387,6 +387,84 @@ class JavaEntityPushTest {
         }
     }
 
+    /**
+     * LocalPlayer#tick waits for the level to load while ClientLevel#tickEntities runs the other entity's
+     * pushEntities, so every waiting tick's push is in the first loaded move.
+     */
+    @Test
+    void pushesWhileTheLevelLoadsMoveTheFirstLoadedTick() throws Exception {
+        try (var f = loadingBesideOther()) {
+            PredictionResult first =
+                    f.tick(LOADING.add(-TICKS_LOADING * pushFrom(LOADING_OTHER.x - LOADING.x), 0, 0), true);
+            assertExact(first);
+            assertEquals(0, first.getSimulationContext().getWorldData().getNumPushing());
+        }
+    }
+
+    /** EntitySelector#pushableBy's team collision rules can stop a pusher touching the player from pushing it. */
+    @Test
+    void pushesWhileTheLevelLoadsMayNotHappen() throws Exception {
+        try (var f = loadingBesideOther()) {
+            assertExact(f.tick(LOADING, true));
+        }
+    }
+
+    /** Entity#push points away from the pusher, so the waiting ticks' pushes cannot move the player towards it. */
+    @Test
+    void pushesWhileTheLevelLoadsDoNotMoveThePlayerTowardsThePusher() throws Exception {
+        try (var f = loadingBesideOther()) {
+            PredictionResult first =
+                    f.tick(LOADING.add(TICKS_LOADING * pushFrom(LOADING_OTHER.x - LOADING.x), 0, 0), true);
+            assertFalse(exact(first), describe(first));
+        }
+    }
+
+    /** A teleport with relative DELTA_X/DELTA_Z keeps the movement the waiting ticks' pushes were added to. */
+    @Test
+    void aTeleportKeepingHorizontalVelocityWhileTheLevelLoadsKeepsThePushes() throws Exception {
+        try (var f = loadingBesideOther()) {
+            f.teleport(LOADING, ALL_DELTAS);
+            assertExact(f.tick(LOADING.add(-TICKS_LOADING * pushFrom(LOADING_OTHER.x - LOADING.x), 0, 0), true));
+        }
+    }
+
+    /** A teleport with absolute zero DELTA_X/DELTA_Z replaces the movement the waiting ticks' pushes were added to. */
+    @Test
+    void aTeleportWhileTheLevelLoadsDropsThePushesBeforeIt() throws Exception {
+        try (var f = loadingBesideOther()) {
+            f.teleport(LOADING, new RelativeFlag(0));
+            PredictionResult first =
+                    f.tick(LOADING.add(-TICKS_LOADING * pushFrom(LOADING_OTHER.x - LOADING.x), 0, 0), true);
+            assertFalse(exact(first), describe(first));
+        }
+    }
+
+    /**
+     * A client standing at {@link #LOADING} that waited {@link #TICKS_LOADING} ticks for its level beside a zombie,
+     * which then left; its level has just loaded.
+     */
+    private static JavaTickFixture loadingBesideOther() throws Exception {
+        JavaTickFixture f = new JavaTickFixture();
+        f.place(LOADING, Vec3.ZERO);
+        f.input(NONE);
+        f.player.packetStateData.playerLoadedIntoLevel = false;
+        entity(f, 100, LOADING_OTHER);
+        for (int tick = 0; tick < TICKS_LOADING; tick++) f.tickEnd();
+        f.player.compensatedEntities.removeEntity(100);
+        f.player.packetStateData.playerLoadedIntoLevel = true;
+        return f;
+    }
+
+    /** Entity#push's impulse on the pushed entity from one {@code dx} away on the x axis alone. */
+    private static double pushFrom(double dx) {
+        double root = Math.sqrt(Math.abs(dx));
+        return dx / root * Math.min(1.0, 1.0 / root) * 0.05F;
+    }
+
+    private static final int TICKS_LOADING = 3;
+    private static final Vec3 LOADING = new Vec3(0.5, FLOOR_Y, 0.5);
+    private static final Vec3 LOADING_OTHER = new Vec3(0.94, FLOOR_Y, 0.5);
+
     /** A client that has just stepped off into the air at {@link #START}. */
     private static JavaTickFixture falling() throws Exception {
         JavaTickFixture f = new JavaTickFixture();
