@@ -21,7 +21,7 @@ final class FindingLines {
         return Component.text()
                 .append(Component.text(ago(now - finding.at()) + " ", NamedTextColor.DARK_GRAY))
                 .append(body(finding))
-                .build();
+                .asComponent();
     }
 
     /** A line of {@code /cult top}: highest confidence, then how many findings. */
@@ -38,7 +38,7 @@ final class FindingLines {
             checks.append(' ').append(oneLine(check.getKey())).append('×').append(check.getValue());
         }
         return line.append(Component.text(checks.toString(), NamedTextColor.GRAY))
-                .build();
+                .asComponent();
     }
 
     private static Component body(Finding finding) {
@@ -51,7 +51,7 @@ final class FindingLines {
                 .append(Component.text(category + " @" + finding.tick(), NamedTextColor.DARK_GRAY));
         if (!shown.isEmpty()) line.append(Component.text(" " + shown, NamedTextColor.GRAY));
         if (!detail.isEmpty()) line.hoverEvent(HoverEvent.showText(Component.text(detail, NamedTextColor.GRAY)));
-        return line.build();
+        return line.asComponent();
     }
 
     /** Service text that the line shows inline, kept to that one line. */
