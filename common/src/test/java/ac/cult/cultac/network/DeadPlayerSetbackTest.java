@@ -102,6 +102,32 @@ class DeadPlayerSetbackTest {
         }
     }
 
+    @Test
+    void aPlayerThatRespawnsAfterTheFreezeTimeGetsNoLatencySetbackBeforeItMoves() throws Exception {
+        try (var f = fallingPlayer()) {
+            SetbackTeleportUtil teleports = f.player.getSetbackTeleportUtil();
+            f.teleport(FALLING, new RelativeFlag(0));
+            f.player.compensatedEntities.getSelf().isDead = true;
+            respawn(f);
+            f.player.compensatedEntities.getSelf().isDead = false;
+            placeAt(f, SPAWN);
+            acceptInOrder(f);
+            f.player.packetStateData.playerLoadedIntoLevel = true;
+            assertTrue(teleports.getRequiredSetBack().isComplete());
+
+            assertTrue(
+                    f.player
+                            .checkManager
+                            .getSimulationProcessor()
+                            .getLastMovementTime()
+                            .isEmpty(),
+                    "the latency clock starts at the placed player's first move, not the last one before it died");
+            teleports.checkIfMustMove();
+            assertTrue(teleports.getRequiredSetBack().isComplete());
+            assertFalse(f.move(SPAWN, true).isCancelled(), teleports.getDebugStrings());
+        }
+    }
+
     /** A client falling past its freeze time: it last moved six seconds ago and must still be moving. */
     private static JavaTickFixture fallingPlayer() throws Exception {
         var f = new JavaTickFixture();
