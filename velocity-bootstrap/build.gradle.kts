@@ -22,12 +22,21 @@ dependencies {
 }
 val bootstrapVersion = tasks.register("bootstrapVersion") {
     val output = layout.buildDirectory.file("generated/version/ac/cult/velocity/CultBuildVersion.java")
-    inputs.property("version", rootProject.version.toString())
+    val version = rootProject.version.toString()
+    val branch = rootProject.ext["git_branch"]?.toString() ?: ""
+    val repository = "${rootProject.ext["git_org"]}/${rootProject.ext["git_repo"]}"
+    inputs.property("version", version)
+    inputs.property("branch", branch)
+    inputs.property("repository", repository)
     outputs.file(output)
     doLast {
+        fun literal(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
         output.get().asFile.apply {
             parentFile.mkdirs()
-            writeText("package ac.cult.velocity; final class CultBuildVersion { static final String VERSION = \"${rootProject.version}\"; }\n")
+            writeText(
+                "package ac.cult.velocity; final class CultBuildVersion { static final String VERSION = ${literal(version)};" +
+                    " static final String BRANCH = ${literal(branch)}; static final String REPOSITORY = ${literal(repository)}; }\n"
+            )
         }
     }
 }
