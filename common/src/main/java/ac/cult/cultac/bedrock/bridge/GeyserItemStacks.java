@@ -9,16 +9,21 @@ import ac.cult.cultac.protocol.WireValueDecoder;
 import ac.cult.cultac.protocol.data.IdTable;
 import ac.cult.cultac.protocol.data.ModelRegistryData;
 import io.netty.buffer.Unpooled;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.HashMap;
 import java.util.Map;
+import org.geysermc.geyser.item.type.Item;
 import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.session.cache.RegistryCache;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftCodec;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 
 /** Stock Geyser values enter the same owned item decoder as Java inventory packets. */
 final class GeyserItemStacks {
+    private static final MethodHandle JAVA_IDENTIFIER = javaIdentifier();
+
     private GeyserItemStacks() {}
 
     static SimItemStack toModelItem(GeyserSession session, ItemStack source, ItemRegistry items) {
@@ -26,10 +31,32 @@ final class GeyserItemStacks {
         var mapping = session.getItemMappings().getMapping(source.getId()).getJavaItem();
         if (mapping.javaId() != source.getId()) throw new IllegalArgumentException("Unknown item " + source.getId());
         var result = decode(source, names(session), items);
-        if (!result.itemKey().equals(mapping.javaIdentifier()))
+        String identifier = javaIdentifier(mapping);
+        if (!result.itemKey().equals(identifier))
             throw new IllegalArgumentException("Geyser item mapping differs from its protocol " + version() + ": "
-                    + source.getId() + " " + mapping.javaIdentifier() + " != " + result.itemKey());
+                    + source.getId() + " " + identifier + " != " + result.itemKey());
         return result;
+    }
+
+    /** Geyser 2.12 returns an Identifier where older builds return the String; both print the namespaced key. */
+    private static MethodHandle javaIdentifier() {
+        try {
+            return MethodHandles.publicLookup()
+                    .unreflect(Item.class.getMethod("javaIdentifier"))
+                    .asType(MethodType.methodType(Object.class, Item.class));
+        } catch (ReflectiveOperationException failure) {
+            throw new ExceptionInInitializerError(failure);
+        }
+    }
+
+    private static String javaIdentifier(Item item) {
+        try {
+            return String.valueOf((Object) JAVA_IDENTIFIER.invokeExact(item));
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Throwable failure) {
+            throw new IllegalStateException(failure);
+        }
     }
 
     static ProtocolVersion version() {
@@ -53,19 +80,8 @@ final class GeyserItemStacks {
     private static WireValueDecoder.Registries names(GeyserSession session) {
         var defaults = ModelRegistryData.load(version());
         var received = new HashMap<String, IdTable>();
-        for (var key : RegistryCache.READERS.keySet()) {
-            // Geyser-Spigot relocates Adventure; only strings cross that boundary.
-            String name;
-            try {
-                name = key.getClass().getMethod("registryKey").invoke(key).toString();
-            } catch (ReflectiveOperationException failure) {
-                throw new IllegalStateException("Cannot read Geyser registry identifier", failure);
-            }
-            var entries = session.getRegistryCache().registry(key).keys();
-            received.put(
-                    name,
-                    new IdTable(name, entries.stream().map(Object::toString).toList()));
-        }
+        GeyserJavaRegistries.received(session)
+                .forEach((name, entries) -> received.put(name, new IdTable(name, entries)));
         var snapshot = Map.copyOf(received);
         return new WireValueDecoder.Registries() {
             private IdTable table(String name) {
