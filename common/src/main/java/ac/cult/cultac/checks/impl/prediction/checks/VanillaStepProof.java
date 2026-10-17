@@ -109,7 +109,7 @@ final class VanillaStepProof {
         Vec3 collidedMovement = collideLikeClient(
                 player,
                 result,
-                result.getSimulationContext().getFromMaximumExtent(),
+                result.getSimulationContext().getFromActualPose(),
                 desiredX,
                 desiredY,
                 desiredZ,
@@ -128,7 +128,7 @@ final class VanillaStepProof {
         Vec3 collisionWithoutStep = collideLikeClient(
                 player,
                 result,
-                result.getSimulationContext().getFromMaximumExtent(),
+                result.getSimulationContext().getFromActualPose(),
                 desiredX,
                 desiredY,
                 desiredZ,
