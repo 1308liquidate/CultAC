@@ -74,6 +74,7 @@ import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.player.PlayerObserver;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.PacketType;
@@ -147,6 +148,9 @@ public class CheckManager {
     public final Map<Class<? extends Check>, Check> allChecks = new HashMap<>();
     private final PacketHandlerScanner recordScanner;
     private final List<TickEndHandlerRegistration> tickEndHandlers = new ArrayList<>();
+    /** Set on the packet thread while a tick end's handlers run. */
+    private boolean dispatchingTickEnd;
+
     private Map<PacketType<?>, PacketReceiveRoute<Object>> earlyReceiveRoutes = Map.of();
     private final List<DecodedPacketReceiveListener> decodedReceiveListeners = new ArrayList<>();
     private final List<PacketReceiveHandler<ServerboundPacket>> nonAsyncReceiveHandlers = new ArrayList<>();
@@ -861,8 +865,15 @@ public class CheckManager {
             // tick therefore must see the post-block-entity piston phase and the
             // post-entity interpolation state, not the stale pre-tick-end cache.
             player.compensatedWorld.onClientTickEnd();
-            for (TickEndHandlerRegistration handler : tickEndHandlers) {
-                handler.handle(packet, player);
+            dispatchingTickEnd = true;
+            try {
+                for (TickEndHandlerRegistration handler : tickEndHandlers) {
+                    handler.handle(packet, player);
+                }
+                PlayerObserver observer = player.observer;
+                if (observer != null) observer.tickEnded();
+            } finally {
+                dispatchingTickEnd = false;
             }
             player.visibilityDebug.update();
         }
@@ -1068,6 +1079,11 @@ public class CheckManager {
             cachedSimulationProcessor = getListener(SimulationProcessor.class);
         }
         return cachedSimulationProcessor;
+    }
+
+    /** Whether a client tick end's handlers are running; on the packet thread. */
+    public boolean isDispatchingTickEnd() {
+        return dispatchingTickEnd;
     }
 
     private SetbackTeleportUtil cachedSetbackUtil = null;

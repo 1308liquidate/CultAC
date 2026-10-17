@@ -14,6 +14,7 @@ import ac.cult.cultac.events.packets.RegistryGenerationAlerts;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.player.PlayerObserver;
 import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundLogin;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
@@ -62,12 +63,16 @@ public class PacketPlayerRespawn {
 
     @CultPacketHandler("clientbound.start_configuration")
     public void onStartConfiguration(PacketSendEvent<Opaque> event, CultPlayer player, Opaque packet) {
+        PlayerObserver observer = player.observer;
+        if (observer != null) observer.configurationStarted();
         player.getSetbackTeleportUtil().levelLeft();
         player.getGhostBlockMitigator().clearLevel();
     }
 
     @CultPacketHandler
     public void onLogin(PacketSendEvent<ClientboundLogin> event, CultPlayer player, ClientboundLogin packet) {
+        PlayerObserver observer = player.observer;
+        if (observer != null) observer.loginSent(packet);
         // for the purposes of detecting mineflayer stuff, send a transaction
         // handles transaction split between JOIN_GAME and server teleport
 
@@ -178,6 +183,8 @@ public class PacketPlayerRespawn {
 
     @CultPacketHandler
     public void onRespawn(PacketSendEvent<ClientboundRespawn> event, CultPlayer player, ClientboundRespawn packet) {
+        PlayerObserver observer = player.observer;
+        if (observer != null) observer.respawnSent(packet);
         var spawnInfo = packet.spawnInfo();
         String dimension = HolderSets.identifier(spawnInfo.dimension());
         String worldName = spawnInfo.dimension();
@@ -214,7 +221,7 @@ public class PacketPlayerRespawn {
             BadPacketsH sequences = player.checkManager.getListener(BadPacketsH.class);
             player.runAtTrailingProof(event, sequences::resetLevel);
         }
-        event.getTasksAfterSend().add(player::sendTransaction);
+        event.getTasksAfterSend().add(player::sendTrailingTransaction);
 
         final boolean keepEntityData = packet.shouldKeep(ClientboundRespawn.KEEP_ENTITY_DATA);
         final boolean keepAttributeModifiers = packet.shouldKeep(ClientboundRespawn.KEEP_ATTRIBUTE_MODIFIERS);
