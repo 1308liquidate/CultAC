@@ -40,6 +40,31 @@ class JavaCobwebMovementTest {
         }
     }
 
+    /**
+     * Entity#checkInsideBlocks steps the axes in Direction#axisStepOrder of the delta Entity#move recorded, which
+     * includes moveRelative's input. Carried X drift with a larger Z input steps Z first, clear of a web the X-first
+     * walk would cross at its corner, so the next move is not slowed.
+     */
+    @Test
+    void theInsideBlockWalkOrdersItsAxesByTheInputAppliedDelta() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            // Corner of the box at x 0.995 -> 1.005 enters the web column only while z still starts below 1.
+            web(f, new BlockPos(1, FLOOR_Y + 1, 0));
+            double drift = 0.01;
+            Vec3 start = new Vec3(0.695, FLOOR_Y + 1, 1.29);
+            f.place(start, new Vec3(drift, 0, 0));
+
+            f.input(FORWARD);
+            double walked = (double) 0.98F * 0.02F;
+            Vec3 first = start.add(new Vec3(drift, 0, walked));
+            assertExact(f.tick(first, false));
+            f.input(NONE);
+            // LivingEntity#travel: air friction 0.91 horizontally, gravity then 0.98 vertically.
+            Vec3 second = first.add(new Vec3(drift * 0.91F, -FALL, walked * 0.91F));
+            assertExact(f.tick(second, false));
+        }
+    }
+
     private static void web(JavaTickFixture f, BlockPos pos) {
         f.player.compensatedWorld.updateBlock(pos, BlockIds.COBWEB.defaultState());
         for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);

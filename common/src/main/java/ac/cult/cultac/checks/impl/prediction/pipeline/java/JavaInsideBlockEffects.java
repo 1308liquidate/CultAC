@@ -23,7 +23,8 @@ public final class JavaInsideBlockEffects {
     public record State(double fallDistance, Vec3 velocity, Vec3 stuckSpeed) {}
 
     /** The velocity-independent bounds of one move's inside-block pass. */
-    public record Scan(PacketEntity actor, Vec3 end, SimpleCollisionBox from, SimpleCollisionBox to) {}
+    public record Scan(
+            PacketEntity actor, Vec3 end, SimpleCollisionBox from, SimpleCollisionBox to, Vec3 originalMovement) {}
 
     /** Returns {@code null} when no block callback can change any velocity resolved for this move. */
     public static Scan scan(CultPlayer player, PredictionResult result, Vec3 movement) {
@@ -35,14 +36,14 @@ public final class JavaInsideBlockEffects {
         SimpleCollisionBox to = context.getToActualPose().offset(end.subtract(context.getEnd()));
         SimpleCollisionBox from = to.copy().offset(movement.scale(-1));
         if (!InsideBlockEffectScan.mayHaveEffects(player, from, to, false)) return null;
-        return new Scan(actor, end, from, to);
+        return new Scan(actor, end, from, to, attemptedMovement(result));
     }
 
     public static State resolve(
             CultPlayer player, PredictionResult result, Scan scan, double distance, Vec3 velocity, boolean landed) {
         if (scan == null) return new State(distance, velocity, null);
         var context = result.getSimulationContext();
-        Vec3 originalMovement = result.getValidMovements().getClosestTrace().preCollisionMovement();
+        Vec3 originalMovement = scan.originalMovement();
         State[] current = {new State(distance, velocity, null)};
         PacketEntity actor = scan.actor();
         Vec3 end = scan.end();
@@ -112,6 +113,17 @@ public final class JavaInsideBlockEffects {
                     });
         }
         return current[0];
+    }
+
+    /**
+     * Entity#move's recorded delta for Direction#axisStepOrder: the selected velocity plus the accepted
+     * LivingEntity#moveRelative input, stuck-scaled, before collision.
+     */
+    static Vec3 attemptedMovement(PredictionResult result) {
+        var trace = result.getValidMovements().getClosestTrace();
+        Vec3 input = result.getLegacyLikePredictionVector().subtract(result.getAcceptedClosestToTarget());
+        Vec3 stuck = trace.position().collisionStuckSpeedMultiplier(result.getSimulationContext());
+        return trace.preCollisionMovement().add(input.multiply(stuck));
     }
 
     static boolean intersects(SimpleCollisionBox from, SimpleCollisionBox to, VoxelShape shape, BlockPos pos) {
