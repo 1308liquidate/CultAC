@@ -31,8 +31,6 @@ import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
-import ac.cult.cultac.utils.math.Vector3dm;
-import ac.cult.cultac.utils.math.VectorUtils;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.ReachUtils;
@@ -48,6 +46,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             int entityId,
             List<Vec3> fromCandidates,
             SimpleCollisionBox targetBox,
+            Vec3 targetSize,
             int type,
             boolean livingEntity,
             boolean exempt,
@@ -61,24 +60,18 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     public record MeasuredAttack(
             int index, int entityId, int type, SimpleCollisionBox box, List<Vec3> origins, double reach) {}
 
-    // A measured distance against the bound vanilla allows it.
-    private record Measure(double distance, double limit) {
-        private static final Measure NONE = new Measure(Double.POSITIVE_INFINITY, 0);
-
-        double excess() {
-            return distance - limit;
-        }
-
-        Measure worse(Measure other) {
-            return other.excess() > excess() ? other : this;
-        }
-
-        Measure better(Measure other) {
-            return other.excess() < excess() ? other : this;
-        }
-    }
-
+    // CultPlayer#getPossibleEyeHeights at scale 1.
+    private static final double[] EYE_HEIGHTS = {0.4, 1.27, 1.62};
     private final ClientVisibilityProcessor visibility;
+    // The looks measureBest tries, three components each.
+    private final double[] looks = new double[15];
+    // The least-flagging measured distance, the farthest a possible target box is entered along the same ray, and the
+    // bounds vanilla allows it.
+    private double bestDistance, bestFar, bestMin, bestMax;
+    // The size of each possible box within the target box measureBest measures.
+    private Vec3 targetSize;
+    // The location hitAlong found.
+    private double hitX, hitY, hitZ;
     private final List<QueuedAttack> playerAttackQueue = new ArrayList<>();
     private final List<QueuedAttack> measuredAttacks = new ArrayList<>();
     private static final List<Integer> blacklisted = Arrays.asList(EntityTypeIds.SHULKER);
@@ -123,6 +116,17 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                 return;
             }
 
+            // ServerGamePacketListenerImpl#handleAttack drops attacks until the client has loaded, and the LocalPlayer
+            // they would be judged from has not ticked yet.
+            if (!player.packetStateData.localPlayerTickedSinceSpawn) {
+                debug(() -> {
+                    return "cancelled = not ticked";
+                });
+                event.setCancelled(true);
+                player.onPacketCancel();
+                return;
+            }
+
             // Stop people from freezing transactions before an entity spawns to bypass reach
             if (entity == null) {
                 // Only cancel if and only if we are tracking this entity
@@ -156,6 +160,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                         action.entityId(),
                         getAttackOrigins(),
                         getReachBox(entity),
+                        getReachSize(entity),
                         entity.type,
                         entity.isLivingEntity(),
                         isReachExempt(entity),
@@ -192,15 +197,14 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         if (measuredAttacks.isEmpty()) return List.of();
         List<MeasuredAttack> measured = new ArrayList<>(measuredAttacks.size());
         for (QueuedAttack attack : measuredAttacks) {
-            double reach = bestMeasure(attack.targetBox(), attack.fromCandidates(), attack.reach(), false)
-                    .distance();
+            measureBest(attack.targetBox(), attack.targetSize(), attack.fromCandidates(), attack.reach(), false);
             measured.add(new MeasuredAttack(
                     attack.index(),
                     attack.entityId(),
                     attack.type(),
                     attack.targetBox(),
                     attack.fromCandidates(),
-                    reach));
+                    bestDistance));
         }
         return measured;
     }
@@ -231,6 +235,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         for (QueuedAttack attack : playerAttackQueue) {
             String result = checkReach(
                     attack.targetBox(),
+                    attack.targetSize(),
                     attack.type(),
                     attack.livingEntity(),
                     attack.exempt(),
@@ -283,9 +288,10 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     }
 
     private String checkReach(
-            PacketEntity reachEntity, Collection<Vec3> fromCandidates, AttackReach reach, boolean isPrediction) {
+            PacketEntity reachEntity, List<Vec3> fromCandidates, AttackReach reach, boolean isPrediction) {
         return checkReach(
                 getReachBox(reachEntity),
+                getReachSize(reachEntity),
                 reachEntity.type,
                 reachEntity.isLivingEntity(),
                 isReachExempt(reachEntity),
@@ -314,28 +320,41 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         return reachBox;
     }
 
+    // The size of each possible box getReachBox spans, at most its real size.
+    private Vec3 getReachSize(PacketEntity reachEntity) {
+        if (reachEntity.type == EntityTypeIds.END_CRYSTAL) return new Vec3(2, 2, 2);
+        double width = Math.max(
+                BoundingBoxSize.getWidth(player, reachEntity), BoundingBoxSize.getReachWidth(player, reachEntity));
+        double height = Math.max(
+                BoundingBoxSize.getHeight(player, reachEntity), BoundingBoxSize.getReachHeight(player, reachEntity));
+        return new Vec3(width, height, width);
+    }
+
     private String checkReach(
             SimpleCollisionBox targetBox,
+            Vec3 targetSize,
             int type,
             boolean livingEntity,
             boolean exempt,
-            Collection<Vec3> fromCandidates,
+            List<Vec3> fromCandidates,
             AttackReach reach,
             boolean isPrediction) {
         targetBox = targetBox.copy();
         targetBox.expand(threshold);
         targetBox.expand(player.getMovementThreshold());
 
-        Measure best = bestMeasure(targetBox, fromCandidates, reach, isPrediction);
+        measureBest(targetBox, targetSize, fromCandidates, reach, isPrediction);
 
         // if the entity is not exempt and the entity is alive
         if ((!exempt && livingEntity) || type == EntityTypeIds.END_CRYSTAL) {
-            if (best.distance() == Double.POSITIVE_INFINITY) {
+            if (bestDistance == Double.POSITIVE_INFINITY) {
                 cancelBuffer = 1;
                 return "Missed hitbox";
-            } else if (best.excess() > 0) {
+            } else if (excess() > 0) {
                 cancelBuffer = 1;
-                return String.format("%.5f blocks, max=%.5f", best.distance(), best.limit());
+                return bestFar < bestMin
+                        ? String.format("%.5f blocks, min=%.5f", bestFar, bestMin)
+                        : String.format("%.5f blocks, max=%.5f", bestDistance, bestMax);
             } else {
                 cancelBuffer = Math.max(0, cancelBuffer - 0.25);
             }
@@ -344,71 +363,481 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         return null;
     }
 
-    /** The least-flagging measure of the look against {@code targetBox} from the eyes at {@code fromCandidates}. */
-    private Measure bestMeasure(
-            SimpleCollisionBox targetBox, Collection<Vec3> fromCandidates, AttackReach reach, boolean isPrediction) {
-        Measure best = Measure.NONE;
+    /** Measures the least-flagging selection of the look at {@code targetBox} from the eyes at {@code fromCandidates}. */
+    private void measureBest(
+            SimpleCollisionBox targetBox,
+            Vec3 targetSize,
+            List<Vec3> fromCandidates,
+            AttackReach reach,
+            boolean isPrediction) {
+        this.targetSize = targetSize;
+        bestDistance = Double.POSITIVE_INFINITY;
+        bestFar = Double.POSITIVE_INFINITY;
+        bestMin = Double.NEGATIVE_INFINITY;
+        bestMax = 0;
 
-        List<Vector3dm> possibleLookDirs = new ArrayList<>();
-        possibleLookDirs.add(ReachUtils.getLook(player, player.xRot, player.yRot));
-
+        int lookCount = addLook(0, player.xRot, player.yRot);
         // If we are a tick behind, we don't know their next look so don't bother doing this
         if (!isPrediction) {
-            possibleLookDirs.add(ReachUtils.getLook(player, player.lastTickXRot, player.lastTickYRot));
+            lookCount = addLook(lookCount, player.lastTickXRot, player.lastTickYRot);
         }
 
-        for (Vector3dm lookVec : possibleLookDirs) {
-            for (Vec3 from : fromCandidates) {
+        // The item ray looks along Entity#getHeadLookAngle: the pitch, with the yaw of LocalPlayer#yHeadRot.
+        int viewLooks = lookCount;
+        boolean headArc = false;
+        if (!reach.picks().isEmpty()) {
+            lookCount = addLook(lookCount, player.headYaw, player.yRot);
+            if (!Float.isNaN(player.unclampedHeadYaw)) {
+                lookCount = addLook(lookCount, player.unclampedHeadYaw, player.yRot);
+            }
+            headArc = !Float.isNaN(player.headArcFrom);
+        }
+
+        double scale = player.getScale();
+        for (int look = 0; look < lookCount; look++) {
+            double lookX = looks[look * 3];
+            double lookY = looks[look * 3 + 1];
+            double lookZ = looks[look * 3 + 2];
+            for (int candidate = 0; candidate < fromCandidates.size(); candidate++) {
+                Vec3 from = fromCandidates.get(candidate);
                 if (from == null) {
                     continue;
                 }
-                for (double eye : player.getPossibleEyeHeights()) {
-                    Vector3dm eyePos = new Vector3dm(from.x, from.y + eye, from.z);
-                    best = best.better(measure(targetBox, eyePos, lookVec, reach));
-                    if (best.distance() == 0) break;
+                for (double height : EYE_HEIGHTS) {
+                    double eyeY = from.y + height * scale;
+                    if (look < viewLooks) {
+                        measureView(targetBox, from.x, eyeY, from.z, lookX, lookY, lookZ, reach);
+                    } else {
+                        measureItem(targetBox, from.x, eyeY, from.z, lookX, lookY, lookZ, reach);
+                    }
+                    if (bestDistance == 0 && excess() <= 0) return;
                 }
-                if (best.distance() == 0) break;
             }
-            if (best.distance() == 0) break;
         }
-
-        return best;
+        if (headArc) measureHeadArc(targetBox, fromCandidates, reach, scale, lookCount);
     }
 
-    // The least-flagging vanilla selection from one eye and look: Minecraft#pick, then Minecraft#startAttack.
-    private Measure measure(SimpleCollisionBox targetBox, Vector3dm eyePos, Vector3dm lookVec, AttackReach reach) {
-        // AttackRange#isInRange measures to a point on the target box, never nearer than its closest point.
-        Measure itemLimit = Measure.NONE;
+    // Of the head yaws the arc allows, the one nearest the yaw from each eye to the target's center.
+    private void measureHeadArc(
+            SimpleCollisionBox targetBox, List<Vec3> fromCandidates, AttackReach reach, double scale, int slot) {
+        double centerX = (targetBox.minX + targetBox.maxX) / 2.0;
+        double centerZ = (targetBox.minZ + targetBox.maxZ) / 2.0;
+        float from = player.headArcFrom;
+        float length = player.headArcLength;
+        for (int candidate = 0; candidate < fromCandidates.size(); candidate++) {
+            Vec3 eye = fromCandidates.get(candidate);
+            if (eye == null) {
+                continue;
+            }
+            float aim = (float) Math.toDegrees(Math.atan2(eye.x - centerX, centerZ - eye.z));
+            float into = aim - from;
+            into -= 360.0F * (float) Math.floor(into / 360.0F);
+            float yaw = into <= length ? from + into : into - length < 360.0F - into ? from + length : from;
+            addLook(slot, yaw, player.yRot);
+            double lookX = looks[slot * 3];
+            double lookY = looks[slot * 3 + 1];
+            double lookZ = looks[slot * 3 + 2];
+            for (double height : EYE_HEIGHTS) {
+                measureItem(targetBox, eye.x, eye.y + height * scale, eye.z, lookX, lookY, lookZ, reach);
+                if (bestDistance == 0 && excess() <= 0) return;
+            }
+        }
+    }
+
+    // ReachUtils#getLook, into looks.
+    private int addLook(int count, float yaw, float pitch) {
+        float pitchRadians = pitch * ((float) Math.PI / 180F);
+        float yawRadians = -yaw * ((float) Math.PI / 180F);
+        float cosPitch = player.trigHandler.cos(pitchRadians);
+        looks[count * 3] = player.trigHandler.sin(yawRadians) * cosPitch;
+        looks[count * 3 + 1] = -player.trigHandler.sin(pitchRadians);
+        looks[count * 3 + 2] = player.trigHandler.cos(yawRadians) * cosPitch;
+        return count + 1;
+    }
+
+    private double excess() {
+        return Math.max(bestDistance - bestMax, bestMin - bestFar);
+    }
+
+    // The maximum bounds the nearest possible hit and the minimum the farthest.
+    private void consider(double distance, double far, double min, double max) {
+        if (Math.max(distance - max, min - far) < excess()) {
+            bestDistance = distance;
+            bestFar = far;
+            bestMin = min;
+            bestMax = max;
+        }
+    }
+
+    // LocalPlayer#pick hits the box along the view within entity_interaction_range; Minecraft#startAttack bounds
+    // that hit by the main hand's AttackRange#isInRange.
+    private void measureView(
+            SimpleCollisionBox box,
+            double eyeX,
+            double eyeY,
+            double eyeZ,
+            double lookX,
+            double lookY,
+            double lookZ,
+            AttackReach reach) {
+        double length = reach.entityRange() + 3;
+        double scale = length / Math.sqrt(lookX * lookX + lookY * lookY + lookZ * lookZ);
+        double dx = lookX * scale;
+        double dy = lookY * scale;
+        double dz = lookZ * scale;
+        double hit = contains(box, eyeX, eyeY, eyeZ) ? 0 : clip(box, 0, eyeX, eyeY, eyeZ, dx, dy, dz);
+        if (Double.isNaN(hit)) return;
+        double distance = distance(eyeX, eyeY, eyeZ, eyeX + hit * dx, eyeY + hit * dy, eyeZ + hit * dz);
+        double far = farthest(box, 0, distance, eyeX, eyeY, eyeZ, eyeX, eyeY, eyeZ, dx, dy, dz);
         if (reach.hasItemLimit()) {
-            Vector3dm closest = VectorUtils.cutBoxToVector(eyePos, targetBox);
-            itemLimit = new Measure(eyePos.distance(closest), reach.itemLimit());
+            consider(distance, far, reach.itemMin(), Math.min(reach.entityRange(), reach.itemLimit()));
+        } else {
+            consider(distance, far, Double.NEGATIVE_INFINITY, reach.entityRange());
         }
-
-        // LocalPlayer#pick: the entity_interaction_range ray against the target box.
-        Measure best = Measure.NONE;
-        double rawHit = intercept(targetBox, eyePos, lookVec, reach.entityRange() + 3);
-        if (rawHit != Double.POSITIVE_INFINITY) {
-            Measure pick = new Measure(rawHit, reach.entityRange());
-            best = reach.hasItemLimit() ? pick.worse(itemLimit) : pick;
-        }
-
-        // AttackRange#getClosesetHit: the item ray against the box inflated by its hitbox margin.
-        for (ClientVisibility.ItemPick itemPick : reach.picks()) {
-            double rayLength = lookVec.length() * itemPick.rayScale();
-            SimpleCollisionBox marginBox = targetBox.copy().expand(itemPick.hitboxMargin());
-            double itemHit = intercept(marginBox, eyePos, lookVec, rayLength + 3);
-            if (itemHit == Double.POSITIVE_INFINITY) continue;
-            Measure pick = new Measure(itemHit, rayLength);
-            best = best.better(reach.hasItemLimit() ? pick.worse(itemLimit) : pick);
-        }
-        return best;
     }
 
-    private static double intercept(SimpleCollisionBox box, Vector3dm eyePos, Vector3dm lookVec, double length) {
-        if (ReachUtils.isVecInside(box, eyePos)) return 0;
-        Vector3dm end = eyePos.clone().add(lookVec.clone().multiply(length / lookVec.length()));
-        Vector3dm intercept = ReachUtils.calculateIntercept(box, eyePos, end).getFirst();
-        return intercept == null ? Double.POSITIVE_INFINITY : eyePos.distance(intercept);
+    // AttackRange#getClosesetHit: where ProjectileUtil#getHitEntitiesAlong's segment from rayStart to rayEnd plus the
+    // known movement along the look hits the box, in the segment's direction; Minecraft#startAttack bounds that hit by
+    // the main hand's AttackRange#isInRange.
+    private void measureItem(
+            SimpleCollisionBox box,
+            double eyeX,
+            double eyeY,
+            double eyeZ,
+            double lookX,
+            double lookY,
+            double lookZ,
+            AttackReach reach) {
+        double min = reach.hasItemLimit() ? reach.itemMin() : Double.NEGATIVE_INFINITY;
+        double max = reach.hasItemLimit() ? reach.itemLimit() : Double.POSITIVE_INFINITY;
+        List<ClientVisibility.ItemPick> picks = reach.picks();
+        for (int i = 0; i < picks.size(); i++) {
+            ClientVisibility.ItemPick pick = picks.get(i);
+            double fromX = eyeX + lookX * pick.rayStart();
+            double fromY = eyeY + lookY * pick.rayStart();
+            double fromZ = eyeZ + lookZ * pick.rayStart();
+            if (contains(box, fromX, fromY, fromZ)) {
+                double distance = distance(eyeX, eyeY, eyeZ, fromX, fromY, fromZ);
+                double length = pick.rayEnd() - pick.rayStart();
+                double far = farthest(
+                        box,
+                        pick.hitboxMargin(),
+                        distance,
+                        eyeX,
+                        eyeY,
+                        eyeZ,
+                        fromX,
+                        fromY,
+                        fromZ,
+                        lookX * length,
+                        lookY * length,
+                        lookZ * length);
+                consider(distance, far, min, max);
+                continue;
+            }
+
+            double[] movements = pick.movements();
+            for (int m = 0; m < movements.length; m += 3) {
+                double along = movements[m] * lookX + movements[m + 1] * lookY + movements[m + 2] * lookZ;
+                double end = pick.rayEnd() + Math.max(0.0, along);
+                double dx = eyeX + lookX * end - fromX;
+                double dy = eyeY + lookY * end - fromY;
+                double dz = eyeZ + lookZ * end - fromZ;
+                if (hitAlong(box, pick.hitboxMargin(), fromX, fromY, fromZ, dx, dy, dz)) {
+                    double distance = distance(eyeX, eyeY, eyeZ, hitX, hitY, hitZ);
+                    double far = farthest(
+                            box, pick.hitboxMargin(), distance, eyeX, eyeY, eyeZ, fromX, fromY, fromZ, dx, dy, dz);
+                    consider(distance, far, min, max);
+                } else if (!measureInsideMargin(
+                        box, pick.hitboxMargin(), eyeX, eyeY, eyeZ, fromX, fromY, fromZ, dx, dy, dz, min, max)) {
+                    measureShort(box, pick, fromX, fromY, fromZ, eyeX, eyeY, eyeZ, lookX, lookY, lookZ, end);
+                }
+            }
+        }
+    }
+
+    // A move starting within margin of box but outside it can still enter the margin of a box of targetSize within box
+    // and hit it by projection: such a hit lies in box, so box's nearest point bounds it for the maximum.
+    private boolean measureInsideMargin(
+            SimpleCollisionBox box,
+            float margin,
+            double eyeX,
+            double eyeY,
+            double eyeZ,
+            double x,
+            double y,
+            double z,
+            double dx,
+            double dy,
+            double dz,
+            double min,
+            double max) {
+        if (margin <= 0 || !contains(box.copy().expand(margin), x, y, z)) return false;
+        if (Double.isNaN(farthestEntry(box, margin, x, y, z, dx, dy, dz))) return false;
+        double nearX = Math.max(box.minX, Math.min(eyeX, box.maxX));
+        double nearY = Math.max(box.minY, Math.min(eyeY, box.maxY));
+        double nearZ = Math.max(box.minZ, Math.min(eyeZ, box.maxZ));
+        double distance = distance(eyeX, eyeY, eyeZ, nearX, nearY, nearZ);
+        consider(distance, farthest(box, margin, distance, eyeX, eyeY, eyeZ, x, y, z, dx, dy, dz), min, max);
+        return true;
+    }
+
+    // A hit just past the end of a segment that missed measures how far the segment fell short.
+    private void measureShort(
+            SimpleCollisionBox box,
+            ClientVisibility.ItemPick pick,
+            double fromX,
+            double fromY,
+            double fromZ,
+            double eyeX,
+            double eyeY,
+            double eyeZ,
+            double lookX,
+            double lookY,
+            double lookZ,
+            double end) {
+        double past = Math.max(end, pick.rayStart()) + 3;
+        double scale = clip(
+                box,
+                pick.hitboxMargin(),
+                fromX,
+                fromY,
+                fromZ,
+                eyeX + lookX * past - fromX,
+                eyeY + lookY * past - fromY,
+                eyeZ + lookZ * past - fromZ);
+        if (Double.isNaN(scale)) return;
+        double lookLength = Math.sqrt(lookX * lookX + lookY * lookY + lookZ * lookZ);
+        double along = pick.rayStart() + scale * (past - pick.rayStart());
+        consider(lookLength * along, lookLength * along, Double.NEGATIVE_INFINITY, lookLength * end);
+    }
+
+    // The farthest from the eye that the move hits a box of targetSize within box, either directly or within margin of
+    // it, and at least distance.
+    private double farthest(
+            SimpleCollisionBox box,
+            float margin,
+            double distance,
+            double eyeX,
+            double eyeY,
+            double eyeZ,
+            double x,
+            double y,
+            double z,
+            double dx,
+            double dy,
+            double dz) {
+        double far = distance;
+        double scale = farthestEntry(box, 0, x, y, z, dx, dy, dz);
+        if (!Double.isNaN(scale)) {
+            far = Math.max(far, distance(eyeX, eyeY, eyeZ, x + scale * dx, y + scale * dy, z + scale * dz));
+        }
+        if (margin > 0) far = Math.max(far, farthestProjected(box, margin, eyeX, eyeY, eyeZ, x, y, z, dx, dy, dz));
+        return far;
+    }
+
+    // ProjectileUtil#getManyEntityHitResult moves a hit only within the margin from the margin's entry toward the
+    // target's center until it meets the target: the largest over the axes of 1 - half size / the entry's distance from
+    // the center, which lies between the least and greatest gaps of their ranges, and at most half size plus margin.
+    // The entries lie between the move's entry into box grown by margin, or its start when that lies inside, and its
+    // latest entry into a box of targetSize grown by margin, and the centers within half the size of box's sides and
+    // half the size plus margin of the entries.
+    private double farthestProjected(
+            SimpleCollisionBox box,
+            double margin,
+            double eyeX,
+            double eyeY,
+            double eyeZ,
+            double x,
+            double y,
+            double z,
+            double dx,
+            double dy,
+            double dz) {
+        double early = clip(box, margin, x, y, z, dx, dy, dz);
+        if (Double.isNaN(early)) {
+            if (!contains(box.copy().expand(margin), x, y, z)) return Double.NEGATIVE_INFINITY;
+            early = 0;
+        }
+        double late = farthestEntry(box, margin, x, y, z, dx, dy, dz);
+        if (Double.isNaN(late)) late = early;
+        double shareLow = 0;
+        double share = 0;
+        double sum = 0;
+        // The first pass bounds the share over the axes, the second the hit with it.
+        for (int pass = 0; pass < 2; pass++) {
+            for (int axis = 0; axis < 3; axis++) {
+                double from = axis(axis, x, y, z);
+                double move = axis(axis, dx, dy, dz);
+                double boxLow = axis(axis, box.minX, box.minY, box.minZ);
+                double boxHigh = axis(axis, box.maxX, box.maxY, box.maxZ);
+                double half = axis(axis, targetSize.x, targetSize.y, targetSize.z) / 2;
+                double entryLow = Math.min(from + early * move, from + late * move);
+                double entryHigh = Math.max(from + early * move, from + late * move);
+                double centerLow = Math.max(boxLow + half, entryLow - half - margin);
+                double centerHigh = Math.min(boxHigh - half, entryHigh + half + margin);
+                if (centerLow > centerHigh) centerLow = centerHigh = (centerLow + centerHigh) / 2;
+                if (pass == 0) {
+                    double apart = Math.min(
+                            half + margin, Math.max(Math.abs(centerHigh - entryLow), Math.abs(entryHigh - centerLow)));
+                    if (apart > half) share = Math.max(share, 1 - half / apart);
+                    double nearest = Math.max(0, Math.max(centerLow - entryHigh, entryLow - centerHigh));
+                    if (nearest > half) shareLow = Math.max(shareLow, 1 - half / nearest);
+                    continue;
+                }
+                double low = Math.max(
+                        boxLow,
+                        Math.min(
+                                entryLow + shareLow * (centerLow - entryLow),
+                                entryLow + share * (centerLow - entryLow)));
+                double high = Math.min(
+                        boxHigh,
+                        Math.max(
+                                entryHigh + shareLow * (centerHigh - entryHigh),
+                                entryHigh + share * (centerHigh - entryHigh)));
+                double eye = axis(axis, eyeX, eyeY, eyeZ);
+                double offset = Math.max(Math.abs(low - eye), Math.abs(high - eye));
+                sum += offset * offset;
+            }
+        }
+        return Math.sqrt(sum);
+    }
+
+    // The latest fraction of the move at which it enters a box of targetSize, both grown by margin, that lies within
+    // box grown by margin; NaN when it enters none. The face it enters through lies between the near side and the size
+    // short of the far side.
+    private double farthestEntry(
+            SimpleCollisionBox box, double margin, double x, double y, double z, double dx, double dy, double dz) {
+        double latest = Double.NaN;
+        for (int entering = 0; entering < 3; entering++) {
+            if (Math.abs(axis(entering, dx, dy, dz)) <= 1.0E-7) continue;
+            double enter = 0;
+            double exit = 1;
+            for (int axis = 0; axis < 3 && enter <= exit; axis++) {
+                double low = axis(axis, box.minX, box.minY, box.minZ) - margin;
+                double high = axis(axis, box.maxX, box.maxY, box.maxZ) + margin;
+                double from = axis(axis, x, y, z);
+                double move = axis(axis, dx, dy, dz);
+                if (axis == entering) {
+                    double size = axis(axis, targetSize.x, targetSize.y, targetSize.z) + 2 * margin;
+                    double inset = Math.min(size, high - low);
+                    if (move > 0) high -= inset;
+                    else low += inset;
+                }
+                if (Math.abs(move) <= 1.0E-7) {
+                    if (from < low || from > high) enter = Double.POSITIVE_INFINITY;
+                    continue;
+                }
+                double a = (low - from) / move;
+                double b = (high - from) / move;
+                enter = Math.max(enter, Math.min(a, b));
+                exit = Math.min(exit, Math.max(a, b));
+            }
+            if (enter <= exit && !(latest >= exit)) latest = exit;
+        }
+        return latest;
+    }
+
+    private static double axis(int axis, double x, double y, double z) {
+        return axis == 0 ? x : axis == 1 ? y : z;
+    }
+
+    // ProjectileUtil#getManyEntityHitResult: the box's entry, or else the margin's entry projected toward the box's
+    // center, into hitX, hitY and hitZ.
+    private boolean hitAlong(
+            SimpleCollisionBox box,
+            float margin,
+            double fromX,
+            double fromY,
+            double fromZ,
+            double dx,
+            double dy,
+            double dz) {
+        double scale = clip(box, 0, fromX, fromY, fromZ, dx, dy, dz);
+        if (Double.isNaN(scale) && margin > 0) {
+            scale = clip(box, margin, fromX, fromY, fromZ, dx, dy, dz);
+            if (Double.isNaN(scale)) return false;
+            fromX += scale * dx;
+            fromY += scale * dy;
+            fromZ += scale * dz;
+            dx = box.minX + 0.5 * (box.maxX - box.minX) - fromX;
+            dy = box.minY + 0.5 * (box.maxY - box.minY) - fromY;
+            dz = box.minZ + 0.5 * (box.maxZ - box.minZ) - fromZ;
+            scale = clip(box, 0, fromX, fromY, fromZ, dx, dy, dz);
+        }
+        if (Double.isNaN(scale)) return false;
+        hitX = fromX + scale * dx;
+        hitY = fromY + scale * dy;
+        hitZ = fromZ + scale * dz;
+        return true;
+    }
+
+    // AABB#contains.
+    private static boolean contains(SimpleCollisionBox box, double x, double y, double z) {
+        return x >= box.minX && x < box.maxX && y >= box.minY && y < box.maxY && z >= box.minZ && z < box.maxZ;
+    }
+
+    // AABB#clip on the box grown by margin: the fraction of the move at which it enters, NaN when it doesn't.
+    private static double clip(
+            SimpleCollisionBox box, double margin, double x, double y, double z, double dx, double dy, double dz) {
+        double minX = box.minX - margin;
+        double minY = box.minY - margin;
+        double minZ = box.minZ - margin;
+        double maxX = box.maxX + margin;
+        double maxY = box.maxY + margin;
+        double maxZ = box.maxZ + margin;
+        double scale = 1;
+        if (dx > 1.0E-7) {
+            scale = clipFace(scale, minX, x, dx, y, dy, minY, maxY, z, dz, minZ, maxZ);
+        } else if (dx < -1.0E-7) {
+            scale = clipFace(scale, maxX, x, dx, y, dy, minY, maxY, z, dz, minZ, maxZ);
+        }
+        if (dy > 1.0E-7) {
+            scale = clipFace(scale, minY, y, dy, z, dz, minZ, maxZ, x, dx, minX, maxX);
+        } else if (dy < -1.0E-7) {
+            scale = clipFace(scale, maxY, y, dy, z, dz, minZ, maxZ, x, dx, minX, maxX);
+        }
+        if (dz > 1.0E-7) {
+            scale = clipFace(scale, minZ, z, dz, x, dx, minX, maxX, y, dy, minY, maxY);
+        } else if (dz < -1.0E-7) {
+            scale = clipFace(scale, maxZ, z, dz, x, dx, minX, maxX, y, dy, minY, maxY);
+        }
+        return scale < 1 ? scale : Double.NaN;
+    }
+
+    // AABB#clipPoint.
+    private static double clipFace(
+            double scale,
+            double face,
+            double a,
+            double da,
+            double b,
+            double db,
+            double minB,
+            double maxB,
+            double c,
+            double dc,
+            double minC,
+            double maxC) {
+        double s = (face - a) / da;
+        double pb = b + s * db;
+        double pc = c + s * dc;
+        return 0 < s
+                        && s < scale
+                        && minB - 1.0E-7 < pb
+                        && pb < maxB + 1.0E-7
+                        && minC - 1.0E-7 < pc
+                        && pc < maxC + 1.0E-7
+                ? s
+                : scale;
+    }
+
+    // Vec3#distanceToSqr from the hit to the eye, as AttackRange#isInRange measures it.
+    private static double distance(double eyeX, double eyeY, double eyeZ, double x, double y, double z) {
+        double dx = x - eyeX;
+        double dy = y - eyeY;
+        double dz = z - eyeZ;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     private boolean isReachExempt(PacketEntity reachEntity) {

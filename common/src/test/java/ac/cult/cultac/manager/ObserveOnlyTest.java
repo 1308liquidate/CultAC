@@ -326,6 +326,7 @@ class ObserveOnlyTest {
             CultPlayer player = mock(CultPlayer.class);
             player.noModifyPacketPermission = mode[1];
             player.gamemode = GameMode.SURVIVAL;
+            player.packetStateData = new PacketStateData();
             when(player.getSetbackTeleportUtil()).thenReturn(mock(SetbackTeleportUtil.class));
             when(player.getClientVersion()).thenReturn(ClientVersion.V_1_21_2);
             CompensatedEntities entities = mock(CompensatedEntities.class);
