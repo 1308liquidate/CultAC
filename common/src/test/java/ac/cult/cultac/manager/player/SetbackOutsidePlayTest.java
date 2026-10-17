@@ -66,6 +66,31 @@ class SetbackOutsidePlayTest {
     }
 
     @Test
+    void aResyncRequestedWithoutALevelDoesNotBlockMovement() {
+        withPlayer(player -> {
+            player.user.getCultConnection().placedClientbound(ClientboundPackets.START_CONFIGURATION);
+
+            player.getSetbackTeleportUtil().executeForceResync("phase");
+
+            assertNull(player.getSetbackTeleportUtil().getRequiredSetBack());
+            assertFalse(player.getSetbackTeleportUtil().blockOffsets, "no teleport is tracked to release it");
+        });
+    }
+
+    @Test
+    void leavingTheLevelReleasesAResyncBlock() {
+        withPlayer(player -> {
+            player.getSetbackTeleportUtil().executeForceResync("phase");
+            assertTrue(player.getSetbackTeleportUtil().blockOffsets);
+
+            player.user.getCultConnection().placedClientbound(ClientboundPackets.START_CONFIGURATION);
+            new PacketPlayerRespawn().onStartConfiguration(null, player, null);
+
+            assertFalse(player.getSetbackTeleportUtil().blockOffsets);
+        });
+    }
+
+    @Test
     void aSetbackQueuedInPlayIsNotSentOnceTheClientHasLeftItsLevel() {
         withPlayer(player -> {
             CultConnection connection = player.user.getCultConnection();

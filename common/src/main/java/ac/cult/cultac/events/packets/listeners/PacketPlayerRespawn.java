@@ -208,8 +208,7 @@ public class PacketPlayerRespawn {
         // (We won't process movements until they accept a teleport, we won't let movements though either)
         // Also invalidate previous positions
         final ac.cult.cultac.manager.player.SetbackTeleportUtil setbacks = player.getSetbackTeleportUtil();
-        setbacks.hasFullyLoaded = false;
-        setbacks.lastKnownGoodPosition = null;
+        setbacks.respawnSent();
 
         if (worldChange) {
             player.compensatedEntities.serverPositionsMap.clear();

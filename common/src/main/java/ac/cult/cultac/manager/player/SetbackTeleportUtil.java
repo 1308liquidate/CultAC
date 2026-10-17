@@ -309,10 +309,24 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         lastKnownGoodPosition = null;
         hasFullyLoaded = false;
         requiredSetBack = null;
+        blockOffsets = false;
+    }
+
+    /**
+     * A respawn discards the player a setback corrected; the server's placement teleport positions the new one and
+     * movement stays blocked until the client accepts it.
+     */
+    public void respawnSent() {
+        lastKnownGoodPosition = null;
+        hasFullyLoaded = false;
+        blockOffsets = false;
     }
 
     public boolean executeTooHighLatencySetback(String cause) {
         if (isExempt()) return false;
+        // Latency is measured by movement: a dead client's movement is cancelled before prediction, and a client
+        // that has not accepted its placement teleport has no movement to send yet.
+        if (player.compensatedEntities.getSelf().isDead || !hasFullyLoaded) return false;
         if (player.getSetbackTeleportUtil().debug) {
             LogUtil.warn("Setback sent to " + player.getName() + ", high latency, " + cause);
         }
@@ -488,11 +502,6 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             clientVel = null;
         } // if the player hasn't spawned... don't force kb
 
-        // Something weird has occurred in the player's movement, block offsets until we resync
-        if (fullResync) {
-            blockOffsets = true;
-        }
-
         if (debug) {
             LogUtil.info("Teleported " + player.getName() + " to " + position + " with vel " + clientVel + " using "
                     + simulateNext + " " + fullResync + " " + ignoreUnchanged);
@@ -508,6 +517,11 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 expectedOnGround,
                 profileState);
         sendSetback(data, simulateNext);
+        // Something weird has occurred in the player's movement, block offsets until the client accepts this
+        // setback. Only its acceptance clears the block, so a setback that was never tracked must not raise it.
+        if (fullResync && requiredSetBack == data) {
+            blockOffsets = true;
+        }
         if (debug) {
             LogUtil.info(
                     "Teleport sent | resync=" + fullResync + ", infc=" + ignoreUnchanged + ", simNext=" + simulateNext);
@@ -577,7 +591,10 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         if (!player.canSendPlayPackets()) return;
         if (!player.user.getCultConnection().clientHasLevel()) {
             // A client without a level cannot take a teleport; the play login that gives it one places it anew.
-            if (requiredSetBack == data) requiredSetBack = null;
+            if (requiredSetBack == data) {
+                requiredSetBack = null;
+                blockOffsets = false;
+            }
             return;
         }
         if (!player.isBedrockMovement() && !player.user.isPreparingWrites()) {
@@ -1842,7 +1859,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 return;
             }
             // This will activate the velocity part of this check
-            final String latencyReason = "move, " + elapsed + TimeUnit.NANOSECONDS.toMillis(elapsed) + "ms";
+            final String latencyReason = "move, " + TimeUnit.NANOSECONDS.toMillis(elapsed) + "ms";
             executeTooHighLatencySetback(latencyReason);
         }
     }
