@@ -77,6 +77,45 @@ The native plugin stays loaded while each anticheat generation runs in its own c
 2. Run `/cult update <filename.jar>` with `cult.update` permission.
 3. Run `/cult runtimes` with `cult.runtimes` permission to see current and draining generations.
 
+### Numbered builds on Velocity
+
+Every push to `main`, `release/**` and `experimental` is built as build N and published as the GitHub prerelease
+`build-N`, with `cultac-velocity.jar`, `cultac-companion.jar`, `cultac-bukkit.jar` and a signed `manifest.json`.
+The version reads `0.1.0-b<N>-<branch>-<commit>`. From the proxy console, or with `cult.update` permission:
+
+* `/cult update <N>` installs build N without a restart;
+* `/cult update latest [branch]` installs the newest build of a branch, by default the branch the plugin was built from;
+* `/cult update builds [branch]` lists the newest builds and marks the running one;
+* `/cult update <filename.jar>` still installs a jar from the `updates/` folder.
+
+The loader downloads the manifest and its Ed25519 signature from the release, verifies the signature, then downloads
+the jar from the same release, checking its size and sha256, and hot-swaps it. A build that needs another loader
+version is refused with "needs a proxy restart"; install its jar and restart. Each install ends in one console line,
+such as `b141 → b142 (main abc1234), 3 players draining`. Players move to the new build on their next server switch or
+reconnect.
+
+The installed build number is kept in a state file. On the next start, the loader fetches and verifies that build
+before it activates a runtime, for at most 10 seconds, and starts the bundled build after one warning if that fails.
+Installing a jar with `/cult update <filename.jar>` forgets the number.
+
+The settings live in the `update` section of the plugin's `config.yml`. Each environment variable wins over its key.
+
+| Key | Environment variable | Default |
+| --- | --- | --- |
+| `update.repository` | `CULTAC_UPDATE_REPOSITORY` | the `owner/repo` the plugin was built from |
+| `update.public-key` | `CULTAC_UPDATE_PUBKEY` | the official signing key; a fork that signs its own builds sets its own |
+| `update.token` | `CULTAC_UPDATE_TOKEN` | none; sent only to `api.github.com`, which allows 60 anonymous requests an hour |
+| `update.webhook` | `CULTAC_UPDATE_WEBHOOK` | none; a Discord-style webhook that receives each install line |
+| `update.state-file` | `CULTAC_UPDATE_STATE` | `update-state.json` in the plugin data directory |
+| `update.build` | `CULTAC_UPDATE_BUILD` | none; the build to start on boot while the state file names none |
+
+```yaml
+update:
+  repository: CultAC/CultAC
+  webhook: ""
+  build: 142
+```
+
 ## Compiling From Source
 
 Install JDK 25 and Git, and set `JAVA_HOME` to the JDK 25 installation.

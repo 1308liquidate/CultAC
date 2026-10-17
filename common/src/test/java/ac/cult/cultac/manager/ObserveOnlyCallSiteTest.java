@@ -290,6 +290,7 @@ class ObserveOnlyCallSiteTest {
             player/CultPlayer.java#disconnect(Component) closeConnection
             player/CultPlayer.java#disconnect(Component) disconnectPacket
             player/CultPlayer.java#disconnect(Component) kickPlayer
+            reload/host/BuildUpdates.java#onNext(List) cancel x2
             [] the companion runs a proxy request; each proxy caller is listed
             companion/api/ApiModule.java#dispatchConsole(JavaPlugin,String) dispatchCommand
             companion/bridge/BridgeInjector.java#install() inject x2
