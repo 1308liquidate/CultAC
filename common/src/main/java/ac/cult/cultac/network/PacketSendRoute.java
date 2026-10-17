@@ -40,6 +40,10 @@ public final class PacketSendRoute<R> {
         return handlers.length == 0;
     }
 
+    public boolean hasConnectionHandlers() {
+        return connectionHandlers.length != 0;
+    }
+
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void dispatch(PacketSendEvent<?> event, CultPlayer player, R packet) {
         for (PacketSendHandler<? super R> handler : handlers) {

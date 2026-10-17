@@ -55,8 +55,9 @@ final class TestTransportRoutes {
     @SuppressWarnings({"unchecked", "rawtypes"})
     <R extends ClientboundPacket> void send(PacketType<R> type, Consumer<PacketSendEvent<R>> callback) {
         PacketSendHandler<Object> handler = (event, player, packet) -> callback.accept((PacketSendEvent) event);
-        entries[runtime.slot(type)] =
-                new PacketDispatcher.Route(type, null, PacketSendRoute.of(new PacketSendHandler[] {handler}));
+        // These routes dispatch without a player, so they are connection handlers.
+        PacketSendHandler<Object>[] handlers = new PacketSendHandler[] {handler};
+        entries[runtime.slot(type)] = new PacketDispatcher.Route(type, null, PacketSendRoute.of(handlers, handlers));
         snapshot = new PacketRoutes(runtime, entries);
     }
 }

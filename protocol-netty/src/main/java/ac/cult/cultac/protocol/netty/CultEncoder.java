@@ -322,8 +322,9 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         PacketType<?> forwardedType = null;
         try {
             var values = connection.packets().read(phase, PacketDirection.CLIENTBOUND, bytes, connection, type -> {
-                if (connection.dispatcher().get(type) == null) return false;
-                if (phase != ConnectionPhase.PLAY || tracked()) return true;
+                var route = connection.dispatcher().get(type);
+                if (route == null) return false;
+                if (phase != ConnectionPhase.PLAY || tracked() || route.send().hasConnectionHandlers()) return true;
                 untracked[0] = type;
                 return false;
             });
@@ -386,8 +387,9 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     }
 
     /**
-     * Send routes dispatch only to an attached player, so an untracked connection's play values
-     * would be decoded and discarded; its frames still forward unchanged. The player's model
+     * Send routes without connection handlers dispatch only to an attached player, so an untracked
+     * connection's play values for them would be decoded and discarded; those frames still forward
+     * unchanged. The player's model
      * supplies older-wire world values, so decoding them without one cannot succeed.
      */
     private boolean tracked() {

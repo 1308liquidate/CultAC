@@ -258,7 +258,18 @@ class VelocityClientboundHandlingTest {
                 }
             };
             connection = new CultConnection(channel, dispatcher, ignored -> null);
-            new User(new User.Profile(UUID.randomUUID(), "ProtocolTest"), connection);
+            var user = new User(new User.Profile(UUID.randomUUID(), "ProtocolTest"), connection);
+            // The transport decodes play packets only for a connection with an attached player.
+            try {
+                var userField = CultPlayer.class.getDeclaredField("user");
+                userField.setAccessible(true);
+                userField.set(player, user);
+            } catch (ReflectiveOperationException failure) {
+                throw new AssertionError(failure);
+            }
+            synchronized (connection) {
+                connection.player(player);
+            }
             connection.phase(PacketDirection.CLIENTBOUND, ConnectionPhase.PLAY);
             channel.pipeline().addLast(new ChannelOutboundHandlerAdapter() {
                 @Override
