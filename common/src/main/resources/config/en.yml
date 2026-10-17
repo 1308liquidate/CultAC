@@ -243,6 +243,8 @@ bridge:
 # set and not blank, and an empty proxy-id takes CULTAC_PROXY_ID. docs/cloud-upload.md in CultAC's source says
 # what is uploaded.
 cloud:
+  # false stops the upload, whatever CULTAC_CLOUD_* says; /cult reload applies it.
+  enabled: true
   url: ""
   api-key: ""
   # Each upload socket's server id. {server} is the backend's name on a proxy and this server's own name on a

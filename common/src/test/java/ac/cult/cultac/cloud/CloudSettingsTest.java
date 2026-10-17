@@ -19,6 +19,8 @@ class CloudSettingsTest {
         ConfigManager config = Mockito.mock(ConfigManager.class);
         Mockito.when(config.getStringElse(Mockito.anyString(), Mockito.any()))
                 .thenAnswer(invocation -> strings.getOrDefault(invocation.getArgument(0), invocation.getArgument(1)));
+        Mockito.when(config.getBooleanElse(Mockito.eq("cloud.enabled"), Mockito.anyBoolean()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         return config;
     }
 

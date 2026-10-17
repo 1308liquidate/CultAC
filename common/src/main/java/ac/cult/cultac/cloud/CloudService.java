@@ -72,7 +72,10 @@ public final class CloudService {
         CloudSettings settings = proxy
                 ? CloudSettings.read(config, CloudSettings.PROXY_PROTOCOLS, CloudSettings.DEFAULT_SERVER_ID)
                 : CloudSettings.read(config, CloudSettings.SERVER_PROTOCOLS, CloudSettings.OWN_SERVER_ID);
-        if (settings.url().isEmpty() || settings.apiKey().isEmpty()) {
+        if (!config.getBooleanElse("cloud.enabled", true)) {
+            LogUtil.info("Cloud upload is off: cloud.enabled is false");
+            settings = CloudSettings.OFF;
+        } else if (settings.url().isEmpty() || settings.apiKey().isEmpty()) {
             LogUtil.info("Cloud upload is off: cloud.url and cloud.api-key are not both set");
             settings = CloudSettings.OFF;
         } else if (settings.serverIdTemplate().contains("{proxy}")
