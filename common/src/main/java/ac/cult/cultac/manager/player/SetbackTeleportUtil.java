@@ -310,6 +310,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         hasFullyLoaded = false;
         requiredSetBack = null;
         blockOffsets = false;
+        player.checkManager.getSimulationProcessor().getLastMovementTime().clear();
     }
 
     /**
@@ -320,6 +321,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         lastKnownGoodPosition = null;
         hasFullyLoaded = false;
         blockOffsets = false;
+        // Latency is measured from the next movement of the placed player, not the last one before it died.
+        player.checkManager.getSimulationProcessor().getLastMovementTime().clear();
     }
 
     public boolean executeTooHighLatencySetback(String cause) {
