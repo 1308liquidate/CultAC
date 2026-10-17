@@ -176,6 +176,20 @@ class ObserveOnlyTest {
     }
 
     @Test
+    void aSetbackPendingWhenObserveOnlyStartsIsReleased() throws ReflectiveOperationException {
+        try (var ignored = installConfig(false)) {
+            SetbackTeleportUtil setbacks = ignoreServerTeleport(false).setbacks();
+            setbacks.blockOffsets = true;
+            assertTrue(setbacks.isPendingSetback());
+
+            setbacks.observeOnlyStarted();
+
+            assertFalse(setbacks.isPendingSetback());
+            assertFalse(setbacks.blockOffsets);
+        }
+    }
+
+    @Test
     void worldResyncIsLeftToTheServer() throws ReflectiveOperationException {
         for (boolean observeOnly : new boolean[] {true, false}) {
             CultPlayer player = mock(CultPlayer.class);

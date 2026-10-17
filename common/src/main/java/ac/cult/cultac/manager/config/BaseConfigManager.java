@@ -102,6 +102,8 @@ public class BaseConfigManager {
 
     // initialize the config
     public void load(ConfigManager config) {
+        boolean reloading = this.config != null;
+        boolean wasObserveOnly = observeOnly;
         this.config = config;
 
         int configuredMaxTransactionTime = config.getIntElse("max-transaction-time", 60);
@@ -125,6 +127,12 @@ public class BaseConfigManager {
         observeOnly = resolveObserveOnly(config, System::getenv);
         if (observeOnly) {
             LogUtil.info("Observe-only mode: checks flag and alert; nothing acts on the player or their packets");
+        }
+        if (reloading && observeOnly != wasObserveOnly) {
+            LogUtil.info(
+                    observeOnly
+                            ? "Switched to observe-only; pending setbacks are released"
+                            : "Switched to enforcing; check violations start from zero");
         }
 
         printAlertsToConsole = config.getBooleanElse("alerts.print-to-console", true);
@@ -173,12 +181,15 @@ public class BaseConfigManager {
         bedrockMovementSetbacksEnabled = config.getBooleanElse("cult.checks.bedrock-movement.enable-setbacks", true);
     }
 
-    /** {@code CULTAC_OBSERVE_ONLY} (true/1/yes) when set and not blank, else {@code observe-only}. */
+    /** {@code observe-only} when set, else {@code CULTAC_OBSERVE_ONLY}'s true/1/yes. */
     static boolean resolveObserveOnly(ConfigManager config, Function<String, String> env) {
         String value = env.apply("CULTAC_OBSERVE_ONLY");
-        if (value == null || value.isBlank()) return config.getBooleanElse("observe-only", false);
-        String normalized = value.strip().toLowerCase(Locale.ROOT);
-        return normalized.equals("true") || normalized.equals("1") || normalized.equals("yes");
+        boolean envDefault = value != null
+                && switch (value.strip().toLowerCase(Locale.ROOT)) {
+                    case "true", "1", "yes" -> true;
+                    default -> false;
+                };
+        return config.getBooleanElse("observe-only", envDefault);
     }
 
     // ran on start, can be used to handle things that can't be done while loading
