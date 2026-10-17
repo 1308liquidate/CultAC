@@ -346,6 +346,14 @@ public class SimulationContext {
         return GetBoundingBox.getBoundingBoxFromPosAndSize(end.x, end.y, end.z, getMaxWidth(), getMinHeight());
     }
 
+    public SimpleCollisionBox getFromActualPose() {
+        if (getVehicle() != null) {
+            return getFromMaximumExtent();
+        }
+        return GetBoundingBox.getBoundingBoxFromPosAndSize(
+                start.x, start.y, start.z, pose.width * scale, pose.height * scale);
+    }
+
     public SimpleCollisionBox getToActualPose() {
         if (getVehicle() != null) {
             return getToMaxPose();
