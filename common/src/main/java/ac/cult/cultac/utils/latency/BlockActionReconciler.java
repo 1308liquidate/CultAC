@@ -1,6 +1,7 @@
 package ac.cult.cultac.utils.latency;
 
 import ac.cult.blocksim.SimAction;
+import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.events.packets.blockplace.PlaceHandler;
 import ac.cult.cultac.network.packet.InventoryPackets;
 import ac.cult.cultac.player.CultPlayer;
@@ -50,6 +51,11 @@ public final class BlockActionReconciler {
     }
 
     public void rejectPlace(ServerboundUseItemOn packet) {
+        // Observe-only forwards a rejected action, so the server acknowledges it.
+        if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
+            forwarded(packet.sequence());
+            return;
+        }
         var prediction = PlaceHandler.predictRejectedUseItemOn(player, packet);
         Correction correction = correction(packet.sequence());
         correction.positions.add(packet.blockPosition());
@@ -67,6 +73,10 @@ public final class BlockActionReconciler {
     }
 
     public void rejectDig(ServerboundPlayerAction packet) {
+        if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
+            forwarded(packet.sequence());
+            return;
+        }
         Correction correction = correction(packet.sequence());
         correction.positions.add(packet.position());
         if (packet.action() == PlayerAction.STOP_DESTROY_BLOCK

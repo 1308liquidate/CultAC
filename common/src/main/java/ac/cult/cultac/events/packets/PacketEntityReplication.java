@@ -1,6 +1,7 @@
 package ac.cult.cultac.events.packets;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.prediction.integration.BedrockVehicleControl;
 import ac.cult.cultac.checks.CultProcessor;
 import ac.cult.cultac.checks.impl.combat.FairReach;
@@ -385,7 +386,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     public void resyncTrackedVehicle(@Nullable PacketEntity vehicle) {
-        if (vehicle == null) {
+        if (vehicle == null || CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
             return;
         }
 
@@ -398,7 +399,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private void sendVehicleProtocolResync(VehicleMountResyncState resyncState) {
-        if (!player.canSendPlayPackets()) return;
+        if (!player.canSendPlayPackets() || CultAPI.INSTANCE.getConfigManager().isObserveOnly()) return;
         CultPlayer.TrackedTransaction proof = player.createTrackedTransactionPacketForBundle();
         if (proof == null) {
             return;
@@ -1121,12 +1122,14 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                                 && vehicle.passengers.contains(player.compensatedEntities.playerEntity));
 
         if (removesLocalPlayer) {
-            Vec3 dismountPosition = new Vec3(player.x, player.y, player.z);
-            Vec3 dismountVelocity = Vec3.ZERO;
-            SelfDismountResyncState dismountResyncState = new SelfDismountResyncState(
-                    dismountPosition,
-                    dismountVelocity,
-                    player.getSetbackTeleportUtil().nextTeleportId());
+            // Entity#stopRiding moves nothing on the client; rideTick already zeroed its velocity.
+            SelfDismountResyncState dismountResyncState =
+                    CultAPI.INSTANCE.getConfigManager().isObserveOnly()
+                            ? null
+                            : new SelfDismountResyncState(
+                                    new Vec3(player.x, player.y, player.z),
+                                    Vec3.ZERO,
+                                    player.getSetbackTeleportUtil().nextTeleportId());
             int transaction = transactionForSetPassengers(event, null, dismountResyncState);
             int vehicleId = packet.vehicleId();
             player.compensatedEntities.vehicles.setServerVehicleDismount(vehicleId, transaction);
@@ -1143,7 +1146,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
 
         VehicleMountResyncState mountResyncState = null;
         if (mountsLocalPlayer) {
-            if (shouldResyncVehicleOnMount(vehicle, passengers)) {
+            if (!CultAPI.INSTANCE.getConfigManager().isObserveOnly()
+                    && shouldResyncVehicleOnMount(vehicle, passengers)) {
                 mountResyncState = vehicleMountResyncState(packet.vehicleId());
             }
         }
@@ -1192,7 +1196,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             PacketSendEvent<?> event,
             @Nullable VehicleMountResyncState mountResyncState,
             @Nullable SelfDismountResyncState dismountResyncState) {
-        List<CultWrite> resyncPackets = resyncPackets(mountResyncState, dismountResyncState);
+        List<CultWrite> resyncPackets = CultAPI.INSTANCE.getConfigManager().isObserveOnly()
+                ? List.of()
+                : resyncPackets(mountResyncState, dismountResyncState);
         boolean useDelimiter = !resyncPackets.isEmpty() || useReachBundleDelimiter;
         CultPlayer.TrackedTransaction proof = appendTrailingProofTransaction(event, resyncPackets, useDelimiter);
         return proof == null ? player.lastTransactionSent.get() : proof.transaction();
