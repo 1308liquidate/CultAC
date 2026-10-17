@@ -324,7 +324,8 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             var values = connection.packets().read(phase, PacketDirection.CLIENTBOUND, bytes, connection, type -> {
                 var route = connection.dispatcher().get(type);
                 if (route == null) return false;
-                if (phase != ConnectionPhase.PLAY || tracked() || route.send().hasConnectionHandlers()) return true;
+                if (phase != ConnectionPhase.PLAY || tracked()) return true;
+                if (route.send() != null && route.send().hasConnectionHandlers()) return true;
                 untracked[0] = type;
                 return false;
             });
