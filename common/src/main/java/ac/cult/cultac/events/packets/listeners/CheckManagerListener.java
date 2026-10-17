@@ -2,6 +2,7 @@ package ac.cult.cultac.events.packets.listeners;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.engine.SimItemStack;
+import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.prediction.integration.BedrockVehicleControl;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsVehicle;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
@@ -226,7 +227,9 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
     @CultPacketHandler
     public void onContainerClick(PacketReceiveEvent<InventoryClick> event, CultPlayer player, InventoryClick packet) {
         processGenericReceive(event, player);
-        if (event.isCancelled()) player.getInventory().resyncCancelledClick(packet);
+        // Observe-only forwards a cancelled click to the server.
+        if (event.isCancelled() && !CultAPI.INSTANCE.getConfigManager().isObserveOnly())
+            player.getInventory().resyncCancelledClick(packet);
         else player.getInventory().onClickForwarded(packet);
     }
 
