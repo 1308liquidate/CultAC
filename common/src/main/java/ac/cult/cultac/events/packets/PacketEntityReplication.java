@@ -1030,16 +1030,17 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             var proof = appendTrailingProofTransaction(event);
             Runnable apply = () -> {
                 var received = player.compensatedEntities.getEntity(entityId);
-                if (received != null && received.isLivingEntity() && received.type != EntityTypeIds.PLAYER)
+                // LivingEntity#handleEntityEvent(3) only plays a Player's death sound; other living entities die.
+                if (received != null && received.isLivingEntity() && received.type != EntityTypeIds.PLAYER) {
                     received.actionAlive = false;
+                    received.isDead = true;
+                }
             };
             if (proof != null) player.latencyUtils.addRealTimeTask(proof.transaction(), apply);
             else player.latencyUtils.addRealTimeTaskNow(apply);
             PacketEntity entity = player.compensatedEntities.getEntity(entityId);
 
-            if (entity == null) return;
-            // LivingEntity#handleEntityEvent(3) only plays a Player's death sound; other living entities die.
-            if (entity.type != EntityTypeIds.PLAYER) entity.isDead = true;
+            if (entity != null && !entity.isLivingEntity()) entity.isDead = true;
         }
 
         // These are native server status codes, before ViaVersion rewrites the packet.
