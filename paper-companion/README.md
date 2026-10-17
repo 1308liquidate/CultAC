@@ -11,8 +11,11 @@ it is installed on.
 
 - The proxy jar (`CultAC-velocity.jar`) is built against the Velocity 3.4.0 API for Java 21, and loads on Velocity
   3.5.1 and 4.2.0.
-- The companion is built and tested against Paper 26.3. The Paper versions in the [root README](../README.md) apply to
-  the standalone CultAC plugin, not to the companion.
+- The companion is built against Paper 26.3 and runs on Paper 1.21.11 and 26.3, on Java 21 or newer. The Paper
+  versions in the [root README](../README.md) apply to the standalone CultAC plugin, not to the companion.
+  `./gradlew :paper-companion:checkPaperLinkage -PpaperLinkageServer=<dir>` checks that the jar links against an
+  older server; `<dir>` holds the `versions/` and `libraries/` of a Paper paperclip run with
+  `-Dpaperclip.patchonly=true`.
 
 ## Install
 
