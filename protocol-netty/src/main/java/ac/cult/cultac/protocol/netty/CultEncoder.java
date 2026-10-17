@@ -207,12 +207,14 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
     private PacketType<?> fallbackType(ByteBuf frame) {
         try {
-            var route = connection
-                    .dispatcher()
-                    .get(
-                            PacketDirection.CLIENTBOUND,
+            // The frame's ID is in the client's numbering, which differs from the dispatcher's when translated.
+            var type = connection
+                    .packets()
+                    .type(
                             connection.phase(PacketDirection.CLIENTBOUND),
+                            PacketDirection.CLIENTBOUND,
                             Wire.peekVarInt(frame));
+            var route = type == null ? null : connection.dispatcher().get(type);
             return route == null ? null : route.type();
         } catch (Throwable failure) {
             CultNetworkManager.reportFailure("outbound fallback identity", failure);

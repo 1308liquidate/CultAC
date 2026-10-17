@@ -372,11 +372,11 @@ public final class CultConnection implements CodecState {
     }
 
     /**
-     * {@code type} took its place in the client's stream: packets placed after a play login reach a level, packets
+     * {@code type} took its place in the client's stream: packets placed after a play login or respawn reach a level, packets
      * placed after the client leaves play do not. On the writing event loop, before the packet is emitted.
      */
     public void placedClientbound(PacketType<?> type) {
-        if (type == ClientboundPackets.LOGIN) levelPending = false;
+        if (type == ClientboundPackets.LOGIN || type == ClientboundPackets.RESPAWN) levelPending = false;
         else if (type == ClientboundPackets.LOGIN_FINISHED || type == ClientboundPackets.START_CONFIGURATION)
             levelLost();
     }
