@@ -69,6 +69,7 @@ ignore-duplicate-packet-rotation: false
 max-clicks-per-tick: 3
 
 # Flag and alert without acting: no punishment commands, setbacks, packet cancels or kicks. Client packets reach the server as sent.
+# CULTAC_OBSERVE_ONLY (true, 1 or yes; anything else is false) wins over this when set and not blank.
 observe-only: false
 
 Simulation:
@@ -264,7 +265,9 @@ bridge:
   secret: ""
 
 # Upload of captured play to an intake service, which analyses it. Off while url or api-key is empty;
-# your intake service provides both. docs/cloud-upload.md in CultAC's source says what is uploaded.
+# your intake service provides both. CULTAC_CLOUD_URL and CULTAC_CLOUD_API_KEY win over url and api-key when
+# set and not blank, and an empty proxy-id takes CULTAC_PROXY_ID. docs/cloud-upload.md in CultAC's source says
+# what is uploaded.
 cloud:
   url: ""
   api-key: ""

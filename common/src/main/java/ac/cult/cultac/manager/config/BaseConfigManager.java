@@ -4,6 +4,8 @@ import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.grim.grimac.api.config.ConfigManager;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import lombok.Getter;
@@ -120,7 +122,7 @@ public class BaseConfigManager {
             }
         }
 
-        observeOnly = config.getBooleanElse("observe-only", false);
+        observeOnly = resolveObserveOnly(config, System::getenv);
         if (observeOnly) {
             LogUtil.info("Observe-only mode: checks flag and alert; nothing acts on the player or their packets");
         }
@@ -169,6 +171,14 @@ public class BaseConfigManager {
         bedrockMovementVelocityFlagThreshold =
                 nonNegativeElse(config, "cult.checks.bedrock-movement.velocity-flag-threshold", 0.001D);
         bedrockMovementSetbacksEnabled = config.getBooleanElse("cult.checks.bedrock-movement.enable-setbacks", true);
+    }
+
+    /** {@code CULTAC_OBSERVE_ONLY} (true/1/yes) when set and not blank, else {@code observe-only}. */
+    static boolean resolveObserveOnly(ConfigManager config, Function<String, String> env) {
+        String value = env.apply("CULTAC_OBSERVE_ONLY");
+        if (value == null || value.isBlank()) return config.getBooleanElse("observe-only", false);
+        String normalized = value.strip().toLowerCase(Locale.ROOT);
+        return normalized.equals("true") || normalized.equals("1") || normalized.equals("yes");
     }
 
     // ran on start, can be used to handle things that can't be done while loading

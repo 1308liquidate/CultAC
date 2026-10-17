@@ -6,10 +6,11 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
- * The upload's settings, read from the config alone. An empty {@code url} or {@code apiKey}, or no {@code protocols},
+ * The upload's settings, read from the config and the environment. An empty {@code url} or {@code apiKey}, or no {@code protocols},
  * leaves the upload off. {@code serverIdTemplate} names each socket's server id through {@link CloudServerIds};
  * {@code protocols} are the intake protocols this platform offers, highest last.
  */
@@ -40,17 +41,25 @@ public record CloudSettings(
 
     /**
      * Reads {@code cloud.url}, {@code cloud.api-key}, {@code cloud.server-id} and {@code cloud.proxy-id}, an empty
-     * {@code cloud.server-id} picking {@code defaultServerId}.
+     * {@code cloud.server-id} picking {@code defaultServerId}. {@code CULTAC_CLOUD_URL} and
+     * {@code CULTAC_CLOUD_API_KEY} win over the config; an empty {@code cloud.proxy-id} takes {@code CULTAC_PROXY_ID}.
      */
     public static CloudSettings read(ConfigManager config, List<Integer> protocols, String defaultServerId) {
+        return read(config, protocols, defaultServerId, System::getenv);
+    }
+
+    static CloudSettings read(
+            ConfigManager config, List<Integer> protocols, String defaultServerId, Function<String, String> env) {
         String serverId = config.getStringElse("cloud.server-id", "");
-        String url = config.getStringElse("cloud.url", "");
-        if (url != null && !url.isBlank() && !allowedUrl(url.strip())) {
+        String url = url(config, env);
+        if (!url.isEmpty() && !allowedUrl(url)) {
             LogUtil.warn("Cloud upload off: cloud.url must be https, or http to a loopback host, with a host and no"
                     + " user info, query or fragment");
             url = "";
         }
-        String apiKey = config.getStringElse("cloud.api-key", "");
+        String proxyId = config.getStringElse("cloud.proxy-id", "");
+        if (proxyId == null || proxyId.isBlank()) proxyId = env.apply("CULTAC_PROXY_ID");
+        String apiKey = CloudModule.apiKey(config, env);
         if (apiKey != null
                 && !apiKey.isBlank()
                 && !API_KEY.matcher(apiKey.strip()).matches()) {
@@ -62,8 +71,13 @@ public record CloudSettings(
                 url,
                 apiKey,
                 serverId.isBlank() ? defaultServerId : serverId,
-                config.getStringElse("cloud.proxy-id", ""),
+                proxyId,
                 protocols);
+    }
+
+    /** The service's address: {@code CULTAC_CLOUD_URL}, else {@code cloud.url}; empty is off. */
+    static String url(ConfigManager config, Function<String, String> env) {
+        return CloudModule.setting(config, env, "cloud.url", "CULTAC_CLOUD_URL", "");
     }
 
     /**

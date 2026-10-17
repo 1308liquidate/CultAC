@@ -118,6 +118,32 @@ class CloudSettingsTest {
     }
 
     @Test
+    void theEnvironmentWinsOverTheConfigAndProxyIdFallsBackToTheEnvironment() {
+        Map<String, String> env = Map.of(
+                "CULTAC_CLOUD_URL", "https://env.example",
+                "CULTAC_CLOUD_API_KEY", " env-key ",
+                "CULTAC_PROXY_ID", "p0");
+        CloudSettings settings = CloudSettings.read(
+                config(Map.of("cloud.url", "https://config.example", "cloud.api-key", "config-key")),
+                CloudSettings.PROXY_PROTOCOLS,
+                CloudSettings.DEFAULT_SERVER_ID,
+                env::get);
+        assertEquals("https://env.example", settings.url());
+        assertEquals("env-key", settings.apiKey());
+        assertEquals("p0", settings.proxyId());
+        CloudSettings configured = CloudSettings.read(
+                config(Map.of("cloud.proxy-id", "edge-1")),
+                CloudSettings.PROXY_PROTOCOLS,
+                CloudSettings.DEFAULT_SERVER_ID,
+                env::get);
+        assertEquals("edge-1", configured.proxyId());
+        CloudSettings bare = CloudSettings.read(
+                config(Map.of()), CloudSettings.PROXY_PROTOCOLS, CloudSettings.DEFAULT_SERVER_ID, name -> null);
+        assertEquals("", bare.url());
+        assertFalse(bare.enabled());
+    }
+
+    @Test
     void anEmptyUrlOrKeyIsOff() {
         assertFalse(read(Map.of("cloud.api-key", "key"), CloudSettings.SERVER_PROTOCOLS)
                 .enabled());

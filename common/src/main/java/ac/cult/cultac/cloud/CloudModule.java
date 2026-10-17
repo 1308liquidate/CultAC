@@ -5,10 +5,12 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.grim.grimac.api.config.ConfigManager;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
- * The anticheat's only way into the cloud upload. Until a config sets {@code cloud.url} or {@code cloud.api-key},
- * every call returns at once and no other cloud class is loaded.
+ * The anticheat's only way into the cloud upload. Until {@code cloud.url} or {@code cloud.api-key}, or
+ * {@code CULTAC_CLOUD_URL} or {@code CULTAC_CLOUD_API_KEY}, is set, every call returns at once and no other cloud
+ * class is loaded.
  */
 public final class CloudModule {
     /** A config has named the upload: calls reach {@link CloudService} from here on. */
@@ -26,15 +28,26 @@ public final class CloudModule {
         if (superseded) return;
         if (!loaded) {
             ConfigManager config = CultAPI.INSTANCE.getConfigManager().getConfig();
-            if (blank(config.getStringElse("cloud.url", "")) && blank(config.getStringElse("cloud.api-key", "")))
-                return;
+            if (setting(config, System::getenv, "cloud.url", "CULTAC_CLOUD_URL", "")
+                            .isEmpty()
+                    && apiKey(config, System::getenv).isEmpty()) return;
             loaded = true;
         }
         CloudService.configReloaded();
     }
 
-    private static boolean blank(String value) {
-        return value == null || value.isBlank();
+    /** This server's intake key: {@code CULTAC_CLOUD_API_KEY}, else {@code cloud.api-key}; empty is off. */
+    static String apiKey(ConfigManager config, Function<String, String> env) {
+        return setting(config, env, "cloud.api-key", "CULTAC_CLOUD_API_KEY", "");
+    }
+
+    /** The environment variable when set and not blank, else the config value when not blank, else {@code fallback}. */
+    static String setting(
+            ConfigManager config, Function<String, String> env, String key, String envName, String fallback) {
+        String value = env.apply(envName);
+        if (value == null || value.isBlank()) value = config.getStringElse(key, fallback);
+        if (value == null || value.isBlank()) return fallback;
+        return value.strip();
     }
 
     /** {@code player} is tracked. Any thread. */
