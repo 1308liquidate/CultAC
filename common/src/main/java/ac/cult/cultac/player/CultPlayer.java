@@ -13,6 +13,7 @@ import ac.cult.cultac.checks.impl.movement.timer.ItemUseBurst;
 import ac.cult.cultac.checks.impl.packetorder.PacketOrderProcessor;
 import ac.cult.cultac.checks.impl.ping.TransactionOrder;
 import ac.cult.cultac.checks.impl.prediction.checks.ItemUseDesync;
+import ac.cult.cultac.checks.impl.prediction.profile.MovementProfiles;
 import ac.cult.cultac.checks.impl.prediction.runner.ExplosionHandler;
 import ac.cult.cultac.checks.impl.prediction.runner.KnockbackHandler;
 import ac.cult.cultac.events.packets.PacketEntityReplication;
@@ -1113,6 +1114,35 @@ public class CultPlayer implements GrimUser {
 
     public boolean supportsBundles() {
         return getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_19_4);
+    }
+
+    /** Until the client provably handles new abilities, only the values that refuse item-use starts are certain. */
+    public void abilitiesSent(boolean instabuild, boolean invulnerable) {
+        canInstabuild &= instabuild;
+        isInvulnerable &= invulnerable;
+    }
+
+    public void abilitiesHandled(boolean instabuild, boolean invulnerable) {
+        canInstabuild = instabuild;
+        isInvulnerable = invulnerable;
+    }
+
+    /**
+     * Runs {@code task} at a trailing proof written after the event's packet, or at the ping sent after it when no
+     * proof can be written. Returns whether the proof shares the packet's bundle: ClientPacketListener#handleBundlePacket
+     * then handles both in one task, and the client is never in the packet's state before the proof's pong.
+     */
+    public boolean runAtTrailingProof(PacketSendEvent<?> event, Runnable task) {
+        TrackedTransaction proof = appendTrailingProofTransaction(event);
+        if (proof == null) {
+            latencyUtils.addRealTimeTaskNext(task);
+            event.getTasksAfterSend().add(this::sendTransaction);
+            return false;
+        }
+        latencyUtils.addRealTimeTask(proof.transaction(), task);
+        if (!MovementProfiles.forPlayer(this).shouldUseBundledPacketProof(this)) return false;
+        if (!event.isInsideBundle()) event.bundle();
+        return true;
     }
 
     @Override

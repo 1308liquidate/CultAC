@@ -10,9 +10,7 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerAbilities;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerAbilities;
 
-// Apply server abilities at the existing transaction boundary.
-// Track the last sent permission separately from compensated state so a
-// revocation can schedule its timeout immediately.
+// Flight abilities apply at the preceding transaction, item-use abilities at the trailing proof.
 public class PacketPlayerAbilities extends CultProcessor implements CheckListener {
 
     public PacketPlayerAbilities(CultPlayer player) {
@@ -51,12 +49,18 @@ public class PacketPlayerAbilities extends CultProcessor implements CheckListene
 
         lastSentPlayerCanFly = packet.canFly();
 
+        int preceding = player.lastTransactionSent.get();
         player.latencyUtils.addRealTimeTaskNow(() -> {
             player.canFly = packet.canFly();
             player.isFlying = packet.flying();
-            player.canInstabuild = packet.instabuild();
-            player.isInvulnerable = packet.invulnerable();
             player.flySpeed = packet.flyingSpeed();
         });
+
+        // Player#canEat and the projectile ammo check read these at the client's USE_ITEM.
+        if (!player.runAtTrailingProof(
+                event, () -> player.abilitiesHandled(packet.instabuild(), packet.invulnerable()))) {
+            player.latencyUtils.addRealTimeTask(
+                    preceding, () -> player.abilitiesSent(packet.instabuild(), packet.invulnerable()));
+        }
     }
 }

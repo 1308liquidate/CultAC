@@ -5,7 +5,12 @@ import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.protocol.value.Hand;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * LocalPlayer.startedUsingItem and the outstanding use obligation are different state.
@@ -27,24 +32,33 @@ public final class ClientItemUseState {
 
     private record Use(Hand hand, SimItemStack stack, int remaining, SimItemStack boundStack) {}
 
+    /** One LivingEntity.completeUsingItem outcome: the used hand and its native inventory slot. */
+    public record Completion(Hand hand, int slot) {}
+
+    /** Client outcomes of a completion event; {@code skipped} is a client that completes nothing. */
+    public record Completions(List<Completion> completions, boolean skipped) {}
+
     private List<Use> candidates = List.of();
     private boolean inactive = true;
     private Use obligation;
     private long session;
     private int lastPreparedTick = Integer.MIN_VALUE;
     private Snapshot prepared = Snapshot.NONE;
+    private final Map<SimItemStack, Integer> possiblyChanged = new IdentityHashMap<>();
+    private boolean possiblyFull;
 
-    public void start(Hand hand, SimItemStack stack) {
-        start(hand, stack, duration(stack));
-    }
-
-    public void start(Hand hand, SimItemStack stack, int remainingTicks) {
+    /**
+     * An uncertain start keeps the candidate while the client may equally not be using; the
+     * server may equally have refused it, so it opens no use obligation.
+     */
+    public void start(Hand hand, SimItemStack stack, int remainingTicks, boolean certain) {
         if (stack.isEmpty()) return;
         // A predicted successful use is LocalPlayer.startUsingItem, not a server flag assignment.
         if (!inactive) return;
         Use use = new Use(hand, stack.copy(), remainingTicks, stack);
         candidates = List.of(use);
-        inactive = false;
+        inactive = !certain;
+        if (!certain) return;
         obligation = use;
         session++;
     }
@@ -58,8 +72,10 @@ public final class ClientItemUseState {
         boolean couldNotStart = false;
         if (inactive) {
             for (SimItemStack stack : hand == Hand.MAIN_HAND ? hotbar : List.of(off)) {
-                if (stack.isEmpty()) couldNotStart = true;
-                else merge(next, new Use(hand, stack.copy(), duration(stack), stack));
+                // LivingEntity.startUsingItem cannot start an empty hand, and an
+                // unproven local completion may have emptied or replaced this stack.
+                if (stack.isEmpty() || possiblyEmpty(stack)) couldNotStart = true;
+                if (!stack.isEmpty()) merge(next, new Use(hand, stack.copy(), duration(stack), stack));
             }
         }
         candidates = List.copyOf(next);
@@ -144,11 +160,81 @@ public final class ClientItemUseState {
         return !inactive && !candidates.isEmpty();
     }
 
-    public boolean canCompleteOffhand(SimItemStack held) {
-        // LivingEntity.completeUsingItem compares stack object identity, not item type.
-        // A slot packet may replace that object before the next entity tick rebinds use.
-        return definitelyUsing()
-                && candidates.stream().allMatch(use -> use.hand() == Hand.OFF_HAND && use.boundStack() == held);
+    /**
+     * LivingEntity.completeUsingItem runs only while the client is locally using, and only
+     * for the same stack object bound at its last entity tick; otherwise it releases. Every bound
+     * hotbar slot is a reality: a number key can rebind the use without a carried-item packet before it.
+     */
+    public Completions completions(List<SimItemStack> hotbar, SimItemStack off) {
+        var completions = new LinkedHashSet<Completion>();
+        boolean skipped = inactive || candidates.isEmpty();
+        for (Use use : candidates) {
+            if (use.hand() == Hand.OFF_HAND) {
+                if (use.boundStack() == off) completions.add(new Completion(Hand.OFF_HAND, 40));
+                else skipped = true;
+            }
+        }
+        if (candidates.stream().anyMatch(use -> use.hand() == Hand.MAIN_HAND)) {
+            for (int slot = 0; slot < hotbar.size(); slot++) {
+                SimItemStack held = hotbar.get(slot);
+                if (candidates.stream().anyMatch(use -> use.hand() == Hand.MAIN_HAND && use.boundStack() == held))
+                    completions.add(new Completion(Hand.MAIN_HAND, slot));
+                else skipped = true;
+            }
+        }
+        return new Completions(List.copyOf(completions), skipped);
+    }
+
+    /**
+     * After an unproven completion the client may hold as few as {@code lowest} of this stack in
+     * its slot; 0 also covers a converted or replaced stack.
+     */
+    public void markPossiblyChanged(SimItemStack stack, int lowest) {
+        possiblyChanged.merge(stack, Math.max(0, lowest), Math::min);
+    }
+
+    /** The fewest of this stack the client may hold in its slot. */
+    public int lowestCount(SimItemStack stack) {
+        return possiblyChanged.getOrDefault(stack, stack.count());
+    }
+
+    /** The fewest the client may hold in place of {@code result}, which the model derived from {@code from}. */
+    public int lowestCountAfter(SimItemStack from, SimItemStack result) {
+        if (!result.sameItemSameComponents(from)) return 0;
+        return Math.max(0, result.count() - from.count() + lowestCount(from));
+    }
+
+    /** A modelled copy of a possibly changed stack is still unproven against the client's contents. */
+    public void carryPossibleChange(SimItemStack from, SimItemStack result) {
+        if (!result.isEmpty() && possiblyChanged.containsKey(from))
+            markPossiblyChanged(result, lowestCountAfter(from, result));
+    }
+
+    /** Only an empty slot refuses LivingEntity.startUsingItem or Player.getProjectile; count otherwise does not. */
+    public boolean possiblyEmpty(SimItemStack stack) {
+        return lowestCount(stack) == 0;
+    }
+
+    /** Received slot contents replace the stack object, which ends its stamp. */
+    public void retainPossiblyChanged(List<SimItemStack> hotbar, SimItemStack off) {
+        if (possiblyChanged.isEmpty()) return;
+        Set<SimItemStack> held = Collections.newSetFromMap(new IdentityHashMap<>());
+        held.addAll(hotbar);
+        held.add(off);
+        possiblyChanged.keySet().retainAll(held);
+    }
+
+    public void markPossiblyFull() {
+        possiblyFull = true;
+    }
+
+    public boolean possiblyFull() {
+        return possiblyFull;
+    }
+
+    /** ClientboundSetHealth sets FoodData's level, ending every local completion alternative. */
+    public void foodReceived() {
+        possiblyFull = false;
     }
 
     public Snapshot preparedAt(int tick) {
@@ -179,6 +265,11 @@ public final class ClientItemUseState {
         prepared = Snapshot.NONE;
     }
 
+    /** A LocalPlayer starts with fresh FoodData; no completion alternative carries over. */
+    public void onNewLocalPlayer() {
+        possiblyFull = false;
+    }
+
     private static boolean sameItem(SimItemStack first, SimItemStack second) {
         return first.itemKey().equals(second.itemKey());
     }
@@ -187,7 +278,7 @@ public final class ClientItemUseState {
         return remaining == Integer.MIN_VALUE ? remaining : remaining - 1;
     }
 
-    static int duration(SimItemStack stack) {
+    public static int duration(SimItemStack stack) {
         // Item overrides precede generic components, including a consumable
         // component attached to a trident. Unknown instrument holders are not
         // assigned a guessed duration; action prediction supplies their timer.
@@ -213,11 +304,12 @@ public final class ClientItemUseState {
     }
 
     private static void merge(List<Use> into, Use candidate) {
-        // Remaining ticks never complete consumption client-side. Keep the longest
-        // timer for equivalent stacks instead of multiplying states on metadata resends.
+        // Remaining ticks never complete consumption client-side. Each hand and bound stack
+        // object holds one Use with the longest timer; completion compares that object,
+        // which keeps equal stacks in two slots separate.
         for (int i = 0; i < into.size(); i++) {
             Use old = into.get(i);
-            if (old.hand() == candidate.hand() && old.stack().sameItemSameComponents(candidate.stack())) {
+            if (old.hand() == candidate.hand() && old.boundStack() == candidate.boundStack()) {
                 if (candidate.remaining() > old.remaining()) into.set(i, candidate);
                 return;
             }

@@ -9,6 +9,7 @@ import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItem;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItemOn;
 import ac.cult.cultac.utils.anticheat.update.BlockBreak;
 import ac.cult.cultac.utils.anticheat.update.BlockPlace;
 import ac.grim.grimac.api.storage.verbose.Verbose;
@@ -24,6 +25,7 @@ public class BadPacketsH extends BlockPlaceCheck implements BlockBreakListener {
             ClientVersion.fromProtocolVersion(ProtocolVersion.V26_3.protocol());
 
     private int lastSequence;
+    private int placedSequence = -1;
 
     public BadPacketsH(final CultPlayer player) {
         super(player);
@@ -44,8 +46,24 @@ public class BadPacketsH extends BlockPlaceCheck implements BlockBreakListener {
         }
     }
 
+    /**
+     * Minecraft.startUseItem sends USE_ITEM_ON for each hand facing a block, empty or not, and
+     * only placements reach onBlockPlace; every other id is checked here without a cancel.
+     */
+    @CultPacketHandler
+    public void onUseItemOn(
+            PacketReceiveEvent<ServerboundUseItemOn> event, CultPlayer player, ServerboundUseItemOn packet) {
+        if (!isApplicable()) return;
+        if (packet.sequence() == placedSequence) {
+            placedSequence = -1;
+            return;
+        }
+        shouldCancel(packet.sequence());
+    }
+
     @Override
     public void onBlockPlace(BlockPlace place) {
+        placedSequence = place.sequence;
         if (shouldCancel(place.sequence) && shouldCancel()) {
             place.resync();
         }
@@ -80,7 +98,9 @@ public class BadPacketsH extends BlockPlaceCheck implements BlockBreakListener {
         return flag(V.write(verbose()).sint(expected).sint(sequence));
     }
 
-    public void onWorldChange() {
+    /** A new ClientLevel, whose BlockStatePredictionHandler starts at 0. */
+    public void resetLevel() {
         lastSequence = 0;
+        placedSequence = -1;
     }
 }
