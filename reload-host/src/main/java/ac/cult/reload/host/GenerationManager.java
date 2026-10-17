@@ -666,6 +666,15 @@ public final class GenerationManager implements AutoCloseable {
         }
     }
 
+    /** A missing runtime, or one that cannot answer, lets the connection in. */
+    public boolean failsOpen() {
+        try {
+            return call(currentId(), RuntimeInstance::failsOpen);
+        } catch (Exception failure) {
+            return true;
+        }
+    }
+
     public String placeholder(UUID player, String parameter) {
         UserBinding user = user(player);
         try {

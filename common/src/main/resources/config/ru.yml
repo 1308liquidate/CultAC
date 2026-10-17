@@ -40,6 +40,12 @@ spectators:
 # Сколько времени должно быть у игроков, пока мы не выкинем их за тайм-аут? По умолчанию = 60 секунд
 max-transaction-time: 60
 
+# Если сбоит сам CultAC (не удаётся подключиться к игроку, версия клиента не поддерживается или ни один
+# пинг не получил ответа за max-transaction-time), игрок продолжает играть без проверки, а не отключается.
+# Кики за флуд пакетами и краш-эксплойты по-прежнему действуют.
+launch-safety:
+  fail-open: true
+
 # Enable this to stop Cult cancelling pongs received from players.
 # This may improve compatibility with other anticheats. It may cause issues with packet limiters.
 # Do not enable this if you are not sure what you are doing.

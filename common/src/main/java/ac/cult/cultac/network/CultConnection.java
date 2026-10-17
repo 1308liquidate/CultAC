@@ -394,7 +394,7 @@ public final class CultConnection implements CodecState {
             return true;
         } catch (Throwable failure) {
             // The releasing generation's config decides: the adopting one failed and may not have loaded.
-            if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
+            if (CultAPI.INSTANCE.getConfigManager().failsOpen()) {
                 LogUtil.warn(
                         "Not inspecting " + (user == null ? channel.remoteAddress() : user.getName())
                                 + " any more; the runtime hand-off failed",

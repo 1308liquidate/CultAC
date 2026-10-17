@@ -40,6 +40,12 @@ spectators:
 # Ile czasu powinni mieć gracze, zanim ich wyrzucimy za przekroczenie limitu czasu? Domyślnie = 60 sekund
 max-transaction-time: 60
 
+# Gdy sam CultAC zawiedzie (nie może podłączyć się do gracza, wersja klienta nie jest obsługiwana lub żaden
+# ping nie zostanie odebrany w max-transaction-time), gracz gra dalej bez kontroli zamiast zostać rozłączony.
+# Wyrzucenia za zalew pakietów i exploity crashujące nadal obowiązują.
+launch-safety:
+  fail-open: true
+
 # Włącz tę opcję, aby uniemożliwić Cultowi anulowanie komunikatów Pong otrzymanych od graczy.
 # Może to poprawić kompatybilność z innymi programami antycheatowymi. Może to powodować problemy z limiterami pakietów.
 # Nie włączaj tej opcji, jeśli nie masz pewności, co robisz.

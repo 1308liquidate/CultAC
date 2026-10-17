@@ -76,7 +76,7 @@ public final class BukkitConnectionAdapter implements PlatformConnection {
         if (!ViaVersionUtil.isAvailable()) return false;
         int protocol = ViaConnectionProtocol.originalProtocol(connection.channel);
         if (protocol <= 0 || protocol >= ClientVersion.V_1_21_2.getProtocolVersion()) return false;
-        if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
+        if (CultAPI.INSTANCE.getConfigManager().failsOpen()) {
             User.Profile profile = authenticatedProfile();
             LogUtil.warn("Not inspecting " + (profile == null ? "a client" : profile.getName()) + "; protocol "
                     + protocol + " is older than 1.21.2");

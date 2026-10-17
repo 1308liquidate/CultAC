@@ -1005,7 +1005,7 @@ public class CultPlayer implements GrimUser {
     }
 
     public void timedOut() {
-        if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
+        if (CultAPI.INSTANCE.getConfigManager().failsOpen()) {
             LogUtil.warn(
                     "Not inspecting " + getName() + " any more; no ping answered within " + maxTransactionTime + " s");
             CultAPI.INSTANCE.getPlayerDataManager().exemptUser(user);

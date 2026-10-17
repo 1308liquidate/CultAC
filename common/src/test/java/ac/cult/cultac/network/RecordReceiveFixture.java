@@ -153,6 +153,15 @@ final class RecordReceiveFixture implements AutoCloseable {
         return () -> field.setBoolean(config, original);
     }
 
+    static AutoCloseable failOpen(boolean failOpen) throws ReflectiveOperationException {
+        Field field = BaseConfigManager.class.getDeclaredField("launchFailOpen");
+        field.setAccessible(true);
+        Object config = CultAPI.INSTANCE.getConfigManager();
+        boolean original = field.getBoolean(config);
+        field.setBoolean(config, failOpen);
+        return () -> field.setBoolean(config, original);
+    }
+
     @Override
     public void close() {
         CultAPI.INSTANCE.getPlayerDataManager().onDisconnect(user);

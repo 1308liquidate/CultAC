@@ -131,6 +131,31 @@ class GenerationManagerTest {
     }
 
     @Test
+    void failingOpenFollowsTheCurrentGenerationAndHoldsWithoutOne() throws Exception {
+        try (var empty = new GenerationManager(
+                directory.resolve("CultAC"),
+                "paper",
+                this,
+                controls,
+                null,
+                getClass().getClassLoader(),
+                reports::add)) {
+            assertFalse(empty.isObserveOnly());
+            assertTrue(empty.failsOpen());
+        }
+        var manager = start();
+        try {
+            assertFalse(manager.failsOpen());
+            controls.put("observe-only:v2", true);
+            artifact("v2.jar", "2", "v2", "paper");
+            await(manager.update("v2.jar"));
+            assertTrue(manager.failsOpen());
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
     void handoffMovesDrainingConnectionToCurrentGeneration() throws Exception {
         var manager = start();
         try {

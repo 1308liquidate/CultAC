@@ -246,15 +246,18 @@ class ObserveOnlyTest {
     @Test
     void anUnansweredPlayerIsLetGo() throws ReflectiveOperationException {
         for (boolean observeOnly : new boolean[] {true, false}) {
-            CultPlayer player = mock(CultPlayer.class);
-            User user = user(new EmbeddedChannel());
-            set(player, "user", user);
-            doCallRealMethod().when(player).timedOut();
-            try (var ignored = installConfig(observeOnly)) {
-                player.timedOut();
+            for (boolean failOpen : new boolean[] {true, false}) {
+                CultPlayer player = mock(CultPlayer.class);
+                User user = user(new EmbeddedChannel());
+                set(player, "user", user);
+                doCallRealMethod().when(player).timedOut();
+                try (var ignored = installConfig(observeOnly, failOpen)) {
+                    player.timedOut();
+                }
+                boolean letGo = observeOnly || failOpen;
+                verify(player, times(letGo ? 0 : 1)).disconnect(any());
+                assertEquals(letGo, CultAPI.INSTANCE.getPlayerDataManager().clearExemptions(user));
             }
-            verify(player, times(observeOnly ? 0 : 1)).disconnect(any());
-            assertEquals(observeOnly, CultAPI.INSTANCE.getPlayerDataManager().clearExemptions(user));
         }
     }
 
@@ -265,7 +268,7 @@ class ObserveOnlyTest {
             set(player, "cancelledPackets", new AtomicInteger());
             set(player, "spamThreshold", 1);
             doCallRealMethod().when(player).onPacketCancel();
-            try (var ignored = installConfig(observeOnly)) {
+            try (var ignored = installConfig(observeOnly, true)) {
                 for (int i = 0; i < 4; i++) player.onPacketCancel();
             }
             verify(player, times(observeOnly ? 0 : 2)).disconnect(any());
@@ -279,7 +282,7 @@ class ObserveOnlyTest {
             ServerboundCustomPayload packet = new ServerboundCustomPayload("vv:proxy_details", new byte[0]);
             var event = new PacketReceiveEvent<>(
                     user(channel), ConnectionPhase.PLAY, ServerboundPackets.CUSTOM_PAYLOAD, packet);
-            try (var ignored = installConfig(observeOnly)) {
+            try (var ignored = installConfig(observeOnly, true)) {
                 new PacketPluginMessage().handle(event, packet);
             }
             assertEquals(observeOnly, channel.isOpen());
@@ -403,6 +406,10 @@ class ObserveOnlyTest {
     }
 
     private Restore installConfig(boolean observeOnly) throws ReflectiveOperationException {
+        return installConfig(observeOnly, false);
+    }
+
+    private Restore installConfig(boolean observeOnly, boolean failOpen) throws ReflectiveOperationException {
         BaseConfigManager manager = new BaseConfigManager() {
             @Override
             public ConfigManager getConfig() {
@@ -412,6 +419,11 @@ class ObserveOnlyTest {
             @Override
             public boolean isObserveOnly() {
                 return observeOnly;
+            }
+
+            @Override
+            public boolean failsOpen() {
+                return observeOnly || failOpen;
             }
 
             @Override

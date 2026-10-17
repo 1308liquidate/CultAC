@@ -44,6 +44,11 @@ public abstract class EngineRuntime implements RuntimeInstance {
     }
 
     @Override
+    public boolean failsOpen() {
+        return CultAPI.INSTANCE.getConfigManager().failsOpen();
+    }
+
+    @Override
     public java.util.Map<String, byte[]> configurationFiles() throws Exception {
         var config = CultAPI.INSTANCE.getExternalAPI().getConfigManager();
         return config instanceof ac.cult.cultac.manager.config.ConfigManagerFileImpl files

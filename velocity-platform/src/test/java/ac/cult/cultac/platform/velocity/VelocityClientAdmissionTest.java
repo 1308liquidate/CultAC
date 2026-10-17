@@ -21,15 +21,18 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class VelocityClientAdmissionTest {
     private Object originalLoader;
+    private Object originalConfig;
 
     @BeforeEach
     void installLoader() throws ReflectiveOperationException {
         originalLoader = swap("loader", mock(PlatformLoader.class, RETURNS_DEEP_STUBS));
+        originalConfig = swap("configManager", observeOnly(false));
     }
 
     @AfterEach
     void restoreLoader() throws ReflectiveOperationException {
         swap("loader", originalLoader);
+        swap("configManager", originalConfig);
     }
 
     @ParameterizedTest
@@ -107,6 +110,17 @@ class VelocityClientAdmissionTest {
         }
     }
 
+    @Test
+    void failingOpenLetsUnsupportedClientsJoinUninspected() throws ReflectiveOperationException {
+        Object config = swap("configManager", config(false, true));
+        try {
+            assertJoinsUninspected(player(767), new EmbeddedChannel());
+            assertJoinsUninspected(player(774), viaChannel(VelocityProtocols.NEWEST.protocol() + 1));
+        } finally {
+            swap("configManager", config);
+        }
+    }
+
     private static void assertJoinsUninspected(Player player, EmbeddedChannel channel) {
         try {
             assertTrue(VelocityProtocols.disconnectUnsupportedClient(player, channel));
@@ -117,10 +131,19 @@ class VelocityClientAdmissionTest {
     }
 
     static BaseConfigManager observeOnly(boolean observeOnly) {
+        return config(observeOnly, false);
+    }
+
+    static BaseConfigManager config(boolean observeOnly, boolean failOpen) {
         return new BaseConfigManager() {
             @Override
             public boolean isObserveOnly() {
                 return observeOnly;
+            }
+
+            @Override
+            public boolean failsOpen() {
+                return observeOnly || failOpen;
             }
         };
     }

@@ -132,9 +132,9 @@ final class VelocityTransport {
         }));
     }
 
-    /** Disconnects a client CultAC cannot inspect; observe-only lets it join uninspected. */
+    /** Disconnects a client CultAC cannot inspect unless failing open lets it join uninspected. */
     static void refuse(Player player, Component message, String why, Throwable failure) {
-        if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
+        if (CultAPI.INSTANCE.getConfigManager().failsOpen()) {
             String line = "Not inspecting " + player.getUsername() + "; " + why;
             if (failure == null) LogUtil.warn(line);
             else LogUtil.warn(line, failure);

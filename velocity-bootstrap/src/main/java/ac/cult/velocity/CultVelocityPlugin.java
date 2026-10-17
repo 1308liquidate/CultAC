@@ -189,8 +189,8 @@ public final class CultVelocityPlugin {
     }
 
     private void refuse(Player player, String problem, Throwable failure) {
-        if (engine.isObserveOnly()) {
-            logger.warn(problem + "; observe-only lets them join uninspected", failure);
+        if (engine.failsOpen()) {
+            logger.warn(problem + "; letting them join uninspected", failure);
             return;
         }
         logger.error(problem + "; disconnecting", failure);

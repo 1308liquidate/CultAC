@@ -54,6 +54,8 @@ public class BaseConfigManager {
     @Getter
     private boolean disablePongCancelling;
 
+    private boolean launchFailOpen = true;
+
     @Getter
     private int updatePermissionTicks = -1;
 
@@ -98,6 +100,11 @@ public class BaseConfigManager {
     private static double nonNegativeFiniteElse(ConfigManager config, String key, double fallback) {
         double value = config.getDoubleElse(key, fallback);
         return Double.isFinite(value) && value >= 0 ? value : fallback;
+    }
+
+    /** Whether a failure of the anticheat itself leaves the player connected and uninspected. */
+    public boolean failsOpen() {
+        return isObserveOnly() || launchFailOpen;
     }
 
     // initialize the config
@@ -148,6 +155,7 @@ public class BaseConfigManager {
                 "disconnect.error",
                 "<red>An error occurred whilst processing packets. Please contact the administrators.");
         disablePongCancelling = config.getBooleanElse("disable-pong-cancelling", false);
+        launchFailOpen = config.getBooleanElse("launch-safety.fail-open", true);
         verboseAutoEnable = config.getBooleanElse("cult.diagnostics.auto-enable-verbose", false);
         maxPingKnockback = config.getIntElse("cult.prediction.max-knockback-ping-ms", 1000);
 

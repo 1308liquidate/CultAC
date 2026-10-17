@@ -44,7 +44,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Holds every call that kicks a player, cancels or rewrites a packet, resyncs or teleports to a condition on
- * {@code isObserveOnly()} or {@code shouldModifyPackets()}, or to an entry in {@link #ALLOWED}. A call is guarded when
+ * {@code isObserveOnly()}, {@code shouldModifyPackets()} or {@code failsOpen()} (true in observe-only), or to an
+ * entry in {@link #ALLOWED}. A call is guarded when
  * a condition naming the guard encloses it: an {@code if} or {@code ?:} around it, the left side of an {@code &&} or
  * {@code ||}, or an earlier {@code if (...) return|continue|break|throw} in an enclosing block. The scan is syntactic:
  * it resolves neither receivers nor the guard's polarity, which {@code ObserveOnlyTest} pins.
@@ -99,7 +100,7 @@ class ObserveOnlyCallSiteTest {
             "rejectPlace",
             "rejectDig");
 
-    private static final List<String> GUARDS = List.of("isObserveOnly()", "shouldModifyPackets()");
+    private static final List<String> GUARDS = List.of("isObserveOnly()", "shouldModifyPackets()", "failsOpen()");
 
     /**
      * {@code [guard] reason} starts a section; {@code [] reason} starts a section of exceptions. Each entry is
