@@ -244,7 +244,7 @@ class VersionedClientActionsTest {
         }
     }
 
-    private static final class World implements SimWorldView {
+    private static final class World implements StubWorldView {
         final Map<BlockPos, Integer> states = new HashMap<>();
         World() { for (int x = 0; x < 7; x++) for (int z = 0; z < 7; z++) states.put(new BlockPos(x, 63, z), state("stone")); }
         void apply(SimResult result) { result.writes().forEach(w -> states.put(w.pos(), w.newState())); }

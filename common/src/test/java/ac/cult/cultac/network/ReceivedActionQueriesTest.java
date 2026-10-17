@@ -117,6 +117,32 @@ class ReceivedActionQueriesTest {
     }
 
     @Test
+    void entityOccupancyCountsEveryNonSpectatorIncludingTheLocalPlayer() throws Exception {
+        try (var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+            var player = fixture.player;
+            player.gamemode = GameMode.SURVIVAL;
+            player.boundingBox = new SimpleCollisionBox(-3, 64, -3, -2.4, 65.8, -2.4, false);
+            // EndCrystalItem#useOn queries the two blocks above its obsidian or bedrock support.
+            var crystal = new Box(1, 65, 1, 2, 67, 2);
+            assertFalse(view(fixture).hasEntityIn(crystal));
+            var entities = player.compensatedEntities;
+            var item = ac.cult.blocksim.entity.EntityTypes.defaults()
+                    .byKey("minecraft:item")
+                    .id();
+            entities.addEntity(42, item, new ac.cult.cultac.utils.math.Vec3(1.5, 65, 1.5), 0, 0, 0);
+            assertTrue(
+                    view(fixture).hasEntityIn(crystal),
+                    "Level#getEntities returns entities that neither collide nor block building");
+            entities.removeEntity(42);
+            assertFalse(view(fixture).hasEntityIn(crystal));
+            player.boundingBox = new SimpleCollisionBox(1.2, 65, 1.2, 1.8, 66.8, 1.8, false);
+            assertTrue(view(fixture).hasEntityIn(crystal), "The local player is one of the level's entities");
+            player.gamemode = GameMode.SPECTATOR;
+            assertFalse(view(fixture).hasEntityIn(crystal), "EntitySelector.NO_SPECTATORS excludes spectators");
+        }
+    }
+
+    @Test
     void brushEntryFacesAndBoatEyeContainmentUseDifferentPickingRules() throws Exception {
         try (var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
             var player = fixture.player;

@@ -1,12 +1,14 @@
 package ac.cult.cultac.utils.nmsutil;
 
 import ac.cult.blocksim.behavior.BehaviorRegistry;
+import ac.cult.blocksim.data.Box;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.engine.BlockEntityData;
 import ac.cult.blocksim.engine.BlockPos;
 import ac.cult.blocksim.engine.BlockRaycast;
 import ac.cult.blocksim.engine.EntityCollisionContext;
 import ac.cult.blocksim.engine.SimLevel;
+import ac.cult.blocksim.engine.SimPlayer;
 import ac.cult.blocksim.engine.SimWorldView;
 import ac.cult.blocksim.engine.shapes.Shapes;
 import ac.cult.blocksim.engine.shapes.VoxelShape;
@@ -215,6 +217,114 @@ public final class ClientBlockGeometry {
         @Override
         public boolean isWithinBorder(BlockPos pos) {
             throw new UnsupportedOperationException("Border action on geometry view");
+        }
+
+        @Override
+        public ac.cult.blocksim.engine.Vec3 borderHit(
+                ac.cult.blocksim.engine.Vec3 from, ac.cult.blocksim.engine.Vec3 to) {
+            throw new UnsupportedOperationException("Border action on geometry view");
+        }
+
+        @Override
+        public boolean hasBorderCollision(Box box, ac.cult.blocksim.engine.Vec3 source) {
+            throw new UnsupportedOperationException("Border action on geometry view");
+        }
+
+        @Override
+        public int seaLevel() {
+            throw new UnsupportedOperationException("Level action on geometry view");
+        }
+
+        @Override
+        public String biomeKeyAt(BlockPos pos) {
+            throw new UnsupportedOperationException("Level action on geometry view");
+        }
+
+        @Override
+        public String dimensionKey() {
+            throw new UnsupportedOperationException("Level action on geometry view");
+        }
+
+        @Override
+        public java.util.Set<String> recipeInputs(String key) {
+            throw new UnsupportedOperationException("Level action on geometry view");
+        }
+
+        @Override
+        public int rawBrightnessAt(BlockPos pos) {
+            throw new UnsupportedOperationException("Level action on geometry view");
+        }
+
+        @Override
+        public boolean canSpawn(ac.cult.blocksim.entity.EntityTypes.Type type) {
+            throw new UnsupportedOperationException("Level action on geometry view");
+        }
+
+        @Override
+        public boolean hasFeature(String key) {
+            throw new UnsupportedOperationException("Level action on geometry view");
+        }
+
+        @Override
+        public java.util.List<ac.cult.blocksim.entity.PaintingSize> placeablePaintings() {
+            throw new UnsupportedOperationException("Level action on geometry view");
+        }
+
+        @Override
+        public ac.cult.blocksim.entity.PaintingSize paintingSize(com.google.gson.JsonElement holder) {
+            throw new UnsupportedOperationException("Level action on geometry view");
+        }
+
+        @Override
+        public boolean hasPickableEntityHit(
+                ac.cult.blocksim.engine.Vec3 from, ac.cult.blocksim.engine.Vec3 to, SimPlayer player) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
+        }
+
+        @Override
+        public boolean hasPickableEntityAtEye(SimPlayer player) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
+        }
+
+        @Override
+        public int itemFrameOutputAt(BlockPos pos, ac.cult.blocksim.engine.Direction direction) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
+        }
+
+        @Override
+        public int detectorRailOutputAt(BlockPos pos) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
+        }
+
+        @Override
+        public boolean hasSittingCatAt(BlockPos pos) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
+        }
+
+        @Override
+        public boolean hasMinecartIn(Box box) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
+        }
+
+        @Override
+        public boolean hasEntityIn(Box box) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
+        }
+
+        @Override
+        public boolean hasEntityCollision(Box box, boolean boatSource) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
+        }
+
+        @Override
+        public boolean isUnobstructed(VoxelShape shape) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
+        }
+
+        @Override
+        public boolean hasHangingEntityOverlap(
+                Box box, ac.cult.blocksim.engine.Direction direction, String type, boolean allowSameType) {
+            throw new UnsupportedOperationException("Entity action on geometry view");
         }
 
         @Override

@@ -249,6 +249,11 @@ public final class BlockSimulatorWorldView implements SimWorldView {
     }
 
     @Override
+    public boolean hasEntityIn(ac.cult.blocksim.data.Box box) {
+        return entities.hasEntityIn(box);
+    }
+
+    @Override
     public boolean isUnobstructed(ac.cult.blocksim.engine.shapes.VoxelShape shape) {
         return entities.isUnobstructed(shape);
     }

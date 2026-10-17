@@ -86,7 +86,7 @@ class SignAndSoilTest {
         return new PlacementContext(level, player, Hand.MAIN_HAND, stack, new BlockHit(clicked, face, new Vec3(0.5, face == Direction.DOWN ? 65 : 64, 0.5), false));
     }
     private static SimLevel level(Map<BlockPos, Integer> states, Map<BlockPos, BlockEntityData> entities) {
-        SimWorldView view = new SimWorldView() {
+        SimWorldView view = new StubWorldView() {
             public int stateAt(BlockPos pos) { return states.getOrDefault(pos, state("air")); }
             public boolean isLoaded(BlockPos pos) { return true; }
             public boolean isSectionEmpty(BlockPos pos) { return false; }

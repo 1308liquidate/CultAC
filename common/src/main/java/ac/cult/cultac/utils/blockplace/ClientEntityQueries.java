@@ -70,6 +70,12 @@ public final class ClientEntityQueries {
         return any(PacketEntity::isMinecart, box::intersects);
     }
 
+    /** Level#getEntities(null, box) filters with EntitySelector.NO_SPECTATORS and includes the local player. */
+    public boolean hasEntityIn(Box box) {
+        if (player.gamemode != GameMode.SPECTATOR && box.intersects(localBox())) return true;
+        return any(entity -> !spectator(entity), box::intersects);
+    }
+
     public boolean hasSittingCatAt(ac.cult.blocksim.engine.BlockPos pos) {
         var query = new Box(pos.x(), pos.y() + 1, pos.z(), pos.x() + 1, pos.y() + 2, pos.z() + 1);
         return any(

@@ -223,7 +223,7 @@ class ClientItemActionsTest {
         assertFalse(matcher.test(stack, "minecraft:can_place_on", level, POS));
     }
 
-    private static final class World implements SimWorldView {
+    private static final class World implements StubWorldView {
         private final Map<BlockPos, Integer> states = new HashMap<>();
         private int brightness = 15;
         private boolean entityHit;

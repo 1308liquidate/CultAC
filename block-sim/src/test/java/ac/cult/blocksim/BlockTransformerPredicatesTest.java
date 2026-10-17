@@ -118,7 +118,7 @@ class BlockTransformerPredicatesTest {
 
     private static int state(String key) { return DATA.registry().block("minecraft:" + key).defaultState(); }
 
-    private static final class World implements SimWorldView {
+    private static final class World implements StubWorldView {
         private final Map<BlockPos, Integer> states = new HashMap<>();
         private final Set<BlockPos> unloaded = new HashSet<>();
         private int minY = -64, height = 384, seaLevel = 55;

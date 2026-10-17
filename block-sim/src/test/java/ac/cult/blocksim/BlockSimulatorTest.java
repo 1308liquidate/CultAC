@@ -38,7 +38,7 @@ class BlockSimulatorTest {
         return world(loadedNeighbors, state("grass_block"));
     }
     private SimWorldView world(boolean loadedNeighbors, int root) {
-        return new SimWorldView() {
+        return new StubWorldView() {
             public int stateAt(BlockPos pos) { return pos.equals(GROUND) ? root : state("air"); }
             public boolean isLoaded(BlockPos pos) { return loadedNeighbors || pos.x() >= 0; }
             public boolean isSectionEmpty(BlockPos pos) { return pos.y() >> 4 != GROUND.y() >> 4; }

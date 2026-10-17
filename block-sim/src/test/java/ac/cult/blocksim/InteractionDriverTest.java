@@ -142,7 +142,7 @@ class InteractionDriverTest {
                 }
                 public SimInteraction useWithoutItem(int state, UseContext context) { calls.add("empty"); return emptyResult; }
             };
-            level = new SimLevel(new SimWorldView() {
+            level = new SimLevel(new StubWorldView() {
                 public int stateAt(BlockPos pos) { return state; }
                 public boolean isLoaded(BlockPos pos) { return true; }
                 public boolean isSectionEmpty(BlockPos pos) { return false; }

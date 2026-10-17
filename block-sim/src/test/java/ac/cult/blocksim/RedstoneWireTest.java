@@ -73,7 +73,7 @@ class RedstoneWireTest {
 
     private static RedstoneWireBehavior wire(SimLevel level) { return (RedstoneWireBehavior) level.behavior(state("redstone_wire")); }
     private static SimLevel level(World world) { return new SimLevel(world, DATA.registry(), new BehaviorRegistry(DATA)); }
-    private static final class World implements SimWorldView {
+    private static final class World implements StubWorldView {
         final Map<BlockPos, Integer> states = new HashMap<>();
         public int stateAt(BlockPos pos) { return states.getOrDefault(pos, state("air")); }
         public boolean isLoaded(BlockPos pos) { return true; }

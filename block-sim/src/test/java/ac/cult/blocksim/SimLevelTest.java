@@ -152,7 +152,7 @@ class SimLevelTest {
             source.relative(Direction.SOUTH), source.relative(Direction.DOWN), source.relative(Direction.UP)), calls);
     }
 
-    private final class World implements SimWorldView {
+    private final class World implements StubWorldView {
         private final Map<BlockPos, Integer> states = new HashMap<>();
         public int stateAt(BlockPos pos) { return states.getOrDefault(pos, state("air")); }
         public boolean isLoaded(BlockPos pos) { return true; }

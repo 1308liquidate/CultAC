@@ -66,7 +66,7 @@ class DoorTest {
     }
 
     private static SimLevel level(Map<BlockPos, Integer> states) {
-        SimWorldView view = new SimWorldView() {
+        SimWorldView view = new StubWorldView() {
             public int stateAt(BlockPos pos) { return states.getOrDefault(pos, state("air")); }
             public boolean isLoaded(BlockPos pos) { return true; }
             public boolean isSectionEmpty(BlockPos pos) { return false; }
