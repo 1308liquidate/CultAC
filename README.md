@@ -79,8 +79,11 @@ The native plugin stays loaded while each anticheat generation runs in its own c
 
 ### Numbered builds on Velocity
 
-Every push to `main`, `release/**` and `experimental` is built as build N and published as the GitHub prerelease
-`build-N`, with `cultac-velocity.jar`, `cultac-companion.jar`, `cultac-bukkit.jar` and a signed `manifest.json`.
+Three branches publish builds, from most to least proven: `stable`, `experimental` and `development`. Changes land on
+`development` and are promoted to `experimental`, then `stable`, by pull request. Every push to one of them is built as
+build N and published as the GitHub release `build-N`, with `cultac-velocity.jar`, `cultac-companion.jar`,
+`cultac-bukkit.jar` and a signed `manifest.json`. Stable builds are full releases, the newest marked latest; the others
+are prereleases.
 The version reads `0.1.0-b<N>-<branch>-<commit>`. From the proxy console, or with `cult.update` permission:
 
 * `/cult update <N>` installs build N without a restart;
@@ -91,7 +94,7 @@ The version reads `0.1.0-b<N>-<branch>-<commit>`. From the proxy console, or wit
 The loader downloads the manifest and its Ed25519 signature from the release, verifies the signature, then downloads
 the jar from the same release, checking its size and sha256, and hot-swaps it. A build that needs another loader
 version is refused with "needs a proxy restart"; install its jar and restart. Each install ends in one console line,
-such as `b141 → b142 (main abc1234), 3 players draining`. Players move to the new build on their next server switch or
+such as `b141 → b142 (stable abc1234), 3 players draining`. Players move to the new build on their next server switch or
 reconnect.
 
 The installed build number is kept in a state file. On the next start, the loader fetches and verifies that build

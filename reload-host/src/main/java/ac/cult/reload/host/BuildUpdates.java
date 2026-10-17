@@ -143,7 +143,7 @@ public final class BuildUpdates {
         http = HttpClients.create(connectTimeout);
     }
 
-    /** The build number a version names, {@code 0.1.0-b142-main-abc1234}; 0 for an unnumbered version. */
+    /** The build number a version names, {@code 0.1.0-b142-stable-abc1234}; 0 for an unnumbered version. */
     public static long buildNumber(String version) {
         if (version == null) return 0;
         var matcher = BUILD_NUMBER.matcher(version);
