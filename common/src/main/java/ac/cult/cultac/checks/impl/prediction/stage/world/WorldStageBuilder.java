@@ -8,6 +8,7 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext.HardCollidingEntityCollision;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CarriedPush;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.EntityPush;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
@@ -25,8 +26,10 @@ import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.Vector3dm;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
+import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
 import ac.cult.cultac.utils.nmsutil.Collisions;
+import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.FluidTypeFlowing;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.ArrayList;
@@ -253,7 +256,8 @@ public class WorldStageBuilder {
                 honeySlide,
                 onHoney,
                 mainSupportingBlockData,
-                fishingRodPulls);
+                fishingRodPulls,
+                pushesWhileLoadingLevel(player, simulationContext));
     }
 
     private DesyncStatus sampleClimbingAtStart(CultPlayer player, SimulationContext context) {
@@ -472,6 +476,12 @@ public class WorldStageBuilder {
         return lastPrediction.getSimulationContext().getWorldData().getNumCollidingTickingAfterPlayer();
     }
 
+    private static SimpleCollisionBox pushesWhileLoadingLevel(CultPlayer player, SimulationContext context) {
+        if (context.getVehicle() != null) return null;
+        SimpleCollisionBox pushes = player.checkManager.getSimulationProcessor().getPushesWhileLoadingLevel();
+        return pushes == null ? null : pushes.copy();
+    }
+
     private int getNumEntitiesCollidingWith(SimulationContext context) {
         int numColliding = 0;
         collidingTickingBeforePlayer = 0;
@@ -493,33 +503,20 @@ public class WorldStageBuilder {
             long playerTickOrder = entities.getSelf().getClientTickOrder();
 
             for (PacketEntity entity : entities.entityMap.values()) {
-                boolean boatLike = ac.cult.cultac.utils.nmsutil.EntityTypeUtil.isBoat(entity.type);
+                SimpleCollisionBox entityBox =
+                        collidingPusherBox(entities, entity, playerBox, entityBounds, entityScratch);
+                if (entityBox == null) continue;
+                numColliding++;
+                if (entities.clientTickOrder(entity) < playerTickOrder) collidingTickingBeforePlayer++;
+                boolean boatLike = EntityTypeUtil.isBoat(entity.type);
                 boolean minecartLike = entity.isMinecart();
-                boolean bedrockHardCollidingEntity = entity.type == EntityTypeIds.STRIDER
-                        || ac.cult.cultac.utils.nmsutil.EntityTypeUtil.isHappyGhast(entity.type);
-                boolean hardCollidingEntity = boatLike || minecartLike || bedrockHardCollidingEntity;
-                // Players can push living entities. Some entities also provide
-                // hard movement collision boxes that Bedrock consumes as geometry.
-                // The one exemption to a living entity is an armor stand (matters due to plugins sending them)
-                if (!entity.isLivingEntity() && !hardCollidingEntity || entity.type == EntityTypeIds.ARMOR_STAND)
-                    continue;
-                if (entities.sharesRootVehicleWithSelf(entity)) continue;
-
-                // MCP-Reborn push/collision checks use the entity's concrete
-                // bounding box, not the reach-expanded uncertainty box.
-                SimpleCollisionBox entityBox = entity.getPossibleMovementCollisionBoxes(entityBounds, entityScratch);
-
-                if (playerBox.isCollided(entityBox)) {
-                    numColliding++;
-                    if (entities.clientTickOrder(entity) < playerTickOrder) collidingTickingBeforePlayer++;
-                    if (hardCollidingEntity) {
-                        if (hardCollidingEntityCollisions == null) hardCollidingEntityCollisions = new ArrayList<>();
-                        hardCollidingEntityCollisions.add(
-                                new HardCollidingEntityCollision(entityBox.copy(), boatLike, minecartLike));
-                    } else {
-                        if (entityCollisionBoxes == null) entityCollisionBoxes = new ArrayList<>();
-                        entityCollisionBoxes.add(entityBox.copy());
-                    }
+                if (boatLike || minecartLike || isBedrockHardCollidingEntity(entity)) {
+                    if (hardCollidingEntityCollisions == null) hardCollidingEntityCollisions = new ArrayList<>();
+                    hardCollidingEntityCollisions.add(
+                            new HardCollidingEntityCollision(entityBox.copy(), boatLike, minecartLike));
+                } else {
+                    if (entityCollisionBoxes == null) entityCollisionBoxes = new ArrayList<>();
+                    entityCollisionBoxes.add(entityBox.copy());
                 }
             }
         }
@@ -529,6 +526,55 @@ public class WorldStageBuilder {
                 hardCollidingEntityCollisions == null ? List.of() : List.copyOf(hardCollidingEntityCollisions));
 
         return numColliding;
+    }
+
+    /**
+     * Adds to {@code pushes} the x/z range of the Entity#push impulses a player standing at the given position takes
+     * through one client tick. While LocalPlayer#tick waits for the level to load, ClientLevel#tickEntities still runs
+     * every other entity's pushEntities.
+     */
+    public void addPushesOnStandingPlayer(CultPlayer player, double x, double y, double z, SimpleCollisionBox pushes) {
+        if (player.compensatedEntities.getSelf().inVehicle()) return;
+        SimpleCollisionBox playerBox = GetBoundingBox.getBoundingBoxFromPosAndSize(x, y, z, 0.6f, 1.8f);
+        SimpleCollisionBox entityBounds = new SimpleCollisionBox();
+        SimpleCollisionBox entityScratch = new SimpleCollisionBox();
+        CompensatedEntities entities = player.compensatedEntities;
+        for (PacketEntity entity : entities.entityMap.values()) {
+            SimpleCollisionBox box = collidingPusherBox(entities, entity, playerBox, entityBounds, entityScratch);
+            if (box == null) continue;
+            double width = BoundingBoxSize.getWidth(player, entity);
+            // The box holds every box the entity may have this tick; its centre spans the box less one size.
+            double minCentreX = Math.min(box.minX + width / 2.0, (box.minX + box.maxX) / 2.0);
+            double maxCentreX = Math.max(box.maxX - width / 2.0, (box.minX + box.maxX) / 2.0);
+            double minCentreZ = Math.min(box.minZ + width / 2.0, (box.minZ + box.maxZ) / 2.0);
+            double maxCentreZ = Math.max(box.maxZ - width / 2.0, (box.minZ + box.maxZ) / 2.0);
+            EntityPush.addPushRange(pushes, minCentreX - x, maxCentreX - x, minCentreZ - z, maxCentreZ - z);
+        }
+    }
+
+    /** The box of an entity that pushes or collides with the player when it touches {@code playerBox}, else null. */
+    private static SimpleCollisionBox collidingPusherBox(
+            CompensatedEntities entities,
+            PacketEntity entity,
+            SimpleCollisionBox playerBox,
+            SimpleCollisionBox entityBounds,
+            SimpleCollisionBox entityScratch) {
+        boolean hardCollidingEntity =
+                EntityTypeUtil.isBoat(entity.type) || entity.isMinecart() || isBedrockHardCollidingEntity(entity);
+        // Players can push living entities. Some entities also provide
+        // hard movement collision boxes that Bedrock consumes as geometry.
+        // The one exemption to a living entity is an armor stand (matters due to plugins sending them)
+        if (!entity.isLivingEntity() && !hardCollidingEntity || entity.type == EntityTypeIds.ARMOR_STAND) return null;
+        if (entities.sharesRootVehicleWithSelf(entity)) return null;
+
+        // MCP-Reborn push/collision checks use the entity's concrete
+        // bounding box, not the reach-expanded uncertainty box.
+        SimpleCollisionBox entityBox = entity.getPossibleMovementCollisionBoxes(entityBounds, entityScratch);
+        return playerBox.isCollided(entityBox) ? entityBox : null;
+    }
+
+    private static boolean isBedrockHardCollidingEntity(PacketEntity entity) {
+        return entity.type == EntityTypeIds.STRIDER || EntityTypeUtil.isHappyGhast(entity.type);
     }
 
     private StuckEdgeData couldBeOnStuckEdge(

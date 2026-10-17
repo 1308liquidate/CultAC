@@ -59,6 +59,9 @@ public class WorldData {
     MainSupportingBlockData mainSupportingBlockPos;
     SimpleCollisionBox fishingRodPulls;
 
+    /** The x/z range of the pushes taken while the level loaded, carried into the first loaded travel; null if none. */
+    SimpleCollisionBox loadingLevelPushes;
+
     public boolean mustBeInLiquid() {
         return inWater.determinePessimistically() || inLava.determinePessimistically();
     }

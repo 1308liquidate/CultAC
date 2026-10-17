@@ -7,6 +7,7 @@ import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
@@ -26,6 +27,14 @@ public class EntityPush implements UncertaintyHandler {
             PredVector start,
             Vec3 end) {
         WorldData world = context.getWorldData();
+        SimpleCollisionBox loading = world.getLoadingLevelPushes();
+        if (loading != null) {
+            start = start.withXYZOrSelf(
+                    CultMath.clamp(end.x, start.x + loading.minX, start.x + loading.maxX),
+                    start.y,
+                    CultMath.clamp(end.z, start.z + loading.minZ, start.z + loading.maxZ),
+                    "loading level pushes");
+        }
         int carried = world.getNumCarriedPushing();
         // ClientPacketListener#handleSetEntityMotion replaces the delta movement that carries last tick's push.
         CarriedPush carriedPush = world.getCarriedPush();
@@ -35,6 +44,38 @@ public class EntityPush implements UncertaintyHandler {
         PredVector pushed =
                 start.isEntityMotion() ? start : carriedPush.push(start, end, maxHorizontalImpulse(carried));
         return handleEntityPush(pushed, end, world.getNumPushing() - carried);
+    }
+
+    /**
+     * Adds to {@code pushes} the x/z range of Entity#push's impulse on an entity from a pusher whose centre is
+     * {@code minDx..maxDx}, {@code minDz..maxDz} from its own. The range includes no push: EntitySelector#pushableBy's
+     * team collision rules and LivingEntity#isPushable are not modelled.
+     */
+    public static void addPushRange(SimpleCollisionBox pushes, double minDx, double maxDx, double minDz, double maxDz) {
+        double maxAxis =
+                Math.max(Math.max(Math.abs(minDx), Math.abs(maxDx)), Math.max(Math.abs(minDz), Math.abs(maxDz)));
+        if (maxAxis < 0.01F) return;
+        double minAxis = Math.max(minAbs(minDx, maxDx), minAbs(minDz, maxDz));
+        // Entity#push scales each axis by 1/sqrt(absMax) and min(1, 1/sqrt(absMax)), which fall as absMax grows.
+        double maxScale = pushScale(Math.max(minAxis, 0.01F));
+        double minScale = pushScale(maxAxis);
+        double minX = -0.05F * Math.max(maxDx * minScale, maxDx * maxScale);
+        double maxX = -0.05F * Math.min(minDx * minScale, minDx * maxScale);
+        double minZ = -0.05F * Math.max(maxDz * minScale, maxDz * maxScale);
+        double maxZ = -0.05F * Math.min(minDz * minScale, minDz * maxScale);
+        pushes.minX += Math.min(minX, 0.0D);
+        pushes.maxX += Math.max(maxX, 0.0D);
+        pushes.minZ += Math.min(minZ, 0.0D);
+        pushes.maxZ += Math.max(maxZ, 0.0D);
+    }
+
+    private static double pushScale(double absMax) {
+        double root = Math.sqrt(absMax);
+        return 1.0D / root * Math.min(1.0D, 1.0D / root);
+    }
+
+    private static double minAbs(double min, double max) {
+        return min <= 0.0D && max >= 0.0D ? 0.0D : Math.min(Math.abs(min), Math.abs(max));
     }
 
     public static PredVector handleEntityPush(PredVector start, Vec3 end, int collidingEntities) {

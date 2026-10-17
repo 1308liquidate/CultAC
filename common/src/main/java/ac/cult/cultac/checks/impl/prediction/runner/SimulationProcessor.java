@@ -99,6 +99,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     private static final double TELEPORT_GROUND_UNCERTAIN_DISTANCE_SQ = 4.0E-8;
     private static final double TRAVEL_DEBUG_DISTANCE_SQR = 1.0;
     private static final double TRAVEL_FLAG_DISTANCE_SQR = 400.0;
+    // LevelLoadTracker stops waiting after CLIENT_WAIT_TIMEOUT_MS (30 s) and LEVEL_LOAD_CLOSE_DELAY_MS (0.5 s).
+    private static final int MAX_LOADING_LEVEL_TICKS = 610;
     LastInstance lastTickSkip = new LastInstance(this.player);
     LastInstance lastOnGroundSkip = new LastInstance(this.player);
     EvictingQueue<Long> lastMovementTime = new EvictingQueue(3);
@@ -114,6 +116,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     boolean lastGliding = false;
     boolean lastMovementWasSetback = false;
     CarriedPush carriedPush = CarriedPush.IDENTITY;
+    SimpleCollisionBox pushesWhileLoadingLevel = null;
+    int ticksWhileLoadingLevel = 0;
     PredictionCarry profileCarry;
     private boolean bedrockSleepingStateObserved;
     private TeleportData bedrockTeleport;
@@ -278,12 +282,23 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         if (!this.player.compensatedEntities.vehicles.hasPlayerPassengerState()
                 && !this.player.packetStateData.hasPassengerRotationThisClientTick()) {
             if (!this.player.isBedrockMovement()) {
-                if (!this.player.packetStateData.receivedMovementThisClientTick
-                        && CheckManagerListener.localPlayerTicked(this.player)) {
-                    PredictionResult result = this.advanceNoPositionClientTick(
-                            new Vec3(this.player.x, this.player.y, this.player.z), this.player.xRot, this.player.yRot);
-                    if (this.isAcceptedNoPositionTick(result)) {
-                        this.couldPotentiallyTickSkip = true;
+                if (!this.player.packetStateData.receivedMovementThisClientTick) {
+                    if (CheckManagerListener.localPlayerTicked(this.player)) {
+                        PredictionResult result = this.advanceNoPositionClientTick(
+                                new Vec3(this.player.x, this.player.y, this.player.z),
+                                this.player.xRot,
+                                this.player.yRot);
+                        if (this.isAcceptedNoPositionTick(result)) {
+                            this.couldPotentiallyTickSkip = true;
+                        }
+                    } else if (this.ticksWhileLoadingLevel < MAX_LOADING_LEVEL_TICKS) {
+                        // Entity#push adds to the waiting player's deltaMovement with no travel or friction between.
+                        this.ticksWhileLoadingLevel++;
+                        if (this.pushesWhileLoadingLevel == null) {
+                            this.pushesWhileLoadingLevel = new SimpleCollisionBox(0, 0, 0, 0, 0, 0);
+                        }
+                        this.worldStageBuilder.addPushesOnStandingPlayer(
+                                this.player, this.player.x, this.player.y, this.player.z, this.pushesWhileLoadingLevel);
                     }
                 }
                 // Minecraft#tick runs piston block entities after LocalPlayer#tick
@@ -398,6 +413,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 GetBoundingBox.getCollisionBoxForPlayer(this.player, position.x, position.y, position.z);
         if (!this.player.compensatedEntities.getSelf().inVehicle()) {
             this.carriedPush = this.carriedPush.after(teleportData);
+            if (this.pushesWhileLoadingLevel != null) {
+                this.pushesWhileLoadingLevel = inheritedRange(teleportData, this.pushesWhileLoadingLevel);
+                if (this.pushesWhileLoadingLevel == null) this.ticksWhileLoadingLevel = 0;
+            }
             Set<Vec3> existingVectors = this.validPlayerStartingVels;
             this.validPlayerStartingVels = new HashSet<>();
 
@@ -1019,6 +1038,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             }
             this.lastPrediction = result;
             this.carriedPush = CarriedPush.IDENTITY;
+            this.pushesWhileLoadingLevel = null;
+            this.ticksWhileLoadingLevel = 0;
             this.lastXRot = xRot;
             this.lastYRot = yRot;
             this.player.minPlayerAttackSlow = 0;
@@ -1875,6 +1896,28 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
 
     public CarriedPush getCarriedPush() {
         return this.carriedPush;
+    }
+
+    /**
+     * The x/z range of the entity pushes the player took while it waited for its level to load, carried into its
+     * first loaded travel; null when none.
+     */
+    public SimpleCollisionBox getPushesWhileLoadingLevel() {
+        return this.pushesWhileLoadingLevel;
+    }
+
+    /** The horizontal range a teleport's inherited-velocity transform maps {@code range} into; null when none is kept. */
+    private static SimpleCollisionBox inheritedRange(TeleportData teleportData, SimpleCollisionBox range) {
+        SimpleCollisionBox inherited = null;
+        for (double x : new double[] {range.minX, range.maxX}) {
+            for (double z : new double[] {range.minZ, range.maxZ}) {
+                Vec3 corner = teleportData.transformInheritedVelocity(new Vec3(x, 0.0, z));
+                if (inherited == null) inherited = new SimpleCollisionBox(corner.x, 0, corner.z, corner.x, 0, corner.z);
+                else inherited.union(new SimpleCollisionBox(corner.x, 0, corner.z, corner.x, 0, corner.z));
+            }
+        }
+        boolean kept = inherited.minX != 0.0 || inherited.maxX != 0.0 || inherited.minZ != 0.0 || inherited.maxZ != 0.0;
+        return kept ? inherited : null;
     }
 
     @Generated
