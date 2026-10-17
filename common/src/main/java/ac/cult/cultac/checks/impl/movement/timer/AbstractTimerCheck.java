@@ -10,7 +10,7 @@ import ac.cult.cultac.protocol.packet.ServerboundPackets;
 
 // @CheckData(name = "Timer", configName = "TimerA", setback = 10)
 public abstract class AbstractTimerCheck extends Check implements CheckListener {
-    private static final long ONE_CLIENT_TICK = 50_000_000L;
+    protected static final long ONE_CLIENT_TICK = 50_000_000L;
     private final boolean serverSupportsClientTickEnd;
 
     long timerBalanceRealTime = 0;
@@ -118,7 +118,7 @@ public abstract class AbstractTimerCheck extends Check implements CheckListener 
         if (!countClientTick) return false;
 
         hasGottenMovementAfterTransaction = true;
-        timerBalanceRealTime += 50e6;
+        timerBalanceRealTime += ONE_CLIENT_TICK;
 
         return true;
     }
@@ -143,7 +143,7 @@ public abstract class AbstractTimerCheck extends Check implements CheckListener 
             }
 
             // Reset the violation by 1 movement
-            timerBalanceRealTime -= 50e6;
+            timerBalanceRealTime -= ONE_CLIENT_TICK;
         }
 
         this.timerBalanceRealTime = Math.max(this.timerBalanceRealTime, this.knownPlayerClockTime - this.clockDrift);
