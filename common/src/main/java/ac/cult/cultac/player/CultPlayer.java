@@ -286,6 +286,7 @@ public class CultPlayer implements GrimUser {
     public long lastBlockPlaceUseItem = 0;
     public int totalFlyingPacketsSent;
     public final @NotNull AtomicInteger cancelledPackets = new AtomicInteger(0);
+    private boolean loggedPacketSpam;
     /**
      * Client tick ends received while an {@link #observer} is set, counted before any handler runs, so a skipped handler
      * cannot shift the count.
@@ -309,6 +310,14 @@ public class CultPlayer implements GrimUser {
 
     public void onPacketCancel() {
         if (spamThreshold != -1 && cancelledPackets.incrementAndGet() > spamThreshold) {
+            if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
+                if (!loggedPacketSpam) {
+                    loggedPacketSpam = true;
+                    LogUtil.info("Not disconnecting " + getName() + " for spamming invalid packets in observe-only");
+                }
+                cancelledPackets.set(0);
+                return;
+            }
             LogUtil.info("Disconnecting " + getName()
                     + " for spamming invalid packets, packets cancelled within a second " + cancelledPackets);
             disconnect(MessageUtil.miniMessage(MessageUtil.replacePlaceholders(
@@ -948,6 +957,12 @@ public class CultPlayer implements GrimUser {
     }
 
     public void timedOut() {
+        if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
+            LogUtil.warn(
+                    "Not inspecting " + getName() + " any more; no ping answered within " + maxTransactionTime + " s");
+            CultAPI.INSTANCE.getPlayerDataManager().exemptUser(user);
+            return;
+        }
         disconnect(MessageUtil.miniMessage(MessageUtil.replacePlaceholders(
                 this, CultAPI.INSTANCE.getConfigManager().getDisconnectTimeout())));
     }

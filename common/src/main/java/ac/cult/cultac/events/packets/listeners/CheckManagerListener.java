@@ -2,6 +2,7 @@ package ac.cult.cultac.events.packets.listeners;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.engine.SimItemStack;
+import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.prediction.integration.BedrockVehicleControl;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsVehicle;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
@@ -226,8 +227,13 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
     @CultPacketHandler
     public void onContainerClick(PacketReceiveEvent<InventoryClick> event, CultPlayer player, InventoryClick packet) {
         processGenericReceive(event, player);
-        if (event.isCancelled()) player.getInventory().resyncCancelledClick(packet);
-        else player.getInventory().onClickForwarded(packet);
+        if (reachesServer(event)) player.getInventory().onClickForwarded(packet);
+        else player.getInventory().resyncCancelledClick(packet);
+    }
+
+    // In observe-only the codec forwards a cancelled packet unchanged, so the server applies it.
+    private static boolean reachesServer(PacketReceiveEvent<?> event) {
+        return !event.isCancelled() || CultAPI.INSTANCE.getConfigManager().isObserveOnly();
     }
 
     @CultPacketHandler
@@ -1017,7 +1023,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
 
         dispatchReceiveHandlers(event, player);
-        if (!event.isCancelled()
+        if (reachesServer(event)
                 && (action == PlayerAction.START_DESTROY_BLOCK || action == PlayerAction.STOP_DESTROY_BLOCK)) {
             player.blockActionReconciler.forwarded(packet.sequence());
         }
@@ -1069,9 +1075,10 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
         // The player tried placing blocks in air/water or failed other checks
         // Or the player tried playing blocks while pending a teleport
-        if (blockPlace.isCancelled()
-                || event.isCancelled()
-                || player.getSetbackTeleportUtil().isPendingSetback()) {
+        if (!CultAPI.INSTANCE.getConfigManager().isObserveOnly()
+                && (blockPlace.isCancelled()
+                        || event.isCancelled()
+                        || player.getSetbackTeleportUtil().isPendingSetback())) {
             // Invalid block place due to placing on a ghost block
             blockPlace.resync();
 
@@ -1093,7 +1100,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
 
         dispatchReceiveHandlers(event, player);
-        if (!event.isCancelled()) player.blockActionReconciler.forwarded(packet.sequence());
+        if (reachesServer(event)) player.blockActionReconciler.forwarded(packet.sequence());
         clearTransientPacketState(player);
     }
 
@@ -1108,7 +1115,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         player.lastBlockPlaceUseItem = System.currentTimeMillis();
 
         dispatchReceiveHandlers(event, player);
-        if (!event.isCancelled()) player.blockActionReconciler.forwarded(packet.sequence());
+        if (reachesServer(event)) player.blockActionReconciler.forwarded(packet.sequence());
         clearTransientPacketState(player);
     }
 
@@ -1360,7 +1367,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         public void handle(PacketReceiveEvent event, CultPlayer player, Object packet) {
             if (event.getPhase() == ConnectionPhase.PLAY) {
                 player.checkManager.dispatchEarlyReceive(event);
-                if (event.isCancelled()) player.blockActionReconciler.rejectEarly(packet);
+                if (!reachesServer(event)) player.blockActionReconciler.rejectEarly(packet);
             }
         }
     }

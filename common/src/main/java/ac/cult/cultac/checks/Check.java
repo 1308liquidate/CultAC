@@ -116,6 +116,7 @@ public class Check extends CultProcessor implements AbstractCheck {
 
     public boolean shouldModifyPackets() {
         return isEnabled
+                && !CultAPI.INSTANCE.getConfigManager().isObserveOnly()
                 && !player.isDisabled()
                 && !player.noModifyPacketPermission
                 && !noModifyPacketPermission
@@ -329,7 +330,9 @@ public class Check extends CultProcessor implements AbstractCheck {
     }
 
     public boolean shouldSetback() {
-        return !noSetbackPermission && violations + deferredFlags > setbackVL;
+        return !noSetbackPermission
+                && !CultAPI.INSTANCE.getConfigManager().isObserveOnly()
+                && violations + deferredFlags > setbackVL;
     }
 
     public boolean executeViolationSetback() {
