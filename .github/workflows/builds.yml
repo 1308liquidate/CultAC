@@ -1,0 +1,224 @@
+name: Numbered Builds
+
+# Every push to stable, experimental or development becomes build N, N being this workflow's run number: monotonic,
+# unique across branches, and kept by a re-run. With the signing key in the `builds` environment, build N is published
+# as release `build-N` with a signed manifest; `/cult update N` on a Velocity proxy installs it (README.md). Stable
+# builds are full releases and the newest is marked latest; experimental and development builds are prereleases.
+
+on:
+    push:
+        branches:
+            - stable
+            - experimental
+            - development
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+
+        env:
+            CULT_BUILD_NUMBER: ${{ github.run_number }}
+            CULT_GIT_ORG: ${{ github.repository_owner }}
+            CULT_GIT_REPO: ${{ github.event.repository.name }}
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  persist-credentials: false
+
+            - name: Set up JDK 25
+              uses: actions/setup-java@v4
+              with:
+                  java-version: '25'
+                  distribution: 'temurin'
+
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v3
+              with:
+                  cache-read-only: ${{ github.ref_name != github.event.repository.default_branch }}
+
+            - name: Build the Velocity, companion and Bukkit jars
+              run: |
+                  set -o pipefail
+                  ./gradlew --console=plain printVersion \
+                    :velocity-bootstrap:shadowJar :paper-companion:shadowJar :bukkit:shadowJar \
+                    -x spotlessApply | tee build-output.log
+                  VERSION=$(grep '^VERSION=' build-output.log | tail -n1 | cut -d'=' -f2)
+                  case "$VERSION" in
+                    *-b${CULT_BUILD_NUMBER}-*) echo "Build version: $VERSION" ;;
+                    *) echo "::error::Version $VERSION does not carry build number $CULT_BUILD_NUMBER"; exit 1 ;;
+                  esac
+                  mkdir -p dist
+                  cp velocity-bootstrap/build/libs/CultAC-velocity.jar dist/cultac-velocity.jar
+                  cp paper-companion/build/libs/CultAC-companion.jar dist/cultac-companion.jar
+                  cp bukkit/build/libs/CultAC-paper.jar dist/cultac-bukkit.jar
+
+            - name: Upload the jars
+              uses: actions/upload-artifact@v6
+              with:
+                  name: cultac-build-${{ github.run_number }}
+                  path: dist/
+                  if-no-files-found: error
+
+    # Pushes only reach this job on the branches above; pull requests never run this workflow. The `builds` environment
+    # holds CULTAC_SIGNING_KEY and admits those branches alone. Without the key the build stays an Actions artifact.
+    publish:
+        needs: build
+        if: github.ref == 'refs/heads/stable' || github.ref == 'refs/heads/experimental' || github.ref == 'refs/heads/development'
+        runs-on: ubuntu-latest
+        environment: builds
+        permissions:
+            contents: write
+        outputs:
+            published: ${{ steps.release.outputs.published }}
+
+        env:
+            BUILD: ${{ github.run_number }}
+            BRANCH: ${{ github.ref_name }}
+            COMMIT: ${{ github.sha }}
+
+        steps:
+            - name: Check for the signing key
+              id: key
+              env:
+                  CULTAC_SIGNING_KEY: ${{ secrets.CULTAC_SIGNING_KEY }}
+              run: |
+                  if [ -n "$CULTAC_SIGNING_KEY" ]; then
+                    echo "present=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "present=false" >> "$GITHUB_OUTPUT"
+                    echo "::notice::CULTAC_SIGNING_KEY is not set in the builds environment; build $BUILD stays an Actions artifact."
+                  fi
+
+            - name: Checkout repository with full history
+              if: steps.key.outputs.present == 'true'
+              uses: actions/checkout@v4
+              with:
+                  persist-credentials: false
+                  fetch-depth: 0
+
+            - name: Set up JDK 25
+              if: steps.key.outputs.present == 'true'
+              uses: actions/setup-java@v4
+              with:
+                  java-version: '25'
+                  distribution: 'temurin'
+
+            - name: Download the jars
+              if: steps.key.outputs.present == 'true'
+              uses: actions/download-artifact@v7
+              with:
+                  name: cultac-build-${{ github.run_number }}
+                  path: dist
+
+            - name: Write and sign the manifest
+              if: steps.key.outputs.present == 'true'
+              env:
+                  CULTAC_SIGNING_KEY: ${{ secrets.CULTAC_SIGNING_KEY }}
+                  # The key the plugin trusts by default; a fork signing with its own key sets the variable.
+                  CULTAC_UPDATE_PUBKEY: ${{ vars.CULTAC_UPDATE_PUBKEY || 'MCowBQYDK2VwAyEAxE6sl2rSssawl6S3SA62aWafFKFfvnI5EAkzdQXvBOM=' }}
+              run: |
+                  java .github/scripts/BuildManifest.java \
+                    --build "$BUILD" --branch "$BRANCH" --commit "$COMMIT" \
+                    --velocity dist/cultac-velocity.jar --companion dist/cultac-companion.jar --out dist
+
+            - name: Write the release notes
+              if: steps.key.outputs.present == 'true'
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  set -euo pipefail
+                  gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                    --jq '.[] | select(.tag_name | test("^build-[0-9]+$")) | select(.name | test("^build-[0-9]+ [(][^ ]+ [0-9a-f]+[)]$"))
+                          | [(.tag_name | ltrimstr("build-")), (.name | capture("^build-[0-9]+ [(](?<branch>[^ ]+) ").branch)] | @tsv' \
+                    > builds.tsv
+                  # Numbers have gaps (other branches, failed or pruned runs): take the newest earlier build of this
+                  # branch whose tag this commit descends from.
+                  previous=""
+                  for candidate in $(awk -F'\t' -v branch="$BRANCH" -v build="$BUILD" '$2 == branch && $1 + 0 < build + 0 { print $1 }' builds.tsv | sort -rn); do
+                    if git merge-base --is-ancestor "build-$candidate" "$COMMIT" 2>/dev/null; then
+                      previous="$candidate"
+                      break
+                    fi
+                  done
+                  {
+                    echo "Build $BUILD of \`$BRANCH\` at $COMMIT."
+                    echo
+                    echo "Install it on a Velocity proxy with \`/cult update $BUILD\`."
+                    echo
+                    echo "### Changes"
+                    echo
+                    if [ -n "$previous" ]; then
+                      echo "Since build $previous:"
+                      echo
+                      changes=$(git log --no-merges --format='- %s (%h)' -n 100 "build-$previous..$COMMIT")
+                      echo "${changes:-No new commits.}"
+                    else
+                      echo "The first build of \`$BRANCH\`; its newest commits:"
+                      echo
+                      git log --no-merges --format='- %s (%h)' -n 20 "$COMMIT"
+                    fi
+                  } > notes.md
+                  cat notes.md
+
+            - name: Publish release build-${{ github.run_number }}
+              id: release
+              if: steps.key.outputs.present == 'true'
+              env:
+                  # Releases made with GITHUB_TOKEN start no workflows, so release.yml does not run for build releases.
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  set -euo pipefail
+                  if [ "$BRANCH" = stable ]; then
+                    channel=(--latest)
+                  else
+                    channel=(--prerelease --latest=false)
+                  fi
+                  if gh release view "build-$BUILD" > /dev/null 2>&1; then
+                    gh release delete "build-$BUILD" --cleanup-tag --yes
+                  fi
+                  gh release create "build-$BUILD" \
+                    dist/cultac-velocity.jar dist/cultac-companion.jar dist/cultac-bukkit.jar \
+                    dist/manifest.json dist/manifest.json.sig \
+                    --target "$COMMIT" \
+                    --title "build-$BUILD ($BRANCH ${COMMIT:0:7})" \
+                    --notes-file notes.md \
+                    "${channel[@]}"
+                  echo "published=true" >> "$GITHUB_OUTPUT"
+
+    prune:
+        needs: publish
+        if: needs.publish.outputs.published == 'true'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        # Runs one at a time, so two pruning runs never list and delete the same releases.
+        concurrency:
+            group: builds-prune
+            cancel-in-progress: false
+
+        steps:
+            - name: Prune old builds
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  KEEP_PER_BRANCH: 30
+              run: |
+                  set -euo pipefail
+                  gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                    --jq '.[] | select(.tag_name | test("^build-[0-9]+$")) | select(.name | test("^build-[0-9]+ [(][^ ]+ [0-9a-f]+[)]$"))
+                          | [(.tag_name | ltrimstr("build-")), (.name | capture("^build-[0-9]+ [(](?<branch>[^ ]+) ").branch)] | @tsv' \
+                    > builds.tsv
+                  # Newest first within each branch: the first KEEP_PER_BRANCH stay, so each branch keeps its newest.
+                  sort -t "$(printf '\t')" -k2,2 -k1,1nr builds.tsv \
+                    | awk -F'\t' -v keep="$KEEP_PER_BRANCH" '++seen[$2] > keep { print $1 }' \
+                    | while read -r old; do
+                        echo "Deleting build-$old"
+                        gh release delete "build-$old" --cleanup-tag --yes
+                      done
