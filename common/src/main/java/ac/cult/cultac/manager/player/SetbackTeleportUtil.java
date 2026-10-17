@@ -1317,6 +1317,16 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         sendSetback(requiredSetBack);
     }
 
+    /** Lets go of a setback and held move that observe-only would otherwise keep waiting on. */
+    public void observeOnlyStarted() {
+        pendingServerMove = null;
+        if (requiredSetBack != null && !requiredSetBack.isComplete()) {
+            releaseRequiredSetback(new Vec3(player.x, player.y, player.z));
+        }
+        bedrockVehicleSetback = null;
+        blockOffsets = false;
+    }
+
     private void releaseRequiredSetback(Vec3 position) {
         requiredSetBack.setComplete(true);
         blockOffsets = false;

@@ -1125,6 +1125,7 @@ public class CultPlayer implements GrimUser {
     private int spamThreshold = 100;
     private boolean debugPacketCancel;
     private int maxTransactionTime = 60;
+    private boolean observeOnly = CultAPI.INSTANCE.getConfigManager().isObserveOnly();
     public boolean spoofHealth = false;
     public boolean throwError = false;
     public boolean chunkDebug = false;
@@ -1146,6 +1147,17 @@ public class CultPlayer implements GrimUser {
         featureManager.onReload(config);
         debugPacketCancel = config.getBooleanElse("debug-packet-cancel", false);
         maxTransactionTime = CultMath.clamp(config.getIntElse("max-transaction-time", 60), 1, 180);
+        boolean nowObserveOnly = CultAPI.INSTANCE.getConfigManager().isObserveOnly();
+        if (nowObserveOnly != observeOnly) {
+            observeOnly = nowObserveOnly;
+            if (nowObserveOnly) getSetbackTeleportUtil().observeOnlyStarted();
+            else {
+                // Violations counted while nothing acted would otherwise set back on the next flag.
+                for (AbstractCheck check : getChecks()) {
+                    if (check instanceof Check c) c.violations = 0;
+                }
+            }
+        }
         onReload();
         // reload all checks
         for (AbstractCheck value : getChecks()) value.reload();
