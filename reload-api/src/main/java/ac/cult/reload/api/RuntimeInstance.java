@@ -81,4 +81,9 @@ public interface RuntimeInstance {
     default boolean isObserveOnly() {
         return false;
     }
+
+    /** Whether a connection this runtime cannot attach still joins, uninspected. */
+    default boolean failsOpen() {
+        return isObserveOnly();
+    }
 }

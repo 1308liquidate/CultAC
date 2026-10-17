@@ -40,6 +40,12 @@ spectators:
 # Hoe lang moeten spelers hebben voordat we ze schoppen voor timing-out? Standaard = 60 seconden
 max-transaction-time: 60
 
+# Als CultAC zelf faalt (het kan zich niet aan een speler koppelen, de clientversie wordt niet ondersteund of
+# er wordt binnen max-transaction-time geen ping beantwoord), speelt de speler ongecontroleerd verder in plaats
+# van verbroken te worden. Kicks voor pakketfloods en crash-exploits blijven gelden.
+launch-safety:
+  fail-open: true
+
 # Enable this to stop Cult cancelling pongs received from players.
 # This may improve compatibility with other anticheats. It may cause issues with packet limiters.
 # Do not enable this if you are not sure what you are doing.

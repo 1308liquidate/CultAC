@@ -40,6 +40,12 @@ spectators:
 # Oyuncuların zaman aşımından dolayı sunucudan atılmadan önce ne kadar süreleri olmalı? Varsayılan = 60 saniye
 max-transaction-time: 60
 
+# CultAC'ın kendisi başarısız olduğunda (bir oyuncuya bağlanamaz, istemci sürümü desteklenmez veya
+# max-transaction-time içinde hiçbir ping yanıtlanmazsa), oyuncu bağlantısı kesilmek yerine denetlenmeden
+# oynamaya devam eder. Paket seli ve çökertme açıkları için atmalar yine uygulanır.
+launch-safety:
+  fail-open: true
+
 # Enable this to stop Cult cancelling pongs received from players.
 # This may improve compatibility with other anticheats. It may cause issues with packet limiters.
 # Do not enable this if you are not sure what you are doing.

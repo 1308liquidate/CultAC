@@ -74,14 +74,16 @@ class CultTransportTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
-    void aFailedHandoffClosesTheConnectionOnlyOutsideObserveOnly(boolean observeOnly) throws Exception {
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "true,false", "false,true"})
+    void aFailedHandoffClosesTheConnectionOnlyWhenNotFailingOpen(boolean observeOnly, boolean failOpen)
+            throws Exception {
         var context = ac.cult.cultac.runtime.RuntimeEnvironment.class.getDeclaredField("context");
         context.setAccessible(true);
         Object previous = context.get(null);
         try (var f = new Fixture(false);
                 var services = new RecordConsumerServices();
-                var ignored = RecordReceiveFixture.observeOnly(observeOnly)) {
+                var ignored = RecordReceiveFixture.observeOnly(observeOnly);
+                var launchSafety = RecordReceiveFixture.failOpen(failOpen)) {
             var host = mock(ac.cult.reload.api.HostContext.class);
             when(host.platform()).thenReturn("velocity");
             when(host.handoff(f.channel, null)).thenThrow(new IllegalStateException("adopt failed"));
@@ -91,7 +93,7 @@ class CultTransportTest {
             String bytes = ByteBufUtil.hexDump(ack);
             f.channel.writeInbound(ack);
             ByteBuf forwarded = f.channel.readInbound();
-            if (observeOnly) {
+            if (observeOnly || failOpen) {
                 assertEquals(bytes, ByteBufUtil.hexDump(forwarded));
                 forwarded.release();
                 assertTrue(f.channel.isOpen());

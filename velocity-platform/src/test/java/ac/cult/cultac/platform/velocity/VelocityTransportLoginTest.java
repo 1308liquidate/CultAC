@@ -19,6 +19,8 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import java.lang.reflect.Field;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class VelocityTransportLoginTest {
     @Test
@@ -27,18 +29,25 @@ class VelocityTransportLoginTest {
         var player = mock(Player.class);
         var transport = transport(player, channel);
         doThrow(new IllegalStateException("attach failed")).when(transport).attach(any(), any(), any(), any());
-        login(transport, player, channel);
+        Object config =
+                VelocityClientAdmissionTest.swap("configManager", VelocityClientAdmissionTest.observeOnly(false));
+        try {
+            login(transport, player, channel);
+        } finally {
+            VelocityClientAdmissionTest.swap("configManager", config);
+        }
         verify(player).disconnect(VelocityTransport.REFUSED);
     }
 
-    @Test
-    void failedAttachInObserveOnlyLetsThePlayerJoin() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void failedAttachLetsThePlayerJoinInObserveOnlyOrFailingOpen(boolean observeOnly) throws Exception {
         var channel = new EmbeddedChannel();
         var player = mock(Player.class);
         var transport = transport(player, channel);
         doThrow(new IllegalStateException("attach failed")).when(transport).attach(any(), any(), any(), any());
-        Object config =
-                VelocityClientAdmissionTest.swap("configManager", VelocityClientAdmissionTest.observeOnly(true));
+        Object config = VelocityClientAdmissionTest.swap(
+                "configManager", VelocityClientAdmissionTest.config(observeOnly, !observeOnly));
         try {
             login(transport, player, channel);
         } finally {
