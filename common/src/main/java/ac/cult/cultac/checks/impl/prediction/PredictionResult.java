@@ -163,12 +163,14 @@ public class PredictionResult {
         if (profilePredictionVector != null) {
             return profilePredictionVector;
         }
-        float speed = getSimulationContext().getMaxSpeed(player);
         Vec3 closest = getAcceptedClosestToTarget();
-        return UncertaintyHelper.handleCircular(
-                new PredVector(closest),
-                getTarget(),
-                getSimulationContext().getVehicle() == null ? speed * 1.3D : speed);
+        return UncertaintyHelper.handleCircular(new PredVector(closest), getTarget(), getHorizontalInputRadius());
+    }
+
+    /** Radius of the circular horizontal input allowance around the closest movement. */
+    public double getHorizontalInputRadius() {
+        float speed = getSimulationContext().getMaxSpeed(player);
+        return getSimulationContext().getVehicle() == null ? speed * 1.3D : speed;
     }
 
     public Vec3 getInputVectorAndVerticals() {

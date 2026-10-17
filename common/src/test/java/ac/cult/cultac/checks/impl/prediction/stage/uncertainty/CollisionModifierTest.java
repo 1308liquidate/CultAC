@@ -38,7 +38,7 @@ public class CollisionModifierTest {
                 new ArrayList<>());
 
         PredVector clipped = CollisionModifier.transformWithCollisions(
-                context(), collide, start, new Vec3(-0.2167751367791848D, trueClip, -0.3556917605745653D));
+                context(), collide, start, new Vec3(-0.2167751367791848D, trueClip, -0.3556917605745653D), null);
 
         assertEquals(probeClip, clipped.y, 1.0E-9D);
         assertTrue("ceiling clip must not keep the unclipped jump velocity", clipped.y < 0.21D);
@@ -56,7 +56,7 @@ public class CollisionModifierTest {
                 new ArrayList<>());
 
         PredVector result = CollisionModifier.transformWithCollisions(
-                context(), collide, start, new Vec3(0.0D, -0.0784000015258789D, 0.0D));
+                context(), collide, start, new Vec3(0.0D, -0.0784000015258789D, 0.0D), null);
 
         assertEquals(0.41999998688697815D, result.y, 1.0E-12D);
     }
@@ -74,7 +74,7 @@ public class CollisionModifierTest {
                 new ArrayList<>());
 
         PredVector result =
-                CollisionModifier.transformWithCollisions(context(), collide, start, new Vec3(0.0D, clip, 0.0D));
+                CollisionModifier.transformWithCollisions(context(), collide, start, new Vec3(0.0D, clip, 0.0D), null);
 
         assertEquals(clip, result.y, 1.0E-9D);
     }
