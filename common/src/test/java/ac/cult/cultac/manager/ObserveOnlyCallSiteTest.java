@@ -131,7 +131,6 @@ class ObserveOnlyCallSiteTest {
             manager/player/SetbackTeleportUtil.java#sendSetback(SetBackData,boolean) sendSetback
             manager/player/SetbackTeleportUtil.java#sendSetback(SetBackData,boolean,boolean) sendSetback
             manager/player/SetbackTeleportUtil.java#transferBedrockVehicleSetback(int) sendSetback
-            reload/integrations/ViaInputRouter.java#transform(Direction,State,PacketWrapper) cancel
             [reachesServer(] CheckManagerListener.reachesServer(PacketReceiveEvent) is true in observe-only
             events/packets/listeners/CheckManagerListener.java#handle(PacketReceiveEvent,CultPlayer,Object) rejectEarly
             events/packets/listeners/CheckManagerListener.java#onContainerClick(PacketReceiveEvent,CultPlayer,InventoryClick) resyncCancelledClick
@@ -264,15 +263,13 @@ class ObserveOnlyCallSiteTest {
             platform/bukkit/PaperRuntimeEntrypoint.java#attach(Object,Object) inject
             platform/bukkit/entity/BukkitCultEntity.java#eject() eject
             platform/bukkit/entity/BukkitCultEntity.java#teleportAsync(Location) teleportAsync
-            platform/bukkit/manager/BukkitItemResetHandler.java#<clinit> clearActiveItem x2
+            platform/bukkit/manager/BukkitItemResetHandler.java#resetItemUsage(PlatformPlayer) clearActiveItem
             platform/bukkit/player/BukkitPlatformPlayer.java#closeInventory() closeInventory
             platform/bukkit/player/BukkitPlatformPlayer.java#eject() eject
             platform/bukkit/player/BukkitPlatformPlayer.java#kickPlayer(String) kickPlayer
             platform/bukkit/player/BukkitPlatformPlayer.java#setGameMode(GameMode) setGameMode
             platform/bukkit/player/BukkitPlatformPlayer.java#teleportAsync(Location) teleportAsync
             platform/bukkit/sender/BukkitSenderFactory.java#performCommand(CommandSender,String) dispatchCommand
-            platform/bukkit/utils/reflection/PaperUtils.java#teleportAsync(Entity,Location) teleport
-            platform/bukkit/utils/reflection/PaperUtils.java#teleportAsync(Entity,Location) teleportAsync
             platform/velocity/VelocityConnectionAdapter.java#disconnect(Component) disconnect
             platform/velocity/VelocityPlayer.java#closeInventory() inject
             platform/velocity/VelocityPlayer.java#kickPlayer(String) disconnect

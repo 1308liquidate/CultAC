@@ -5,9 +5,7 @@ import ac.cult.cultac.checks.type.BlockBreakListener;
 import ac.cult.cultac.checks.type.BlockPlaceCheck;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
-import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItem;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItemOn;
 import ac.cult.cultac.utils.anticheat.update.BlockBreak;
@@ -21,8 +19,6 @@ import ac.grim.grimac.api.storage.verbose.Verbose;
         experimental = true)
 public class BadPacketsH extends BlockPlaceCheck implements BlockBreakListener {
     private static final Verbose V = Verbose.of("expected={sint}, id={sint}");
-    private static final ClientVersion SERVER_VERSION =
-            ClientVersion.fromProtocolVersion(ProtocolVersion.V26_3.protocol());
 
     private int lastSequence;
     private int placedSequence = -1;
@@ -31,15 +27,8 @@ public class BadPacketsH extends BlockPlaceCheck implements BlockBreakListener {
         super(player);
     }
 
-    @Override
-    public boolean isApplicable() {
-        return player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_19)
-                && SERVER_VERSION.isNewerThanOrEquals(ClientVersion.V_1_19); // PE ServerVersion.V_1_19
-    }
-
     @CultPacketHandler
     public void onUseItem(PacketReceiveEvent<ServerboundUseItem> event, CultPlayer player, ServerboundUseItem packet) {
-        if (!isApplicable()) return;
         if (shouldCancel(packet.sequence())) {
             event.setCancelled(true);
             player.onPacketCancel();
@@ -53,7 +42,6 @@ public class BadPacketsH extends BlockPlaceCheck implements BlockBreakListener {
     @CultPacketHandler
     public void onUseItemOn(
             PacketReceiveEvent<ServerboundUseItemOn> event, CultPlayer player, ServerboundUseItemOn packet) {
-        if (!isApplicable()) return;
         if (packet.sequence() == placedSequence) {
             placedSequence = -1;
             return;
