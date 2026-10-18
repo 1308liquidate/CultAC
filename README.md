@@ -79,16 +79,16 @@ The native plugin stays loaded while each anticheat generation runs in its own c
 
 ### Numbered builds on Velocity
 
-Three branches publish builds, from most to least proven: `stable`, `experimental` and `development`. Changes land on
-`development` and are promoted to `experimental`, then `stable`, by pull request. Every push to one of them is built as
-build N and published as the GitHub release `build-N`, with `cultac-velocity.jar`, `cultac-companion.jar`,
-`cultac-bukkit.jar` and a signed `manifest.json`. Stable builds are full releases, the newest marked latest; the others
-are prereleases.
-The version reads `0.1.0-b<N>-<branch>-<commit>`. From the proxy console, or with `cult.update` permission:
+Three branches publish builds, from most to least proven: `main`, `experimental` and `dev`. Their builds belong to the
+channels `stable`, `experimental` and `dev`: main's channel is called stable. Changes land on `dev` and are promoted to
+`experimental`, then `main`, by pull request. Every push to one of them is built as build N and published as the
+GitHub release `build-N`, with `cultac-velocity.jar`, `cultac-companion.jar`, `cultac-bukkit.jar` and a signed
+`manifest.json`. Stable builds are full releases, the newest marked latest; the others are prereleases.
+The version reads `0.1.0-b<N>-<channel>-<commit>`. From the proxy console, or with `cult.update` permission:
 
 * `/cult update <N>` installs build N without a restart;
-* `/cult update latest [branch]` installs the newest build of a branch, by default the branch the plugin was built from;
-* `/cult update builds [branch]` lists the newest builds and marks the running one;
+* `/cult update latest [channel]` installs the newest build of a channel, by default the channel of the jar the proxy started from;
+* `/cult update builds [channel]` lists the newest builds and marks the running one;
 * `/cult update <filename.jar>` still installs a jar from the `updates/` folder.
 
 The loader downloads the manifest and its Ed25519 signature from the release, verifies the signature, then downloads
