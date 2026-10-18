@@ -76,8 +76,8 @@ final class PaperInjector {
         var listener = ((CraftServer) Bukkit.getServer()).getServer().getConnection();
         if (listener != null)
             for (var connection : listener.getConnections()) {
-                if (connection.channel != null)
-                    connection.channel.eventLoop().execute(() -> inject(connection.channel, true));
+                var channel = BukkitConnectionAdapter.channel(connection);
+                if (channel != null) channel.eventLoop().execute(() -> inject(channel, true));
             }
     }
 
@@ -86,7 +86,7 @@ final class PaperInjector {
         if (!(channel.pipeline().get("packet_handler") instanceof Connection nativeConnection)) return;
         var inbound = existing ? installedPhase(channel, "decoder", PacketDecoder.class) : ConnectionPhase.HANDSHAKE;
         var outbound = existing ? installedPhase(channel, "encoder", PacketEncoder.class) : ConnectionPhase.HANDSHAKE;
-        var connection = manager.createConnection(new BukkitConnectionAdapter(nativeConnection), channel);
+        var connection = manager.createConnection(new BukkitConnectionAdapter(nativeConnection, channel), channel);
         if (existing) {
             connection.phase(PacketDirection.SERVERBOUND, inbound);
             connection.phase(PacketDirection.CLIENTBOUND, outbound);

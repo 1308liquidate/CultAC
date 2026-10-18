@@ -5,6 +5,7 @@ import static org.mockito.Mockito.*;
 
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
+import ac.cult.cultac.manager.config.BaseConfigManager;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketDirection;
@@ -117,6 +118,126 @@ class PacketConnectionsTest {
         } finally {
             close(session);
         }
+    }
+
+    @Test
+    void failedPreparationLeavesFailOpenConnectionsUninspectedOnce() throws Exception {
+        var restore = failOpen(true);
+        var calls = new AtomicInteger();
+        connections.hooks(new UserLifecycleHooks() {
+            @Override
+            public void onAuthenticated(User user) {
+                calls.incrementAndGet();
+            }
+        });
+        var uuid = UUID.randomUUID();
+        var session = session(uuid);
+        when(session.platform().disconnectOutdatedClient()).thenThrow(new IllegalStateException("broken"));
+        try {
+            assertDoesNotThrow(session::prepare);
+            connections.playerJoined(session);
+            ((EmbeddedChannel) session.channel()).runPendingTasks();
+            assertTrue(session.channel().isActive());
+            assertEquals(0, calls.get());
+            assertNull(session.user());
+            assertNull(connections.getUser(uuid));
+            verify(session.platform(), times(1)).disconnectOutdatedClient();
+            verify(session.platform(), never()).disconnect(any());
+        } finally {
+            restore.run();
+            close(session);
+        }
+    }
+
+    @Test
+    void failedPreparationDisconnectsFailClosedConnections() throws Exception {
+        var restore = failOpen(false);
+        var uuid = UUID.randomUUID();
+        var session = session(uuid);
+        when(session.platform().disconnectOutdatedClient()).thenThrow(new IllegalStateException("broken"));
+        try {
+            assertDoesNotThrow(session::prepare);
+            assertNull(session.user());
+            verify(session.platform()).disconnect(any());
+        } finally {
+            restore.run();
+            close(session);
+        }
+    }
+
+    @Test
+    void failedAuthenticationFollowsTheLaunchPolicy() throws Exception {
+        var restore = failOpen(false);
+        connections.hooks(new UserLifecycleHooks() {
+            @Override
+            public void onAuthenticated(User user) {
+                throw new IllegalStateException("hook failed");
+            }
+        });
+        var uuid = UUID.randomUUID();
+        var session = session(uuid);
+        try {
+            assertDoesNotThrow(session::prepare);
+            assertNull(session.player());
+            assertNull(connections.getUser(uuid));
+            verify(session.platform()).disconnect(any());
+        } finally {
+            restore.run();
+            close(session);
+        }
+    }
+
+    @Test
+    void failedLoginWithdrawsThePublishedPlayerWhenFailingOpen() throws Exception {
+        var restore = failOpen(true);
+        var uuid = UUID.randomUUID();
+        var session = session(uuid);
+        when(session.platform().playerBinding()).thenThrow(new IllegalStateException("binding failed"));
+        try {
+            assertDoesNotThrow(session::prepare);
+            var players = CultAPI.INSTANCE.getPlayerDataManager().getEntries();
+            assertNotNull(session.user());
+            assertNull(session.player());
+            assertTrue(players.stream().noneMatch(player -> player.user == session.user()));
+            assertNull(connections.getUser(uuid));
+            assertTrue(session.channel().isActive());
+            assertFalse(session.disconnected());
+            verify(session.platform(), never()).disconnect(any());
+        } finally {
+            restore.run();
+            close(session);
+        }
+    }
+
+    @Test
+    void failedDisconnectStillClosesFailClosedConnections() throws Exception {
+        var restore = failOpen(false);
+        var session = session(UUID.randomUUID());
+        when(session.platform().disconnectOutdatedClient()).thenThrow(new IllegalStateException("broken"));
+        doThrow(new IllegalStateException("kick failed")).when(session.platform()).disconnect(any());
+        try {
+            assertDoesNotThrow(session::prepare);
+            assertFalse(session.channel().isOpen());
+        } finally {
+            restore.run();
+            close(session);
+        }
+    }
+
+    private static Runnable failOpen(boolean failOpen) throws ReflectiveOperationException {
+        var manager = CultAPI.INSTANCE.getConfigManager();
+        var field = BaseConfigManager.class.getDeclaredField("launchFailOpen");
+        field.setAccessible(true);
+        boolean original = field.getBoolean(manager);
+        field.setBoolean(manager, failOpen);
+        assertEquals(failOpen, manager.failsOpen());
+        return () -> {
+            try {
+                field.setBoolean(manager, original);
+            } catch (IllegalAccessException failure) {
+                throw new IllegalStateException(failure);
+            }
+        };
     }
 
     @Test

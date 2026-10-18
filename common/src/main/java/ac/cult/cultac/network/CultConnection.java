@@ -25,6 +25,8 @@ public final class CultConnection implements CodecState {
     private final PlatformConnection platform;
     boolean loginNotified;
     private volatile boolean disconnected;
+    /** Preparation reached a final outcome without an inspected user: excluded, refused or failed open. */
+    private volatile boolean excluded;
     private final PacketDispatcher dispatcher;
     private final ProjectedPackets packets;
     private final Function<Channel, PacketOwner> ownerResolver;
@@ -155,6 +157,14 @@ public final class CultConnection implements CodecState {
 
     public boolean disconnected() {
         return disconnected;
+    }
+
+    boolean excluded() {
+        return excluded;
+    }
+
+    void exclude() {
+        excluded = true;
     }
 
     synchronized boolean markDisconnected() {

@@ -12,6 +12,8 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.utils.anticheat.LogUtil;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.UUID;
@@ -35,6 +37,7 @@ public final class BukkitConnectionAdapter implements PlatformConnection {
     private static final Method PLAYER_LEVEL = playerLevelMethod();
     private static final String OUTDATED_CLIENT = "Outdated client! Please use Minecraft 1.21.2 or newer.";
     private final Connection connection;
+    private final Channel channel;
     /** Received model registry names and older-wire values; Velocity owns the same per connection. */
     private final ac.cult.cultac.network.codec.ConnectionModelValues model =
             new ac.cult.cultac.network.codec.ConnectionModelValues(ac.cult.cultac.protocol.ProtocolCodecs.decoder());
@@ -53,8 +56,10 @@ public final class BukkitConnectionAdapter implements PlatformConnection {
         return model;
     }
 
-    public BukkitConnectionAdapter(Connection connection) {
+    /** {@code channel} is the session's pipeline channel, never the NMS field another plugin may replace. */
+    public BukkitConnectionAdapter(Connection connection, Channel channel) {
         this.connection = java.util.Objects.requireNonNull(connection);
+        this.channel = java.util.Objects.requireNonNull(channel);
     }
 
     @Override
@@ -65,7 +70,7 @@ public final class BukkitConnectionAdapter implements PlatformConnection {
     @Override
     public ProtocolVersion getClientProtocol() {
         if (authenticatedProfile() == null) return null;
-        int protocol = ViaVersionUtil.isAvailable() ? ViaConnectionProtocol.originalProtocol(connection.channel) : -1;
+        int protocol = ViaVersionUtil.isAvailable() ? ViaConnectionProtocol.originalProtocol(channel) : -1;
         if (protocol == -1) protocol = net.minecraft.SharedConstants.getProtocolVersion();
         if (protocol < 768 || protocol > 777) return null;
         return ProtocolVersion.of(protocol);
@@ -74,7 +79,7 @@ public final class BukkitConnectionAdapter implements PlatformConnection {
     @Override
     public boolean disconnectOutdatedClient() {
         if (!ViaVersionUtil.isAvailable()) return false;
-        int protocol = ViaConnectionProtocol.originalProtocol(connection.channel);
+        int protocol = ViaConnectionProtocol.originalProtocol(channel);
         if (protocol <= 0 || protocol >= ClientVersion.V_1_21_2.getProtocolVersion()) return false;
         if (CultAPI.INSTANCE.getConfigManager().failsOpen()) {
             User.Profile profile = authenticatedProfile();
@@ -153,11 +158,26 @@ public final class BukkitConnectionAdapter implements PlatformConnection {
                     },
                     null,
                     0);
-        } else {
-            connection.disconnect(net.minecraft.network.chat.Component.literal(
-                    net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText()
-                            .serialize(reason)));
+            return;
         }
+        var nativeReason = net.minecraft.network.chat.Component.literal(
+                net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(reason));
+        // Connection.disconnect only closes the channel; the configuration listener sends the reason first.
+        if (connection.getPacketListener() instanceof ServerConfigurationPacketListenerImpl listener) {
+            MinecraftServer.getServer().execute(() -> listener.disconnect(nativeReason));
+        } else {
+            connection.disconnect(nativeReason);
+        }
+    }
+
+    /**
+     * The pipeline channel that owns this connection's handler. ProtocolLib replaces {@code Connection.channel} with a
+     * proxy (and 4.x also its pipeline), so the field is not a session identity or lookup key.
+     */
+    public static Channel channel(Connection connection) {
+        Channel advertised = connection.channel;
+        ChannelHandlerContext context = advertised == null ? null : advertised.pipeline().context(connection);
+        return context == null ? null : context.channel();
     }
 
     public static Connection connection(Player player) {

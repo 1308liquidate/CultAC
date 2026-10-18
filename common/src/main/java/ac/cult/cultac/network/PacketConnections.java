@@ -3,6 +3,8 @@ package ac.cult.cultac.network;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
+import ac.cult.cultac.utils.anticheat.LogUtil;
+import ac.cult.reload.api.RuntimeInstance;
 import io.netty.channel.Channel;
 import io.netty.util.concurrent.EventExecutor;
 import java.util.List;
@@ -11,6 +13,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import net.kyori.adventure.text.Component;
 
 /** One directory of attached sessions, with a secondary current-account index. */
 final class PacketConnections {
@@ -38,31 +41,64 @@ final class PacketConnections {
     }
 
     private void prepare(CultConnection session) {
-        if (!session.channel().isActive() || session.disconnected()) return;
+        if (!session.channel().isActive() || session.disconnected() || session.excluded()) return;
+        try {
+            var platform = session.platform();
+            var profile = platform == null ? null : platform.authenticatedProfile();
+            if (profile == null || profile.getUUID() == null) return;
+            if (platform.disconnectOutdatedClient()) {
+                session.exclude();
+                return;
+            }
+            var user = authenticate(session, profile.getUUID(), profile.getName());
+            if (user != null) completeLogin(user, platform.playerBinding());
+        } catch (RuntimeException | Error failure) {
+            refuse(session, failure);
+        }
+    }
+
+    /** Preparation failed, so this connection has no inspected user; the launch policy decides whether it stays. */
+    private void refuse(CultConnection session, Throwable failure) {
+        session.exclude();
+        detach(session);
+        // The profile read may be what failed.
+        var who = session.channel().remoteAddress();
+        if (CultAPI.INSTANCE.getConfigManager().failsOpen()) {
+            LogUtil.warn("Not inspecting " + who + "; CultAC could not prepare its session", failure);
+            return;
+        }
+        LogUtil.error("Disconnecting " + who + "; CultAC could not prepare its session", failure);
         var platform = session.platform();
-        var profile = platform == null ? null : platform.authenticatedProfile();
-        if (profile == null || profile.getUUID() == null) return;
-        if (platform.disconnectOutdatedClient()) return;
-        var user = authenticate(session, profile.getUUID(), profile.getName());
-        if (user != null) completeLogin(user, platform.playerBinding());
+        try {
+            if (platform != null) {
+                platform.disconnect(Component.text(RuntimeInstance.CONNECTION_REFUSED));
+                return;
+            }
+        } catch (RuntimeException | Error disconnectFailure) {
+            failure.addSuppressed(disconnectFailure);
+        }
+        session.channel().close();
+    }
+
+    /** Withdraws a published user's player and index entry; the transport and its packet values stay usable. */
+    private void detach(CultConnection session) {
+        var user = session.user();
+        if (user == null) return;
+        currentByUuid.remove(user.getUUID(), session);
+        CultAPI.INSTANCE.getPlayerDataManager().remove(user);
     }
 
     private User authenticate(CultConnection session, UUID uuid, String name) {
         if (!session.channel().isActive() || session.disconnected()) return null;
         if (session.user() != null) return session.user();
         User user = new User(new User.Profile(uuid, name == null ? uuid.toString() : name), session);
-        try {
-            hooks.onAuthenticated(user);
-            if (!session.channel().isActive()) return null;
-            // Configuration packets already belong to the authenticated player.
-            promote(user);
-            var continued = session.continuation();
-            if (continued != null && session.player() != null) continued.restore(session.player());
-            return user;
-        } catch (RuntimeException | Error failure) {
-            finishDisconnect(session);
-            throw failure;
-        }
+        hooks.onAuthenticated(user);
+        if (!session.channel().isActive()) return null;
+        // Configuration packets already belong to the authenticated player.
+        promote(user);
+        var continued = session.continuation();
+        if (continued != null && session.player() != null) continued.restore(session.player());
+        return user;
     }
 
     private void promote(User user) {

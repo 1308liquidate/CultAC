@@ -258,7 +258,7 @@ class ObserveOnlyCallSiteTest {
             [] platform implementations; each caller is listed
             network/protocol/player/User.java#closeConnection() close
             platform/api/PlatformServer.java#dispatchCommand(Sender,String,PlatformPlayer,AbstractCheck,double,String) dispatchCommand
-            platform/bukkit/BukkitConnectionAdapter.java#disconnect(Component) disconnect
+            platform/bukkit/BukkitConnectionAdapter.java#disconnect(Component) disconnect x2
             platform/bukkit/BukkitConnectionAdapter.java#disconnect(Component) kick
             platform/bukkit/BukkitPlatformServer.java#dispatchCommand(Sender,String) dispatchCommand
             platform/bukkit/BukkitValidationBlocks.java#apply(PlatformPlayer,int,int,int,String,Runnable) setBlockData
