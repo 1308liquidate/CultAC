@@ -9,7 +9,6 @@ import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
-import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.ArrayList;
 import java.util.List;
@@ -114,9 +113,7 @@ public class EntityPush implements UncertaintyHandler {
         // in the same tick; a later-ticking remote boat pushes after sendPosition and
         // is carried into the following player-body tick.
         for (PacketEntity entity : state.getEntities().entityMap.values()) {
-            if (entity.isDead
-                    || entity.hasPassenger(player.compensatedEntities.getSelf())
-                    || !EntityTypeUtil.isBoat(entity.type)) {
+            if (entity.isDead || entity.hasPassenger(player.compensatedEntities.getSelf()) || !entity.isBoat()) {
                 continue;
             }
 

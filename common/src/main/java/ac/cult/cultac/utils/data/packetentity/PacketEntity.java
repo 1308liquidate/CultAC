@@ -49,6 +49,10 @@ public class PacketEntity {
     public Vec3 desyncClientPos;
 
     public final int type;
+    private final boolean living;
+    private final boolean boat;
+    private final boolean minecart;
+    private final boolean happyGhast;
 
     public PacketEntity riding;
     public List<PacketEntity> passengers = new ArrayList<>(0);
@@ -98,6 +102,10 @@ public class PacketEntity {
     public PacketEntity(int type, int entityId) {
         this.entityId = entityId;
         this.type = type;
+        this.living = EntityTypeUtil.isLiving(type);
+        this.boat = EntityTypeUtil.isBoat(type);
+        this.minecart = EntityTypeUtil.isMinecart(type);
+        this.happyGhast = EntityTypeUtil.isHappyGhast(type);
     }
 
     public PacketEntity(CultPlayer cultPlayer, int entityId, int type, double x, double y, double z) {
@@ -116,11 +124,11 @@ public class PacketEntity {
     }
 
     public boolean isLivingEntity() {
-        return EntityTypeUtil.isLiving(type);
+        return living;
     }
 
     public boolean isMinecart() {
-        return EntityTypeUtil.isMinecart(type);
+        return minecart;
     }
 
     public boolean isHorse() {
@@ -132,7 +140,11 @@ public class PacketEntity {
     }
 
     public boolean isBoat() {
-        return EntityTypeUtil.isBoat(type);
+        return boat;
+    }
+
+    public boolean isHappyGhast() {
+        return happyGhast;
     }
 
     public boolean isAnimal() {
@@ -238,11 +250,7 @@ public class PacketEntity {
             CultPlayer player,
             boolean bundled) {
         if (hasPosition) desyncClientPos = path.endPosition();
-        if (type == EntityTypeIds.SHULKER
-                || (!EntityTypeUtil.isLiving(type)
-                        && !EntityTypeUtil.isBoat(type)
-                        && !EntityTypeUtil.isMinecart(type)
-                        && type != EntityTypeIds.FISHING_BOBBER)) {
+        if (type == EntityTypeIds.SHULKER || (!living && !boat && !minecart && type != EntityTypeIds.FISHING_BOBBER)) {
             setPositionRaw(
                     GetBoundingBox.getPacketEntityBoundingBox(
                             player, desyncClientPos.x, desyncClientPos.y, desyncClientPos.z, this),
@@ -250,8 +258,7 @@ public class PacketEntity {
                     interpolationTargetPitch(pitch));
             return;
         }
-        if (EntityTypeUtil.isLiving(type)
-                && (newPacketLocation == null || !newPacketLocation.usesSteppedInterpolation())) {
+        if (living && (newPacketLocation == null || !newPacketLocation.usesSteppedInterpolation())) {
             SimpleCollisionBox start = interpolationStartingLocation(player);
             Vec3 current = positionFromCollisionBox(start);
             newPacketLocation = new ReachInterpolationData(

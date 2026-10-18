@@ -29,7 +29,6 @@ import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
 import ac.cult.cultac.utils.nmsutil.Collisions;
-import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.FluidTypeFlowing;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.ArrayList;
@@ -502,7 +501,7 @@ public class WorldStageBuilder {
                 if (entityBox == null) continue;
                 numColliding++;
                 if (entities.clientTickOrder(entity) < playerTickOrder) collidingTickingBeforePlayer++;
-                boolean boatLike = EntityTypeUtil.isBoat(entity.type);
+                boolean boatLike = entity.isBoat();
                 boolean minecartLike = entity.isMinecart();
                 if (boatLike || minecartLike || isBedrockHardCollidingEntity(entity)) {
                     if (hardCollidingEntityCollisions == null) hardCollidingEntityCollisions = new ArrayList<>();
@@ -584,8 +583,7 @@ public class WorldStageBuilder {
             SimpleCollisionBox playerBox,
             SimpleCollisionBox entityBounds,
             SimpleCollisionBox entityScratch) {
-        boolean hardCollidingEntity =
-                EntityTypeUtil.isBoat(entity.type) || entity.isMinecart() || isBedrockHardCollidingEntity(entity);
+        boolean hardCollidingEntity = entity.isBoat() || entity.isMinecart() || isBedrockHardCollidingEntity(entity);
         // Players can push living entities. Some entities also provide
         // hard movement collision boxes that Bedrock consumes as geometry.
         // The one exemption to a living entity is an armor stand (matters due to plugins sending them)
@@ -599,7 +597,7 @@ public class WorldStageBuilder {
     }
 
     private static boolean isBedrockHardCollidingEntity(PacketEntity entity) {
-        return entity.type == EntityTypeIds.STRIDER || EntityTypeUtil.isHappyGhast(entity.type);
+        return entity.type == EntityTypeIds.STRIDER || entity.isHappyGhast();
     }
 
     private StuckEdgeData couldBeOnStuckEdge(

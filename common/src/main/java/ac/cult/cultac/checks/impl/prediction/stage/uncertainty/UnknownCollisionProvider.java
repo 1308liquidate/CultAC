@@ -8,7 +8,6 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHappyGhast;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
 import ac.cult.cultac.utils.math.Vec3;
-import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import java.util.List;
 
 public final class UnknownCollisionProvider {
@@ -39,11 +38,11 @@ public final class UnknownCollisionProvider {
             SimpleCollisionBox scratch) {
         boolean ridingStrider = player.compensatedEntities.getSelf().getRiding() instanceof PacketEntityStrider;
         boolean inBoat = player.compensatedEntities.getSelf().getRiding() != null
-                && EntityTypeUtil.isBoat(player.compensatedEntities.getSelf().getRiding().type);
+                && player.compensatedEntities.getSelf().getRiding().isBoat();
         boolean inVehicle = player.compensatedEntities.getSelf().inVehicle();
 
         for (PacketEntity entity : player.compensatedEntities.entityMap.values()) {
-            if (EntityTypeUtil.isBoat(entity.type)) {
+            if (entity.isBoat()) {
                 // Expand by 2 since boats suck.
                 addIntersecting(
                         boxes,
@@ -54,7 +53,7 @@ public final class UnknownCollisionProvider {
             if (inBoat && !player.compensatedEntities.getSelf().getRiding().hasPassenger(entity)) {
                 boolean canPush = entity.isLivingEntity();
                 // Minecarts and boats are only non-living that can push
-                if (EntityTypeUtil.isMinecart(entity.type) || EntityTypeUtil.isBoat(entity.type)) {
+                if (entity.isMinecart() || entity.isBoat()) {
                     canPush = true;
                 }
                 // Bats, parrots, and armor stands cannot

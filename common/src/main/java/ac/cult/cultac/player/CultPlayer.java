@@ -1018,10 +1018,7 @@ public class CultPlayer implements GrimUser {
             return false;
         }
 
-        return EntityTypeUtil.isBoat(entity.type)
-                || entity.isMinecart()
-                || entity.type == EntityTypeIds.SHULKER
-                || EntityTypeUtil.isHappyGhast(entity.type);
+        return entity.isBoat() || entity.isMinecart() || entity.type == EntityTypeIds.SHULKER || entity.isHappyGhast();
     }
 
     public void closeInventorySafely() {
