@@ -100,10 +100,7 @@ class ObserveOnlyCallSiteTest {
             "disconnectPacket",
             "resyncPackets",
             "sendVehicleProtocolResync",
-            "resyncPose",
-            "resyncCancelledClick",
-            "rejectPlace",
-            "rejectDig");
+            "resyncPose");
 
     private static final List<String> GUARDS = List.of("isObserveOnly()", "shouldModifyPackets()", "failsOpen()");
 
@@ -153,10 +150,6 @@ class ObserveOnlyCallSiteTest {
             utils/latency/CompensatedInventory.java#resyncFromServerView() sendCorrections
             [] follows a cancel that already happened
             events/packets/listeners/PacketPlayerDigging.java#onPlayerAction(PacketReceiveEvent,CultPlayer,ServerboundPlayerAction) setCancelled
-            [] the reconciler counts the action as forwarded in observe-only
-            events/packets/listeners/CheckManagerListener.java#processUseItemOnReceive(PacketReceiveEvent,CultPlayer,ServerboundUseItemOn) rejectPlace
-            utils/latency/BlockActionReconciler.java#rejectEarly(Object) rejectPlace
-            utils/latency/BlockActionReconciler.java#rejectEarly(Object) rejectDig
             [] the codec forwards the client's packet in observe-only
             checks/impl/crash/CrashA.java#onMovePlayer(PacketReceiveEvent,CultPlayer,ServerboundMovePlayer) setCancelled
             checks/impl/crash/CrashB.java#onSetCreativeModeSlot(PacketReceiveEvent,CultPlayer,CreativeSlot) setCancelled

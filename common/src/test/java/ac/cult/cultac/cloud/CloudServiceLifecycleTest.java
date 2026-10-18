@@ -239,6 +239,8 @@ class CloudServiceLifecycleTest {
             }
             return strings.getOrDefault(invocation.getArgument(0), invocation.getArgument(1));
         });
+        Mockito.when(held.getBooleanElse(Mockito.eq("cloud.enabled"), Mockito.anyBoolean()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         List<Throwable> failures = new CopyOnWriteArrayList<>();
         Thread configuring = new Thread(() -> CloudService.configure(held, false), "configure-held");
         Thread notice = new Thread(CloudService::turnedOff, "turned-off");
