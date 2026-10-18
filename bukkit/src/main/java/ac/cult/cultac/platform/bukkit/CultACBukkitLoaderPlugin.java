@@ -29,11 +29,13 @@ import ac.cult.cultac.platform.bukkit.scheduler.bukkit.BukkitPlatformScheduler;
 import ac.cult.cultac.platform.bukkit.scheduler.folia.FoliaPlatformScheduler;
 import ac.cult.cultac.platform.bukkit.sender.BukkitSenderFactory;
 import ac.cult.cultac.platform.bukkit.utils.placeholder.PlaceholderAPIExpansion;
+import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.cultac.utils.lazy.LazyHolder;
 import ac.grim.grimac.api.plugin.GrimPlugin;
 import ac.grim.grimac.internal.platform.bukkit.resolver.BukkitResolverRegistrar;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import lombok.Getter;
 import org.bukkit.Bukkit;
 import org.bukkit.command.BlockCommandSender;
@@ -117,7 +119,17 @@ public final class CultACBukkitLoaderPlugin implements PlatformLoader {
     // Bukkit's permission registry is not thread-safe; a runtime swapped in while the server runs starts elsewhere.
     private void registerCheckPermissions() {
         if (Bukkit.isPrimaryThread()) CheckPermissions.register(permissionManager);
-        else getScheduler().getGlobalRegionScheduler().run(plugin, () -> CheckPermissions.register(permissionManager));
+        else
+            getScheduler().getGlobalRegionScheduler().run(plugin, () -> {
+                CheckPermissions.register(permissionManager);
+                for (CultPlayer online : CultAPI.INSTANCE.getPlayerDataManager().getEntries()) {
+                    try {
+                        online.runSafely(online::updatePermissions);
+                    } catch (RejectedExecutionException closing) {
+                        // A connection whose owner is shutting down has no session left to exempt.
+                    }
+                }
+            });
     }
 
     public void onEnable() {
