@@ -33,6 +33,9 @@ public class CollisionModifier implements UncertaintyHandler {
     private final SimpleCollisionBox probeEntityScratch = new SimpleCollisionBox();
     private final AxisResult positiveResult = new AxisResult(0, false);
     private final AxisResult negativeResult = new AxisResult(0, false);
+    // An axis step's tests and move depend only on its axis, position and movements within one probe.
+    private final ResolvedStep[] resolvedSteps = new ResolvedStep[PROBE_ORDERS.length * 3];
+    private int resolvedStepCount;
     private final boolean javaTravelInput;
 
     public CollisionModifier() {
@@ -311,6 +314,7 @@ public class CollisionModifier implements UncertaintyHandler {
         }
 
         boolean groundedOrder = context.getLastOnGround().determineOptimistically();
+        resolvedStepCount = 0;
 
         // Brute force the current-client axis order possibilities exposed by the server-observable movement envelope.
         for (int orderIndex = 0; orderIndex < PROBE_ORDERS.length; orderIndex++) {
@@ -325,18 +329,6 @@ public class CollisionModifier implements UncertaintyHandler {
                         getAttemptedAxisMovement(axis, movement, attemptedMovementExtents, stuckSpeed, false);
                 double multiplier = 1 / getAxisOfVector(stuckSpeed, axis); // TODO: How do we stuck speed collision?
 
-                AxisResult pos = testInAxisAndDirection(
-                        context,
-                        collisions,
-                        unknown,
-                        iterX,
-                        iterY,
-                        iterZ,
-                        axis,
-                        positiveMovement,
-                        true,
-                        dimensions,
-                        positiveResult);
                 // Keep the downward reach for landing/step discovery separate
                 // from the position used for the following horizontal axes.
                 if (axis == Collisions.Axis.Y) {
@@ -344,34 +336,74 @@ public class CollisionModifier implements UncertaintyHandler {
                             getAttemptedAxisMovement(axis, minY, attemptedMovementExtents, stuckSpeed, false);
                     movement = followCandidateVerticalMovement ? candidateY : minY;
                 }
-                AxisResult neg = testInAxisAndDirection(
-                        context,
-                        collisions,
-                        unknown,
-                        iterX,
-                        iterY,
-                        iterZ,
-                        axis,
-                        negativeMovement,
-                        false,
-                        dimensions,
-                        negativeResult);
+                AxisResult pos;
+                AxisResult neg;
+                double moved = 0;
+                ResolvedStep step =
+                        findResolvedStep(axis, iterX, iterY, iterZ, positiveMovement, negativeMovement, movement);
+                if (step != null) {
+                    pos = step.positive(positiveResult);
+                    neg = step.negative(negativeResult);
+                    movement = step.movement;
+                    moved = step.moved;
+                } else {
+                    double requested = movement;
+                    pos = testInAxisAndDirection(
+                            context,
+                            collisions,
+                            unknown,
+                            iterX,
+                            iterY,
+                            iterZ,
+                            axis,
+                            positiveMovement,
+                            true,
+                            dimensions,
+                            positiveResult);
+                    neg = testInAxisAndDirection(
+                            context,
+                            collisions,
+                            unknown,
+                            iterX,
+                            iterY,
+                            iterZ,
+                            axis,
+                            negativeMovement,
+                            false,
+                            dimensions,
+                            negativeResult);
 
-                if (axis == Collisions.Axis.Y && followCandidateVerticalMovement && movement != 0.0D) {
-                    AxisResult vertical = movement < 0 ? neg : pos;
-                    if (vertical != null && vertical.isCollide()) {
-                        movement = movement < 0
-                                ? Math.max(movement, vertical.getResult())
-                                : Math.min(movement, vertical.getResult());
+                    if (axis == Collisions.Axis.Y && followCandidateVerticalMovement && movement != 0.0D) {
+                        AxisResult vertical = movement < 0 ? neg : pos;
+                        if (vertical != null && vertical.isCollide()) {
+                            movement = movement < 0
+                                    ? Math.max(movement, vertical.getResult())
+                                    : Math.min(movement, vertical.getResult());
+                        }
                     }
+
+                    // Entity#collideWithShapes advances by the resolved candidate
+                    // before the next axis. Neither the envelope's minY nor an
+                    // unvalidated packet Y proves the height of an X/Z contact.
+                    if (movement != 0) {
+                        moved = moveBoundingBoxForAxis(
+                                context, collisionsMinusUnknown, axis, movement, iterX, iterY, iterZ, dimensions);
+                    }
+                    recordResolvedStep(
+                            axis,
+                            iterX,
+                            iterY,
+                            iterZ,
+                            positiveMovement,
+                            negativeMovement,
+                            requested,
+                            pos,
+                            neg,
+                            movement,
+                            moved);
                 }
 
-                // Entity#collideWithShapes advances by the resolved candidate
-                // before the next axis. Neither the envelope's minY nor an
-                // unvalidated packet Y proves the height of an X/Z contact.
                 if (movement != 0) {
-                    double moved = moveBoundingBoxForAxis(
-                            context, collisionsMinusUnknown, axis, movement, iterX, iterY, iterZ, dimensions);
                     iterX += axis == Collisions.Axis.X ? moved : 0;
                     iterY += axis == Collisions.Axis.Y ? moved : 0;
                     iterZ += axis == Collisions.Axis.Z ? moved : 0;
@@ -398,6 +430,95 @@ public class CollisionModifier implements UncertaintyHandler {
         }
 
         return result;
+    }
+
+    private ResolvedStep findResolvedStep(
+            Collisions.Axis axis,
+            double x,
+            double y,
+            double z,
+            double positiveMovement,
+            double negativeMovement,
+            double movement) {
+        long xBits = Double.doubleToRawLongBits(x);
+        long yBits = Double.doubleToRawLongBits(y);
+        long zBits = Double.doubleToRawLongBits(z);
+        long positiveBits = Double.doubleToRawLongBits(positiveMovement);
+        long negativeBits = Double.doubleToRawLongBits(negativeMovement);
+        long movementBits = Double.doubleToRawLongBits(movement);
+        for (int i = 0; i < resolvedStepCount; i++) {
+            ResolvedStep step = resolvedSteps[i];
+            if (step.axis == axis
+                    && step.x == xBits
+                    && step.y == yBits
+                    && step.z == zBits
+                    && step.positiveMovement == positiveBits
+                    && step.negativeMovement == negativeBits
+                    && step.requestedMovement == movementBits) {
+                return step;
+            }
+        }
+        return null;
+    }
+
+    private void recordResolvedStep(
+            Collisions.Axis axis,
+            double x,
+            double y,
+            double z,
+            double positiveMovement,
+            double negativeMovement,
+            double requestedMovement,
+            AxisResult pos,
+            AxisResult neg,
+            double movement,
+            double moved) {
+        if (resolvedStepCount == resolvedSteps.length) return;
+        ResolvedStep step = resolvedSteps[resolvedStepCount];
+        if (step == null) {
+            step = new ResolvedStep();
+            resolvedSteps[resolvedStepCount] = step;
+        }
+        resolvedStepCount++;
+        step.axis = axis;
+        step.x = Double.doubleToRawLongBits(x);
+        step.y = Double.doubleToRawLongBits(y);
+        step.z = Double.doubleToRawLongBits(z);
+        step.positiveMovement = Double.doubleToRawLongBits(positiveMovement);
+        step.negativeMovement = Double.doubleToRawLongBits(negativeMovement);
+        step.requestedMovement = Double.doubleToRawLongBits(requestedMovement);
+        step.hasPositive = pos != null;
+        step.positiveCollide = pos != null && pos.collide;
+        step.positiveResult = pos == null ? 0 : pos.result;
+        step.hasNegative = neg != null;
+        step.negativeCollide = neg != null && neg.collide;
+        step.negativeResult = neg == null ? 0 : neg.result;
+        step.movement = movement;
+        step.moved = moved;
+    }
+
+    private static final class ResolvedStep {
+        private Collisions.Axis axis;
+        private long x, y, z;
+        private long positiveMovement, negativeMovement, requestedMovement;
+        private boolean hasPositive, positiveCollide, hasNegative, negativeCollide;
+        private double positiveResult, negativeResult;
+        private double movement, moved;
+
+        private AxisResult positive(AxisResult out) {
+            return restore(out, hasPositive, positiveCollide, positiveResult);
+        }
+
+        private AxisResult negative(AxisResult out) {
+            return restore(out, hasNegative, negativeCollide, negativeResult);
+        }
+
+        private static AxisResult restore(AxisResult out, boolean present, boolean collide, double result) {
+            if (!present) return null;
+            out.result = result;
+            out.collide = collide;
+            return out;
+        }
     }
 
     private static boolean didCollide(AxisResult pos, AxisResult neg) {
