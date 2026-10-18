@@ -1171,45 +1171,41 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         player.packetStateData.clearDesiredOnGround();
     }
 
-    /** Applies a transaction-matched teleport response without producing a movement tick. */
+    /**
+     * Applies a transaction-matched teleport response without producing a movement tick. Before 26.3 the response is
+     * ClientPacketListener#handleMovePlayer's PosRot; from 26.3 it is ServerboundAcceptTeleportationPacket, which
+     * carries the same position and look and no PosRot follows. Both reach checks as the same teleport position and
+     * rotation update, so no check depends on which packet carried it.
+     */
     public static void applyTeleportResponse(CultPlayer player, TeleportAcceptData accepted, float yaw, float pitch) {
-        Vec3 previous = new Vec3(player.x, player.y, player.z);
-        applyTeleportAcknowledgementLook(player, yaw, pitch, accepted);
-        if (accepted.isMatchedTeleportPosition()) {
-            if (player.compensatedEntities.vehicles.hasPendingServerDismount()) {
-                player.compensatedEntities.vehicles.applyClientVisibleDismount();
-            }
-            player.checkManager.getSimulationProcessor().applyAcceptedJavaTeleport(accepted);
-        }
-        player.getSetbackTeleportUtil()
-                .onPredictionComplete(new PredictionComplete(new PositionUpdate(
-                        previous,
-                        new Vec3(player.x, player.y, player.z),
-                        yaw,
-                        pitch,
-                        player.onGround,
-                        accepted,
-                        null)));
-    }
-
-    /** 26.3's coordinate-bearing acknowledgement carries the old teleport PosRot's look state. */
-    public static void applyTeleportAcknowledgementLook(CultPlayer player, float yaw, float pitch) {
-        applyTeleportAcknowledgementLook(player, yaw, pitch, null);
-    }
-
-    private static void applyTeleportAcknowledgementLook(
-            CultPlayer player, float yaw, float pitch, TeleportAcceptData accepted) {
-        boolean previous = player.packetStateData.lastPacketWasTeleport;
-        player.packetStateData.lastPacketWasTeleport = true;
-        player.packetStateData.teleportedThisClientTick = true;
+        var state = player.packetStateData;
+        boolean previousTeleport = state.lastPacketWasTeleport;
+        boolean previousMatched = state.lastPacketMatchedTeleportPosition;
+        state.lastPacketWasTeleport = true;
+        state.lastPacketMatchedTeleportPosition = accepted.isMatchedTeleportPosition();
+        state.teleportedThisClientTick = true;
         try {
+            if (accepted.isMatchedTeleportPosition()) {
+                if (player.compensatedEntities.vehicles.hasPendingServerDismount()) {
+                    player.compensatedEntities.vehicles.applyClientVisibleDismount();
+                }
+                Vec3 target = accepted.getTeleportData().getLocation();
+                handleFlying(player, target.x, target.y, target.z, yaw, pitch, true, true, false, accepted);
+                return;
+            }
+            // ClientPacketListener#handleMovePlayer leaves a passenger in place and only takes the look.
             if (player.xRot != yaw || player.yRot != pitch) {
                 player.lastTickXRot = player.xRot;
                 player.lastTickYRot = player.yRot;
             }
             applyRotation(player, yaw, pitch, accepted);
+            Vec3 position = new Vec3(player.x, player.y, player.z);
+            player.getSetbackTeleportUtil()
+                    .onPredictionComplete(new PredictionComplete(
+                            new PositionUpdate(position, position, yaw, pitch, player.onGround, accepted, null)));
         } finally {
-            player.packetStateData.lastPacketWasTeleport = previous;
+            state.lastPacketWasTeleport = previousTeleport;
+            state.lastPacketMatchedTeleportPosition = previousMatched;
         }
     }
 
@@ -1243,7 +1239,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         player.checkManager.onRotationUpdate(update);
     }
 
-    private void handleFlying(
+    private static void handleFlying(
             CultPlayer player,
             double x,
             double y,
@@ -1254,7 +1250,8 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             boolean hasLook,
             boolean onGround,
             TeleportAcceptData teleportData) {
-        player.serverOpenedInventoryThisTick = false;
+        // A teleport response is handled in the same packet phase as a screen the server opened; tick end clears it.
+        if (!teleportData.isTeleport()) player.serverOpenedInventoryThisTick = false;
         if (hasLook && (player.xRot != yaw || player.yRot != pitch)) {
             player.lastTickXRot = player.xRot;
             player.lastTickYRot = player.yRot;

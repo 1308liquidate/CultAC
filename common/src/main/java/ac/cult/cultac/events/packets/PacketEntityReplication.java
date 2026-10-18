@@ -46,8 +46,6 @@ import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.protocol.value.PositionPath;
 import ac.cult.cultac.protocol.value.Relative;
 import ac.cult.cultac.protocol.value.Vec3d;
-import ac.cult.cultac.utils.anticheat.update.PositionUpdate;
-import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ClientAttackStrength;
 import ac.cult.cultac.utils.data.ReachInterpolationData;
@@ -685,6 +683,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 float pitch = calculateAbsolutePitch(sourcePitch, change.xRot(), packetFlags);
                 TeleportAcceptData accepted = new TeleportAcceptData();
                 accepted.setTeleport(true);
+                // Before 26.3 the PosRot echo of this exact position is the matched response.
+                accepted.setMatchedTeleportPosition(true);
                 accepted.setTeleportData(new TeleportData(
                         position,
                         packetFlags,
@@ -695,11 +695,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                         sourcePitch,
                         yaw,
                         pitch));
-                CheckManagerListener.applyTeleportAcknowledgementLook(player, yaw, pitch);
-                player.checkManager.getSimulationProcessor().applyAcceptedJavaTeleport(accepted);
-                player.getSetbackTeleportUtil()
-                        .onPredictionComplete(new PredictionComplete(
-                                new PositionUpdate(previous, position, yaw, pitch, player.onGround, accepted, null)));
+                CheckManagerListener.applyTeleportResponse(player, accepted, yaw, pitch);
             };
             if (proofTransaction >= 0) player.latencyUtils.addRealTimeTask(proofTransaction, apply);
             else player.latencyUtils.addRealTimeTaskNext(apply);

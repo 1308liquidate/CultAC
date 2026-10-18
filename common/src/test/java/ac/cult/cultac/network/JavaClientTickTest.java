@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.checks.impl.movement.timer.DumbTimer;
 import ac.cult.cultac.checks.impl.prediction.OffsetHandler;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -20,6 +21,7 @@ import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityEvent;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.Relative;
 import ac.cult.cultac.utils.math.Vec3;
+import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -100,6 +102,46 @@ class JavaClientTickTest {
 
             assertEquals(far.z, f.player.z, 1.0E-9);
             assertEquals(0, f.player.checkManager.getCheck(OffsetHandler.class).violations);
+        }
+    }
+
+    @Test
+    void aFarTeleportAcceptanceReachesPositionListenersAtItsTarget() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.place(STANDING, Vec3.ZERO);
+            f.input(NONE);
+            f.tick(STANDING, true);
+            DumbTimer dumbTimer = f.player.checkManager.getListener(DumbTimer.class);
+            Field lastLongTeleport = DumbTimer.class.getDeclaredField("lastLongTeleport");
+            lastLongTeleport.setAccessible(true);
+
+            // 26.3 sends no PosRot after the acceptance; DumbTimer's long-teleport window still opens.
+            Vec3 far = new Vec3(1_000.5, FLOOR_Y, 1_000.5);
+            long beforeTeleport = System.nanoTime();
+            f.teleport(far, new RelativeFlag(0));
+
+            // Only DumbTimer#onPositionUpdate's long-teleport branch moves this past the construction time.
+            assertTrue(lastLongTeleport.getDouble(dumbTimer) >= beforeTeleport);
+            assertEquals(
+                    far, f.player.getSetbackTeleportUtil().lastKnownGoodPosition.getPos());
+            assertEquals(far.x, f.player.x, 0);
+            assertEquals(far.z, f.player.packetStateData.clientSidePosition.z, 0);
+        }
+    }
+
+    @Test
+    void aTeleportAcceptanceKeepsTheServerOpenedInventoryOfItsTick() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.place(STANDING, Vec3.ZERO);
+            f.input(NONE);
+            f.tick(STANDING, true);
+
+            // The client handles an open screen and a teleport in the same packet phase; only tick end clears it.
+            f.player.serverOpenedInventoryThisTick = true;
+            f.teleport(new Vec3(2.5, FLOOR_Y, 2.5), new RelativeFlag(0));
+
+            assertEquals(2.5, f.player.x, 0);
+            assertTrue(f.player.serverOpenedInventoryThisTick);
         }
     }
 

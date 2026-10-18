@@ -464,12 +464,6 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         }
     }
 
-    public void applyAcceptedJavaTeleport(TeleportAcceptData accepted) {
-        if (accepted == null || !accepted.isTeleport() || accepted.getTeleportData() == null) return;
-        this.handleTeleport(accepted);
-        this.commitPlayerPosition(accepted.getTeleportData().getLocation());
-    }
-
     public void applyAcceptedBedrockTeleport(TeleportAcceptData teleportAcceptData) {
         if (teleportAcceptData != null
                 && teleportAcceptData.isTeleport()
