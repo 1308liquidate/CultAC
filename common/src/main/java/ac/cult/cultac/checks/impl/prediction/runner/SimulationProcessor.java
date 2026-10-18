@@ -1139,6 +1139,30 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         result.setRealitiesExtent(valid);
     }
 
+    /**
+     * The accepted travel that ends within LocalPlayer#sendPosition's movement threshold of xLast, the best one if it
+     * does, else the one ending nearest; a travel ending farther away would have sent its position.
+     */
+    static PredictionResult travelWithinMovementThreshold(
+            PredictionResult travelled, Vec3 position, Vec3 sent, double threshold) {
+        double nearestSqr = threshold * threshold;
+        if (sent.distanceToSqr(position.add(travelled.getAcceptedClosestToTarget())) <= nearestSqr) {
+            return travelled;
+        }
+        PredictionResult nearest = null;
+        List<PredictionResult> realities = travelled.getRealities();
+        for (int i = 0, size = realities.size(); i < size; i++) {
+            PredictionResult reality = realities.get(i);
+            if (reality.getFlagSeverity() != 0.0) continue;
+            double distanceSqr = sent.distanceToSqr(position.add(reality.getAcceptedClosestToTarget()));
+            if (distanceSqr <= nearestSqr) {
+                nearestSqr = distanceSqr;
+                nearest = reality;
+            }
+        }
+        return nearest;
+    }
+
     public PredictionResult tryToAchievePointThree(Vec3 withPos, float xRot, float yRot) {
         return this.callPrediction(
                 Vec3.ZERO, withPos, withPos, true, xRot, yRot, null, MovementProfiles.forPlayer(this.player));
@@ -1162,10 +1186,13 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 // The withheld position lies anywhere within the threshold; the client is where it travelled.
                 PredictionResult travelled =
                         this.callPrediction(movement, position, end, false, xRot, yRot, null, movementProfile);
-                if (travelled.getFlags().isEmpty() && !travelled.isExempt()) {
-                    this.handlePossibleRealities(travelled);
-                    committed = travelled;
-                    movement = travelled.getAcceptedClosestToTarget();
+                PredictionResult withheld = travelled.getFlags().isEmpty() && !travelled.isExempt()
+                        ? travelWithinMovementThreshold(travelled, position, sent, this.player.getMovementThreshold())
+                        : null;
+                if (withheld != null) {
+                    this.handlePossibleRealities(withheld);
+                    committed = withheld;
+                    movement = withheld.getAcceptedClosestToTarget();
                     end = position.add(movement);
                 }
                 this.commitPlayerPosition(end);
