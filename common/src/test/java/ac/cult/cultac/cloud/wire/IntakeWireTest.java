@@ -27,6 +27,7 @@ import ac.cult.cultac.cloud.intake.v3.Reply;
 import ac.cult.cultac.cloud.intake.v3.Unstreamed;
 import ac.cult.cultac.cloud.intake.v3.Verdict;
 import ac.cult.cultac.cloud.intake.v3.World;
+import com.github.luben.zstd.ZstdDecompressCtx;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -41,8 +42,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import java.util.zip.DataFormatException;
-import java.util.zip.Inflater;
 import org.junit.jupiter.api.Test;
 
 class IntakeWireTest {
@@ -325,32 +324,35 @@ class IntakeWireTest {
     }
 
     @Test
-    void messagesAreAFlagsByteThenTheEntries() throws DataFormatException, InvalidProtocolBufferException {
+    void messagesAreAFlagsByteThenTheEntries() throws InvalidProtocolBufferException {
         byte[] join = IntakeWire.join(PLAYER, 773, "vanilla", -64, 384, null, null, 0);
         byte[] leave = IntakeWire.leave(PLAYER);
         byte[] records = new byte[join.length + leave.length];
         System.arraycopy(join, 0, records, 0, join.length);
         System.arraycopy(leave, 0, records, join.length, leave.length);
-        IntakeWire.MessageWriter writer = new IntakeWire.MessageWriter();
 
-        for (int round = 0; round < 2; round++) {
-            byte[] deflated = bytes(writer.write(List.of(join, leave)));
-            assertEquals(IntakeWire.COMPRESSED, deflated[0]);
-            byte[] inflated = inflate(Arrays.copyOfRange(deflated, 1, deflated.length));
-            assertArrayEquals(records, inflated);
-            Intake intake = Intake.parseFrom(inflated);
-            assertEquals(IntakeMessage.KindCase.JOIN, intake.getMessages(0).getKindCase());
-            assertEquals(IntakeMessage.KindCase.LEAVE, intake.getMessages(1).getKindCase());
+        try (IntakeWire.StreamWriter writer = new IntakeWire.StreamWriter();
+                ZstdDecompressCtx reader = new ZstdDecompressCtx()) {
+            for (int round = 0; round < 2; round++) {
+                byte[] compressed = bytes(writer.write(List.of(join, leave), records.length));
+                assertEquals(IntakeWire.COMPRESSED, compressed[0]);
+                byte[] decompressed = decompress(reader, compressed);
+                assertArrayEquals(records, decompressed);
+                Intake intake = Intake.parseFrom(decompressed);
+                assertEquals(IntakeMessage.KindCase.JOIN, intake.getMessages(0).getKindCase());
+                assertEquals(IntakeMessage.KindCase.LEAVE, intake.getMessages(1).getKindCase());
+            }
         }
     }
 
     @Test
-    void largeMessagesDeflateWhole() throws DataFormatException {
+    void largeMessagesCompressWhole() {
         byte[] big = new byte[3 * 1024 * 1024];
         new Random(1).nextBytes(big);
-        IntakeWire.MessageWriter writer = new IntakeWire.MessageWriter();
-        byte[] deflated = bytes(writer.write(List.of(big)));
-        assertArrayEquals(big, inflate(Arrays.copyOfRange(deflated, 1, deflated.length)));
+        try (IntakeWire.StreamWriter writer = new IntakeWire.StreamWriter();
+                ZstdDecompressCtx reader = new ZstdDecompressCtx()) {
+            assertArrayEquals(big, decompress(reader, bytes(writer.write(List.of(big), big.length))));
+        }
     }
 
     private static byte[] bytes(ByteBuffer buffer) {
@@ -359,18 +361,21 @@ class IntakeWireTest {
         return bytes;
     }
 
-    private static byte[] inflate(byte[] deflated) throws DataFormatException {
-        Inflater inflater = new Inflater(true);
-        inflater.setInput(deflated);
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] chunk = new byte[8192];
-        while (!inflater.finished()) {
-            int n = inflater.inflate(chunk);
-            if (n == 0 && inflater.needsInput()) break;
-            out.write(chunk, 0, n);
+    /** One message of a socket's zstd frame, from its bytes and the messages before it on {@code reader}. */
+    private static byte[] decompress(ZstdDecompressCtx reader, byte[] message) {
+        ByteBuffer in = ByteBuffer.allocateDirect(message.length - 1);
+        in.put(message, 1, message.length - 1).flip();
+        ByteBuffer out = ByteBuffer.allocateDirect(64 * 1024);
+        ByteArrayOutputStream records = new ByteArrayOutputStream();
+        while (true) {
+            out.clear();
+            reader.decompressDirectByteBufferStream(out, in);
+            out.flip();
+            byte[] chunk = new byte[out.remaining()];
+            out.get(chunk);
+            records.writeBytes(chunk);
+            if (!in.hasRemaining() && chunk.length < out.capacity()) return records.toByteArray();
         }
-        inflater.end();
-        return out.toByteArray();
     }
 
     @Test
@@ -892,7 +897,7 @@ class IntakeWireTest {
         add(builder, IntakeWire.SERVERBOUND, 300, new byte[200]);
         int body = CodedOutputStream.computeTagSize(IntakeWire.SERVERBOUND) + 2 + 200 + 1 + 2;
         assertEquals(1 + 2 + body, builder.bytes());
-        assertEquals(builder.bytes(), IntakeWire.captureBytes(IntakeWire.SERVERBOUND, 300, 200, 0, 0, 0, false));
+        assertEquals(builder.bytes(), IntakeWire.captureBytes(IntakeWire.SERVERBOUND, 300, 200, 0, 0, 0));
     }
 
     @Test
@@ -904,8 +909,8 @@ class IntakeWireTest {
         builder.serverTick(123_456_789L);
         Frame frame = message(builder.build(PLAYER, 3)).getFrame();
         assertEquals(123_456_789L, frame.getServerTick());
-        assertEquals(1, frame.getRecords(1).getServerTickDelta());
+        assertEquals(1, frame.getRecords(1).getTickDelta());
         assertEquals(1, frame.getRecords(1).getPingKindValue());
-        assertEquals(-1, frame.getRecords(2).getServerTickDelta());
+        assertEquals(-1, frame.getRecords(2).getTickDelta());
     }
 }

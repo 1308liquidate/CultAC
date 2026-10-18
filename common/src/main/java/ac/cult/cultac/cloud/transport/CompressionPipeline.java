@@ -21,15 +21,11 @@ import java.util.function.Supplier;
  * locking; the workers only write. Each message's bytes count against the connection's queued bytes from the moment
  * its records are queued: as records until it is written, then as the written message until {@link #sent} or a drop.
  *
- * <p>On a protocol 5 socket ({@link #stream}) the messages are one zstd frame: each is written after the one submitted
- * before it, one at a time, by the socket's {@link IntakeWire.StreamWriter}, and one whose predecessor failed is not
- * written at all. The socket's writer is closed when the next socket opens and when the pipeline closes.
+ * <p>A socket's messages ({@link #stream}) are one zstd frame: each is written after the one submitted before it, one at
+ * a time, by the socket's {@link IntakeWire.StreamWriter}, and one whose predecessor failed is not written at all. The
+ * socket's writer is closed when the next socket opens and when the pipeline closes.
  */
 final class CompressionPipeline implements AutoCloseable {
-    /** One per pool thread, which writes one message at a time whichever connection it is for. */
-    private static final ThreadLocal<IntakeWire.MessageWriter> WRITERS =
-            ThreadLocal.withInitial(IntakeWire.MessageWriter::new);
-
     private final ExecutorService pool;
     private final QueuedBytes queuedBytes;
     private final int threads;
@@ -38,7 +34,7 @@ final class CompressionPipeline implements AutoCloseable {
     private final AtomicInteger writing = new AtomicInteger();
     private final AtomicLong writingBytes = new AtomicLong();
     private final Supplier<IntakeWire.StreamWriter> streams;
-    /** The socket's zstd frame on protocol 5; null otherwise. */
+    /** The socket's zstd frame; null before the first socket and once closed. */
     private IntakeWire.StreamWriter stream;
     /** The message last submitted to the stream, which the next one is written after. */
     private CompletableFuture<byte[]> streamTail;
@@ -53,7 +49,7 @@ final class CompressionPipeline implements AutoCloseable {
         this(pool, threads, queuedBytes, IntakeWire.StreamWriter::new);
     }
 
-    /** As above, with each protocol 5 socket's writer from {@code streams}. */
+    /** As above, with each socket's writer from {@code streams}. */
     CompressionPipeline(
             ExecutorService pool, int threads, QueuedBytes queuedBytes, Supplier<IntakeWire.StreamWriter> streams) {
         this.streams = streams;
@@ -90,15 +86,21 @@ final class CompressionPipeline implements AutoCloseable {
     }
 
     /**
-     * A socket opened: on protocol 5 ({@code on}) its messages are one zstd frame from here, written by a fresh
-     * {@link IntakeWire.StreamWriter}. Drops what is pending first, then closes the last socket's writer.
+     * A socket opened: its messages are one zstd frame from here, written by a fresh {@link IntakeWire.StreamWriter}.
+     * Drops what is pending first, then closes the last socket's writer.
      */
-    void stream(boolean on) {
+    void stream() {
+        end();
+        stream = streams.get();
+    }
+
+    /** Drops what is pending and closes the socket's writer, if any. */
+    private void end() {
         drop();
         // A taken message's write may still be running if its taker was interrupted; zstd refuses to close mid-write.
         if (streamTail != null) streamTail.handle((message, failed) -> null).join();
         if (stream != null) stream.close();
-        stream = on ? streams.get() : null;
+        stream = null;
         streamTail = null;
     }
 
@@ -113,22 +115,16 @@ final class CompressionPipeline implements AutoCloseable {
         writing.incrementAndGet();
         writingBytes.addAndGet(bytes);
         IntakeWire.StreamWriter writer = stream;
-        CompletableFuture<byte[]> message;
-        if (writer == null) {
-            message = CompletableFuture.supplyAsync(
-                    () -> written(() -> WRITERS.get().write(own), bytes), pool);
-        } else {
-            CompletableFuture<byte[]> after = streamTail == null ? CompletableFuture.completedFuture(null) : streamTail;
-            message = after.handleAsync(
-                    (previous, failed) -> {
-                        if (failed == null) return written(() -> writer.write(own, bytes), bytes);
-                        writing.decrementAndGet();
-                        writingBytes.addAndGet(-bytes);
-                        throw new CompletionException(failed);
-                    },
-                    pool);
-            streamTail = message;
-        }
+        CompletableFuture<byte[]> after = streamTail == null ? CompletableFuture.completedFuture(null) : streamTail;
+        CompletableFuture<byte[]> message = after.handleAsync(
+                (previous, failed) -> {
+                    if (failed == null) return written(() -> writer.write(own, bytes), bytes);
+                    writing.decrementAndGet();
+                    writingBytes.addAndGet(-bytes);
+                    throw new CompletionException(failed);
+                },
+                pool);
+        streamTail = message;
         pending.add(new Pending(bytes, message));
     }
 
@@ -186,6 +182,6 @@ final class CompressionPipeline implements AutoCloseable {
     /** Drops what is pending and frees the socket's zstd context; the shared pool keeps running. */
     @Override
     public void close() {
-        stream(false);
+        end();
     }
 }

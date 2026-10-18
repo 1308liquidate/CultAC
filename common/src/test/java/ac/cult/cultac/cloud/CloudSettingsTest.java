@@ -32,7 +32,7 @@ class CloudSettingsTest {
                         "cloud.api-key", "key",
                         "cloud.server-id", "{server}",
                         "cloud.proxy-id", "edge-1")),
-                CloudSettings.PROXY_PROTOCOLS,
+                CloudSettings.PROTOCOLS,
                 CloudSettings.DEFAULT_SERVER_ID);
         assertEquals("http://127.0.0.1:8080", settings.url());
         assertEquals("key", settings.apiKey());
@@ -82,13 +82,13 @@ class CloudSettingsTest {
                                 "cloud.url", "https://intake.example",
                                 "cloud.api-key", key,
                                 "cloud.proxy-id", "lobby"),
-                        CloudSettings.SERVER_PROTOCOLS);
+                        CloudSettings.PROTOCOLS);
                 assertEquals("", settings.apiKey());
                 assertFalse(settings.enabled());
             }
             CloudSettings fine = read(
                     Map.of("cloud.url", "https://intake.example", "cloud.api-key", " issued-token_0123456789= "),
-                    CloudSettings.SERVER_PROTOCOLS);
+                    CloudSettings.PROTOCOLS);
             assertEquals("issued-token_0123456789=", fine.apiKey());
             synchronized (globals.logs) {
                 assertEquals(3, globals.logs.size());
@@ -147,7 +147,7 @@ class CloudSettingsTest {
     }
 
     private static CloudSettings read(String url) {
-        return read(Map.of("cloud.url", url, "cloud.api-key", "key"), CloudSettings.SERVER_PROTOCOLS);
+        return read(Map.of("cloud.url", url, "cloud.api-key", "key"), CloudSettings.PROTOCOLS);
     }
 
     private static CloudSettings read(Map<String, String> strings, List<Integer> protocols) {
@@ -162,7 +162,7 @@ class CloudSettingsTest {
                 "CULTAC_PROXY_ID", "p0");
         CloudSettings settings = CloudSettings.read(
                 config(Map.of("cloud.url", "https://config.example", "cloud.api-key", "config-key")),
-                CloudSettings.PROXY_PROTOCOLS,
+                CloudSettings.PROTOCOLS,
                 CloudSettings.DEFAULT_SERVER_ID,
                 env::get);
         assertEquals("https://env.example", settings.url());
@@ -170,23 +170,22 @@ class CloudSettingsTest {
         assertEquals("p0", settings.proxyId());
         CloudSettings configured = CloudSettings.read(
                 config(Map.of("cloud.proxy-id", "edge-1")),
-                CloudSettings.PROXY_PROTOCOLS,
+                CloudSettings.PROTOCOLS,
                 CloudSettings.DEFAULT_SERVER_ID,
                 env::get);
         assertEquals("edge-1", configured.proxyId());
         CloudSettings bare = CloudSettings.read(
-                config(Map.of()), CloudSettings.PROXY_PROTOCOLS, CloudSettings.DEFAULT_SERVER_ID, name -> null);
+                config(Map.of()), CloudSettings.PROTOCOLS, CloudSettings.DEFAULT_SERVER_ID, name -> null);
         assertEquals("", bare.url());
         assertFalse(bare.enabled());
     }
 
     @Test
     void anEmptyUrlOrKeyIsOff() {
-        assertFalse(read(Map.of("cloud.api-key", "key"), CloudSettings.SERVER_PROTOCOLS)
-                .enabled());
         assertFalse(
-                read(Map.of("cloud.url", "http://127.0.0.1:8080", "cloud.api-key", " "), CloudSettings.SERVER_PROTOCOLS)
-                        .enabled());
+                read(Map.of("cloud.api-key", "key"), CloudSettings.PROTOCOLS).enabled());
+        assertFalse(read(Map.of("cloud.url", "http://127.0.0.1:8080", "cloud.api-key", " "), CloudSettings.PROTOCOLS)
+                .enabled());
         assertFalse(read(Map.of("cloud.url", "http://127.0.0.1:8080", "cloud.api-key", "key"), List.of())
                 .enabled());
     }
@@ -197,21 +196,21 @@ class CloudSettingsTest {
                 CloudSettings.OWN_SERVER_ID,
                 CloudSettings.read(
                                 config(Map.of("cloud.server-id", "")),
-                                CloudSettings.SERVER_PROTOCOLS,
+                                CloudSettings.PROTOCOLS,
                                 CloudSettings.OWN_SERVER_ID)
                         .serverIdTemplate());
         assertEquals(
                 CloudSettings.DEFAULT_SERVER_ID,
                 CloudSettings.read(
                                 config(Map.of("cloud.server-id", "")),
-                                CloudSettings.PROXY_PROTOCOLS,
+                                CloudSettings.PROTOCOLS,
                                 CloudSettings.DEFAULT_SERVER_ID)
                         .serverIdTemplate());
         assertEquals(
                 "{proxy}-{server}",
                 CloudSettings.read(
                                 config(Map.of("cloud.server-id", "{proxy}-{server}")),
-                                CloudSettings.SERVER_PROTOCOLS,
+                                CloudSettings.PROTOCOLS,
                                 CloudSettings.OWN_SERVER_ID)
                         .serverIdTemplate());
     }
@@ -246,7 +245,7 @@ class CloudSettingsTest {
                     false);
             assertTrue(CloudService.status()
                     .get(0)
-                    .startsWith("Cloud upload on, protocols " + CloudSettings.SERVER_PROTOCOLS + ","));
+                    .startsWith("Cloud upload on, protocols " + CloudSettings.PROTOCOLS + ","));
         } finally {
             CloudService.configure(config(Map.of()), false);
             CloudCapture.uplinks(CloudCapture.Uplinks.NONE);

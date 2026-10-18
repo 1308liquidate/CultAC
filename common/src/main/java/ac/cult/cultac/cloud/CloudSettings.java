@@ -20,10 +20,8 @@ public record CloudSettings(
     public static final String DEFAULT_SERVER_ID = "{proxy}.{server}";
     /** A server's default: its own name, since no proxy shares its key. */
     public static final String OWN_SERVER_ID = "{server}";
-    /** A server's offer: protocol 3 stays the fallback when zstd cannot load. */
-    public static final List<Integer> SERVER_PROTOCOLS = List.of(3, 5);
-    /** A proxy's offer: protocol 5 alone, since protocol 3's raw chunk packets cost a proxy too much. */
-    public static final List<Integer> PROXY_PROTOCOLS = List.of(5);
+    /** Every platform's offer: intake protocol 5 alone. */
+    public static final List<Integer> PROTOCOLS = List.of(5);
 
     private static final Pattern LOOPBACK_V4 = Pattern.compile("127(\\.(25[0-5]|2[0-4]\\d|1?\\d?\\d)){3}");
     /** Visible ASCII only, so the key always makes a valid {@code Authorization} header. */

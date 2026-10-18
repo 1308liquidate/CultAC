@@ -33,25 +33,23 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.zip.Deflater;
 
 /**
- * The intake service's protocols 3 to 5, whose contract is {@code common/src/main/proto/intake/v3/intake.proto}
+ * The intake service's protocol 5, whose contract is {@code common/src/main/proto/intake/v3/intake.proto}
  * (the service's schema under this project's package). A socket message is a flags byte, then an {@code Intake}: its
  * {@code IntakeMessage} entries back to back, each written on its own as a queued record. FRAME, its records and
  * VERDICT are written here with {@link CodedOutputStream} into arrays sized beforehand; JOIN, LEAVE, META and replies
  * use the generated classes.
  */
 public final class IntakeWire {
-    public static final int PROTOCOL_3 = 3;
     /**
-     * Protocol 3 with probe markers, record clocks in microseconds, and a socket's compressed messages as one zstd
-     * frame. Terrain goes as section, block and section_gone records read from CultAC's simulation world, never as chunk
-     * packets.
+     * The one protocol CultAC speaks: probe markers, record clocks in microseconds, and a socket's compressed messages as
+     * one zstd frame. Terrain goes as section, block and section_gone records read from CultAC's simulation world, never
+     * as chunk packets.
      */
     public static final int PROTOCOL_5 = 5;
 
-    /** The message flag: what follows the flags byte is compressed (raw DEFLATE on protocol 3, zstd on protocol 5). */
+    /** The message flag: what follows the flags byte is compressed, as the socket's zstd frame. */
     public static final int COMPRESSED = 0x01;
 
     // Intake.messages, and IntakeMessage's FRAME.
@@ -85,10 +83,9 @@ public final class IntakeWire {
 
     public static final int BLOCK = 12;
     public static final int SECTION_GONE = 14;
-    /** Record's advance_nanos: nanoseconds on protocol 3, microseconds on protocol 5. */
+    /** Record's advance_nanos, in microseconds. */
     private static final int ADVANCE_NANOS = 15;
 
-    private static final int SERVER_TICK_DELTA = 16;
     private static final int PING_KIND = 17;
     /**
      * {@code PingKind}s: CultAC's ping at the end of a server tick, its ping after and before a packet it proves, and
@@ -707,24 +704,19 @@ public final class IntakeWire {
 
     /**
      * The bytes a record of {@code length} body bytes takes in a frame, its own field in the frame included: a
-     * clientbound one with its server tick delta and ping kind, a whole pong with its {@code skipped} pings, in protocol
-     * 5's fields when {@code compact}.
+     * clientbound one with its server tick delta and ping kind, a whole pong with its {@code skipped} pings.
      */
-    public static long captureBytes(
-            int kind, long sinceLast, int length, int tickDelta, int pingKind, int skipped, boolean compact) {
-        int record = recordSize(kind, sinceLast, length, tickDelta, pingKind, skipped, compact);
+    public static long captureBytes(int kind, long sinceLast, int length, int tickDelta, int pingKind, int skipped) {
+        int record = recordSize(kind, sinceLast, length, tickDelta, pingKind, skipped);
         return 1 + CodedOutputStream.computeUInt32SizeNoTag(record) + record;
     }
 
-    private static int recordSize(
-            int kind, long sinceLast, int length, int tickDelta, int pingKind, int skipped, boolean compact) {
+    private static int recordSize(int kind, long sinceLast, int length, int tickDelta, int pingKind, int skipped) {
         int size = kind == PING_MARKER
                 ? CodedOutputStream.computeEnumSize(PING_MARKER, pingKind)
                 : CodedOutputStream.computeTagSize(kind) + CodedOutputStream.computeUInt32SizeNoTag(length) + length;
         if (sinceLast != 0) size += CodedOutputStream.computeUInt64Size(ADVANCE_NANOS, sinceLast);
-        if (tickDelta != 0) {
-            size += CodedOutputStream.computeSInt32Size(compact ? TICK_DELTA : SERVER_TICK_DELTA, tickDelta);
-        }
+        if (tickDelta != 0) size += CodedOutputStream.computeSInt32Size(TICK_DELTA, tickDelta);
         if (pingKind != 0 && kind != PING_MARKER) size += CodedOutputStream.computeEnumSize(PING_KIND, pingKind);
         if (skipped != 0) size += CodedOutputStream.computeUInt32Size(SKIPPED_PINGS, skipped);
         return size;
@@ -732,7 +724,7 @@ public final class IntakeWire {
 
     /**
      * Gathers one frame's records, then writes the FRAME into one array of its exact size; the bodies are copied once,
-     * there. Reusable after {@link #clear()}; {@link #compact} writes protocol 5's fields.
+     * there. Reusable after {@link #clear()}.
      */
     public static final class FrameBuilder {
         /** Record slots a builder starts again with once a frame past {@link #MAX_KEPT_RECORDS} is cleared. */
@@ -750,22 +742,13 @@ public final class IntakeWire {
         private int[] skips = new int[32];
         private long serverTick = -1;
         private long bytes;
-        private boolean compact;
-
-        /**
-         * Whether records go out in protocol 5's fields: clock advances in microseconds, the tick delta in field 13, and
-         * {@link #PING_MARKER} bodies. Set while the builder is empty.
-         */
-        public void compact(boolean compact) {
-            this.compact = compact;
-        }
 
         /**
          * Appends a record: its body field, the clock's advance since the previous record as the wire carries it
-         * (nanoseconds, or microseconds when compact), and the body, the first {@code length} bytes of {@code payload}.
-         * A clientbound record has its server tick minus the previous clientbound record's ({@link #serverTick(long)}
-         * for the first) and a ping's {@code PingKind}, 0 for none. On protocol 5 a {@link #PING_MARKER}'s value is its
-         * {@code pingKind}, and a pong sent whole carries the {@code skipped} pending pings before the one it answers.
+         * (microseconds), and the body, the first {@code length} bytes of {@code payload}. A clientbound record has its
+         * server tick minus the previous clientbound record's ({@link #serverTick(long)} for the first) and a ping's
+         * {@code PingKind}, 0 for none. A {@link #PING_MARKER}'s value is its {@code pingKind}, and a pong sent whole
+         * carries the {@code skipped} pending pings before the one it answers.
          */
         public void add(
                 int kind, long sinceLast, byte[] payload, int length, int tickDelta, int pingKind, int skipped) {
@@ -786,7 +769,7 @@ public final class IntakeWire {
             pingKinds[count] = pingKind;
             skips[count] = skipped;
             count++;
-            bytes += captureBytes(kind, sinceLast, length, tickDelta, pingKind, skipped, compact);
+            bytes += captureBytes(kind, sinceLast, length, tickDelta, pingKind, skipped);
         }
 
         /** The server tick of the frame's first clientbound record. */
@@ -824,8 +807,8 @@ public final class IntakeWire {
                 if (seq != 0) stream.writeUInt64(FRAME_SEQ, seq);
                 for (int i = 0; i < count; i++) {
                     stream.writeTag(FRAME_RECORDS, 2);
-                    stream.writeUInt32NoTag(recordSize(
-                            kinds[i], sinceLast[i], lengths[i], tickDeltas[i], pingKinds[i], skips[i], compact));
+                    stream.writeUInt32NoTag(
+                            recordSize(kinds[i], sinceLast[i], lengths[i], tickDeltas[i], pingKinds[i], skips[i]));
                     if (kinds[i] == PING_MARKER) {
                         stream.writeEnum(PING_MARKER, pingKinds[i]);
                     } else {
@@ -834,7 +817,7 @@ public final class IntakeWire {
                         stream.writeRawBytes(payloads[i], 0, lengths[i]);
                     }
                     if (sinceLast[i] != 0) stream.writeUInt64(ADVANCE_NANOS, sinceLast[i]);
-                    if (tickDeltas[i] != 0) stream.writeSInt32(compact ? TICK_DELTA : SERVER_TICK_DELTA, tickDeltas[i]);
+                    if (tickDeltas[i] != 0) stream.writeSInt32(TICK_DELTA, tickDeltas[i]);
                     if (pingKinds[i] != 0 && kinds[i] != PING_MARKER) stream.writeEnum(PING_KIND, pingKinds[i]);
                     if (skips[i] != 0) stream.writeUInt32(SKIPPED_PINGS, skips[i]);
                 }
@@ -865,33 +848,6 @@ public final class IntakeWire {
 
         int capacity() {
             return kinds.length;
-        }
-    }
-
-    /**
-     * Writes whole records as one socket message: a flags byte, then the records, deflated. One per writing thread; a
-     * message stays valid until the next.
-     */
-    public static final class MessageWriter {
-        private final Deflater deflater = new Deflater(Deflater.BEST_SPEED, true);
-        private byte[] buffer = new byte[64 * 1024];
-
-        public ByteBuffer write(List<byte[]> records) {
-            deflater.reset();
-            buffer[0] = COMPRESSED;
-            int position = 1;
-            for (byte[] record : records) {
-                deflater.setInput(record);
-                while (!deflater.needsInput()) position = deflate(position);
-            }
-            deflater.finish();
-            while (!deflater.finished()) position = deflate(position);
-            return ByteBuffer.wrap(buffer, 0, position);
-        }
-
-        private int deflate(int position) {
-            if (position == buffer.length) buffer = Arrays.copyOf(buffer, buffer.length * 2);
-            return position + deflater.deflate(buffer, position, buffer.length - position);
         }
     }
 

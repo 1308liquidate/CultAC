@@ -192,11 +192,6 @@ public final class CloudCapture implements PlayerObserver {
 
         boolean enabled();
 
-        /** Whether every socket speaks only intake protocol 5, so no chunk packet is ever kept. */
-        default boolean sectionsOnly() {
-            return false;
-        }
-
         /** The socket for backend {@code serverName}, held until {@link #release}; null when it has none. */
         @Nullable
         Uplink open(String serverName);
@@ -517,7 +512,6 @@ public final class CloudCapture implements PlayerObserver {
             built.pingPacket(ids.ping());
             built.pongPacket(ids.pong());
             built.chunks(ids.chunks());
-            built.sectionsOnly(uplinks.sectionsOnly());
             built.text(PlayerText.of(protocol));
             built.terrain(new SimulationTerrain());
             stream = built;
@@ -820,7 +814,7 @@ public final class CloudCapture implements PlayerObserver {
                         height,
                         facts,
                         player.getName(),
-                        uplink.terms(generation).sections() ? ClientPacketCodecs.MODEL_VERSION.protocol() : 0);
+                        ClientPacketCodecs.MODEL_VERSION.protocol());
         stream.join(sink(uplink, generation), join, base, sent);
         if (!unstreamed) mirror();
     }
@@ -906,7 +900,7 @@ public final class CloudCapture implements PlayerObserver {
 
             @Override
             public CloudConnection.Terms terms() {
-                return uplink == null ? CloudConnection.Terms.PROTOCOL_3 : uplink.terms(generation);
+                return uplink == null ? CloudConnection.Terms.NONE : uplink.terms(generation);
             }
 
             @Override

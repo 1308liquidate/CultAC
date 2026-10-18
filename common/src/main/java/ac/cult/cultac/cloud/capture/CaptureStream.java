@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * its frame is written, and the pending pings change only once the socket takes the frame.
  *
  * <p>On intake protocol 5 chunk and block-change packets never go out: the terrain is the player's simulation world,
- * its sections in range sent as {@link Sections} decides, into the open frame. On protocol 3 they go out as packets.
+ * its sections in range sent as {@link Sections} decides, into the open frame. Before JOIN they are not kept either.
  */
 public final class CaptureStream {
     /** Where records go, and the server's shared budget for every frame retained until it is sent or dropped. */
@@ -53,7 +53,7 @@ public final class CaptureStream {
 
         /** The terms the socket was opened on. */
         default CloudConnection.Terms terms() {
-            return CloudConnection.Terms.PROTOCOL_3;
+            return CloudConnection.Terms.NONE;
         }
 
         /** Whether the socket's connect said {@code textStripped}: false lets packets out unstripped without a codec. */
@@ -232,8 +232,6 @@ public final class CaptureStream {
     private long firstNanos = Long.MIN_VALUE;
     private int preJoinFrames;
     private long frameReserved;
-    /** The socket can only speak protocol 5: chunk packets are never kept, even before JOIN. */
-    private boolean sectionsOnly;
     /** The client was sent a world while the open frame was open. */
     private boolean frameWorld;
     /** A world the service never got: the next frame it takes starts with WORLD and META. */
@@ -351,8 +349,8 @@ public final class CaptureStream {
         }
     };
 
-    /** The joined socket's terms; protocol 3's while not joined. */
-    private CloudConnection.Terms terms = CloudConnection.Terms.PROTOCOL_3;
+    /** The joined socket's terms; {@link CloudConnection.Terms#NONE} while not joined. */
+    private CloudConnection.Terms terms = CloudConnection.Terms.NONE;
     /** The joined socket's {@code textStripped}; true while not joined. */
     private boolean textStripped = true;
 
@@ -378,11 +376,6 @@ public final class CaptureStream {
     /** The client protocol's chunk packets, which protocol 5 leaves out as its terrain goes as sections. */
     public void chunks(ChunkIds ids) {
         chunkIds = ids;
-    }
-
-    /** Whether chunk packets are never kept, even before JOIN; per capture, not per segment. */
-    public void sectionsOnly(boolean sectionsOnly) {
-        this.sectionsOnly = sectionsOnly;
     }
 
     /** The player's simulation world, read on the event loop: protocol 5's terrain. */
@@ -413,8 +406,8 @@ public final class CaptureStream {
     }
 
     /**
-     * Retains only the initial capture; {@code sink}'s budget also belongs to its first JOIN's sink. Its chunks go out
-     * raw: terms are protocol 3 until JOIN.
+     * Retains only the initial capture; {@code sink}'s budget also belongs to its first JOIN's sink. Its chunk and block
+     * packets are dropped: the terrain goes out as sections once joined.
      */
     public void prepare(Sink sink) {
         this.sink = sink;
@@ -470,7 +463,7 @@ public final class CaptureStream {
     /** On protocol 5, the ids asked for less the chunk and block packets, whose terrain goes out as sections. */
     private int[] withoutTerrain(int[] clientbound) {
         ChunkIds ids = chunkIds;
-        if (!terms.sections() || ids == null) return clientbound;
+        if (ids == null) return clientbound;
         return Arrays.stream(clientbound)
                 .filter(id -> id != ids.levelChunk()
                         && id != ids.forget()
@@ -599,8 +592,7 @@ public final class CaptureStream {
     /** On protocol 5, whether a clientbound packet loads, forgets or changes terrain, which never goes out as one. */
     private boolean terrainPacket(int id) {
         ChunkIds ids = chunkIds;
-        return (sectionsOnly || terms.sections())
-                && ids != null
+        return ids != null
                 && (id == ids.levelChunk()
                         || id == ids.forget()
                         || id == ids.blockUpdate()
@@ -885,8 +877,6 @@ public final class CaptureStream {
         long before = lastNanos;
         int lost = tick.lostBefore + lostSending;
         builder.clear();
-        boolean compact = compact();
-        builder.compact(compact);
         ArrayDeque<Integer> unanswered = null;
         long seq = tick.index - origin - 1;
         List<byte[]> carried = outcomes();
@@ -938,7 +928,7 @@ public final class CaptureStream {
             } else if (kind == IntakeWire.SERVERBOUND) {
                 if (!Policy.has(policy.serverbound(), raw.id())) continue;
                 limit = MAX_SERVERBOUND_BYTES;
-                if (compact && raw.id() == pongPacket) probe = IntakeWire.bareId(payload, pongPacket);
+                if (raw.id() == pongPacket) probe = IntakeWire.bareId(payload, pongPacket);
             } else if (Policy.has(policy.dimension(), raw.id())) {
                 Session session = raw.session();
                 meta = IntakeWire.meta(session.entityId(), session.gameMode(), session.dimension());
@@ -952,7 +942,7 @@ public final class CaptureStream {
                 limit = 16;
             } else if (Policy.has(policy.clientbound(), raw.id())) {
                 limit = MAX_CLIENTBOUND_BYTES;
-                if (compact && raw.id() == pingPacket) {
+                if (raw.id() == pingPacket) {
                     probe = IntakeWire.bareId(payload, pingPacket);
                     if (probe != null) {
                         kind = IntakeWire.PING_MARKER;
@@ -1178,11 +1168,6 @@ public final class CaptureStream {
         return -1;
     }
 
-    /** Whether the joined socket speaks compact records: every protocol past 3. */
-    private boolean compact() {
-        return terms.protocol() > IntakeWire.PROTOCOL_3;
-    }
-
     /** The ordinal the service gives the ping {@code id}; -1 when it has not been, or will not be, sent. */
     private long pingOrdinal(Integer id, int framePingCount) {
         if (id == null) return -1;
@@ -1246,9 +1231,9 @@ public final class CaptureStream {
         lastNanos = at;
     }
 
-    /** The clock's advance from the last record to {@code at} as the wire carries it: compact in microseconds. */
+    /** The clock's advance from the last record to {@code at} as the wire carries it, in microseconds. */
     private long advance(long at) {
-        return compact() ? micros(at) - micros(lastNanos) : at - lastNanos;
+        return micros(at) - micros(lastNanos);
     }
 
     /** Writes the widest VERDICT there is: every flag, geometry and engine field present and at its longest. */
@@ -1357,7 +1342,7 @@ public final class CaptureStream {
         if (sink != null && heldBytes != 0) sink.release(heldBytes);
         held.clear();
         heldBytes = 0;
-        terms = CloudConnection.Terms.PROTOCOL_3;
+        terms = CloudConnection.Terms.NONE;
         textStripped = true;
         sink = null;
     }

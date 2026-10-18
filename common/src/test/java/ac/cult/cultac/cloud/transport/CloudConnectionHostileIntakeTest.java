@@ -57,11 +57,11 @@ class CloudConnectionHostileIntakeTest {
     void aPlainSocketUrlOffThisMachineIsNeverOpened() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             receiver.connections.forServer("proxy.a");
             receiver.answerConnect(
                     HttpResponseStatus.OK,
-                    "{\"url\":\"ws://203.0.113.9:1/intake\",\"protocol\":3,\"maxMessageBytes\":2097152}"
+                    "{\"url\":\"ws://203.0.113.9:1/intake\",\"protocol\":5,\"maxMessageBytes\":2097152}"
                             .getBytes(StandardCharsets.UTF_8));
             LogRecord warning = awaitLog(globals, "Cloud connection to");
             assertTrue(warning.getMessage().contains("may not carry the key"), warning.getMessage());
@@ -74,7 +74,7 @@ class CloudConnectionHostileIntakeTest {
     void transportFailuresNeverLogTheKey() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             receiver.answerConnect(
                     HttpResponseStatus.SERVICE_UNAVAILABLE,
@@ -103,7 +103,7 @@ class CloudConnectionHostileIntakeTest {
     void aSocketUrlNeverLogsTheKey() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             receiver.connections.forServer("proxy.a");
             String refused = "ws://203.0.113.9:1/" + "a".repeat(LogThrottle.MAX_CLIPPED - 23) + "test-key";
             receiver.answerConnect(HttpResponseStatus.OK, connectAnswer(refused));
@@ -120,7 +120,7 @@ class CloudConnectionHostileIntakeTest {
     }
 
     private static byte[] connectAnswer(String socketUrl) {
-        return ("{\"url\":\"" + socketUrl + "\",\"protocol\":3,\"maxMessageBytes\":2097152}")
+        return ("{\"url\":\"" + socketUrl + "\",\"protocol\":5,\"maxMessageBytes\":2097152}")
                 .getBytes(StandardCharsets.UTF_8);
     }
 
@@ -135,7 +135,7 @@ class CloudConnectionHostileIntakeTest {
     void anOversizedConnectAnswerIsRetriedAndLoggedShort() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             assertNotNull(receiver.connections.forServer("proxy.a"));
             byte[] body = new byte[1024 * 1024];
             Arrays.fill(body, (byte) 'x');
@@ -153,7 +153,7 @@ class CloudConnectionHostileIntakeTest {
     void aLongErrorBodyIsClipped() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             receiver.connections.forServer("proxy.a");
             String body = "\u001b[31m" + "y".repeat(10_000);
             receiver.answerConnect(HttpResponseStatus.SERVICE_UNAVAILABLE, body.getBytes(StandardCharsets.UTF_8));
@@ -167,12 +167,12 @@ class CloudConnectionHostileIntakeTest {
     void aSocketUrlWithUserInfoIsNeverOpened() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             receiver.connections.forServer("proxy.a");
             String url = receiver.socketUrl().replace("ws://", "ws://user:secret@");
             receiver.answerConnect(
                     HttpResponseStatus.OK,
-                    ("{\"url\":\"" + url + "\",\"protocol\":3,\"maxMessageBytes\":2097152}")
+                    ("{\"url\":\"" + url + "\",\"protocol\":5,\"maxMessageBytes\":2097152}")
                             .getBytes(StandardCharsets.UTF_8));
             LogRecord warning = awaitLog(globals, "Cloud connection to");
             assertTrue(warning.getMessage().contains("may not carry the key"), warning.getMessage());
@@ -186,7 +186,7 @@ class CloudConnectionHostileIntakeTest {
     void aMessageLimitBelow64KiBIsRetriedAndOneAbove64MiBIsClamped() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             receiver.answerConnect(HttpResponseStatus.OK, answer(receiver, 1000));
             assertTrue(awaitLog(globals, "Cloud connection to").getMessage().contains("message limit of 1000"));
@@ -203,9 +203,9 @@ class CloudConnectionHostileIntakeTest {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
             CloudConnections connections = receiver.connections;
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection old = connections.forServer("proxy.a");
-            connections.configure(settings(receiver.url(), "other-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "other-key", CloudSettings.PROTOCOLS));
             owner(connections).unavailable(old, "late refusal");
             assertTrue(connections.available());
             assertNotNull(connections.forServer("proxy.a"));
@@ -219,14 +219,14 @@ class CloudConnectionHostileIntakeTest {
             CloudConnections connections = receiver.connections;
             AtomicInteger turnedOff = new AtomicInteger();
             connections.onTurnedOff(turnedOff::incrementAndGet);
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROXY_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             assertTrue(connections.available());
             CloudConnection connection = connections.forServer("proxy.a");
             receiver.refuseConnect();
             await(connection::closed, "socket closed");
             await(() -> turnedOff.get() == 1, "hook ran");
             assertFalse(connections.available());
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROXY_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             assertTrue(connections.available());
             assertEquals(1, turnedOff.get());
         }
@@ -236,7 +236,7 @@ class CloudConnectionHostileIntakeTest {
     void aReplyForAnotherSocketStillAsksForTheNextMessage() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             WebSocket early = Mockito.mock(WebSocket.class);
             var constructor = Class.forName(CloudConnection.class.getName() + "$Replies")
@@ -258,7 +258,7 @@ class CloudConnectionHostileIntakeTest {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver(timing)) {
             CloudConnections connections = receiver.connections;
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = connections.forServer("proxy.a");
             receiver.allowConnect();
             Channel socket = receiver.handshakes.poll(5, TimeUnit.SECONDS);
@@ -288,7 +288,7 @@ class CloudConnectionHostileIntakeTest {
     }
 
     private static byte[] answer(Receiver receiver, int maxMessageBytes) {
-        return ("{\"url\":\"" + receiver.socketUrl() + "\",\"protocol\":3,\"maxMessageBytes\":" + maxMessageBytes + "}")
+        return ("{\"url\":\"" + receiver.socketUrl() + "\",\"protocol\":5,\"maxMessageBytes\":" + maxMessageBytes + "}")
                 .getBytes(StandardCharsets.UTF_8);
     }
 

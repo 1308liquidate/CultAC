@@ -173,13 +173,15 @@ shown on one line.
 
 ## When the upload turns itself off
 
-- **422 from the intake service.** The service accepted none of the protocols CultAC offered. The upload turns off
-  for the whole server with one warning naming the offered protocols, and stays off until `/cult reload` or a restart.
+CultAC speaks intake protocol 5 only, and offers nothing else.
+
+- **422 from the intake service.** The service does not accept protocol 5. The upload turns off for the whole server
+  with one warning naming the offered protocol, and stays off until `/cult reload` or a restart.
+- **Another protocol agreed.** If the service answers the connect with any protocol but 5, or none, CultAC streams
+  nothing, warns once ("The cloud did not agree intake protocol 5; not streaming") and asks again with backoff.
 - **zstd missing.** The runtime jar bundles zstd for Linux (x86-64 and ARM64), Windows (x86-64) and macOS (Intel and
-  Apple silicon). Where it cannot load:
-  - on Velocity, the upload stays off, with one warning, since a proxy offers only the zstd-compressed protocol;
-  - on Paper, CultAC falls back to the older DEFLATE protocol with one warning. That protocol carries raw chunk
-    packets instead of terrain sections, uses much more bandwidth, and offers no diagnostics.
+  Apple silicon). Where it cannot load, on Paper and Velocity alike, the upload stays off with one warning, since
+  protocol 5 is zstd-compressed.
 - **Other errors** (the service unreachable, a refused or dropped connection) retry with backoff, from 1 up to 30
   seconds apart. Play during the outage is not uploaded; each player's stream starts again once the connection is
   back.
@@ -191,8 +193,7 @@ shown on one line.
   facts once when a player's bridge session becomes ready, and that player's combat settings then and whenever a
   once-a-second check on its main thread finds them changed; with the upload off the proxy keeps nothing of them.
 - **Bandwidth:** each streamed player's packets and terrain, compressed with zstd, and a burst of terrain at each
-  session start. Combat, busy inventories, a larger terrain radius and diagnostics cost more. The DEFLATE fallback on
-  Paper sends whole chunk packets and costs far more.
+  session start. Combat, busy inventories, a larger terrain radius and diagnostics cost more.
 - **CPU:** the capture runs on each player's network thread and compression on a small shared pool (a quarter of the
   cores, 2 to 4 threads). The main thread does one facts read per join on Paper.
 - **Memory:** a few KB per online player (a frame of more than 256 packets holds more until it is sent), and at most

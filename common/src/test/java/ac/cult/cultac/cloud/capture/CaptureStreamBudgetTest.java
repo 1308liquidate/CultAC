@@ -37,12 +37,11 @@ class CaptureStreamBudgetTest {
     }
 
     @Test
-    void aProxyStreamHoldsNoChunkPacketWhilePreparing() {
+    void aStreamHoldsNoChunkPacketWhilePreparing() {
         TestBudget budget = new TestBudget(LIMIT);
-        TestSink sink = sink(budget, CloudConnection.Terms.PROTOCOL_3);
+        TestSink sink = sink(budget, CloudConnection.Terms.sections(0, 0));
         CaptureStream stream = new CaptureStream(PLAYER);
         stream.start(0);
-        stream.sectionsOnly(true);
         stream.chunks(new ChunkIds(LEVEL_CHUNK, 8, 82, 37));
         stream.prepare(sink);
         assertFalse(stream.wants(IntakeWire.CLIENTBOUND, LEVEL_CHUNK));
@@ -61,9 +60,7 @@ class CaptureStreamBudgetTest {
         Random random = new Random(42);
         for (int run = 0; run < 400; run++) {
             TestBudget budget = new TestBudget(LIMIT);
-            boolean sections = random.nextBoolean();
-            TestSink sink =
-                    sink(budget, sections ? CloudConnection.Terms.sections(0, 0) : CloudConnection.Terms.PROTOCOL_3);
+            TestSink sink = sink(budget, CloudConnection.Terms.sections(0, 0));
             CaptureStream stream = new CaptureStream(PLAYER);
             stream.start(0);
             long cuts = 0;
@@ -119,7 +116,7 @@ class CaptureStreamBudgetTest {
         List<CaptureStream> streams = new ArrayList<>();
         for (int player = 0; player < 32; player++) {
             UUID id = new UUID(9, player);
-            TestSink sink = sink(budget, CloudConnection.Terms.PROTOCOL_3);
+            TestSink sink = sink(budget, CloudConnection.Terms.sections(0, 0));
             CaptureStream stream = new CaptureStream(id);
             stream.start(0);
             stream.join(sink, IntakeWire.join(id, 777, "vanilla", -64, 384, null, null, 0), 0, SESSION);
@@ -157,7 +154,7 @@ class CaptureStreamBudgetTest {
     @Test
     void framesHeldAcrossTheAnswerGiveBackExactlyWhatTheyTook() {
         TestBudget budget = new TestBudget(LIMIT);
-        TestSink sink = sink(budget, CloudConnection.Terms.PROTOCOL_3);
+        TestSink sink = sink(budget, CloudConnection.Terms.sections(0, 0));
         CaptureStream stream = new CaptureStream(PLAYER);
         stream.start(0);
         stream.join(sink, IntakeWire.join(PLAYER, 777, "vanilla", -64, 384, null, null, 0), 0, SESSION);

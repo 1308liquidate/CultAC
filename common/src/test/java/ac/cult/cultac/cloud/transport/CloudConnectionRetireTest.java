@@ -25,7 +25,7 @@ class CloudConnectionRetireTest {
     void aRetiredSocketDrainsClosesAndNeverReconnects() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(3)));
+            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(5)));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             assertNotNull(connection);
             AtomicLong generation = new AtomicLong(-1);
@@ -38,7 +38,7 @@ class CloudConnectionRetireTest {
 
                 public void reply(long replied, IntakeWire.Reply reply) {}
             });
-            receiver.allowConnect("\"protocol\":3");
+            receiver.allowConnect("\"protocol\":5");
             await(() -> generation.get() > 0, "connected");
 
             assertTrue(connection.send(generation.get(), IntakeWire.leave(PLAYER), 0));
@@ -59,7 +59,7 @@ class CloudConnectionRetireTest {
     void retiringTheOpenSocketsKeepsTheUploadOnForOthers() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(3)));
+            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(5)));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             assertNotNull(connection);
             AtomicLong generation = new AtomicLong(-1);
@@ -72,7 +72,7 @@ class CloudConnectionRetireTest {
 
                 public void reply(long replied, IntakeWire.Reply reply) {}
             });
-            receiver.allowConnect("\"protocol\":3");
+            receiver.allowConnect("\"protocol\":5");
             await(() -> generation.get() > 0, "connected");
 
             receiver.connections.retireOpen();
@@ -83,7 +83,7 @@ class CloudConnectionRetireTest {
             CloudConnection draining = receiver.connections.forServer("proxy.a-drain-1a2b3c4d");
             assertNotNull(draining);
             assertNotSame(connection, draining);
-            receiver.allowConnect("\"protocol\":3");
+            receiver.allowConnect("\"protocol\":5");
             assertTrue(receiver.connectBodies.stream().anyMatch(body -> body.contains("proxy.a-drain-1a2b3c4d")));
             assertFalse(
                     receiver.connectBodies.stream().skip(1).anyMatch(body -> body.contains("\"proxy.a\"")),
@@ -95,7 +95,7 @@ class CloudConnectionRetireTest {
     void aRetiredSocketWaitingToReconnectStops() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(3)));
+            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(5)));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             assertNotNull(connection);
             assertNotNull(receiver.connects.poll(5, TimeUnit.SECONDS), "connect attempted");
@@ -109,14 +109,14 @@ class CloudConnectionRetireTest {
     void aFrozenConnectionHandsOutNoSocket() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(3)));
+            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(5)));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             assertNotNull(connection);
             await(() -> !receiver.connects.isEmpty(), "connect in flight");
             receiver.connections.freeze();
             assertFalse(receiver.connections.available());
             assertNull(receiver.connections.forServer("proxy.b"), "no socket is handed out");
-            receiver.allowConnect("\"protocol\":3");
+            receiver.allowConnect("\"protocol\":5");
             assertNull(receiver.handshakes.poll(500, TimeUnit.MILLISECONDS), "the answered connect opens no socket");
             await(connection::closed, "closed");
             assertNull(receiver.connects.poll(500, TimeUnit.MILLISECONDS), "never reconnects");
@@ -127,7 +127,7 @@ class CloudConnectionRetireTest {
     void aRetiredSocketThatCannotDrainClosesWithinItsDeadline() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(3)));
+            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(5)));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             assertNotNull(connection);
             AtomicLong generation = new AtomicLong(-1);
@@ -140,7 +140,7 @@ class CloudConnectionRetireTest {
 
                 public void reply(long replied, IntakeWire.Reply reply) {}
             });
-            receiver.allowConnect("\"protocol\":3");
+            receiver.allowConnect("\"protocol\":5");
             Channel socket = receiver.handshakes.poll(5, TimeUnit.SECONDS);
             assertNotNull(socket);
             await(() -> generation.get() > 0, "connected");

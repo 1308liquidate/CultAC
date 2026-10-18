@@ -202,14 +202,12 @@ class CloudCaptureTapTest {
             fixture.channel.runPendingTasks();
             drainOutbound(fixture);
             fixture.tickEnd();
-            int ping = fixture.id(PacketDirection.CLIENTBOUND, "ping");
             List<Record> pings = new ArrayList<>();
             for (Record record : records(fixture)) {
-                if (record.getBodyCase() == Record.BodyCase.CLIENTBOUND
-                        && record.getClientbound().byteAt(0) == ping) pings.add(record);
+                if (record.getBodyCase() == Record.BodyCase.PING) pings.add(record);
             }
             assertEquals(1, pings.size());
-            assertEquals(CultPlayer.PING_LEADING, pings.get(0).getPingKindValue());
+            assertEquals(CultPlayer.PING_LEADING, pings.get(0).getPingValue());
         }
     }
 

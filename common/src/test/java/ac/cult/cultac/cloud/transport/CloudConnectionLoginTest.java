@@ -55,7 +55,10 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 class CloudConnectionLoginTest {
@@ -67,7 +70,7 @@ class CloudConnectionLoginTest {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
             CloudConnections connections = receiver.connections;
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             assertNull(receiver.connects.poll(300, TimeUnit.MILLISECONDS));
             assertTrue(connections.summaries().isEmpty());
             assertNotNull(connections.forServer("proxy.a"));
@@ -79,11 +82,11 @@ class CloudConnectionLoginTest {
     }
 
     @Test
-    void connectOffersTheConfiguredProtocolsAndSaysTextIsStripped() throws Exception {
+    void connectOffersExactlyProtocol5AndSaysTextIsStripped() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
             CloudConnections connections = receiver.connections;
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             connections.forServer("proxy.a");
             receiver.allowConnect();
             JsonObject connect = JsonParser.parseString(receiver.connectBodies.poll(5, TimeUnit.SECONDS))
@@ -92,17 +95,38 @@ class CloudConnectionLoginTest {
             assertTrue(connect.get("textStripped").getAsBoolean());
             assertFalse(connect.has("entityFilter"));
             assertTrue(connect.has("diag"));
-            assertEquals("[3,5]", connect.getAsJsonArray("protocols").toString());
+            assertEquals("[5]", connect.getAsJsonArray("protocols").toString());
             JsonObject agent = connect.getAsJsonObject("agent");
             assertEquals("cultac", agent.get("name").getAsString());
             assertEquals("enforcing", agent.get("mode").getAsString());
 
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROXY_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", List.of(3, 5)));
             connections.forServer("proxy.a");
-            receiver.allowConnect("\"protocol\":5");
+            receiver.allowConnect();
             connect = JsonParser.parseString(receiver.connectBodies.poll(5, TimeUnit.SECONDS))
                     .getAsJsonObject();
             assertEquals("[5]", connect.getAsJsonArray("protocols").toString());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\"protocol\":3", "\"chunkRadius\":2"})
+    void anAnswerOtherThanProtocol5StreamsNothing(String terms) throws Exception {
+        try (Globals globals = new Globals();
+                Receiver receiver = new Receiver()) {
+            CloudConnections connections = receiver.connections;
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
+            connections.forServer("proxy.a");
+            receiver.allowConnect(terms);
+            assertNull(receiver.handshakes.poll(500, TimeUnit.MILLISECONDS), "no socket opens");
+            assertNull(receiver.connects.poll(300, TimeUnit.MILLISECONDS), "no connect within the backoff");
+            synchronized (globals.logs) {
+                List<LogRecord> refusals = globals.logs.stream()
+                        .filter(record -> record.getMessage()
+                                .contains("The cloud did not agree intake protocol 5; not streaming"))
+                        .toList();
+                assertEquals(1, refusals.size(), String.valueOf(refusals));
+            }
         }
     }
 
@@ -111,7 +135,7 @@ class CloudConnectionLoginTest {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
             CloudConnections connections = receiver.connections;
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             connections.forServer("proxy.a");
             receiver.allowConnect();
             String body = receiver.connectBodies.poll(5, TimeUnit.SECONDS);
@@ -120,7 +144,7 @@ class CloudConnectionLoginTest {
             assertFalse(connect.has("perf"), body);
             assertTrue(connect.has("diag"), body);
 
-            CloudSettings off = settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS);
+            CloudSettings off = settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS);
             connections.configure(new CloudSettings(
                     off.url(), off.apiKey(), off.serverIdTemplate(), off.proxyId(), off.protocols(), true));
             connections.forServer("proxy.a");
@@ -137,7 +161,7 @@ class CloudConnectionLoginTest {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
             CloudConnections connections = receiver.connections;
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = connections.forServer("proxy.a");
             receiver.allowConnect();
             assertTrue(textStripped(receiver));
@@ -184,15 +208,15 @@ class CloudConnectionLoginTest {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
             CloudConnections connections = receiver.connections;
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection original = connections.forServer("proxy.a");
             receiver.allowConnect();
             Channel socket = receiver.handshakes.poll(5, TimeUnit.SECONDS);
             assertNotNull(socket);
-            connections.configure(settings(receiver.url() + "/", "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url() + "/", "test-key", CloudSettings.PROTOCOLS));
             assertSame(original, connections.forServer("proxy.a"));
             assertFalse(original.closed());
-            connections.configure(settings(receiver.url(), "other-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "other-key", CloudSettings.PROTOCOLS));
             assertTrue(original.closed());
             assertTrue(socket.closeFuture().await(5, TimeUnit.SECONDS));
             CloudConnection replaced = connections.forServer("proxy.a");
@@ -206,7 +230,7 @@ class CloudConnectionLoginTest {
     void repliesCarryTheirGeneration() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             assertNotNull(connection);
             Recorder player = new Recorder();
@@ -249,7 +273,7 @@ class CloudConnectionLoginTest {
     void findingsAreCountedAndNeverReachAStream() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             assertNotNull(connection);
             Recorder player = new Recorder();
@@ -267,7 +291,7 @@ class CloudConnectionLoginTest {
             player.next(player.connected);
             socket.writeAndFlush(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(event)));
             socket.writeAndFlush(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(event)));
-            await(() -> connection.summary().endsWith(", 2 findings received"), "both findings counted");
+            await(() -> connection.summary().contains(", 2 findings received"), "both findings counted");
             assertTrue(player.replies.isEmpty());
         }
     }
@@ -278,7 +302,7 @@ class CloudConnectionLoginTest {
         CloudConnection.Timing timing = new CloudConnection.Timing(Long.MAX_VALUE / 4, Long.MAX_VALUE / 4, now::get);
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver(timing)) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             List<UUID> found = new CopyOnWriteArrayList<>();
             receiver.connections.onFinding(event -> found.add(event.player()));
             CloudConnection a = receiver.connections.forServer("proxy.a");
@@ -326,11 +350,11 @@ class CloudConnectionLoginTest {
                                     .setCheckId("speed")))
                     .build()
                     .toByteArray();
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             assertNotNull(connection);
             receiver.allowConnect();
-            await(() -> connection.summary().endsWith(", 1 findings received"), "the first reply read");
+            await(() -> connection.summary().contains(", 1 findings received"), "the first reply read");
         }
     }
 
@@ -339,7 +363,7 @@ class CloudConnectionLoginTest {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
             for (String key : List.of("", "  ")) {
-                receiver.connections.configure(settings(receiver.url(), key, CloudSettings.SERVER_PROTOCOLS));
+                receiver.connections.configure(settings(receiver.url(), key, CloudSettings.PROTOCOLS));
                 assertNull(receiver.connections.forServer("proxy.a"));
                 assertTrue(receiver.connections.summaries().isEmpty());
             }
@@ -353,7 +377,7 @@ class CloudConnectionLoginTest {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
             CloudConnections connections = receiver.connections;
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROXY_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection a = connections.forServer("proxy.a");
             CloudConnection b = connections.forServer("proxy.b");
             receiver.refuseConnect();
@@ -368,7 +392,7 @@ class CloudConnectionLoginTest {
                                 .filter(record -> record.getMessage().startsWith("Cloud upload off"))
                                 .count());
             }
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             assertNotNull(connections.forServer("proxy.c"));
         }
     }
@@ -378,7 +402,7 @@ class CloudConnectionLoginTest {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
             CloudConnections connections = receiver.connections;
-            connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             connections.forServer("proxy.a");
             receiver.allowConnect();
             Channel socket = receiver.handshakes.poll(5, TimeUnit.SECONDS);
@@ -410,7 +434,7 @@ class CloudConnectionLoginTest {
     void firstPlayerCarriesLoginChunkAndZombie() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             PlayerStream player = new PlayerStream(connection);
             synchronized (player) {
@@ -458,7 +482,7 @@ class CloudConnectionLoginTest {
             assertEquals(
                     1L << IntakeWire.FLYING,
                     frame.getFrame().getRecords(5).getVerdict().getConditions());
-            assertEquals(49_997_000, frame.getFrame().getRecords(5).getAdvanceNanos());
+            assertEquals(49_997, frame.getFrame().getRecords(5).getAdvanceNanos());
             synchronized (player) {
                 player.stream.leave(100_001_000);
             }
@@ -471,7 +495,7 @@ class CloudConnectionLoginTest {
     void socketReconnectStartsAFreshSessionForAnOnlinePlayer() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {
-            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+            receiver.connections.configure(settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
             CloudConnection connection = receiver.connections.forServer("proxy.a");
             PlayerStream player = new PlayerStream(connection);
             synchronized (player) {

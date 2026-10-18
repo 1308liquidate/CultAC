@@ -99,17 +99,17 @@ class CaptureStreamTest {
         stream.start(5);
         stream.prepare(sink);
         CaptureStream.Session login = new CaptureStream.Session(42, 1, "minecraft:overworld", true);
-        stream.observe(login, -64, 384, 100);
-        stream.tap(IntakeWire.CLIENTBOUND, DIMENSION_ID, new byte[] {DIMENSION_ID}, 100, -64, 384, login);
-        stream.tap(IntakeWire.CLIENTBOUND, CLIENTBOUND_ID, new byte[] {CLIENTBOUND_ID, 10}, 110, -64, 384, login);
-        stream.tap(IntakeWire.CLIENTBOUND, CLIENTBOUND_ID, new byte[] {CLIENTBOUND_ID, 20}, 120, -64, 384, login);
-        stream.cut(150);
+        stream.observe(login, -64, 384, 100_000);
+        stream.tap(IntakeWire.CLIENTBOUND, DIMENSION_ID, new byte[] {DIMENSION_ID}, 100_000, -64, 384, login);
+        stream.tap(IntakeWire.CLIENTBOUND, CLIENTBOUND_ID, new byte[] {CLIENTBOUND_ID, 10}, 110_000, -64, 384, login);
+        stream.tap(IntakeWire.CLIENTBOUND, CLIENTBOUND_ID, new byte[] {CLIENTBOUND_ID, 20}, 120_000, -64, 384, login);
+        stream.cut(150_000);
         verdict(stream, 6, 6, 1L << IntakeWire.FLYING);
-        tick(stream, 200);
-        assertEquals(100, stream.baseNanos(300));
+        tick(stream, 200_000);
+        assertEquals(100_000, stream.baseNanos(300_000));
         assertEquals(0, sink.sent.size());
 
-        stream.join(sink, join(), 300, login);
+        stream.join(sink, join(), 300_000, login);
         answer(stream);
         verdict(stream, 7, 7, 1L << IntakeWire.GLIDING);
 
@@ -224,13 +224,13 @@ class CaptureStreamTest {
     void reconnectDoesNotReplayFramesFromEitherSideOfTheDisconnect() {
         TestSink sink = new TestSink();
         CaptureStream stream = preparing(sink);
-        tick(stream, 100);
-        stream.join(sink, join(), 200, SESSION);
+        tick(stream, 100_000);
+        stream.join(sink, join(), 200_000, SESSION);
         stream.reset();
-        tick(stream, 300);
-        stream.join(sink, join(), 400, SESSION);
+        tick(stream, 300_000);
+        stream.join(sink, join(), 400_000, SESSION);
         answer(stream);
-        tick(stream, 500);
+        tick(stream, 500_000);
         verdict(stream, 3, 3, 0);
         assertEquals(2, sink.entries(IntakeMessage.KindCase.JOIN).size());
         assertEquals(1, frames(sink).size());
@@ -1293,14 +1293,19 @@ class CaptureStreamTest {
         stream.tap(IntakeWire.CLIENTBOUND, CLIENTBOUND_ID, new byte[] {CLIENTBOUND_ID, 1}, nanos, -64, 384, SESSION);
     }
 
-    /** Each clientbound record's server tick, from the frame's and the deltas; its ping kinds alongside. */
+    /**
+     * Each clientbound record's and ping marker's server tick, from the frame's and the deltas; its ping kinds alongside.
+     */
     private static List<long[]> serverTicks(Frame frame) {
         List<long[]> ticks = new ArrayList<>();
         long tick = frame.serverTick() == null ? -1 : frame.serverTick();
-        for (Capture capture : frame.records(IntakeWire.CLIENTBOUND)) {
-            tick += capture.record().getServerTickDelta();
+        for (Capture capture : frame.records()) {
+            boolean marker = capture.kind() == IntakeWire.PING_MARKER;
+            if (!marker && capture.kind() != IntakeWire.CLIENTBOUND) continue;
+            tick += capture.record().getTickDelta();
             ticks.add(new long[] {
-                frame.serverTick() == null ? -1 : tick, capture.record().getPingKindValue()
+                frame.serverTick() == null ? -1 : tick,
+                marker ? capture.record().getPingValue() : capture.record().getPingKindValue()
             });
         }
         return ticks;
@@ -1358,7 +1363,7 @@ class CaptureStreamTest {
         assertEquals(4, frames.size());
         assertEquals(null, frames.get(0).serverTick());
         assertEquals(
-                0, frames.get(0).records(IntakeWire.CLIENTBOUND).get(0).record().getServerTickDelta());
+                0, frames.get(0).records(IntakeWire.CLIENTBOUND).get(0).record().getTickDelta());
         assertEquals(100L, frames.get(1).serverTick());
         assertArrayEquals(
                 new long[][] {{100, 0}, {100, 3}, {100, 1}, {101, 0}, {101, 2}},

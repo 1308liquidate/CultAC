@@ -147,8 +147,7 @@ class CloudConnectionLivenessTest {
     }
 
     private static CloudConnection open(Globals globals, Receiver receiver) throws InterruptedException {
-        receiver.connections.configure(
-                ConnectionFixture.settings(receiver.url(), "test-key", CloudSettings.SERVER_PROTOCOLS));
+        receiver.connections.configure(ConnectionFixture.settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
         CloudConnection connection = receiver.connections.forServer("login-test");
         receiver.allowConnect();
         return connection;

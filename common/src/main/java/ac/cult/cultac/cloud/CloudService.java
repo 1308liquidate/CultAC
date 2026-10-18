@@ -62,9 +62,8 @@ public final class CloudService {
     }
 
     private static void configureNow(ConfigManager config, boolean proxy) {
-        CloudSettings settings = proxy
-                ? CloudSettings.read(config, CloudSettings.PROXY_PROTOCOLS, CloudSettings.DEFAULT_SERVER_ID)
-                : CloudSettings.read(config, CloudSettings.SERVER_PROTOCOLS, CloudSettings.OWN_SERVER_ID);
+        CloudSettings settings = CloudSettings.read(
+                config, CloudSettings.PROTOCOLS, proxy ? CloudSettings.DEFAULT_SERVER_ID : CloudSettings.OWN_SERVER_ID);
         if (!config.getBooleanElse("cloud.enabled", true)) {
             LogUtil.info("Cloud upload is off: cloud.enabled is false");
             settings = CloudSettings.OFF;
@@ -263,11 +262,6 @@ public final class CloudService {
         @Override
         public boolean enabled() {
             return connections.available();
-        }
-
-        @Override
-        public boolean sectionsOnly() {
-            return connections.settings().protocols().equals(List.of(5));
         }
 
         @Override

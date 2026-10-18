@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.cultac.cloud.wire.IntakeWire;
+import com.github.luben.zstd.ZstdDecompressCtx;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,11 +32,13 @@ class CompressionPipelineTest {
         pools.forEach(ExecutorService::shutdownNow);
     }
 
-    /** A pipeline on a pool of its own, as the shared one every connection writes on. */
+    /** A pipeline on a pool of its own, as the shared one every connection writes on, its socket open. */
     private CompressionPipeline pipeline(int threads, String name, QueuedBytes queued) {
         ExecutorService pool = CompressionPipeline.newPool(threads, name);
         pools.add(pool);
-        return new CompressionPipeline(pool, threads, queued);
+        CompressionPipeline pipeline = new CompressionPipeline(pool, threads, queued);
+        pipeline.stream();
+        return pipeline;
     }
 
     /** Messages of very different sizes, so later small ones finish before earlier big ones. */
@@ -62,18 +65,19 @@ class CompressionPipelineTest {
         return bytes;
     }
 
+    /** The records back to back, as a message decompresses. */
     private static byte[] expected(List<byte[]> records) {
-        ByteBuffer written = new IntakeWire.MessageWriter().write(records);
-        byte[] out = new byte[written.remaining()];
-        written.get(out);
-        return out;
+        ByteBuffer joined = ByteBuffer.allocate(bytes(records));
+        for (byte[] record : records) joined.put(record);
+        return joined.array();
     }
 
     @Test
     void messagesComeBackInSubmissionOrder() throws Exception {
         QueuedBytes queued = new QueuedBytes(new AtomicLong());
         List<List<byte[]>> messages = messages(120);
-        try (CompressionPipeline pipeline = pipeline(4, NAME, queued)) {
+        try (CompressionPipeline pipeline = pipeline(4, NAME, queued);
+                ZstdDecompressCtx zstd = new ZstdDecompressCtx()) {
             int submitted = 0;
             int taken = 0;
             while (taken < messages.size()) {
@@ -84,7 +88,7 @@ class CompressionPipelineTest {
                     records.clear();
                 }
                 byte[] message = pipeline.take();
-                assertArrayEquals(expected(messages.get(taken++)), message);
+                assertArrayEquals(expected(messages.get(taken++)), ConnectionFixture.decompress(zstd, message));
                 pipeline.sent(message);
             }
             assertNull(pipeline.take());
@@ -109,7 +113,7 @@ class CompressionPipelineTest {
     }
 
     @Test
-    void countsEachMessageAsWrittenOnceDeflated() throws Exception {
+    void countsEachMessageAsWrittenOnceCompressed() throws Exception {
         QueuedBytes queued = new QueuedBytes(new AtomicLong());
         List<List<byte[]>> messages = messages(6);
         long raw = 0;
@@ -145,6 +149,7 @@ class CompressionPipelineTest {
             }
         });
         try (CompressionPipeline pipeline = new CompressionPipeline(pool, 1, queued)) {
+            pipeline.stream();
             byte[] record = new byte[4096];
             queued.addAndGet(record.length);
             pipeline.submit(List.of(record), record.length);
@@ -168,7 +173,7 @@ class CompressionPipelineTest {
             closed.close();
             return closed;
         })) {
-            pipeline.stream(true);
+            pipeline.stream();
             queued.addAndGet(10);
             pipeline.submit(List.of(new byte[10]), 10);
             assertThrows(ExecutionException.class, pipeline::take);
@@ -182,6 +187,7 @@ class CompressionPipelineTest {
         ExecutorService pool = CompressionPipeline.newPool(4, NAME + "-close");
         pools.add(pool);
         CompressionPipeline pipeline = new CompressionPipeline(pool, 4, queued);
+        pipeline.stream();
         for (List<byte[]> records : messages(8)) {
             queued.addAndGet(bytes(records));
             pipeline.submit(records, bytes(records));
@@ -202,16 +208,29 @@ class CompressionPipelineTest {
         pools.add(pool);
         List<List<byte[]>> messages = messages(12);
         List<CompressionPipeline> pipelines = new ArrayList<>();
-        for (int p = 0; p < 3; p++) pipelines.add(new CompressionPipeline(pool, 2, new QueuedBytes(new AtomicLong())));
-        for (int i = 0; i < messages.size(); i += 3) {
-            for (int p = 0; p < 3; p++) {
-                List<byte[]> records = messages.get(i + p);
-                pipelines.get(p).submit(records, bytes(records));
+        List<ZstdDecompressCtx> readers = new ArrayList<>();
+        for (int p = 0; p < 3; p++) {
+            CompressionPipeline pipeline = new CompressionPipeline(pool, 2, new QueuedBytes(new AtomicLong()));
+            pipeline.stream();
+            pipelines.add(pipeline);
+            readers.add(new ZstdDecompressCtx());
+        }
+        try {
+            for (int i = 0; i < messages.size(); i += 3) {
+                for (int p = 0; p < 3; p++) {
+                    List<byte[]> records = messages.get(i + p);
+                    pipelines.get(p).submit(records, bytes(records));
+                }
+                for (int p = 0; p < 3; p++) {
+                    assertArrayEquals(
+                            expected(messages.get(i + p)),
+                            ConnectionFixture.decompress(
+                                    readers.get(p), pipelines.get(p).take()));
+                }
             }
-            for (int p = 0; p < 3; p++) {
-                assertArrayEquals(
-                        expected(messages.get(i + p)), pipelines.get(p).take());
-            }
+        } finally {
+            pipelines.forEach(CompressionPipeline::close);
+            readers.forEach(ZstdDecompressCtx::close);
         }
     }
 
@@ -226,18 +245,17 @@ class CompressionPipelineTest {
             return writer;
         });
         List<byte[]> records = List.of(new byte[] {1, 2, 3});
-        pipeline.stream(true);
+        pipeline.stream();
         pipeline.submit(records, 3);
-        pipeline.stream(true);
+        pipeline.stream();
         assertEquals(2, writers.size());
         assertThrows(IllegalStateException.class, () -> writers.get(0).write(records, 3));
         pipeline.submit(records, 3);
         assertTrue(pipeline.take().length > 1);
-        pipeline.stream(false);
-        assertThrows(IllegalStateException.class, () -> writers.get(1).write(records, 3));
-        pipeline.stream(true);
+        assertTrue(pipeline.streaming());
         pipeline.close();
-        assertEquals(3, writers.size());
-        assertThrows(IllegalStateException.class, () -> writers.get(2).write(records, 3));
+        assertFalse(pipeline.streaming());
+        assertEquals(2, writers.size());
+        assertThrows(IllegalStateException.class, () -> writers.get(1).write(records, 3));
     }
 }

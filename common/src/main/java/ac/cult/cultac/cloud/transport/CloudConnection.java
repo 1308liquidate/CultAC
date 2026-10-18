@@ -159,7 +159,6 @@ public final class CloudConnection {
     private static final long DEPARTED_NANOS = TimeUnit.MILLISECONDS.toNanos(FindingsLog.RETENTION_MILLIS);
 
     private static final LogThrottle REPLY_FAILURES = new LogThrottle();
-    private static final AtomicBoolean ZSTD_WARNED = new AtomicBoolean();
     private static final AtomicBoolean RADIUS_WARNED = new AtomicBoolean();
     /** The config files that decide what CultAC does, hashed for the service's record of each session. */
     private static final List<String> CONFIG_FILES = List.of("config.yml", "cult.yml", "punishments.yml");
@@ -200,7 +199,7 @@ public final class CloudConnection {
     private volatile long generation;
     private volatile int maxMessageBytes;
     /** The open socket's generation, the terms it was opened on, and the {@code textStripped} its connect said. */
-    private volatile Agreed agreed = new Agreed(0, Terms.PROTOCOL_3, true);
+    private volatile Agreed agreed = new Agreed(0, Terms.NONE, true);
 
     /** The agent this socket announced; a reload that changes its mode or config hash reconnects. */
     private volatile JsonObject announced;
@@ -246,11 +245,12 @@ public final class CloudConnection {
     }
 
     /**
-     * What the service agreed to at connect: the intake protocol and, on protocol 5, the columns (Chebyshev) and the
-     * sections above and below the player's within which its simulation world's sections stream.
+     * What the service agreed to at connect: intake protocol 5, and the columns (Chebyshev) and the sections above and
+     * below the player's within which its simulation world's sections stream.
      */
     public record Terms(int protocol, int chunkRadius, int sectionRadius) {
-        public static final Terms PROTOCOL_3 = new Terms(IntakeWire.PROTOCOL_3, 0, 0);
+        /** No socket: nothing streams, terrain included. */
+        public static final Terms NONE = new Terms(0, 0, 0);
         /** Protocol 5's radii when connect's answer leaves them out. */
         public static final int DEFAULT_CHUNK_RADIUS = 2;
 
@@ -263,7 +263,7 @@ public final class CloudConnection {
             return new Terms(IntakeWire.PROTOCOL_5, chunkRadius, sectionRadius);
         }
 
-        /** Terrain goes out as sections of the simulation world, and chunk packets never do. */
+        /** A socket agreed these terms: terrain goes out as sections of the simulation world. */
         public boolean sections() {
             return protocol == IntakeWire.PROTOCOL_5;
         }
@@ -500,10 +500,10 @@ public final class CloudConnection {
         return max - 1 - max / 1024 - 64;
     }
 
-    /** The terms the socket of {@code generation} was opened on; protocol 3's once it is gone. */
+    /** The terms the socket of {@code generation} was opened on; {@link Terms#NONE} once it is gone. */
     public Terms terms(long generation) {
         Agreed current = agreed;
-        return current.generation() == generation ? current.terms() : Terms.PROTOCOL_3;
+        return current.generation() == generation ? current.terms() : Terms.NONE;
     }
 
     /**
@@ -651,19 +651,13 @@ public final class CloudConnection {
                 }
                 return;
             }
-            if (zstdUnavailable != null && !ZSTD_WARNED.getAndSet(true)) {
-                LogUtil.warn("Cloud intake protocol 5 needs zstd, which did not load; offering protocol 3 only: "
-                        + zstdUnavailable);
-            }
             JsonArray protocols = new JsonArray();
             for (int protocol : offered) protocols.add(protocol);
             body.add("protocols", protocols);
             boolean textStripped = PlayerText.stripsEvery();
             body.addProperty("textStripped", textStripped);
-            boolean diag = zstdUnavailable == null;
-            if (diag) body.addProperty("diag", DiagWire.VERSION);
-            boolean offersPerf = offerPerf && zstdUnavailable == null;
-            if (offersPerf) body.addProperty("perf", PerfWire.VERSION);
+            body.addProperty("diag", DiagWire.VERSION);
+            if (offerPerf) body.addProperty("perf", PerfWire.VERSION);
             JsonObject agent = agent();
             body.add("agent", agent);
             HttpResponse<String> response = http.send(
@@ -684,7 +678,11 @@ public final class CloudConnection {
                 return;
             }
             Connected connected = GSON.fromJson(response.body(), Connected.class);
-            if (connected == null || connected.url == null || !offered.contains(connected.protocol)) {
+            if (connected != null && connected.protocol != IntakeWire.PROTOCOL_5) {
+                backOff("The cloud did not agree intake protocol 5; not streaming");
+                return;
+            }
+            if (connected == null || connected.url == null) {
                 retry("connect answered " + response.body());
                 return;
             }
@@ -709,9 +707,9 @@ public final class CloudConnection {
                     .buildAsync(URI.create(connected.url), new Replies(opened)));
             if (webSocket == null) return;
             dropQueued();
-            diagnostics.connected(opened, diag ? connected.diagLimits() : null);
-            perf.connected(opened, offersPerf ? connected.perfLimits() : null);
-            pipeline.stream(terms.sections());
+            diagnostics.connected(opened, connected.diagLimits());
+            perf.connected(opened, offerPerf ? connected.perfLimits() : null);
+            pipeline.stream();
             agreed = new Agreed(opened, terms, textStripped);
             generation = opened;
             announced = agent;
@@ -721,12 +719,9 @@ public final class CloudConnection {
             socket = webSocket;
             webSocket.request(1);
             failing = false;
-            LogUtil.info(
-                    "Cloud connected to " + redacted(origin(connected.url)) + " on intake protocol " + terms.protocol()
-                            + (terms.sections()
-                                    ? " (chunk radius " + terms.chunkRadius() + ", section radius "
-                                            + terms.sectionRadius() + ")"
-                                    : ""));
+            LogUtil.info("Cloud connected to " + redacted(origin(connected.url)) + " on intake protocol "
+                    + terms.protocol() + " (chunk radius " + terms.chunkRadius() + ", section radius "
+                    + terms.sectionRadius() + ")");
             for (Stream stream : streams.values()) {
                 try {
                     stream.connected(opened);
@@ -768,14 +763,13 @@ public final class CloudConnection {
     }
 
     /**
-     * The protocols of {@code configured} to offer: protocol 5 compresses with zstd, so not when it is unavailable. Empty
-     * when none is left, and the upload stays off.
+     * The protocols to offer: protocol 5 when {@code configured} has it, and none when zstd, which it compresses with, is
+     * unavailable. Empty, the upload stays off.
      */
     static List<Integer> protocols(List<Integer> configured, String zstdUnavailable) {
-        if (zstdUnavailable == null) return configured;
-        return configured.stream()
-                .filter(protocol -> protocol == IntakeWire.PROTOCOL_3)
-                .toList();
+        return zstdUnavailable == null && configured.contains(IntakeWire.PROTOCOL_5)
+                ? List.of(IntakeWire.PROTOCOL_5)
+                : List.of();
     }
 
     /**
@@ -920,21 +914,17 @@ public final class CloudConnection {
             return answered == null ? fallback : Math.clamp(answered, 0, Terms.MAX_RADIUS);
         }
 
-        /** Whether protocol 5's answer named a radius past {@link Terms#MAX_RADIUS}. */
+        /** Whether the answer named a radius past {@link Terms#MAX_RADIUS}. */
         boolean radiusClamped() {
-            return protocol == IntakeWire.PROTOCOL_5
-                    && (chunkRadius != null && chunkRadius > Terms.MAX_RADIUS
-                            || sectionRadius != null && sectionRadius > Terms.MAX_RADIUS);
+            return chunkRadius != null && chunkRadius > Terms.MAX_RADIUS
+                    || sectionRadius != null && sectionRadius > Terms.MAX_RADIUS;
         }
 
-        /** The terms of the protocol agreed; protocol 5's radii default when absent. */
+        /** Protocol 5's terms, its radii defaulting when absent. */
         Terms terms() {
-            if (protocol == IntakeWire.PROTOCOL_5) {
-                return Terms.sections(
-                        radius(chunkRadius, Terms.DEFAULT_CHUNK_RADIUS),
-                        radius(sectionRadius, Terms.DEFAULT_SECTION_RADIUS));
-            }
-            return Terms.PROTOCOL_3;
+            return Terms.sections(
+                    radius(chunkRadius, Terms.DEFAULT_CHUNK_RADIUS),
+                    radius(sectionRadius, Terms.DEFAULT_SECTION_RADIUS));
         }
     }
 
@@ -1071,9 +1061,12 @@ public final class CloudConnection {
 
     /** Waits out the backoff; warns on the first failure in a row, not on every retry. */
     private void retry(String why) {
-        if (!failing) {
-            LogUtil.warn("Cloud connection to " + loggable(connect) + " failed: " + redacted(why) + "; retrying");
-        }
+        backOff("Cloud connection to " + loggable(connect) + " failed: " + redacted(why) + "; retrying");
+    }
+
+    /** A connect failed: {@code line} is logged once per run of failures, and the next connect waits out the backoff. */
+    private void backOff(String line) {
+        if (!failing) LogUtil.warn(line);
         failing = true;
         await(backoff.failed());
     }
@@ -1121,7 +1114,7 @@ public final class CloudConnection {
             queuedBytes.addAndGet(-bytes);
             pipeline.drop();
             // The service cannot decompress a stream past a message it never got.
-            if (pipeline.streaming()) lost(open, "a message was not sent: " + failure);
+            lost(open, "a message was not sent: " + failure);
             throw failure;
         }
     }
