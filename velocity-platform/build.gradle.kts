@@ -31,7 +31,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testImplementation("org.mockito:mockito-core:5.22.0")
     testImplementation("io.netty:netty-handler:4.2.18.Final")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
     testRuntimeOnly(libs.viaversion)
 }
 tasks.test {
