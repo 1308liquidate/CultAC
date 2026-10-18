@@ -30,7 +30,8 @@ While the upload is on, each player's session is streamed from the moment they r
 - **Diagnostics bundles, only on request.** When the intake service asks to watch a player, CultAC keeps a short ring
   of that player's prediction traces (positions, velocities, the nearby block grid, the boxes of nearby entities,
   other players included, the player's name and the world name, under a header with the plugin version, client
-  version, brand and ping) and uploads a window of it when the service asks for one. Nothing is kept or sent for
+  version, brand and ping, the server software, and the version of any enabled plugin known to rewrite movement or
+  packets, such as ViaVersion or ProtocolLib) and uploads a window of it when the service asks for one. Nothing is kept or sent for
   unwatched players.
 - **Performance profiles, only with `cloud.perf` and on request.** Off by default. When on, the intake service may ask
   for a short JFR profile of the whole server process: CPU and allocation stack samples (class and method names),

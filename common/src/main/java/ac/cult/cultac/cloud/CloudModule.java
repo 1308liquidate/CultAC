@@ -1,6 +1,7 @@
 package ac.cult.cultac.cloud;
 
 import ac.cult.cultac.CultAPI;
+import ac.cult.cultac.cloud.diag.PredictionDiagnostics;
 import ac.cult.cultac.player.CultPlayer;
 import ac.grim.grimac.api.config.ConfigManager;
 import java.util.List;
@@ -34,6 +35,7 @@ public final class CloudModule {
             loaded = true;
         }
         CloudService.configReloaded();
+        PredictionDiagnostics.readServerFields();
     }
 
     /** This server's intake key: {@code CULTAC_CLOUD_API_KEY}, else {@code cloud.api-key}; empty is off. */
