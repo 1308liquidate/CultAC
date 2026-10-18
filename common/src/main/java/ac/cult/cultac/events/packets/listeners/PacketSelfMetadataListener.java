@@ -97,7 +97,7 @@ public class PacketSelfMetadataListener {
                             // no-op
                         }
                         player.isGliding = isGliding;
-                        player.refreshPlayerPose();
+                        // The local pose changes only in Player#updatePlayerPose, after the tick's aiStep.
                     };
                     bundledSharedFlags = applySharedFlags;
                 }
