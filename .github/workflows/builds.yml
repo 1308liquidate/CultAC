@@ -1,16 +1,15 @@
 name: Numbered Builds
 
-# Every push to main, stable, experimental or dev becomes build N, N being this workflow's run number: monotonic, unique
-# across branches, and kept by a re-run. With the signing key in the `builds` environment, build N is published as
-# release `build-N` with a signed manifest; `/cult update N` on a Velocity proxy installs it (README.md). Builds carry a
-# channel named after the branch, except that main and stable both publish as `stable`. Stable builds are full releases
-# and the newest is marked latest; experimental and dev builds are prereleases.
+# Every push to main, experimental or dev becomes build N, N being this workflow's run number: monotonic, unique across
+# branches, and kept by a re-run. With the signing key in the `builds` environment, build N is published as release
+# `build-N` with a signed manifest; `/cult update N` on a Velocity proxy installs it (README.md). Builds carry a channel
+# named after the branch, except that main's is `stable`. Stable builds are full releases and the newest is marked
+# latest; experimental and dev builds are prereleases.
 
 on:
     push:
         branches:
             - main
-            - stable
             - experimental
             - dev
     workflow_dispatch:
@@ -26,7 +25,7 @@ jobs:
 
         env:
             CULT_BUILD_NUMBER: ${{ github.run_number }}
-            CULT_BUILD_CHANNEL: ${{ (github.ref_name == 'main' || github.ref_name == 'stable') && 'stable' || github.ref_name }}
+            CULT_BUILD_CHANNEL: ${{ github.ref_name == 'main' && 'stable' || github.ref_name }}
             CULT_GIT_ORG: ${{ github.repository_owner }}
             CULT_GIT_REPO: ${{ github.event.repository.name }}
 
@@ -74,7 +73,7 @@ jobs:
     # holds CULTAC_SIGNING_KEY and admits those branches alone. Without the key the build stays an Actions artifact.
     publish:
         needs: build
-        if: contains(fromJSON('["refs/heads/main", "refs/heads/stable", "refs/heads/experimental", "refs/heads/dev"]'), github.ref)
+        if: contains(fromJSON('["refs/heads/main", "refs/heads/experimental", "refs/heads/dev"]'), github.ref)
         runs-on: ubuntu-latest
         environment: builds
         permissions:
@@ -84,7 +83,7 @@ jobs:
 
         env:
             BUILD: ${{ github.run_number }}
-            CHANNEL: ${{ (github.ref_name == 'main' || github.ref_name == 'stable') && 'stable' || github.ref_name }}
+            CHANNEL: ${{ github.ref_name == 'main' && 'stable' || github.ref_name }}
             COMMIT: ${{ github.sha }}
 
         steps:
