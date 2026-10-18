@@ -545,7 +545,7 @@ public class WorldStageBuilder {
         long playerTickOrder = entities.getSelf().getClientTickOrder();
         int tickingAfterPlayer = 0;
         for (PacketEntity entity : entities.entityMap.values()) {
-            if (entities.clientTickOrder(entity) < playerTickOrder) continue;
+            if (!mayPushOrCollide(entity) || entities.clientTickOrder(entity) < playerTickOrder) continue;
             if (collidingPusherBox(entities, entity, playerBox, entityBounds, entityScratch) != null)
                 tickingAfterPlayer++;
         }
@@ -583,17 +583,22 @@ public class WorldStageBuilder {
             SimpleCollisionBox playerBox,
             SimpleCollisionBox entityBounds,
             SimpleCollisionBox entityScratch) {
-        boolean hardCollidingEntity = entity.isBoat() || entity.isMinecart() || isBedrockHardCollidingEntity(entity);
-        // Players can push living entities. Some entities also provide
-        // hard movement collision boxes that Bedrock consumes as geometry.
-        // The one exemption to a living entity is an armor stand (matters due to plugins sending them)
-        if (!entity.isLivingEntity() && !hardCollidingEntity || entity.type == EntityTypeIds.ARMOR_STAND) return null;
+        if (!mayPushOrCollide(entity)) return null;
         if (entities.sharesRootVehicleWithSelf(entity)) return null;
 
         // MCP-Reborn push/collision checks use the entity's concrete
         // bounding box, not the reach-expanded uncertainty box.
         SimpleCollisionBox entityBox = entity.getPossibleMovementCollisionBoxes(entityBounds, entityScratch);
         return playerBox.isCollided(entityBox) ? entityBox : null;
+    }
+
+    /** The type test {@link #collidingPusherBox} applies before any position or riding test. */
+    private static boolean mayPushOrCollide(PacketEntity entity) {
+        boolean hardCollidingEntity = entity.isBoat() || entity.isMinecart() || isBedrockHardCollidingEntity(entity);
+        // Players can push living entities. Some entities also provide
+        // hard movement collision boxes that Bedrock consumes as geometry.
+        // The one exemption to a living entity is an armor stand (matters due to plugins sending them)
+        return !(!entity.isLivingEntity() && !hardCollidingEntity || entity.type == EntityTypeIds.ARMOR_STAND);
     }
 
     private static boolean isBedrockHardCollidingEntity(PacketEntity entity) {

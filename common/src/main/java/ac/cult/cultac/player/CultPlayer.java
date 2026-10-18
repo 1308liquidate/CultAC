@@ -1010,15 +1010,19 @@ public class CultPlayer implements GrimUser {
     }
 
     private boolean canCollideWithForPoseCheck(@Nullable PacketEntity riding, PacketEntity entity) {
-        if (entity == null || entity.isDead || entity.getEntityId() == entityID) {
+        if (entity == null
+                || !(entity.isBoat()
+                        || entity.isMinecart()
+                        || entity.type == EntityTypeIds.SHULKER
+                        || entity.isHappyGhast())) {
             return false;
         }
 
-        if (riding != null && (riding == entity || riding.hasPassenger(entity) || entity.hasPassenger(riding))) {
+        if (entity.isDead || entity.getEntityId() == entityID) {
             return false;
         }
 
-        return entity.isBoat() || entity.isMinecart() || entity.type == EntityTypeIds.SHULKER || entity.isHappyGhast();
+        return riding == null || !(riding == entity || riding.hasPassenger(entity) || entity.hasPassenger(riding));
     }
 
     public void closeInventorySafely() {
