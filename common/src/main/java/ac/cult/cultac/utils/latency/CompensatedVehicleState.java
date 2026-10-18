@@ -417,6 +417,16 @@ public final class CompensatedVehicleState implements Debuggable {
         return vehicle != null && passengerIndex(vehicle) == 0 && canLocalClientAuthoritativelyMove(vehicle);
     }
 
+    /**
+     * Whether the local player, as the client-visible first passenger, could be this vehicle's controller. Only
+     * server-sent state decides this, never the client's movement packets. A saddled pig or strider counts whatever
+     * item is held, because the held item is the client's choice and can trail the real slot by a tick.
+     */
+    public boolean mayLocalPlayerControl(@Nullable PacketEntity vehicle) {
+        if (vehicle == null || vehicle.passengers.indexOf(entities.playerEntity) != 0) return false;
+        return isItemControlledVehicleType(vehicle) ? hasSaddle(vehicle) : canLocalClientAuthoritativelyMove(vehicle);
+    }
+
     public boolean canClientEchoLocalAuthoritativeMoveVehiclePacket(@Nullable PacketEntity vehicle) {
         // MCP-Reborn Entity#isLocalInstanceAuthoritative only requires the root
         // vehicle's controlling passenger to be the local player. Pig/strider
@@ -458,7 +468,7 @@ public final class CompensatedVehicleState implements Debuggable {
     }
 
     public boolean shouldProtocolResyncOnMount(@Nullable PacketEntity vehicle, int[] passengers) {
-        return canLocalClientAuthoritativelyMoveMountedVehicle(vehicle, passengers) && !vehicle.isMinecart();
+        return canLocalClientAuthoritativelyMoveMountedVehicle(vehicle, passengers);
     }
 
     public boolean hasClientObservedServerVehicle() {
@@ -675,7 +685,9 @@ public final class CompensatedVehicleState implements Debuggable {
         if (vehicle instanceof PacketEntityHappyGhast happyGhast)
             return happyGhast.hasBodyArmor && !happyGhast.staysStill;
         // Callers check the controlling passenger, using the incoming list for a mount.
-        return true;
+        // AbstractBoat is the only other getControllingPassenger override that can return
+        // a player; Entity#getControllingPassenger (e.g. minecarts) and Mob's return no player.
+        return EntityTypeUtil.isBoat(vehicle.type);
     }
 
     private boolean hasSaddle(PacketEntity vehicle) {

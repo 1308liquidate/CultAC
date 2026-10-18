@@ -357,6 +357,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         tickEntityInterpolationAtClientTickEnd();
         recountPushersAfterPlayer();
         player.compensatedEntities.vehicles.onClientTickEnd();
+        player.compensatedEntities.recordRideTickSeat();
         player.compensatedEntities.vehicles.updateServerControlledSafeSetbackPositionOnTickEnd();
         transformTick++;
         if (packetHandlerEntityTransforms.size() > MAX_REUSED_TRANSFORMS) packetHandlerEntityTransforms.clear();
@@ -1128,21 +1129,33 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                                 && vehicle.passengers.contains(player.compensatedEntities.playerEntity));
 
         if (removesLocalPlayer) {
-            // Entity#stopRiding moves nothing on the client; rideTick already zeroed its velocity.
+            // Entity#stopRiding moves nothing on the client, so the resync keeps the player at its last ride-tick
+            // seat. A vehicle the player could control has its position in player.x/y/z from MoveVehicle instead.
+            Vec3 seat = vehicle == null ? null : player.compensatedEntities.dismountSeat(vehicle);
             SelfDismountResyncState dismountResyncState =
                     CultAPI.INSTANCE.getConfigManager().isObserveOnly()
                             ? null
                             : new SelfDismountResyncState(
-                                    new Vec3(player.x, player.y, player.z),
+                                    seat != null ? seat : new Vec3(player.x, player.y, player.z),
                                     Vec3.ZERO,
                                     player.getSetbackTeleportUtil().nextTeleportId());
             int transaction = transactionForSetPassengers(event, null, dismountResyncState);
             int vehicleId = packet.vehicleId();
+            boolean resyncTeleports = dismountResyncState != null;
             player.compensatedEntities.vehicles.setServerVehicleDismount(vehicleId, transaction);
             player.latencyUtils.addRealTimeTask(transaction, () -> {
                 player.compensatedEntities.playerEntity.deltaMovement =
                         PacketCodecUtil.quantizeLpVec3(SELF_DISMOUNT_VELOCITY);
+                // The resync teleport is accepted before this transaction and already set the position.
+                PacketEntity riding = player.compensatedEntities.playerEntity.getRiding();
+                Vec3 dismountSeat = resyncTeleports || riding == null || riding.getEntityId() != vehicleId
+                        ? null
+                        : player.compensatedEntities.dismountSeat(riding);
                 player.compensatedEntities.vehicles.applyVehiclePassengers(vehicleId, passengers);
+                if (dismountSeat != null
+                        && !player.compensatedEntities.getSelf().inVehicle()) {
+                    player.compensatedEntities.commitDismountSeat(dismountSeat);
+                }
                 player.compensatedEntities.vehicles.clearServerVehicle(vehicleId, transaction);
                 // Vehicle-switch state changes at the passenger transaction boundary.
                 player.vehicleData.wasVehicleSwitch = true;
@@ -1367,7 +1380,17 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     private void handleRemoveEntities(
             PacketSendEvent<ClientboundRemoveEntities> event, ClientboundRemoveEntities packet) {
         List<Integer> destroyEntityIds = packet.entityIds();
-        int transaction = appendTrailingProofTransactionId(event);
+        // Removing the player's vehicle ejects it client-side with the velocity its last Entity#rideTick left.
+        // A zero motion before the proof replaces that velocity, as the set_passengers dismount resync does.
+        boolean resetsVelocity = !CultAPI.INSTANCE.getConfigManager().isObserveOnly()
+                && !player.isBedrockMovement()
+                && destroyEntityIds.stream().anyMatch(player.compensatedEntities.vehicles::isServerPlayerPassengerOf);
+        CultPlayer.TrackedTransaction proof = resetsVelocity
+                ? appendTrailingProofTransaction(
+                        event, List.of(entityMotion(player.entityID, SELF_DISMOUNT_VELOCITY)), true)
+                : appendTrailingProofTransaction(event);
+        int transaction = proof == null ? -1 : proof.transaction();
+        boolean sentVelocityReset = resetsVelocity && proof != null;
 
         for (int entityID : destroyEntityIds) {
             despawnedEntitiesThisTransaction.add(entityID);
@@ -1391,6 +1414,13 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     player.compensatedEntities.removeEntity(integer);
                 player.compensatedFireworks.removeFirework(integer);
             }
+            if (sentVelocityReset
+                    && wasPassenger
+                    && !player.compensatedEntities.getSelf().inVehicle()) {
+                Vec3 velocity = PacketCodecUtil.quantizeLpVec3(SELF_DISMOUNT_VELOCITY);
+                player.compensatedEntities.playerEntity.deltaMovement = velocity;
+                player.checkManager.getSimulationProcessor().seedStartingVelocity(velocity);
+            }
             if (wasPassenger
                     && !player.compensatedEntities.getSelf().inVehicle()
                     && !player.isBedrockMovement()
@@ -1398,7 +1428,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 // Player#tick clears the passenger's ground state; vehicle reports
                 // update the runner with the root's state instead. RC1 no longer
                 // sends a PosRot teleport echo to restore it before the next travel.
-                player.onGround = player.packetStateData.packetPlayerOnGround;
+                // After a ride tick it is false whatever the client claimed: that
+                // tick's travel cannot land, since Entity#rideTick zeroed the velocity.
+                player.onGround =
+                        !player.compensatedEntities.rodeLastClientTick() && player.packetStateData.packetPlayerOnGround;
                 player.checkManager
                         .getSimulationProcessor()
                         .setLastOnGround(

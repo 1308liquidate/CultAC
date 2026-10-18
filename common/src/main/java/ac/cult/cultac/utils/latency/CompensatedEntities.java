@@ -2,6 +2,7 @@ package ac.cult.cultac.utils.latency;
 
 import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.network.packet.InventoryPackets.EquipmentEntry;
 import ac.cult.cultac.network.protocol.ClientVersion;
@@ -49,6 +50,7 @@ public class CompensatedEntities {
 
     public TrackerData selfTrackedEntity;
     public PacketEntitySelf playerEntity;
+    private Vec3 rideTickSeat;
 
     public CompensatedEntities(CultPlayer player) {
         this.player = player;
@@ -101,9 +103,11 @@ public class CompensatedEntities {
         if (removedSelfVehicle) {
             vehicles.clearServerVehicle();
         }
+        Vec3 dismountSeat = dismountSeat(entity);
         for (PacketEntity passenger : new ArrayList<>(entity.passengers)) {
             passenger.eject();
         }
+        if (dismountSeat != null) commitDismountSeat(dismountSeat);
         if (player.isBedrockMovement()) {
             vehicles.seedStartingVelocityIfRootChanged(previousRoot);
             if (previousRoot == null) player.getSetbackTeleportUtil().transferBedrockVehicleSetback(entityID);
@@ -390,6 +394,53 @@ public class CompensatedEntities {
         for (PacketEntity passengerPassenger : passenger.passengers) {
             tickPassenger(passenger, passengerPassenger);
         }
+    }
+
+    /**
+     * Records the seat that this client tick's Entity#rideTick ended on, after the tick-end passenger update. It is
+     * computed from the compensated vehicle alone; a position packet the client sends while riding never reaches it.
+     */
+    public void recordRideTickSeat() {
+        PacketEntity riding = playerEntity.getRiding();
+        rideTickSeat = riding == null ? null : BoundingBoxSize.getRidingOffsetFromVehicle(riding, playerEntity, player);
+    }
+
+    /** Whether the local player was a passenger at the end of the last client tick. */
+    public boolean rodeLastClientTick() {
+        return rideTickSeat != null;
+    }
+
+    /**
+     * The seat the local player stays at when it leaves {@code vehicle} now, or null when the engine position must
+     * not come from the seat. Client-side Entity#stopRiding moves nothing, so the player keeps the position the last
+     * Entity#rideTick gave it through Entity#positionRider. A vehicle the player could control carries the engine
+     * position through its MoveVehicle packets instead, so this never applies to one, whatever the client sends.
+     */
+    public Vec3 dismountSeat(PacketEntity vehicle) {
+        if (player.isBedrockMovement() || rideTickSeat == null || playerEntity.getRiding() != vehicle) return null;
+        PacketEntity root = rootOf(vehicle);
+        if (root == null || vehicles.mayLocalPlayerControl(vehicle) || vehicles.mayLocalPlayerControl(root)) {
+            return null;
+        }
+        return rideTickSeat;
+    }
+
+    /**
+     * Makes the ride-tick seat the engine's player position once the player has left the vehicle. The seat comes
+     * after a ride tick, whose Player#tick cleared onGround and whose travel cannot land: Entity#rideTick zeroed the
+     * velocity and nothing before LivingEntity#travel's Entity#move makes it point down.
+     */
+    public void commitDismountSeat(Vec3 seat) {
+        player.lastX = player.x;
+        player.lastY = player.y;
+        player.lastZ = player.z;
+        player.x = seat.x;
+        player.y = seat.y;
+        player.z = seat.z;
+        player.packetStateData.clientSidePosition = seat;
+        player.boundingBox = GetBoundingBox.getCollisionBoxForPlayer(player, seat.x, seat.y, seat.z);
+        player.onGround = false;
+        player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.FALSE);
     }
 
     public void positionPassenger(PacketEntity riding, PacketEntity passenger) {
