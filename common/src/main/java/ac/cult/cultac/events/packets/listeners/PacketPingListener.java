@@ -38,6 +38,8 @@ public class PacketPingListener {
                     packet.id(),
                     shouldCancel,
                     event.getTimestamp());
+        } else {
+            player.foreignPongReceived(packet.id());
         }
     }
 
@@ -46,6 +48,8 @@ public class PacketPingListener {
         player.packetStateData.lastServerTransWasValid = false;
         if (player.markTransactionPacketSent(packet.id(), event.getTimestamp())) {
             player.packetStateData.lastServerTransWasValid = true;
+        } else {
+            player.foreignPingSent(packet.id());
         }
     }
 }
