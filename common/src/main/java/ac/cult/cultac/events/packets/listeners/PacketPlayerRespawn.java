@@ -184,10 +184,7 @@ public class PacketPlayerRespawn {
         final GameMode respawnMode = GameMode.valueOf(spawnInfo.gameMode().name());
         final boolean instabuild = respawnMode == GameMode.CREATIVE;
         final boolean invulnerable = respawnMode == GameMode.CREATIVE || respawnMode == GameMode.SPECTATOR;
-        player.latencyUtils.addRealTimeTaskNow(() -> {
-            player.abilitiesSent(instabuild, invulnerable);
-            player.food = 20;
-        });
+        int preceding = player.lastTransactionSent.get();
         boolean worldChange = player.compensatedWorld.isLastClientboundDimensionChange(worldName);
         String previousClientboundDimension =
                 player.compensatedWorld.getLastClientboundDimension().dimension();
@@ -209,10 +206,19 @@ public class PacketPlayerRespawn {
             player.compensatedEntities.serverPositionsMap.clear();
             player.compensatedWorld.serverWorldChangeSent();
         }
-        // ClientPacketListener#handleRespawn starts a ClientLevel whose block predictions count from 1.
-        if (worldChange) {
-            BadPacketsH sequences = player.checkManager.getListener(BadPacketsH.class);
-            player.runAtTrailingProof(event, sequences::resetLevel);
+        // ClientPacketListener#handleRespawn creates a LocalPlayer with full food, adjusts its abilities to the
+        // game mode, and on a dimension change starts a ClientLevel whose block predictions count from 1.
+        BadPacketsH sequences = player.checkManager.getListener(BadPacketsH.class);
+        boolean bundled = player.runAtTrailingProof(event, () -> {
+            player.abilitiesHandled(instabuild, invulnerable);
+            player.food = 20;
+            if (worldChange) sequences.resetLevel();
+        });
+        if (!bundled) {
+            player.latencyUtils.addRealTimeTask(preceding, () -> {
+                player.abilitiesSent(instabuild, invulnerable);
+                player.food = 20;
+            });
         }
         event.getTasksAfterSend().add(player::sendTransaction);
 

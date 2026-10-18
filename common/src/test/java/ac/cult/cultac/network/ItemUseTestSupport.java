@@ -113,7 +113,7 @@ final class ItemUseTestSupport {
         return player.lastTransactionSent.get();
     }
 
-    /** Sends a Respawn and returns its post ping, unacknowledged. */
+    /** Sends a Respawn and returns the first transaction written for it, unacknowledged. */
     static int respawn(CultPlayer player, String dimension, GameMode mode) {
         int type = ModelRegistryNamesState.defaults().id("minecraft:dimension_type", dimension);
         var respawn = new ClientboundRespawn(new PlayerSpawnInfo(type, dimension, mode), (byte) 0);
