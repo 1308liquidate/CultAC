@@ -1397,9 +1397,11 @@ public class CultPlayer implements GrimUser {
 
     public ClientVersion getClientVersion() {
         ClientVersion resolved = resolvedClientVersion;
-        if (resolved != null) {
-            return resolved;
-        }
+        return resolved != null ? resolved : resolveClientVersion();
+    }
+
+    private ClientVersion resolveClientVersion() {
+        ClientVersion resolved;
         // Packet decoding uses the observed protocol. Physics uses the original
         // client identity, even when Via has translated the stream before Cult.
         var clientProtocol = user.getCultConnection().getClientProtocol();
