@@ -4,6 +4,7 @@ import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.checks.CheckPermissions;
 import ac.cult.cultac.cloud.CloudModule;
 import ac.cult.cultac.command.CloudCommandService;
+import ac.cult.cultac.command.commands.CultLabelMenu;
 import ac.cult.cultac.manager.init.Initable;
 import ac.cult.cultac.manager.init.start.StartableInitable;
 import ac.cult.cultac.platform.api.Platform;
@@ -136,6 +137,7 @@ public final class CultACBukkitLoaderPlugin implements PlatformLoader {
 
     public void onEnable() {
         CloudModule.platformHooks(() -> BukkitCloudFacts.turnedOn(LOADER), BukkitCloudFacts::turnedOff);
+        CultLabelMenu.install();
         CultAPI.INSTANCE.start();
     }
 

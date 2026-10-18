@@ -242,7 +242,7 @@ public class PlayerDataManager {
         return state;
     }
 
-    private boolean isKnownBedrockPlayer(UUID uuid) {
+    public boolean isKnownBedrockPlayer(UUID uuid) {
         return FloodgateUtil.isFloodgatePlayer(uuid)
                 || isGeyserFormattedUuid(uuid)
                 || ((CultAPI.INSTANCE.getPluginManager().isPluginEnabled("Geyser-Spigot")

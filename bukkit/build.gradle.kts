@@ -184,6 +184,11 @@ bukkit {
             default = Permission.Default.OP
         }
 
+        register("cult.cloud.label.clean") {
+            description = "Offer Clean in the label menu"
+            default = Permission.Default.OP
+        }
+
     }
 }
 

@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -323,6 +324,39 @@ class LabelClientTest {
         assertTrue(failure.chars().noneMatch(c -> c == '\n' || c == '\r' || c == 0x2028 || c == 0x85), failure);
         String plain = LabelClient.failure(new LabelClient.Reply(500, "line one\nline two"));
         assertFalse(plain.contains("\n"), plain);
+    }
+
+    @Test
+    void flagsAreCountedPerCheatOverTheWindow() throws Exception {
+        status = 200;
+        answer = "{\"player\":\"" + PLAYER + "\",\"from\":1000,\"to\":2000,"
+                + "\"flags\":{\"triggerbot\":3,\"aimassist\":14,\"autoclicker\":0}}";
+
+        Map<String, Integer> flags = client().flags(PLAYER, 1000, 2000).get(10, TimeUnit.SECONDS);
+
+        assertEquals(Map.of("triggerbot", 3, "aimassist", 14, "autoclicker", 0), flags);
+        Seen request = seen.get(0);
+        assertEquals("GET", request.method());
+        assertEquals("/api/v1/labels/flags?player=" + PLAYER + "&from=1000&to=2000", request.uri());
+        assertEquals("Bearer " + KEY, request.authorization());
+    }
+
+    @Test
+    void flagsThatDidNotArriveAreNone() throws Exception {
+        status = 404;
+        answer = "{\"detail\":\"not found\"}";
+        assertEquals(Map.of(), client().flags(PLAYER, 1, 2).get(10, TimeUnit.SECONDS));
+        status = 200;
+        answer = "<html>oops</html>";
+        assertEquals(Map.of(), client().flags(PLAYER, 1, 2).get(10, TimeUnit.SECONDS));
+        assertEquals(Map.of(), LabelClient.flagCounts(new LabelClient.Reply(503, "{\"flags\":{\"aimassist\":1}}")));
+        assertEquals(Map.of(), LabelClient.flagCounts(new LabelClient.Reply(200, "{\"flags\":[1,2]}")));
+        assertEquals(Map.of(), LabelClient.flagCounts(new LabelClient.Reply(200, "[]")));
+        assertEquals(
+                Map.of("aimassist", 2),
+                LabelClient.flagCounts(new LabelClient.Reply(200, "{\"flags\":{\"aimassist\":2,\"other\":\"x\"}}")));
+        LabelClient unreachable = new LabelClient("http://127.0.0.1:1", KEY, HttpClient.newHttpClient(), calls);
+        assertEquals(Map.of(), unreachable.flags(PLAYER, 1, 2).get(10, TimeUnit.SECONDS));
     }
 
     private LabelClient client() {

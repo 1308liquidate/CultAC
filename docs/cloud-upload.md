@@ -145,11 +145,12 @@ Every writer sharing one API key needs distinct ids:
 | `/cult findings <player> [count]` | `cult.cloud.view` | The player's latest findings from the intake service, newest first; 15 unless `count` (1 to 200) says otherwise. |
 | `/cult top [check] [minutes]` | `cult.cloud.view` | The 10 players with the most confident findings over the last 30 minutes, or `minutes` (up to 7 days), for one check or all. |
 | `/cult label <player> <cheat> <high\|extreme> <24h\|3d\|7d\|30d> [note]` | `cult.cloud.label` | Labels the player as using one cheat over that span, ending now. |
-| `/cult label <player> clean <high\|extreme> <24h\|3d\|7d\|30d> [note]` | `cult.cloud.label` | Labels the player clean across every check over that span. |
+| `/cult label <player> clean <high\|extreme> [note]` | `cult.cloud.label` | Labels the player clean across every check, with no span: their stored play and all play from now on, until revoked. |
 | `/cult label list <player>` | `cult.cloud.label` | The player's labels. |
 | `/cult label revoke <id> [reason]` | `cult.cloud.label` | Revokes a label. |
+| `/cult label <player>` | `cult.cloud.label` | On Paper, for a Java player: the label menu, a dialog for the verdict (Cheating, Suspected, or Clean with `cult.cloud.label.clean`), the checks, the confidence and a 1 to 30 day span (each staff member's last span is remembered), then a review with each check's flags over the span and any clashing label on file. Confirm closes the menu and one chat line says what was labelled. Bedrock players are pointed at the commands above. |
 
-On Paper the three permissions default to operators. Behind Velocity these commands run only on the proxy, from its
+On Paper the four permissions default to operators. Behind Velocity these commands run only on the proxy, from its
 console or from a player in game: the proxy refuses them when a backend forwards them, whoever it names as the sender.
 
 Findings come from the intake service while the upload is configured and are kept in memory: 200 per player and

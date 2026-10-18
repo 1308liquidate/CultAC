@@ -19,7 +19,9 @@ import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -120,6 +122,39 @@ public final class LabelClient {
     public CompletableFuture<Reply> list(UUID player) {
         return send(request("/api/v1/labels?player=" + URLEncoder.encode(player.toString(), StandardCharsets.UTF_8))
                 .GET());
+    }
+
+    /**
+     * How many times each cheat flagged {@code player} from {@code from} to {@code to} (epoch millis), keyed by label
+     * cheat; empty when the service answers anything but 200 with a readable body, or not at all.
+     */
+    public CompletableFuture<Map<String, Integer>> flags(UUID player, long from, long to) {
+        return send(request("/api/v1/labels/flags?player="
+                                + URLEncoder.encode(player.toString(), StandardCharsets.UTF_8) + "&from=" + from
+                                + "&to=" + to)
+                        .GET())
+                .handle((reply, error) -> error == null ? flagCounts(reply) : Map.of());
+    }
+
+    /** The counts in a {@code GET /flags} answer; empty for any status but 200 or a body without them. */
+    static Map<String, Integer> flagCounts(Reply reply) {
+        if (reply.status() != 200) return Map.of();
+        try {
+            JsonElement parsed = JsonParser.parseString(reply.body());
+            if (!parsed.isJsonObject() || !parsed.getAsJsonObject().has("flags")) return Map.of();
+            JsonElement flags = parsed.getAsJsonObject().get("flags");
+            if (!flags.isJsonObject()) return Map.of();
+            Map<String, Integer> counts = new LinkedHashMap<>();
+            for (Map.Entry<String, JsonElement> entry : flags.getAsJsonObject().entrySet()) {
+                JsonElement value = entry.getValue();
+                if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) {
+                    counts.put(entry.getKey(), Math.max(0, value.getAsInt()));
+                }
+            }
+            return counts;
+        } catch (JsonParseException | IllegalStateException | NumberFormatException notCounts) {
+            return Map.of();
+        }
     }
 
     /** Revokes {@code label}; {@code labellerId} is the revoking player's UUID. */
