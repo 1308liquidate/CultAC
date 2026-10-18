@@ -96,6 +96,8 @@ public class PacketEntity {
     private long clientTickOrder = Long.MAX_VALUE;
     // Reused: valid only until the client tick that computed it applies it.
     private SimpleCollisionBox exactAfterClientTickBox;
+    // Holds the current interpolation location only while carrying the target reads its position.
+    private SimpleCollisionBox carryLocationBox;
 
     public HashMap<MovementEffect, Integer> potionsMap = null;
     public BoatEntityStatus boatStatus = null;
@@ -631,14 +633,18 @@ public class PacketEntity {
             return;
         }
 
-        SimpleCollisionBox currentInterpolationLocation = interpolationData.getExactMovementLocation();
-        if (currentInterpolationLocation == null) {
+        if (carryLocationBox == null) carryLocationBox = new SimpleCollisionBox();
+        SimpleCollisionBox current = interpolationData.getExactMovementLocation(carryLocationBox);
+        if (current == null) {
             return;
         }
-        Vec3 previousInterpolationPosition = positionFromCollisionBox(currentInterpolationLocation);
-        Vec3 physicalDelta = clientPhysicalPosition.subtract(previousInterpolationPosition);
-        if (!interpolationData.usesSteppedInterpolation() || physicalDelta.lengthSqr() > 1.0E-5F) {
-            interpolationData.shiftRootVehicleTargetIfCollisionFree(player, this, physicalDelta);
+        double deltaX = clientPhysicalPosition.x - ((current.maxX - current.minX) / 2 + current.minX);
+        double deltaY = clientPhysicalPosition.y - current.minY;
+        double deltaZ = clientPhysicalPosition.z - ((current.maxZ - current.minZ) / 2 + current.minZ);
+        double deltaLengthSqr = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+        // A zero delta is a no-op shift.
+        if (deltaLengthSqr != 0.0D && (!interpolationData.usesSteppedInterpolation() || deltaLengthSqr > 1.0E-5F)) {
+            interpolationData.shiftRootVehicleTargetIfCollisionFree(player, this, new Vec3(deltaX, deltaY, deltaZ));
         }
         interpolationData.shiftTargetRotationByPhysical(clientPhysicalYaw, clientPhysicalPitch);
         syncDesyncClientPosToInterpolationTarget(interpolationData);

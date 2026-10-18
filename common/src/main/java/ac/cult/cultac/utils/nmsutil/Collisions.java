@@ -666,8 +666,9 @@ public class Collisions {
             double z = vec3.getZ();
 
             double maxStepDown = -player.getMaxUpStep();
+            SimpleCollisionBox probe = player.boundingBox.copy();
 
-            while (x != 0.0 && isEmpty(player, player.boundingBox.copy().offset(x, maxStepDown, 0.0))) {
+            while (x != 0.0 && isEmpty(player, probe.set(player.boundingBox).offset(x, maxStepDown, 0.0))) {
                 if (x < 0.05D && x >= -0.05D) {
                     x = 0.0D;
                 } else if (x > 0.0D) {
@@ -676,7 +677,7 @@ public class Collisions {
                     x += 0.05D;
                 }
             }
-            while (z != 0.0 && isEmpty(player, player.boundingBox.copy().offset(0.0, maxStepDown, z))) {
+            while (z != 0.0 && isEmpty(player, probe.set(player.boundingBox).offset(0.0, maxStepDown, z))) {
                 if (z < 0.05D && z >= -0.05D) {
                     z = 0.0D;
                 } else if (z > 0.0D) {
@@ -687,7 +688,7 @@ public class Collisions {
             }
             while (x != 0.0
                     && z != 0.0
-                    && isEmpty(player, player.boundingBox.copy().offset(x, maxStepDown, z))) {
+                    && isEmpty(player, probe.set(player.boundingBox).offset(x, maxStepDown, z))) {
                 if (x < 0.05D && x >= -0.05D) {
                     x = 0.0D;
                 } else if (x > 0.0D) {

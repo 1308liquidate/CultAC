@@ -537,6 +537,15 @@ public class ReachInterpolationData {
         return getPossibleMovementLocationCombined();
     }
 
+    /** {@link #getExactMovementLocation()} written into {@code out}. */
+    public SimpleCollisionBox getExactMovementLocation(SimpleCollisionBox out) {
+        if (interpolationStepsLowBound != interpolationStepsHighBound) {
+            return null;
+        }
+
+        return getPossibleMovementLocationCombined(out);
+    }
+
     public int getExactInterpolationStep() {
         return interpolationStepsLowBound == interpolationStepsHighBound ? interpolationStepsLowBound : -1;
     }

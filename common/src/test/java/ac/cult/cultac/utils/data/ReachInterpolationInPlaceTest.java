@@ -2,6 +2,7 @@ package ac.cult.cultac.utils.data;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -35,6 +36,15 @@ class ReachInterpolationInPlaceTest {
         SimpleCollisionBox out = new SimpleCollisionBox(9, 9, 9, 10, 10, 10, true);
         assertSame(out, data.getPossibleMovementLocationCombined(out));
         assertBoxEquals(new SimpleCollisionBox(1, 1, 1, 3, 3, 3), out);
+    }
+
+    @Test
+    void exactLocationIntoBox() throws Exception {
+        ReachInterpolationData exact = data(3, 2, 2);
+        SimpleCollisionBox out = new SimpleCollisionBox(9, 9, 9, 10, 10, 10, true);
+        assertSame(out, exact.getExactMovementLocation(out));
+        assertBoxEquals(exact.getExactMovementLocation(), out);
+        assertNull(data(3, 1, 2).getExactMovementLocation(new SimpleCollisionBox()));
     }
 
     @Test
