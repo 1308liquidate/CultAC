@@ -97,11 +97,11 @@ class CultLabelTest {
     @Test
     void theReplyNamesTheChoices() {
         assertEquals(
-                "Labelled Steve triggerbot, extreme (last 24 hours): 1 label(s)",
-                CultLabel.labelledMessage("Steve", LabelRequest.cheat("triggerbot", "extreme", "24h", null), 1));
+                "Labelled Steve triggerbot, extreme (last 24 hours)",
+                CultLabel.labelledMessage("Steve", LabelRequest.cheat("triggerbot", "extreme", "24h", null)));
         assertEquals(
-                "Labelled Steve clean across all checks, high (last 7 days): 2 label(s)",
-                CultLabel.labelledMessage("Steve", LabelRequest.clean("high", "7d", null), 2));
+                "Labelled Steve clean across all checks, high (last 7 days)",
+                CultLabel.labelledMessage("Steve", LabelRequest.clean("high", "7d", null)));
     }
 
     private static CommandManager<Sender> manager() {

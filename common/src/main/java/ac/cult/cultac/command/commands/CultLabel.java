@@ -101,24 +101,21 @@ public class CultLabel implements BuildableCommand {
             if (!CloudArguments.labelingAllowed(sender)) return;
             LabelClient client = client(sender);
             if (client == null) return;
-            String input = context.get("player");
-            sender.sendMessage(Component.text("Labelling " + input + "…", NamedTextColor.GRAY));
-            CloudArguments.resolve(sender, input, target -> {
+            CloudArguments.resolve(sender, context.get("player"), target -> {
                 JsonObject label = request.body(target.id(), System.currentTimeMillis(), sender.getName(), labellerId);
-                call(sender, client.post(label), reply -> {
-                    List<String> ids = LabelClient.ids(reply.body());
-                    sender.sendMessage(
-                            Component.text(labelledMessage(target.name(), request, ids.size()), NamedTextColor.GRAY));
-                    for (String id : ids) sender.sendMessage(id(reply.mask().apply(id)));
-                });
+                call(
+                        sender,
+                        client.post(label),
+                        reply -> sender.sendMessage(
+                                Component.text(labelledMessage(target.name(), request), NamedTextColor.GREEN)));
             });
         });
     }
 
-    static String labelledMessage(String player, LabelRequest request, int labels) {
+    static String labelledMessage(String player, LabelRequest request) {
         String what = request.clean() ? "clean across all checks" : request.cheat();
         return "Labelled " + player + " " + what + ", " + request.confidence() + " ("
-                + request.span().display() + "): " + (labels == 0 ? "no label ids returned" : labels + " label(s)");
+                + request.span().display() + ")";
     }
 
     private void handleList(CommandContext<Sender> context) {
