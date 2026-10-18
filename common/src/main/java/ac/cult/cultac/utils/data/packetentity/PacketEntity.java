@@ -286,7 +286,7 @@ public class PacketEntity {
                     ? path
                     : EntityPositionPath.linear(
                             newPacketLocation.hasActiveInterpolationTarget()
-                                    ? positionFromCollisionBox(newPacketLocation.getTargetLocation())
+                                    ? newPacketLocation.targetPosition()
                                     : clientPhysicalPosition);
             oldPacketLocation = bundled ? null : newPacketLocation;
             newPacketLocation = newPacketLocation.copy();
@@ -405,7 +405,7 @@ public class PacketEntity {
             return false;
         }
 
-        Vec3 target = positionFromCollisionBox(newPacketLocation.getTargetLocation());
+        Vec3 target = newPacketLocation.targetPosition();
         return matchesPosition(target, x, y, z)
                 && Float.compare(newPacketLocation.getTargetYaw(), yaw) == 0
                 && Float.compare(newPacketLocation.getTargetPitch(), pitch) == 0;
@@ -648,7 +648,7 @@ public class PacketEntity {
         if (!interpolationData.usesSteppedInterpolation()
                 && interpolationData == newPacketLocation
                 && interpolationData.hasActiveInterpolationTarget()) {
-            this.desyncClientPos = positionFromCollisionBox(interpolationData.getTargetLocation());
+            this.desyncClientPos = interpolationData.targetPosition();
         }
     }
 

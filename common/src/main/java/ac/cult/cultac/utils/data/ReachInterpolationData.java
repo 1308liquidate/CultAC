@@ -549,6 +549,11 @@ public class ReachInterpolationData {
         return targetLocation.copy();
     }
 
+    /** The feet position of the target location, as computed from {@link #getTargetLocation()}. */
+    public Vec3 targetPosition() {
+        return new Vec3(targetCenterX(), targetMinY(), targetCenterZ());
+    }
+
     public double targetCenterX() {
         return (targetLocation.maxX - targetLocation.minX) / 2.0D + targetLocation.minX;
     }
