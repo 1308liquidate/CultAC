@@ -1426,11 +1426,20 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 boolean useSelectedMovement = engine == JavaMovementEngine.INSTANCE
                         && !validMovements.isCanStep()
                         && !thisResult.getSimulationContext().isTestingPointThree();
+                // Entity#collide resolves a step's X/Z on the grounded box raised to the step height.
+                boolean probeAtStepHeight = engine == JavaMovementEngine.INSTANCE && validMovements.isCanStep();
                 Vec3 collisionTarget = useSelectedMovement
                         ? validMovements.computeCollisionIgnoredMovement(lastPrediction)
-                        : thisResult.getSimulationContext().getTarget();
+                        : probeAtStepHeight
+                                ? stepHeightCollisionTarget(player, thisResult, attemptedExtents)
+                                : thisResult.getSimulationContext().getTarget();
                 CollideAxisData collisionData = probeCollisionsCached(
-                        player, engine, thisResult, attemptedExtents, collisionTarget, validMovements.isCanStep());
+                        player,
+                        engine,
+                        thisResult,
+                        attemptedExtents,
+                        collisionTarget,
+                        validMovements.isCanStep() && !probeAtStepHeight);
 
                 thisResult.setCollideAxisData(collisionData);
                 if (useSelectedMovement) {
@@ -1501,6 +1510,32 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         assert bestResult != null;
         movementProfile.evaluatePredictionResult(player, bestResult);
         return bestResult;
+    }
+
+    /**
+     * The target movement with its Y replaced by {@link #stepHeightProbeY}; probing with it moves the box to the
+     * step height before the horizontal axes.
+     */
+    private static Vec3 stepHeightCollisionTarget(
+            CultPlayer player, PredictionResult result, SimpleCollisionBox attemptedExtents) {
+        SimulationContext context = result.getSimulationContext();
+        Vec3 target = context.getTarget();
+        double probeY = stepHeightProbeY(
+                target.y,
+                attemptedExtents.minY,
+                context.getLastStuckSpeed().y,
+                result.getInitialStartingVel().maxUpStep(player));
+        return new Vec3(target.x, probeY, target.z);
+    }
+
+    /**
+     * {@code targetY} and {@code attemptedMinY} are pre-stuck (the probe multiplies by {@code stuckY}); the step
+     * height is post-stuck movement, bounded like StepTransform's step candidate by the unscaled max up step.
+     * Returns the pre-stuck Y whose scaled value is that bounded step height.
+     */
+    static double stepHeightProbeY(double targetY, double attemptedMinY, double stuckY, double maxUpStep) {
+        double stepY = CultMath.clamp(targetY * stuckY, Math.min(0.0D, attemptedMinY * stuckY), maxUpStep);
+        return stepY / stuckY;
     }
 
     private CollideAxisData probeCollisionsCached(
