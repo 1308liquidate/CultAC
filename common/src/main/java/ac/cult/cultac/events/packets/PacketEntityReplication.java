@@ -71,6 +71,7 @@ import org.jetbrains.annotations.Nullable;
 public class PacketEntityReplication extends CultProcessor implements CheckListener, ClientTickEndListener {
     private static final ClientVersion SERVER_VERSION =
             ClientVersion.fromProtocolVersion(ProtocolVersion.V26_3.protocol());
+    private static final int VIA_INTERPOLATION_STEP_TICKS = 3;
     private static final Vec3 SELF_DISMOUNT_VELOCITY = Vec3.ZERO;
     private static final double VEHICLE_MOVE_RESYNC_SNAP_EPSILON = 2.0E-5D;
     /** Entries past this many are cleared at a client tick end. */
@@ -612,6 +613,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         EntityPositionPath path = packet.hasPosition()
                 ? EntityPositionPath.decodeRelative(packet.delta(), codecBase)
                 : EntityPositionPath.linear(codecBase);
+        if (packet.hasPosition() && receivesViaSteppedPaths()) path = viaSteppedPath(path.endPosition());
         // ClientPacketListener#handleMoveEntity only updates the position codec
         // for local-authoritative roots. Applying interpolation waits for the
         // mounted tick's Rot+MoveVehicle or Rot+TickEnd proof.
@@ -828,9 +830,28 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 event,
                 EntityMovement.positionSyncPacket(
                         packet.entityId(),
-                        EntityPositionPath.fromProtocol(position),
+                        receivesViaSteppedPaths()
+                                ? viaSteppedPath(EntityPositionPath.fromProtocol(position)
+                                        .endPosition())
+                                : EntityPositionPath.fromProtocol(position),
                         new EntityRotation(packet.yaw(), packet.pitch()),
                         packet.onGround()));
+    }
+
+    /** A 26.3 Java client behind ViaVersion on a pre-26.3 host. */
+    private boolean receivesViaSteppedPaths() {
+        return !player.isBedrockMovement()
+                && !player.getObservedProtocol().atLeast(ProtocolVersion.V26_3)
+                && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3);
+    }
+
+    /**
+     * The path a 26.3 client receives for a pre-26.3 host's positioned move or position sync: ViaVersion's
+     * {@code EntityPacketRewriter26_3} sends it as one step of {@code INTERPOLATION_STEP_TICKS}.
+     */
+    private static EntityPositionPath viaSteppedPath(Vec3 position) {
+        return new EntityPositionPath(
+                position, List.of(new EntityPositionPath.Step(position, VIA_INTERPOLATION_STEP_TICKS)));
     }
 
     private void handleMoveMinecart(PacketSendEvent<ClientboundMoveMinecart> event, ClientboundMoveMinecart packet) {
