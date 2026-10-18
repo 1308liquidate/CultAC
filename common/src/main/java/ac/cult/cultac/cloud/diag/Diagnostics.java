@@ -440,7 +440,7 @@ public final class Diagnostics {
 
     /** A tick's full text: its state as the packet thread printed it, then the block grid. */
     static String text(String state, BlockGrid grid) {
-        StringBuilder sb = new StringBuilder(state.length() + 16384);
+        StringBuilder sb = new StringBuilder(state.length() + (grid == null ? 0 : grid.textLength()));
         sb.append(state);
         if (grid != null) grid.appendTo(sb);
         return sb.toString();
