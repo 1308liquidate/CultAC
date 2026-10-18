@@ -67,12 +67,7 @@ public record CloudSettings(
                     + " copy the key again");
             apiKey = "";
         }
-        return new CloudSettings(
-                url,
-                apiKey,
-                serverId.isBlank() ? defaultServerId : serverId,
-                proxyId,
-                protocols);
+        return new CloudSettings(url, apiKey, serverId.isBlank() ? defaultServerId : serverId, proxyId, protocols);
     }
 
     /** The service's address: {@code CULTAC_CLOUD_URL}, else {@code cloud.url}; empty is off. */

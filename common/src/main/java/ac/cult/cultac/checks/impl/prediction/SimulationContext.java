@@ -99,8 +99,10 @@ public class SimulationContext {
     boolean isTestingPointThree;
     Vec3 lastStuckSpeed = NO_STUCK_SPEED;
     Vec3 horseInputs;
+
     @Setter
     KnownInput boatInputs = KnownInput.DEFAULT;
+
     MainSupportingBlockData lastTickMainSupportingBlockData;
     Pose pose;
     float scale;
