@@ -494,8 +494,9 @@ public final class CompensatedVehicleState implements Debuggable {
      * transaction-delayed client timeline still has the local player mounted.
      *
      * <p>The server vehicle marker is installed before the client can process a
-     * mount. Conversely, entity removal clears that marker immediately while
-     * the compensated passenger graph cannot be ejected until the trailing
+     * mount. Conversely, entity removal clears that marker immediately, unless
+     * a sent dismount of that vehicle is still pending, while the compensated
+     * passenger graph cannot be ejected until the trailing
      * transaction proves that the client processed the removal. Both sides of
      * that boundary must reject ordinary non-rotation player movement.</p>
      */

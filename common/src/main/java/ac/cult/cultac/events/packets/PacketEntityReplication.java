@@ -1421,7 +1421,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 if (vehicle != null && vehicle.passengers.contains(player.compensatedEntities.playerEntity)) {
                     removedPlayerVehicleId = entityID;
                 }
-                player.compensatedEntities.vehicles.clearServerVehicle();
+                // A sent dismount stays pending until its own transaction; the client ejected the player before this.
+                if (!player.compensatedEntities.vehicles.hasPendingServerDismount()) {
+                    player.compensatedEntities.vehicles.clearServerVehicle();
+                }
             }
             player.compensatedEntities.serverPositionsMap.remove(entityID);
         }
