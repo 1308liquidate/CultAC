@@ -53,33 +53,64 @@ public class ElytraTransform implements UncertaintyHandler {
             minStart = BubbleColumn.apply(context, lastResult, start, Double.NEGATIVE_INFINITY);
             maxStart = BubbleColumn.apply(context, lastResult, start, Double.POSITIVE_INFINITY);
         }
-        SimpleCollisionBox allowed = null;
+        // FireworkRocketEntity#tick runs after the LocalPlayer's tick and boosts the stored velocity once per
+        // attached rocket with that tick's look; a server velocity set is handled after it and replaces it.
+        int fireworks = start.hasReason("Velocity") ? 0 : player.compensatedFireworks.getMaxFireworksAppliedPossible();
+        Vec3[] boostedMin = {minStart, minStart};
+        Vec3[] boostedMax = {maxStart, maxStart};
+        Vec3 cut = null;
+        double closest = Double.POSITIVE_INFINITY;
+        for (int boosts = 0; boosts <= fireworks; boosts++) {
+            SimpleCollisionBox allowed = null;
 
-        // Don't require the player to have elytra if they MIGHT be in water
-        if (context.getWorldData().maybeInLiquid()) {
-            allowed = new SimpleCollisionBox(minStart, maxStart);
-        }
-
-        for (int loopFastmath = 0; loopFastmath < 2; loopFastmath++) {
-            for (double gravity : result.getPossibleGravity()) {
-                Vec3 elytraResult = transformElytra(player, context, minStart, gravity);
-                Vec3 maxElytraResult =
-                        minStart.y == maxStart.y ? elytraResult : transformElytra(player, context, maxStart, gravity);
-                if (allowed == null) {
-                    allowed = new SimpleCollisionBox(elytraResult, maxElytraResult).sort();
-                } else {
-                    allowed = allowed.union(new SimpleCollisionBox(elytraResult, maxElytraResult).sort());
-                }
+            // Don't require the player to have elytra if they MIGHT be in water
+            if (boosts == 0 && context.getWorldData().maybeInLiquid()) {
+                allowed = new SimpleCollisionBox(minStart, maxStart);
             }
-            player.trigHandler.toggleShitMath();
+
+            for (int loopFastmath = 0; loopFastmath < 2; loopFastmath++) {
+                if (boosts > 0) {
+                    Vector3dm look = ReachUtils.getLook(player, context.getLastXRot(), context.getLastYRot());
+                    boostedMin[loopFastmath] = boostFirework(boostedMin[loopFastmath], look);
+                    boostedMax[loopFastmath] = minStart == maxStart
+                            ? boostedMin[loopFastmath]
+                            : boostFirework(boostedMax[loopFastmath], look);
+                }
+                Vec3 min = boostedMin[loopFastmath];
+                Vec3 max = boostedMax[loopFastmath];
+                for (double gravity : result.getPossibleGravity()) {
+                    Vec3 elytraResult = transformElytra(player, context, min, gravity);
+                    Vec3 maxElytraResult =
+                            min.y == max.y ? elytraResult : transformElytra(player, context, max, gravity);
+                    if (allowed == null) {
+                        allowed = new SimpleCollisionBox(elytraResult, maxElytraResult).sort();
+                    } else {
+                        allowed = allowed.union(new SimpleCollisionBox(elytraResult, maxElytraResult).sort());
+                    }
+                }
+                player.trigHandler.toggleShitMath();
+            }
+
+            assert allowed != null;
+            allowed.expand(0, yUncertainty, 0);
+
+            Vec3 candidate = VectorUtils.cutBoxToVector(end, allowed);
+            double distance = candidate.distanceToSqr(end);
+            if (distance < closest) {
+                closest = distance;
+                cut = candidate;
+            }
         }
         player.trigHandler.toggleShitMath();
 
-        assert allowed != null;
-        allowed.expand(0, yUncertainty, 0);
-
-        Vec3 cut = VectorUtils.cutBoxToVector(end, allowed);
         return start.withXYZ(cut.x, cut.y, cut.z, "elytra");
+    }
+
+    private static Vec3 boostFirework(Vec3 velocity, Vector3dm look) {
+        return velocity.add(
+                look.getX() * 0.1 + (look.getX() * 1.5 - velocity.x) * 0.5,
+                look.getY() * 0.1 + (look.getY() * 1.5 - velocity.y) * 0.5,
+                look.getZ() * 0.1 + (look.getZ() * 1.5 - velocity.z) * 0.5);
     }
 
     public Vec3 transformElytra(CultPlayer player, SimulationContext context, Vec3 start, double gravity) {
