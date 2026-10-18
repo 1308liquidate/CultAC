@@ -231,6 +231,6 @@ public class CultLabel implements BuildableCommand {
                 .append(Component.text(
                         " " + line + (revoked ? " (revoked)" : ""),
                         revoked ? NamedTextColor.DARK_GRAY : NamedTextColor.GRAY))
-                .build();
+                .asComponent();
     }
 }
