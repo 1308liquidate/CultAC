@@ -256,7 +256,8 @@ public class WorldStageBuilder {
                 onHoney,
                 mainSupportingBlockData,
                 fishingRodPulls,
-                pushesWhileLoadingLevel(player, simulationContext));
+                pushesWhileLoadingLevel(player, simulationContext),
+                lastOnGround);
     }
 
     private DesyncStatus sampleClimbingAtStart(CultPlayer player, SimulationContext context) {

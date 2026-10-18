@@ -65,6 +65,9 @@ public class WorldData {
     /** The x/z range of the pushes taken while the level loaded, carried into the first loaded travel; null if none. */
     SimpleCollisionBox loadingLevelPushes;
 
+    /** The previous client tick's ground state, before this tick's pushes or riptide mark it unknown. */
+    DesyncStatus carriedOnGround;
+
     /** A shallow copy: carry contexts share its sub-objects and boxes, so none may be mutated in place. */
     public WorldData copy() {
         return new WorldData(
@@ -94,7 +97,8 @@ public class WorldData {
                 onHoneyBlock,
                 mainSupportingBlockPos,
                 fishingRodPulls,
-                loadingLevelPushes);
+                loadingLevelPushes,
+                carriedOnGround);
     }
 
     public boolean mustBeInLiquid() {

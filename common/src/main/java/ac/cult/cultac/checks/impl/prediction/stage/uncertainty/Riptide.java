@@ -44,12 +44,14 @@ public class Riptide implements UncertaintyHandler {
         if (context.getRiptideLevel() == 0) return trace.withPosition(start);
         float riptideAdditionalVelocity = 3.0F * ((1.0F + context.getRiptideLevel()) / 4.0F);
 
+        DesyncStatus releasedOnGround =
+                result.getSimulationContext().getWorldData().getCarriedOnGround();
         result.getSimulationContext().getWorldData().setLastOnGround(DesyncStatus.UNKNOWN);
 
         // TODO: Force people to be touching water to use riptide
         // TODO: Rate limit riptide
         // TODO: Fix false for the next tick when riptiding on ground
-        if (result.getSimulationContext().getLastOnGround().determineOptimistically()) {
+        if (releasedOnGround.determineOptimistically()) {
             double bestY = CultMath.clamp(end.y, start.y, start.y + 1.2);
             PredVector lifted = start.withY(bestY, "riptide ground lift");
             // MCP-Reborn TridentItem#releaseUsing first writes the riptide
