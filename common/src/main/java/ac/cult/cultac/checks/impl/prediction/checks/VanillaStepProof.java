@@ -22,10 +22,6 @@ final class VanillaStepProof {
             return false;
         }
 
-        if (!canStandAtDestination(player, result)) {
-            return true;
-        }
-
         return !hasSourceProvenStepCandidate(player, result);
     }
 
@@ -106,15 +102,31 @@ final class VanillaStepProof {
                         ? List.of(Collisions.Axis.Y, Collisions.Axis.Z, Collisions.Axis.X)
                         : List.of(Collisions.Axis.Y, Collisions.Axis.X, Collisions.Axis.Z))
                 : null;
-        Vec3 collidedMovement = collideLikeClient(
-                player,
-                result,
-                result.getSimulationContext().getFromActualPose(),
-                desiredX,
-                desiredY,
-                desiredZ,
-                order,
-                true);
+        Vec3 collidedMovement;
+        Vec3 collisionWithoutStep = null;
+        if (order != null && !player.isBedrockMovement()) {
+            Collisions.SteppedCollision collision = Collisions.collideWithStepComparison(
+                    player,
+                    result.getSimulationContext().getFromActualPose(),
+                    desiredX,
+                    desiredY,
+                    desiredZ,
+                    order,
+                    Collections.emptyList(),
+                    result.getSimulationContext().getLastOnGround().determineOptimistically());
+            collidedMovement = collision.movement();
+            collisionWithoutStep = collision.withoutStep();
+        } else {
+            collidedMovement = collideLikeClient(
+                    player,
+                    result,
+                    result.getSimulationContext().getFromActualPose(),
+                    desiredX,
+                    desiredY,
+                    desiredZ,
+                    order,
+                    true);
+        }
         if (Math.abs(collidedMovement.y - result.getTarget().y) > STEP_Y_MATCH_EPSILON) {
             return false;
         }
@@ -125,15 +137,17 @@ final class VanillaStepProof {
             return false;
         }
 
-        Vec3 collisionWithoutStep = collideLikeClient(
-                player,
-                result,
-                result.getSimulationContext().getFromActualPose(),
-                desiredX,
-                desiredY,
-                desiredZ,
-                order,
-                false);
+        if (collisionWithoutStep == null) {
+            collisionWithoutStep = collideLikeClient(
+                    player,
+                    result,
+                    result.getSimulationContext().getFromActualPose(),
+                    desiredX,
+                    desiredY,
+                    desiredZ,
+                    order,
+                    false);
+        }
         return Collisions.getHorizontalDistanceSqr(collidedMovement)
                 > Collisions.getHorizontalDistanceSqr(collisionWithoutStep);
     }

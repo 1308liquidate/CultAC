@@ -84,8 +84,38 @@ public class Collisions {
                 allowStepping,
                 box.minY,
                 additionalCollisionBoxes,
-                onGroundForStep);
+                onGroundForStep,
+                null);
     }
+
+    /** The stepping collision and the same query's pre-step result, which equals a non-stepping call. */
+    public static SteppedCollision collideWithStepComparison(
+            CultPlayer player,
+            SimpleCollisionBox box,
+            double desiredX,
+            double desiredY,
+            double desiredZ,
+            List<Axis> order,
+            List<SimpleCollisionBox> additionalCollisionBoxes,
+            boolean onGroundForStep) {
+        if (player.isBedrockMovement()) throw new IllegalStateException("Bedrock step queries depend on allowStepping");
+        Vec3[] withoutStep = new Vec3[1];
+        Vec3 movement = collide(
+                player,
+                box,
+                desiredX,
+                desiredY,
+                desiredZ,
+                order,
+                true,
+                box.minY,
+                additionalCollisionBoxes,
+                onGroundForStep,
+                withoutStep);
+        return new SteppedCollision(movement, withoutStep[0]);
+    }
+
+    public record SteppedCollision(Vec3 movement, Vec3 withoutStep) {}
 
     public static Vec3 collide(
             CultPlayer player,
@@ -130,7 +160,8 @@ public class Collisions {
                 allowStepping,
                 entityBottom,
                 additionalCollisionBoxes,
-                player.lastOnGround);
+                player.lastOnGround,
+                null);
     }
 
     private static Vec3 collide(
@@ -143,8 +174,12 @@ public class Collisions {
             boolean allowStepping,
             double entityBottom,
             List<SimpleCollisionBox> additionalCollisionBoxes,
-            boolean onGroundForStep) {
-        if (desiredX == 0 && desiredY == 0 && desiredZ == 0) return Vec3.ZERO;
+            boolean onGroundForStep,
+            Vec3[] withoutStep) {
+        if (desiredX == 0 && desiredY == 0 && desiredZ == 0) {
+            if (withoutStep != null) withoutStep[0] = Vec3.ZERO;
+            return Vec3.ZERO;
+        }
 
         SimpleCollisionBox grabBoxesBB = box.copy();
         double stepUpHeight = player.getMaxUpStep();
@@ -184,6 +219,7 @@ public class Collisions {
                 order,
                 SimpleCollisionBox.AxisEpsilon.JAVA,
                 moved);
+        if (withoutStep != null) withoutStep[0] = collisionResult;
 
         // While running up stairs and holding space, the player activates the "lastOnGround" part without otherwise
         // being able to step
