@@ -125,16 +125,25 @@ public class CheckManager {
 
     private final CultPlayer player;
 
-    ClassToInstanceMap<CheckListener> packetChecks;
-    ClassToInstanceMap<CheckListener> positionCheck;
-    ClassToInstanceMap<RotationListener> rotationCheck;
-    ClassToInstanceMap<VehicleListener> vehicleCheck;
-    ClassToInstanceMap<CheckListener> identityChecks;
-    ClassToInstanceMap<CheckListener> prePredictionChecks;
+    final ClassToInstanceMap<CheckListener> packetChecks;
+    final ClassToInstanceMap<CheckListener> positionCheck;
+    final ClassToInstanceMap<RotationListener> rotationCheck;
+    final ClassToInstanceMap<VehicleListener> vehicleCheck;
+    final ClassToInstanceMap<CheckListener> identityChecks;
+    final ClassToInstanceMap<CheckListener> prePredictionChecks;
 
-    ClassToInstanceMap<BlockPlaceCheck> blockPlaceCheck;
-    ClassToInstanceMap<PostPredictionListener> postPredictionCheck;
-    ClassToInstanceMap<PostPredictionListener> pseudoCheck;
+    final ClassToInstanceMap<BlockPlaceCheck> blockPlaceCheck;
+    final ClassToInstanceMap<PostPredictionListener> postPredictionCheck;
+    final ClassToInstanceMap<PostPredictionListener> pseudoCheck;
+
+    // Dispatch snapshots of the immutable maps above, in their iteration order.
+    private final CheckListener[] positionUpdateListeners;
+    private final RotationListener[] rotationListeners;
+    private final VehicleListener[] vehicleListeners;
+    private final BlockPlaceCheck[] blockPlaceListeners;
+    private final PostPredictionListener[] predictionListeners;
+    private final PostPredictionListener[] pseudoListeners;
+    private final Map<Class<?>, CheckListener> listenersByClass;
 
     List<BlockPlace> placesToCheck = new EvictingQueue<>(20);
 
@@ -142,7 +151,7 @@ public class CheckManager {
     private final List<CheckListener> postFlyingBlockBreakListeners = new ArrayList<>();
     private final List<BlockBreak> breaksToCheck = new EvictingQueue<>(20);
 
-    public ClassToInstanceMap<CheckListener> allCheckListeners;
+    public final ClassToInstanceMap<CheckListener> allCheckListeners;
 
     public final Map<Class<? extends Check>, Check> allChecks = new HashMap<>();
     private final PacketHandlerScanner recordScanner;
@@ -194,6 +203,30 @@ public class CheckManager {
                 .putAll(prePredictionChecks)
                 .putAll(pseudoCheck)
                 .build();
+        listenersByClass = new IdentityHashMap<>(allCheckListeners);
+
+        List<CheckListener> positionUpdates = new ArrayList<>();
+        for (var checks : List.of(prePredictionChecks, positionCheck, packetChecks)) {
+            for (CheckListener check : checks.values()) {
+                if (overridesPositionUpdate(check)) positionUpdates.add(check);
+            }
+        }
+        positionUpdateListeners = positionUpdates.toArray(CheckListener[]::new);
+
+        List<RotationListener> rotations = new ArrayList<>(rotationCheck.values());
+        for (BlockPlaceCheck check : blockPlaceCheck.values()) {
+            if (check instanceof RotationListener rotationListener) rotations.add(rotationListener);
+        }
+        rotationListeners = rotations.toArray(RotationListener[]::new);
+        vehicleListeners = vehicleCheck.values().toArray(VehicleListener[]::new);
+        blockPlaceListeners = blockPlaceCheck.values().toArray(BlockPlaceCheck[]::new);
+
+        List<PostPredictionListener> predictions = new ArrayList<>();
+        for (PostPredictionListener check : postPredictionCheck.values()) {
+            if (overridesPredictionComplete(check)) predictions.add(check);
+        }
+        predictionListeners = predictions.toArray(PostPredictionListener[]::new);
+        pseudoListeners = pseudoCheck.values().toArray(PostPredictionListener[]::new);
 
         for (CheckListener listener : allCheckListeners.values()) {
             if (listener instanceof BlockBreakListener) {
@@ -794,6 +827,40 @@ public class CheckManager {
         sendRoutes = registrations.send.sendRoutes();
     }
 
+    /** False only when the callback resolves to an interface's empty default, so skipping the call is a no-op. */
+    static boolean overridesPositionUpdate(CheckListener listener) {
+        return OVERRIDES_POSITION_UPDATE.get(listener.getClass());
+    }
+
+    /** False only when the callback resolves to the interface's empty default, so skipping the call is a no-op. */
+    static boolean overridesPredictionComplete(PostPredictionListener listener) {
+        return OVERRIDES_PREDICTION_COMPLETE.get(listener.getClass());
+    }
+
+    private static final ClassValue<Boolean> OVERRIDES_POSITION_UPDATE = new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(Class<?> type) {
+            Class<?> owner = callbackOwner(type, "onPositionUpdate", PositionUpdate.class);
+            return owner != CheckListener.class && owner != PositionListener.class;
+        }
+    };
+
+    private static final ClassValue<Boolean> OVERRIDES_PREDICTION_COMPLETE = new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(Class<?> type) {
+            return callbackOwner(type, "onPredictionComplete", PredictionComplete.class)
+                    != PostPredictionListener.class;
+        }
+    };
+
+    private static Class<?> callbackOwner(Class<?> type, String name, Class<?> parameter) {
+        try {
+            return type.getMethod(name, parameter).getDeclaringClass();
+        } catch (NoSuchMethodException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
     private boolean shouldRegister(CheckListener listener) {
         return !(listener instanceof Check check) || !player.isBedrockMovement() || check.isBedrockSupported();
     }
@@ -813,7 +880,7 @@ public class CheckManager {
 
     @SuppressWarnings("unchecked")
     public <T extends CheckListener> T getListener(Class<T> check) {
-        return (T) allCheckListeners.get(check);
+        return (T) listenersByClass.get(check);
     }
 
     @SuppressWarnings("unchecked")
@@ -903,7 +970,7 @@ public class CheckManager {
 
     public void doChecksWithKnownLook() {
         for (BlockPlace place : placesToCheck) {
-            for (BlockPlaceCheck check : blockPlaceCheck.values()) {
+            for (BlockPlaceCheck check : blockPlaceListeners) {
                 if (!shouldDispatch(check)) {
                     continue;
                 }
@@ -948,19 +1015,7 @@ public class CheckManager {
     }
 
     public void onPositionUpdate(final PositionUpdate position) {
-        for (CheckListener check : prePredictionChecks.values()) {
-            if (!shouldDispatch(check)) {
-                continue;
-            }
-            check.onPositionUpdate(position);
-        }
-        for (CheckListener check : positionCheck.values()) {
-            if (!shouldDispatch(check)) {
-                continue;
-            }
-            check.onPositionUpdate(position);
-        }
-        for (CheckListener check : packetChecks.values()) {
+        for (CheckListener check : positionUpdateListeners) {
             if (!shouldDispatch(check)) {
                 continue;
             }
@@ -969,22 +1024,16 @@ public class CheckManager {
     }
 
     public void onRotationUpdate(final RotationUpdate rotation) {
-        for (RotationListener check : rotationCheck.values()) {
+        for (RotationListener check : rotationListeners) {
             if (!shouldDispatch(check)) {
                 continue;
             }
             check.process(rotation);
         }
-        for (BlockPlaceCheck check : blockPlaceCheck.values()) {
-            if (!(check instanceof RotationListener rotationListener) || !shouldDispatch(check)) {
-                continue;
-            }
-            rotationListener.process(rotation);
-        }
     }
 
     public void onVehiclePositionUpdate(final VehiclePositionUpdate update) {
-        for (VehicleListener check : vehicleCheck.values()) {
+        for (VehicleListener check : vehicleListeners) {
             if (!shouldDispatch(check)) {
                 continue;
             }
@@ -993,13 +1042,13 @@ public class CheckManager {
     }
 
     public void onPredictionFinish(final PredictionComplete complete) {
-        for (PostPredictionListener check : postPredictionCheck.values()) {
+        for (PostPredictionListener check : predictionListeners) {
             if (!shouldDispatch(check)) {
                 continue;
             }
             check.onPredictionComplete(complete);
         }
-        for (PostPredictionListener check : pseudoCheck.values()) {
+        for (PostPredictionListener check : pseudoListeners) {
             if (!shouldDispatch(check)) {
                 continue;
             }
@@ -1013,7 +1062,7 @@ public class CheckManager {
     public void onBlockPlace(final BlockPlace place) {
         // Minecraft#pick precedes handleKeybinds and all of this tick's local predictions.
         player.compensatedWorld.withSelectionSnapshot(() -> {
-            for (BlockPlaceCheck check : blockPlaceCheck.values()) {
+            for (BlockPlaceCheck check : blockPlaceListeners) {
                 if (!shouldDispatch(check)) {
                     continue;
                 }
