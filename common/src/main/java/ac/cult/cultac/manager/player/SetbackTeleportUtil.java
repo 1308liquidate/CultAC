@@ -34,7 +34,6 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveVehicle;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerPosition;
-import ac.cult.cultac.protocol.packet.clientbound.ClientboundTeleportEntity;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Relative;
@@ -694,10 +693,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                             data.getTeleportData().getTransaction());
                 } else {
                     sendPlayerSetbackPackets(
-                            teleportId,
-                            position,
-                            data.getTeleportData().getFlags().getMask(),
-                            data.isExpectedOnGround());
+                            teleportId, position, data.getTeleportData().getFlags().getMask());
                 }
             }
 
@@ -735,23 +731,13 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         }
     }
 
-    private void sendPlayerSetbackPackets(int teleportId, Vec3 position, int relativeMask, boolean onGround) {
+    private void sendPlayerSetbackPackets(int teleportId, Vec3 position, int relativeMask) {
         var point = new Vec3d(position.x, position.y, position.z);
         var relatives = Relative.unpack(relativeMask);
-        var correction = new CultWrite(
-                new ClientboundPlayerPosition(teleportId, point, Vec3d.ZERO, 0.0F, 0.0F, relatives), true);
-        if (player.isBedrockMovement()) {
-            player.user.write(correction);
-            return;
-        }
-
-        // ClientPacketListener#handleBundlePacket processes both packets before movement.
-        // Apply the correction first so the mirror targets the corrected position.
-        // Only the correction was registered by addSentTeleport; the mirror reaches listeners.
-        var mirror = new CultWrite(
-                new ClientboundTeleportEntity(player.entityID, point, Vec3d.ZERO, 0.0F, 0.0F, relatives, onGround),
-                false);
-        player.user.write(List.of(correction, mirror), true);
+        // unfortunately, 26.3 clients don't like ClietboundTeleportEntity as it causes weird interpolation if multiple
+        // teleports are sent within a few ticks.
+        player.user.write(new CultWrite(
+                new ClientboundPlayerPosition(teleportId, point, Vec3d.ZERO, 0.0F, 0.0F, relatives), true));
     }
 
     private int resolveSetbackVehicleId() {
