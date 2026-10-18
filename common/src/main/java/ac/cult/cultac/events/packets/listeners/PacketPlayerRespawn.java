@@ -21,6 +21,7 @@ import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetHealth;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.utils.anticheat.LogUtil;
+import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.SprintingState;
 import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntitySelf;
@@ -238,6 +239,8 @@ public class PacketPlayerRespawn {
         final Runnable applyRespawnState = () -> {
             if (level != player.compensatedWorld.level()) return;
             player.isSneaking = false;
+            // ClientPacketListener#handleRespawn starts the new LocalPlayer from Input.EMPTY unless KEEP_ENTITY_DATA.
+            if (!keepEntityData) player.packetStateData.knownInput = KnownInput.DEFAULT;
             final BadPacketsF badPacketsF = player.checkManager.getListener(BadPacketsF.class);
             badPacketsF.exemptNext = true;
             player.lastOnGround = false;

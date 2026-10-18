@@ -28,6 +28,7 @@ import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.PlayerSpawnInfo;
 import ac.cult.cultac.utils.anticheat.update.BlockPlace;
+import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.math.Vec3;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -233,6 +234,30 @@ public final class PacketPlayerRespawnLifecycleTest {
     }
 
     @Test
+    public void respawnKeepsTheSentKeysOnlyWithKeptEntityData() throws Exception {
+        OfflineCultTestBootstrap.installConfig();
+        KnownInput held = new KnownInput(true, false, true, false, false, true, false);
+        for (byte kept = 0; kept < 4; kept++) {
+            CultPlayer player = offlineJavaPlayer();
+            try {
+                player.packetStateData.knownInput = held;
+                ClientboundRespawn respawn = respawnPacket(kept);
+                new PacketPlayerRespawn()
+                        .onRespawn(sendEvent(player, ClientboundPackets.RESPAWN, respawn), player, respawn);
+                player.lastTransactionReceived.set(1);
+                player.latencyUtils.handleNettySyncTransaction(1);
+
+                assertEquals(
+                        "kept " + kept,
+                        (kept & ClientboundRespawn.KEEP_ENTITY_DATA) != 0 ? held : KnownInput.DEFAULT,
+                        player.packetStateData.knownInput);
+            } finally {
+                OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+            }
+        }
+    }
+
+    @Test
     public void seaLevelAndBiomeSeedChangeOnlyWhenAnAcknowledgedRespawnCreatesANewClientLevel() throws Exception {
         OfflineCultTestBootstrap.installConfig();
         for (boolean worldChange : new boolean[] {false, true}) {
@@ -391,8 +416,12 @@ public final class PacketPlayerRespawnLifecycleTest {
     }
 
     private static ClientboundRespawn respawnPacket() {
+        return respawnPacket((byte) 0);
+    }
+
+    private static ClientboundRespawn respawnPacket(byte kept) {
         int id = ModelRegistryNamesState.defaults().id("minecraft:dimension_type", "minecraft:overworld");
-        return new ClientboundRespawn(new PlayerSpawnInfo(id, "minecraft:overworld", GameMode.SURVIVAL), (byte) 0);
+        return new ClientboundRespawn(new PlayerSpawnInfo(id, "minecraft:overworld", GameMode.SURVIVAL), kept);
     }
 
     private static ClientboundLogin loginPacket(boolean showDeathScreen) {
