@@ -128,6 +128,8 @@ tasks.shadowJar {
         "Cult-Runtime-Platform" to "paper",
         "Cult-Runtime-Java" to "21",
         "Cult-Runtime-Host-Version" to providers.gradleProperty("paperDevBundleVersion").get().substringBefore(".build."),
+        "Cult-Runtime-Host-Min" to providers.gradleProperty("runtimeHostMinVersion").get(),
+        "Cult-Runtime-Host-Max" to providers.gradleProperty("paperDevBundleVersion").get().substringBefore(".build."),
         "Cult-Runtime-Build" to rootProject.version.toString(),
         "Cult-Runtime-Entrypoint" to "ac.cult.cultac.platform.bukkit.PaperRuntimeEntrypoint"
     ))
