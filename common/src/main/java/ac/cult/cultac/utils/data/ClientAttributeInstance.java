@@ -12,14 +12,22 @@ public final class ClientAttributeInstance {
     private final double defaultBase;
     private final double minValue;
     private final double maxValue;
+    // Modifiers kept for a respawn but left out of the value.
+    private final Set<String> excludedModifierIds;
     private double base;
     private final LinkedHashMap<String, AttributeModifier> modifiers = new LinkedHashMap<>();
     private double value;
 
     public ClientAttributeInstance(double defaultBase, double minValue, double maxValue) {
+        this(defaultBase, minValue, maxValue, Set.of());
+    }
+
+    public ClientAttributeInstance(
+            double defaultBase, double minValue, double maxValue, Set<String> excludedModifierIds) {
         this.defaultBase = defaultBase;
         this.minValue = minValue;
         this.maxValue = maxValue;
+        this.excludedModifierIds = excludedModifierIds;
         this.base = defaultBase;
         this.value = calculateValue();
     }
@@ -63,7 +71,7 @@ public final class ClientAttributeInstance {
     // AttributeInstance#calculateValue, then RangedAttribute#sanitizeValue
     private double calculateValue() {
         double value = CompensatedEntities.calculateAttributeValue(
-                new AttributeSnapshot("", base, List.copyOf(modifiers.values())), Set.of());
+                new AttributeSnapshot("", base, List.copyOf(modifiers.values())), excludedModifierIds);
         return Double.isNaN(value) ? minValue : Math.min(Math.max(value, minValue), maxValue);
     }
 }

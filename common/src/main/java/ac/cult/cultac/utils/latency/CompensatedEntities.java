@@ -32,13 +32,14 @@ public class CompensatedEntities {
     public final ClientPlayerModes clientPlayerModes = new ClientPlayerModes();
     private static final String SPRINTING_MODIFIER_ID = "minecraft:sprinting";
     public static final String SNOW_MODIFIER_ID = "minecraft:powder_snow";
-    private static final Set<String> EXCLUDED_MODIFIER_IDS = Set.of(SPRINTING_MODIFIER_ID, SNOW_MODIFIER_ID);
+    public static final Set<String> EXCLUDED_MODIFIER_IDS = Set.of(SPRINTING_MODIFIER_ID, SNOW_MODIFIER_ID);
     private static final String ATTRIBUTE_NAMESPACE = "minecraft:";
     private static final long LOCAL_PLAYER_CLIENT_TICK_ORDER = 0L;
+    private static final int HELD_UPDATES = 4;
+    private static final int HELD_ENTITIES = 256;
     public final Int2ObjectOpenHashMap<PacketEntity> entityMap = new Int2ObjectOpenHashMap<>(40, 0.7f);
     public final Int2ObjectOpenHashMap<TrackerData> serverPositionsMap = new Int2ObjectOpenHashMap<>(40, 0.7f);
-    private final Int2ObjectOpenHashMap<List<AttributeSnapshot>> pendingAttributes =
-            new Int2ObjectOpenHashMap<>(10, 0.7f);
+    private final Int2ObjectOpenHashMap<List<HeldAttributes>> pendingAttributes = new Int2ObjectOpenHashMap<>(10, 0.7f);
     private final Int2ObjectOpenHashMap<List<EquipmentEntry>> pendingEquipment = new Int2ObjectOpenHashMap<>(10, 0.7f);
     public final CompensatedVehicleState vehicles;
     public List<SimpleCollisionBox> fishingRodPulls = new EvictingQueue<>(100); // sanity limit to prevent leaks.
@@ -180,6 +181,11 @@ public class CompensatedEntities {
     }
 
     public void updateAttributes(int entityID, List<AttributeSnapshot> objects) {
+        updateAttributes(entityID, objects, player.lastTransactionSent.get() + 1);
+    }
+
+    /** Applies objects, which the client has applied once it answers provenAt. */
+    public void updateAttributes(int entityID, List<AttributeSnapshot> objects, int provenAt) {
         boolean selfScaleChanged = false;
         if (entityID == player.entityID) {
             for (AttributeSnapshot snapshot : objects) {
@@ -195,38 +201,20 @@ public class CompensatedEntities {
 
                     // The server replaces the client's sprinting modifier without touching its sprint flag
                     if (!player.isBedrockMovement()) player.sprintState.onServerModifier(foundSprintingModifier);
-                    player.compensatedEntities.getSelf().playerSpeed =
-                            calculateAttribute(snapshot, 0.0, 1024.0, EXCLUDED_MODIFIER_IDS);
                 }
 
                 if (matchesAttribute(snapshot, "scale")) {
-                    player.compensatedEntities.getSelf().scale = (float) calculateAttribute(snapshot, 0.0625, 16.0);
                     selfScaleChanged = true;
-                }
-
-                if (matchesAttribute(snapshot, "gravity")) {
-                    player.compensatedEntities.getSelf().gravity = calculateAttribute(snapshot, -1.0, 1.0);
-                }
-
-                player.compensatedEntities.getSelf().onAttributeSnapshot(snapshot);
-
-                if (matchesAttribute(snapshot, "step_height")) {
-                    player.compensatedEntities.getSelf().stepHeightAttribute = calculateAttribute(snapshot, 0.0, 10.0);
                 }
 
                 // 26.2 attributes (Attributes#BOUNCINESS / FRICTION_MODIFIER /
                 // AIR_DRAG_MODIFIER). Matched by registry path because the static
                 // constants do not exist on pre-26.2 servers.
-                if (supportsAttributes(ClientVersion.V_26_2) && matchesAttribute(snapshot, "bounciness")) {
-                    player.compensatedEntities.getSelf().bounciness = calculateAttribute(snapshot, 0.0, 1.0);
-                }
-
-                if (supportsAttributes(ClientVersion.V_26_2) && matchesAttribute(snapshot, "friction_modifier")) {
-                    player.compensatedEntities.getSelf().frictionModifier = calculateAttribute(snapshot, 0.0, 2048.0);
-                }
-
-                if (supportsAttributes(ClientVersion.V_26_2) && matchesAttribute(snapshot, "air_drag_modifier")) {
-                    player.compensatedEntities.getSelf().airDragModifier = calculateAttribute(snapshot, 0.0, 2048.0);
+                boolean since26_2 = matchesAttribute(snapshot, "bounciness")
+                        || matchesAttribute(snapshot, "friction_modifier")
+                        || matchesAttribute(snapshot, "air_drag_modifier");
+                if (!since26_2 || supportsAttributes(ClientVersion.V_26_2)) {
+                    player.compensatedEntities.getSelf().onAttributeSnapshot(snapshot);
                 }
 
                 if (matchesAttribute(snapshot, "block_interaction_range")) {
@@ -246,14 +234,14 @@ public class CompensatedEntities {
         PacketEntity entity = player.compensatedEntities.getEntity(entityID);
         boolean entityScaleChanged = false;
         if (entity == null && entityID != player.entityID) {
-            pendingAttributes.put(entityID, new ArrayList<>(objects));
+            holdAttributes(entityID, objects, provenAt);
             return;
         }
 
-        if (entity != null) {
+        if (entity != null && entityID != player.entityID) {
             for (AttributeSnapshot snapshot : objects) {
                 if (matchesAttribute(snapshot, "scale")) {
-                    entity.scale = (float) calculateAttribute(snapshot, 0.0625, 16.0);
+                    entity.onScale((float) calculateAttribute(snapshot, 0.0625, 16.0), provenAt);
                     entityScaleChanged = true;
                 }
 
@@ -265,11 +253,11 @@ public class CompensatedEntities {
                     entity.stepHeightAttribute = calculateAttribute(snapshot, 0.0, 10.0);
                 }
 
-                if (entityID != player.entityID && matchesAttribute(snapshot, "movement_efficiency")) {
+                if (matchesAttribute(snapshot, "movement_efficiency")) {
                     entity.movementEfficiency = calculateAttribute(snapshot, 0.0, 1.0);
                 }
 
-                if (entityID != player.entityID && matchesAttribute(snapshot, "water_movement_efficiency")) {
+                if (matchesAttribute(snapshot, "water_movement_efficiency")) {
                     entity.waterMovementEfficiency = calculateAttribute(snapshot, 0.0, 1.0);
                 }
 
@@ -415,10 +403,11 @@ public class CompensatedEntities {
         }
     }
 
-    public void addEntity(int entityID, int entityType, Vec3 position, float xRot, float yRot, int data) {
+    /** Adds the entity and replays its held attributes; returns the greatest replayed proof, or Integer.MIN_VALUE. */
+    public int addEntity(int entityID, int entityType, Vec3 position, float xRot, float yRot, int data) {
         // Dropped items are all server sided and players can't interact with them (except create them!), save the
         // performance
-        if (entityType == EntityTypeIds.ITEM) return;
+        if (entityType == EntityTypeIds.ITEM) return Integer.MIN_VALUE;
 
         PacketEntity packetEntity = createTrackedEntity(entityID, entityType, position, xRot, data);
         packetEntity.setClientPhysicalRotation(xRot, yRot);
@@ -433,14 +422,23 @@ public class CompensatedEntities {
         // assuming server entity IDs match tick order.
         packetEntity.setClientTickOrder(nextClientEntityTickOrder++);
         entityMap.put(entityID, packetEntity);
-        List<AttributeSnapshot> pending = pendingAttributes.remove(entityID);
-        if (pending != null) {
-            updateAttributes(entityID, pending);
+        int replayedProof = Integer.MIN_VALUE;
+        List<HeldAttributes> held = pendingAttributes.remove(entityID);
+        if (held != null) {
+            // Each held update keeps its own proof; those already answered retire with the spawn.
+            for (HeldAttributes update : held) {
+                if (update.leastScale() == update.leastScale())
+                    packetEntity.onScale(update.leastScale(), update.provenAt());
+                updateAttributes(entityID, update.values(), update.provenAt());
+                replayedProof = Math.max(replayedProof, update.provenAt());
+            }
+            packetEntity.onSizeHandled(player.lastTransactionReceived.get());
         }
         List<EquipmentEntry> pendingEquipmentUpdates = pendingEquipment.remove(entityID);
         if (pendingEquipmentUpdates != null) {
             updateEntityEquipment(entityID, pendingEquipmentUpdates);
         }
+        return replayedProof;
     }
 
     private PacketEntity createTrackedEntity(int entityID, int entityType, Vec3 position, float xRot, int data) {
@@ -598,6 +596,11 @@ public class CompensatedEntities {
     }
 
     public void updateEntityMetadata(int entityID, List<EntityMetadata.Entry> watchableObjects) {
+        updateEntityMetadata(entityID, watchableObjects, player.lastTransactionSent.get() + 1);
+    }
+
+    /** Applies watchableObjects, which the client has applied once it answers provenAt. */
+    public void updateEntityMetadata(int entityID, List<EntityMetadata.Entry> watchableObjects, int provenAt) {
         PacketEntity entity = player.compensatedEntities.getEntity(entityID);
         if (entity == null) return;
         if (entity instanceof PacketEntityHanging hanging) hanging.updateActionMetadata(watchableObjects);
@@ -609,7 +612,9 @@ public class CompensatedEntities {
         if (flags != null && flags.value() instanceof Byte value) entity.actionSharedFlags = value;
         if (entity.isLivingEntity()) {
             var pose = WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.ENTITY_POSE);
-            if (pose != null && pose.value() instanceof EntityPose value) entity.actionPose = value;
+            if (pose != null && pose.value() instanceof EntityPose value) {
+                entity.onPose(value, provenAt);
+            }
             var health = WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.LIVING_HEALTH);
             if (health != null && health.value() instanceof Float value) entity.actionAlive = value > 0.0F;
         }
@@ -860,4 +865,54 @@ public class CompensatedEntities {
             if (passenger.getRiding() == entity && isTicking(passenger)) tickEntityTree(passenger, tick);
         }
     }
+
+    /** The number of attribute updates held for entityID until it is added. */
+    public int heldAttributeUpdates(int entityID) {
+        List<HeldAttributes> held = pendingAttributes.get(entityID);
+        return held == null ? 0 : held.size();
+    }
+
+    private void holdAttributes(int entityID, List<AttributeSnapshot> values, int provenAt) {
+        List<HeldAttributes> held = pendingAttributes.get(entityID);
+        if (held == null) {
+            // A tracked spawn's attributes always hold; the client drops those for an id it lacks, so untracked ids
+            // beyond the bound go unheld.
+            if (pendingAttributes.size() >= HELD_ENTITIES && !serverPositionsMap.containsKey(entityID)) return;
+            pendingAttributes.put(entityID, held = new ArrayList<>(HELD_UPDATES));
+        }
+        if (held.size() == HELD_UPDATES) {
+            HeldAttributes oldest = held.remove(0);
+            held.set(0, merge(oldest, held.get(0)));
+        }
+        held.add(new HeldAttributes(List.copyOf(values), provenAt, Float.NaN));
+    }
+
+    // The later values win, the earlier's scale stays an alternative, and the later proof proves both.
+    private HeldAttributes merge(HeldAttributes earlier, HeldAttributes later) {
+        Map<String, AttributeSnapshot> values = new LinkedHashMap<>();
+        for (AttributeSnapshot snapshot : earlier.values()) values.put(snapshot.attribute(), snapshot);
+        for (AttributeSnapshot snapshot : later.values()) values.put(snapshot.attribute(), snapshot);
+        float leastScale = least(least(earlier.leastScale(), heldScale(earlier.values())), later.leastScale());
+        return new HeldAttributes(
+                List.copyOf(values.values()), Math.max(earlier.provenAt(), later.provenAt()), leastScale);
+    }
+
+    private float heldScale(List<AttributeSnapshot> values) {
+        float scale = Float.NaN;
+        for (AttributeSnapshot snapshot : values) {
+            if (matchesAttribute(snapshot, "scale")) scale = (float) calculateAttribute(snapshot, 0.0625, 16.0);
+        }
+        return scale;
+    }
+
+    // The lesser of two scales, NaN standing for none.
+    private static float least(float a, float b) {
+        return b < a || a != a ? b : a;
+    }
+
+    /**
+     * Attributes for an entity not yet added, which the client has applied once it answers provenAt; leastScale is
+     * a smaller scale merged earlier updates set, or NaN.
+     */
+    private record HeldAttributes(List<AttributeSnapshot> values, int provenAt, float leastScale) {}
 }

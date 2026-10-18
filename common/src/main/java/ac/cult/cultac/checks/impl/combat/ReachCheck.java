@@ -68,7 +68,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     // The least-flagging measured distance, the farthest a possible target box is entered along the same ray, and the
     // bounds vanilla allows it.
     private double bestDistance, bestFar, bestMin, bestMax;
-    // The size of each possible box within the target box measureBest measures.
+    // At most the size of each possible box within the target box measureBest measures.
     private Vec3 targetSize;
     // The location hitAlong found.
     private double hitX, hitY, hitZ;
@@ -323,10 +323,21 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     // The size of each possible box getReachBox spans, at most its real size.
     private Vec3 getReachSize(PacketEntity reachEntity) {
         if (reachEntity.type == EntityTypeIds.END_CRYSTAL) return new Vec3(2, 2, 2);
-        double width = Math.max(
-                BoundingBoxSize.getWidth(player, reachEntity), BoundingBoxSize.getReachWidth(player, reachEntity));
-        double height = Math.max(
-                BoundingBoxSize.getHeight(player, reachEntity), BoundingBoxSize.getReachHeight(player, reachEntity));
+        if (reachEntity.isAvatar()) {
+            double width = reachEntity.leastPoseWidth();
+            return new Vec3(width, reachEntity.leastPoseHeight(), width);
+        }
+        // BoundingBoxSize scales linearly; the camel's sitting, the goat's long jump and the warden's digging and
+        // emerging poses still take the standing size.
+        double least = reachEntity.leastScale() / reachEntity.scale;
+        double width = least
+                * Math.max(
+                        BoundingBoxSize.getWidth(player, reachEntity),
+                        BoundingBoxSize.getReachWidth(player, reachEntity));
+        double height = least
+                * Math.max(
+                        BoundingBoxSize.getHeight(player, reachEntity),
+                        BoundingBoxSize.getReachHeight(player, reachEntity));
         return new Vec3(width, height, width);
     }
 
@@ -488,7 +499,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         double hit = contains(box, eyeX, eyeY, eyeZ) ? 0 : clip(box, 0, eyeX, eyeY, eyeZ, dx, dy, dz);
         if (Double.isNaN(hit)) return;
         double distance = distance(eyeX, eyeY, eyeZ, eyeX + hit * dx, eyeY + hit * dy, eyeZ + hit * dz);
-        double far = farthest(box, 0, distance, eyeX, eyeY, eyeZ, eyeX, eyeY, eyeZ, dx, dy, dz);
+        double far = farthest(box, distance, eyeX, eyeY, eyeZ, eyeX, eyeY, eyeZ, dx, dy, dz);
         if (reach.hasItemLimit()) {
             consider(distance, far, reach.itemMin(), Math.min(reach.entityRange(), reach.itemLimit()));
         } else {
@@ -519,7 +530,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             if (contains(box, fromX, fromY, fromZ)) {
                 double distance = distance(eyeX, eyeY, eyeZ, fromX, fromY, fromZ);
                 double length = pick.rayEnd() - pick.rayStart();
-                double far = farthest(
+                measureHit(
                         box,
                         pick.hitboxMargin(),
                         distance,
@@ -531,8 +542,9 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                         fromZ,
                         lookX * length,
                         lookY * length,
-                        lookZ * length);
-                consider(distance, far, min, max);
+                        lookZ * length,
+                        min,
+                        max);
                 continue;
             }
 
@@ -545,9 +557,21 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                 double dz = eyeZ + lookZ * end - fromZ;
                 if (hitAlong(box, pick.hitboxMargin(), fromX, fromY, fromZ, dx, dy, dz)) {
                     double distance = distance(eyeX, eyeY, eyeZ, hitX, hitY, hitZ);
-                    double far = farthest(
-                            box, pick.hitboxMargin(), distance, eyeX, eyeY, eyeZ, fromX, fromY, fromZ, dx, dy, dz);
-                    consider(distance, far, min, max);
+                    measureHit(
+                            box,
+                            pick.hitboxMargin(),
+                            distance,
+                            eyeX,
+                            eyeY,
+                            eyeZ,
+                            fromX,
+                            fromY,
+                            fromZ,
+                            dx,
+                            dy,
+                            dz,
+                            min,
+                            max);
                 } else if (!measureInsideMargin(
                         box, pick.hitboxMargin(), eyeX, eyeY, eyeZ, fromX, fromY, fromZ, dx, dy, dz, min, max)) {
                     measureShort(box, pick, fromX, fromY, fromZ, eyeX, eyeY, eyeZ, lookX, lookY, lookZ, end);
@@ -556,8 +580,57 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         }
     }
 
+    // The move's hit at distance on box. A move meeting every box of targetSize within box hits the target directly, no
+    // nearer than distance and no farther than its latest entry into one. Otherwise the target may be reached only
+    // through its margin, by a projected hit within box, which box's nearest point and farthest corner bound.
+    private void measureHit(
+            SimpleCollisionBox box,
+            float margin,
+            double distance,
+            double eyeX,
+            double eyeY,
+            double eyeZ,
+            double x,
+            double y,
+            double z,
+            double dx,
+            double dy,
+            double dz,
+            double min,
+            double max) {
+        if (margin > 0 && !meetsEveryBox(box, x, y, z, dx, dy, dz)) {
+            consider(nearest(box, eyeX, eyeY, eyeZ), farthestCorner(box, eyeX, eyeY, eyeZ), min, max);
+        } else {
+            consider(distance, farthest(box, distance, eyeX, eyeY, eyeZ, x, y, z, dx, dy, dz), min, max);
+        }
+    }
+
+    // Whether the move meets the part of box that every box of targetSize within it holds.
+    private boolean meetsEveryBox(
+            SimpleCollisionBox box, double x, double y, double z, double dx, double dy, double dz) {
+        double enter = 0;
+        double exit = 1;
+        for (int axis = 0; axis < 3; axis++) {
+            double size = axis(axis, targetSize.x, targetSize.y, targetSize.z);
+            double low = axis(axis, box.maxX, box.maxY, box.maxZ) - size;
+            double high = axis(axis, box.minX, box.minY, box.minZ) + size;
+            double from = axis(axis, x, y, z);
+            double move = axis(axis, dx, dy, dz);
+            if (low > high) return false;
+            if (Math.abs(move) <= 1.0E-7) {
+                if (from < low || from > high) return false;
+                continue;
+            }
+            double a = (low - from) / move;
+            double b = (high - from) / move;
+            enter = Math.max(enter, Math.min(a, b));
+            exit = Math.min(exit, Math.max(a, b));
+        }
+        return enter <= exit;
+    }
+
     // A move starting within margin of box but outside it can still enter the margin of a box of targetSize within box
-    // and hit it by projection: such a hit lies in box, so box's nearest point bounds it for the maximum.
+    // and hit it by projection: such a hit lies in box, so box's nearest point and farthest corner bound it.
     private boolean measureInsideMargin(
             SimpleCollisionBox box,
             float margin,
@@ -574,12 +647,24 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             double max) {
         if (margin <= 0 || !contains(box.copy().expand(margin), x, y, z)) return false;
         if (Double.isNaN(farthestEntry(box, margin, x, y, z, dx, dy, dz))) return false;
+        consider(nearest(box, eyeX, eyeY, eyeZ), farthestCorner(box, eyeX, eyeY, eyeZ), min, max);
+        return true;
+    }
+
+    // The distance from the eye to box's nearest point.
+    private static double nearest(SimpleCollisionBox box, double eyeX, double eyeY, double eyeZ) {
         double nearX = Math.max(box.minX, Math.min(eyeX, box.maxX));
         double nearY = Math.max(box.minY, Math.min(eyeY, box.maxY));
         double nearZ = Math.max(box.minZ, Math.min(eyeZ, box.maxZ));
-        double distance = distance(eyeX, eyeY, eyeZ, nearX, nearY, nearZ);
-        consider(distance, farthest(box, margin, distance, eyeX, eyeY, eyeZ, x, y, z, dx, dy, dz), min, max);
-        return true;
+        return distance(eyeX, eyeY, eyeZ, nearX, nearY, nearZ);
+    }
+
+    // The distance from the eye to box's farthest corner.
+    private static double farthestCorner(SimpleCollisionBox box, double eyeX, double eyeY, double eyeZ) {
+        double x = Math.max(Math.abs(box.minX - eyeX), Math.abs(box.maxX - eyeX));
+        double y = Math.max(Math.abs(box.minY - eyeY), Math.abs(box.maxY - eyeY));
+        double z = Math.max(Math.abs(box.minZ - eyeZ), Math.abs(box.maxZ - eyeZ));
+        return Math.sqrt(x * x + y * y + z * z);
     }
 
     // A hit just past the end of a segment that missed measures how far the segment fell short.
@@ -612,11 +697,9 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         consider(lookLength * along, lookLength * along, Double.NEGATIVE_INFINITY, lookLength * end);
     }
 
-    // The farthest from the eye that the move hits a box of targetSize within box, either directly or within margin of
-    // it, and at least distance.
+    // The farthest from the eye that the move directly hits a box of targetSize within box, and at least distance.
     private double farthest(
             SimpleCollisionBox box,
-            float margin,
             double distance,
             double eyeX,
             double eyeY,
@@ -627,80 +710,9 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             double dx,
             double dy,
             double dz) {
-        double far = distance;
         double scale = farthestEntry(box, 0, x, y, z, dx, dy, dz);
-        if (!Double.isNaN(scale)) {
-            far = Math.max(far, distance(eyeX, eyeY, eyeZ, x + scale * dx, y + scale * dy, z + scale * dz));
-        }
-        if (margin > 0) far = Math.max(far, farthestProjected(box, margin, eyeX, eyeY, eyeZ, x, y, z, dx, dy, dz));
-        return far;
-    }
-
-    // ProjectileUtil#getManyEntityHitResult moves a hit only within the margin from the margin's entry toward the
-    // target's center until it meets the target: the largest over the axes of 1 - half size / the entry's distance from
-    // the center, which lies between the least and greatest gaps of their ranges, and at most half size plus margin.
-    // The entries lie between the move's entry into box grown by margin, or its start when that lies inside, and its
-    // latest entry into a box of targetSize grown by margin, and the centers within half the size of box's sides and
-    // half the size plus margin of the entries.
-    private double farthestProjected(
-            SimpleCollisionBox box,
-            double margin,
-            double eyeX,
-            double eyeY,
-            double eyeZ,
-            double x,
-            double y,
-            double z,
-            double dx,
-            double dy,
-            double dz) {
-        double early = clip(box, margin, x, y, z, dx, dy, dz);
-        if (Double.isNaN(early)) {
-            if (!contains(box.copy().expand(margin), x, y, z)) return Double.NEGATIVE_INFINITY;
-            early = 0;
-        }
-        double late = farthestEntry(box, margin, x, y, z, dx, dy, dz);
-        if (Double.isNaN(late)) late = early;
-        double shareLow = 0;
-        double share = 0;
-        double sum = 0;
-        // The first pass bounds the share over the axes, the second the hit with it.
-        for (int pass = 0; pass < 2; pass++) {
-            for (int axis = 0; axis < 3; axis++) {
-                double from = axis(axis, x, y, z);
-                double move = axis(axis, dx, dy, dz);
-                double boxLow = axis(axis, box.minX, box.minY, box.minZ);
-                double boxHigh = axis(axis, box.maxX, box.maxY, box.maxZ);
-                double half = axis(axis, targetSize.x, targetSize.y, targetSize.z) / 2;
-                double entryLow = Math.min(from + early * move, from + late * move);
-                double entryHigh = Math.max(from + early * move, from + late * move);
-                double centerLow = Math.max(boxLow + half, entryLow - half - margin);
-                double centerHigh = Math.min(boxHigh - half, entryHigh + half + margin);
-                if (centerLow > centerHigh) centerLow = centerHigh = (centerLow + centerHigh) / 2;
-                if (pass == 0) {
-                    double apart = Math.min(
-                            half + margin, Math.max(Math.abs(centerHigh - entryLow), Math.abs(entryHigh - centerLow)));
-                    if (apart > half) share = Math.max(share, 1 - half / apart);
-                    double nearest = Math.max(0, Math.max(centerLow - entryHigh, entryLow - centerHigh));
-                    if (nearest > half) shareLow = Math.max(shareLow, 1 - half / nearest);
-                    continue;
-                }
-                double low = Math.max(
-                        boxLow,
-                        Math.min(
-                                entryLow + shareLow * (centerLow - entryLow),
-                                entryLow + share * (centerLow - entryLow)));
-                double high = Math.min(
-                        boxHigh,
-                        Math.max(
-                                entryHigh + shareLow * (centerHigh - entryHigh),
-                                entryHigh + share * (centerHigh - entryHigh)));
-                double eye = axis(axis, eyeX, eyeY, eyeZ);
-                double offset = Math.max(Math.abs(low - eye), Math.abs(high - eye));
-                sum += offset * offset;
-            }
-        }
-        return Math.sqrt(sum);
+        if (Double.isNaN(scale)) return distance;
+        return Math.max(distance, distance(eyeX, eyeY, eyeZ, x + scale * dx, y + scale * dy, z + scale * dz));
     }
 
     // The latest fraction of the move at which it enters a box of targetSize, both grown by margin, that lies within
