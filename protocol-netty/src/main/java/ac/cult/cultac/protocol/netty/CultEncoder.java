@@ -3,6 +3,7 @@ package ac.cult.cultac.protocol.netty;
 import ac.cult.cultac.network.CultConnection;
 import ac.cult.cultac.network.CultNetworkManager;
 import ac.cult.cultac.network.CultWrite;
+import ac.cult.cultac.network.PacketDispatcher;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketDirection;
@@ -320,21 +321,22 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             Batch batch) {
         var phase = connection.phase(PacketDirection.CLIENTBOUND);
         boolean requested = false;
-        PacketType<?>[] untracked = {null};
+        // The route the predicate found for the frame's type, and whether it was skipped as untracked.
+        PacketDispatcher.Route[] probed = new PacketDispatcher.Route[2];
         PacketType<?> forwardedType = null;
         try {
             var values = connection.packets().read(phase, PacketDirection.CLIENTBOUND, bytes, connection, type -> {
                 var route = connection.dispatcher().get(type);
                 if (route == null) return false;
+                probed[0] = route;
                 if (phase != ConnectionPhase.PLAY || tracked()) return true;
                 if (route.send() != null && route.send().hasConnectionHandlers()) return true;
-                untracked[0] = type;
+                probed[1] = route;
                 return false;
             });
-            if (untracked[0] != null)
-                forwardedType = connection.dispatcher().get(untracked[0]).type();
+            if (probed[1] != null) forwardedType = probed[1].type();
             for (var value : values) {
-                var route = connection.dispatcher().get(value.type());
+                var route = probed[0];
                 forwardedType = route.type();
                 connection.prepare();
                 if (silent || route.send() == null || activeFamilies.contains(route.type())) continue;

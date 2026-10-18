@@ -3,6 +3,7 @@ package ac.cult.cultac.protocol.netty;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.network.CultConnection;
 import ac.cult.cultac.network.CultNetworkManager;
+import ac.cult.cultac.network.PacketDispatcher;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.protocol.DroppedPacketException;
 import ac.cult.cultac.protocol.PacketDirection;
@@ -25,10 +26,12 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
     private static final String HOST_FLOW_NAME = NAME + "-host-flow";
     private final CultConnection connection;
     private final Predicate<PacketType<?>> routed;
+    /** The route {@link #routed} found during a readOne, read back on the owner loop before anything is dispatched. */
+    private PacketDispatcher.Route probed;
 
     public CultDecoder(CultConnection connection) {
         this.connection = connection;
-        routed = type -> connection.dispatcher().get(type) != null;
+        routed = type -> (probed = connection.dispatcher().get(type)) != null;
     }
 
     public static void install(CultConnection connection) {
@@ -118,7 +121,7 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
             ServerboundPacket forwardedPacket = null;
             var value = connection.packets().readOne(phase, PacketDirection.SERVERBOUND, frame, connection, routed);
             if (value != null) {
-                var route = connection.dispatcher().get(value.type());
+                var route = probed;
                 var type = (PacketType<ServerboundPacket>) route.type();
                 var original = (ServerboundPacket) value.packet();
                 originalType = type;

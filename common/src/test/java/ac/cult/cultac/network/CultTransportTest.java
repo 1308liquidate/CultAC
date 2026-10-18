@@ -217,6 +217,45 @@ class CultTransportTest {
     }
 
     @Test
+    void routesPublishedBetweenFramesReachTheNextFrameInBothDirections() throws Exception {
+        for (boolean owned : List.of(false, true))
+            try (var f = new Fixture(owned)) {
+                var received = new ArrayList<String>();
+                var sent = new ArrayList<String>();
+                f.routes.receive(
+                        ServerboundPackets.PONG,
+                        event -> received.add("a" + event.getPacket().id()));
+                f.routes.send(
+                        ClientboundPackets.PING,
+                        event -> sent.add("a" + event.getPacket().id()));
+                f.channel.writeInbound(f.pong(PLAY, 1));
+                f.channel.writeAndFlush(f.ping(PLAY, 1));
+                f.pump();
+                f.routes.receive(ServerboundPackets.PONG, event -> {
+                    received.add("b" + event.getPacket().id());
+                    f.routes.receive(
+                            ServerboundPackets.PONG,
+                            next -> received.add("c" + next.getPacket().id()));
+                });
+                f.routes.send(ClientboundPackets.PING, event -> {
+                    sent.add("b" + event.getPacket().id());
+                    f.routes.send(
+                            ClientboundPackets.PING,
+                            next -> sent.add("c" + next.getPacket().id()));
+                });
+                f.channel.writeInbound(f.pong(PLAY, 2), f.pong(PLAY, 3));
+                f.channel.writeAndFlush(f.ping(PLAY, 2));
+                f.channel.writeAndFlush(f.ping(PLAY, 3));
+                f.pump();
+                assertEquals(List.of("a1", "b2", "c3"), received);
+                assertEquals(List.of("a1", "b2", "c3"), sent);
+                for (int id = 1; id <= 3; id++) assertEquals(f.hex(f.pong(PLAY, id)), f.hex(f.channel.readInbound()));
+                assertNull(f.channel.readInbound());
+                assertEquals(List.of("P1", "P2", "P3"), f.output());
+            }
+    }
+
+    @Test
     void receiveAndSendCancellationAndReplacementWorkSynchronously() throws Exception {
         for (boolean owned : List.of(false, true))
             try (var f = new Fixture(owned)) {
