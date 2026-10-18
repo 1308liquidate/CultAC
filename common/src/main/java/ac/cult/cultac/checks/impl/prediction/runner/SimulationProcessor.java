@@ -41,6 +41,7 @@ import ac.cult.cultac.checks.impl.prediction.stage.MovementModifiers;
 import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CarriedPush;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CollisionModifier;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.ValidMovements;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldStageBuilder;
@@ -1476,6 +1477,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 thisResult.setCollideAxisData(collisionData);
                 if (useSelectedMovement) {
                     validMovements.applyCollisionsToSelectedMovement(lastPrediction);
+                    reselectPastClippedAxes(player, engine, validMovements, attemptedExtents, lastPrediction);
                 } else {
                     validMovements.computeClosest(lastPrediction);
                 }
@@ -1568,6 +1570,29 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     static double stepHeightProbeY(double targetY, double attemptedMinY, double stuckY, double maxUpStep) {
         double stepY = CultMath.clamp(targetY * stuckY, Math.min(0.0D, attemptedMinY * stuckY), maxUpStep);
         return stepY / stuckY;
+    }
+
+    /**
+     * Reselects the collision-ignored movement towards {@link ValidMovements#targetPastClippedAxes}, probes
+     * collisions for it, and keeps whichever clipped movement ends nearer the target.
+     */
+    private void reselectPastClippedAxes(
+            CultPlayer player,
+            MovementEngine engine,
+            ValidMovements validMovements,
+            SimpleCollisionBox attemptedExtents,
+            PredictionResult lastPrediction) {
+        PredictionResult result = validMovements.getResult();
+        Vec3 retarget = validMovements.targetPastClippedAxes();
+        if (retarget == result.getTarget()) return;
+
+        MovementTrace firstTrace = validMovements.getClosestTrace();
+        CollideAxisData firstCollisions = result.getCollideAxisData();
+        Vec3 reselected = validMovements.computeCollisionIgnoredMovement(retarget, lastPrediction);
+        // Entity#collideWithShapes orders X and Z by magnitude, so the reselected movement needs its own probe.
+        result.setCollideAxisData(probeCollisionsCached(player, engine, result, attemptedExtents, reselected, false));
+        validMovements.applyCollisionsToSelectedMovement(lastPrediction);
+        validMovements.keepNearerToTarget(firstTrace, firstCollisions);
     }
 
     private CollideAxisData probeCollisionsCached(

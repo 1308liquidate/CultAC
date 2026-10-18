@@ -122,11 +122,54 @@ public class ValidMovements {
     }
 
     public Vec3 computeCollisionIgnoredMovement(PredictionResult lastResult) {
+        return computeCollisionIgnoredMovement(result.getTarget(), lastResult);
+    }
+
+    /** Selects one complete movement towards {@code end} with collisions ignored. */
+    public Vec3 computeCollisionIgnoredMovement(Vec3 end, PredictionResult lastResult) {
         // Select one complete movement with the existing uncertainty handlers.
         // In particular, Fireworks must share its radius between Y and X/Z.
         result.setCollideAxisData(COLLISION_IGNORED);
-        computeClosest(lastResult);
+        setClosestTrace(transformTraceTowards(end, lastResult));
         return closestToTarget;
+    }
+
+    /**
+     * The target with each horizontal axis the current collisions clip replaced by the starting velocity's value
+     * there, when the target sits on the clip, the starting value is already past it, and a circular allowance in
+     * the selected movement moved that axis. Entity#collide clips every attempt past an obstacle to the same value,
+     * so the target's value on such an axis does not bound the attempt. Returns the target itself when no axis
+     * qualifies.
+     */
+    public Vec3 targetPastClippedAxes() {
+        Vec3 target = result.getTarget();
+        CollideAxisData collisions = result.getCollideAxisData();
+        double x = pastClip(collisions.getX(), target.x, true);
+        double z = pastClip(collisions.getZ(), target.z, false);
+        return x == target.x && z == target.z ? target : new Vec3(x, target.y, z);
+    }
+
+    private double pastClip(CollideAxisData.CollideResult clip, double target, boolean xAxis) {
+        if (clip == null || !clip.isLikelyCollide()) return target;
+        double limit = clip.getResult();
+        if (Math.abs(target - limit) > 1.0E-7D) return target;
+        double start = xAxis ? initialStartingVel.x : initialStartingVel.z;
+        boolean past = limit > 0.0D ? start >= limit : limit < 0.0D && start <= limit;
+        // UncertaintyHelper#handleSpherical moves X/Z through handleCircular.
+        return past && closestTrace.position().reasonMovedAxisSince("circular", initialStartingVel, xAxis)
+                ? start
+                : target;
+    }
+
+    /**
+     * Restores {@code previous}, already clipped by {@code previousCollisions}, unless the selected movement ends
+     * nearer the target.
+     */
+    public void keepNearerToTarget(MovementTrace previous, CollideAxisData previousCollisions) {
+        Vec3 target = result.getTarget();
+        if (closestToTarget.distanceToSqr(target) < previous.position().distanceToSqr(target)) return;
+        result.setCollideAxisData(previousCollisions);
+        setClosestTrace(previous);
     }
 
     public void applyCollisionsToSelectedMovement(PredictionResult lastResult) {
