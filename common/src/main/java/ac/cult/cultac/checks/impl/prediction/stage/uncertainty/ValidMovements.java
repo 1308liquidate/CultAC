@@ -2,6 +2,7 @@ package ac.cult.cultac.checks.impl.prediction.stage.uncertainty;
 
 import static ac.cult.cultac.utils.math.VectorUtils.LARGE_MOVEMENT;
 
+import ac.cult.cultac.bedrock.prediction.integration.BedrockMovementEngine;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.stage.UncertaintyPipeline;
@@ -21,6 +22,9 @@ public class ValidMovements {
     /** Collision data for the collision-ignored pass, shared by every player; writes to it throw. */
     private static final CollideAxisData COLLISION_IGNORED = CollideAxisData.immutable(
             new CollideAxisData.CollideResult(false, 0), null, null, new CollideAxisData.CollideResult(false, 0));
+
+    private static final UncertaintyHandler[] MODIFIERS =
+            UncertaintyPipeline.MODIFIERS.toArray(new UncertaintyHandler[0]);
 
     PredVector initialStartingVel;
     transient CultPlayer player;
@@ -56,6 +60,9 @@ public class ValidMovements {
     private final List<UncertaintyHandler> uncertaintyHandlers;
 
     @ToString.Exclude
+    private final UncertaintyHandler[] handlers;
+
+    @ToString.Exclude
     private final MovementTrace startTrace;
 
     public ValidMovements(PredVector initialStartingVel, CultPlayer player, PredictionResult result, boolean canStep) {
@@ -73,6 +80,13 @@ public class ValidMovements {
         this.result = result;
         this.canStep = canStep;
         this.uncertaintyHandlers = uncertaintyHandlers;
+        if (uncertaintyHandlers == UncertaintyPipeline.MODIFIERS) {
+            this.handlers = MODIFIERS;
+        } else if (uncertaintyHandlers == BedrockMovementEngine.UNCERTAINTY_HANDLERS) {
+            this.handlers = BedrockHandlers.HANDLERS;
+        } else {
+            this.handlers = uncertaintyHandlers.toArray(new UncertaintyHandler[0]);
+        }
         this.startTrace = MovementTrace.start(initialStartingVel);
 
         result.setValidMovements(this);
@@ -85,7 +99,7 @@ public class ValidMovements {
     public MovementTrace transformTraceTowards(Vec3 end, PredictionResult lastResult) {
         MovementTrace trace = startTrace;
 
-        for (UncertaintyHandler handler : uncertaintyHandlers) {
+        for (UncertaintyHandler handler : handlers) {
             trace = handler.handleMovementTrace(
                     player, result.getValidMovements(), result, result.getSimulationContext(), lastResult, trace, end);
         }
@@ -160,4 +174,10 @@ public class ValidMovements {
     }
 
     public void addTransformers(UncertaintyPipeline uncertaintyPipeline) {}
+
+    /** Initialized on the first non-pipeline handler list, so Java-only use never initializes the Bedrock engine. */
+    private static final class BedrockHandlers {
+        private static final UncertaintyHandler[] HANDLERS =
+                BedrockMovementEngine.UNCERTAINTY_HANDLERS.toArray(new UncertaintyHandler[0]);
+    }
 }
