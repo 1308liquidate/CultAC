@@ -26,6 +26,8 @@ import io.netty.util.concurrent.DefaultEventExecutor;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -1182,6 +1184,93 @@ class CultTransportTest {
             assertTrue(f.channel.writeAndFlush(f.ping(PLAY, 3)).isSuccess());
             assertEquals(List.of("P3"), f.output());
             assertEquals(1, later.get());
+        }
+    }
+
+    @Test
+    void flushAfterWritesMatchesAnEmptyWriteTask() throws Exception {
+        var scenarios = new LinkedHashMap<String, BiConsumer<Fixture, Runnable>>();
+        scenarios.put("idle", (f, action) -> action.run());
+        scenarios.put("unflushed frame", (f, action) -> {
+            f.channel.write(f.ping(PLAY, 1));
+            action.run();
+        });
+        scenarios.put("unflushed frames with proofs", (f, action) -> {
+            var sequence = new AtomicInteger();
+            f.routes.send(ClientboundPackets.PING, event -> {
+                if (event.getPacket().id() >= 100) {
+                    event.getWritesAfterSend()
+                            .add(new CultWrite(new ClientboundPing(sequence.incrementAndGet()), false));
+                }
+            });
+            f.channel.write(f.ping(PLAY, 100));
+            action.run();
+            f.channel.write(f.ping(PLAY, 200));
+        });
+        scenarios.put(
+                "inside a write task",
+                (f, action) -> f.user.executeAfterWrites(() -> {
+                    f.user.write(new ClientboundPing(1));
+                    action.run();
+                    f.user.write(new ClientboundPing(2));
+                }));
+        scenarios.put("inside a send listener", (f, action) -> {
+            f.routes.send(ClientboundPackets.PING, event -> {
+                if (event.getPacket().id() == 1) action.run();
+            });
+            f.channel.write(f.ping(PLAY, 1));
+        });
+        scenarios.put("after close", (f, action) -> {
+            f.channel.close();
+            action.run();
+        });
+        scenarios.put("after handler removal", (f, action) -> {
+            f.channel.write(f.ping(PLAY, 1));
+            f.connection.removeHandlers(() -> {
+                f.channel.pipeline().remove(CultDecoder.NAME);
+                f.channel.pipeline().remove(CultEncoder.NAME);
+            });
+            action.run();
+        });
+        for (boolean owned : new boolean[] {true, false}) {
+            for (var scenario : scenarios.entrySet()) {
+                String at = scenario.getKey() + (owned ? " (owned)" : "");
+                var task = transcript(owned, scenario.getValue(), f -> f.user.executeAfterWrites(() -> {}));
+                var flush = transcript(owned, scenario.getValue(), f -> f.user.flushAfterWrites());
+                assertEquals(task, flush, at);
+                if (scenario.getKey().equals("unflushed frame"))
+                    assertEquals(List.of("write P1", "flush", "outbound", "P1", "open true"), task, at);
+            }
+        }
+    }
+
+    /** Every write and flush reaching the head, then the outbound frames and whether the channel stayed open. */
+    private static List<String> transcript(
+            boolean owned, BiConsumer<Fixture, Runnable> scenario, Consumer<Fixture> action) {
+        try (var f = new Fixture(owned)) {
+            var log = new ArrayList<String>();
+            f.channel.pipeline().addFirst("recorder", new ChannelOutboundHandlerAdapter() {
+                @Override
+                public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
+                    log.add("write "
+                            + (message instanceof ByteBuf frame
+                                    ? f.name(frame)
+                                    : message.getClass().getSimpleName()));
+                    ctx.write(message, promise);
+                }
+
+                @Override
+                public void flush(ChannelHandlerContext ctx) {
+                    log.add("flush");
+                    ctx.flush();
+                }
+            });
+            scenario.accept(f, () -> action.accept(f));
+            f.pump();
+            log.add("outbound");
+            log.addAll(f.output());
+            log.add("open " + f.channel.isOpen());
+            return log;
         }
     }
 

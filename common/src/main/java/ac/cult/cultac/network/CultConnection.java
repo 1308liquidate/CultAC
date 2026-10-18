@@ -344,15 +344,26 @@ public final class CultConnection implements CodecState {
     private ChannelFuture writeMessage(Object message) {
         var promise = channel.newPromise();
         if (owner.inEventLoop() && reentrantWriter != null) reentrantWriter.accept(message, promise);
-        else {
-            Runnable send = () -> {
+        else
+            onChannelLoop(() -> {
                 if (removed != null) promise.tryFailure(new java.nio.channels.ClosedChannelException());
                 else channel.writeAndFlush(message, promise);
-            };
-            if (channel.eventLoop().inEventLoop() && (owner == channel.eventLoop() || !owner.inEventLoop())) send.run();
-            else channel.eventLoop().execute(send);
-        }
+            });
         return promise;
+    }
+
+    /** The flush {@link #executeAfterWrites} issues for a task that writes nothing, without writing the task. */
+    public void flushAfterWrites() {
+        if (owner.inEventLoop() && reentrantWriter != null) executeAfterWrites(() -> {});
+        else
+            onChannelLoop(() -> {
+                if (removed == null) channel.flush();
+            });
+    }
+
+    private void onChannelLoop(Runnable send) {
+        if (channel.eventLoop().inEventLoop() && (owner == channel.eventLoop() || !owner.inEventLoop())) send.run();
+        else channel.eventLoop().execute(send);
     }
 
     public void forwarded(PacketType<?> type, Object packet) {

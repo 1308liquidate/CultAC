@@ -1825,31 +1825,41 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
     //
     // We will assume that velocity is more sensitive to not moving than general movement
     public void checkIfMustMove() {
+        checkIfMustMove(System.nanoTime());
+    }
+
+    public void checkIfMustMove(long currentTime) {
+        if (!mustMoveDue(currentTime)) return;
+        final long elapsed = currentTime - lastMovement();
+        // if the player must move
+        if (player.checkManager
+                .getSimulationProcessor()
+                .tryToAchievePointThree(new Vec3(player.x, player.y, player.z), player.xRot, player.yRot)
+                .getFlags()
+                .isEmpty()) {
+            return;
+        }
+        // This will activate the velocity part of this check
+        final String latencyReason = "move, " + TimeUnit.NANOSECONDS.toMillis(elapsed) + "ms";
+        executeTooHighLatencySetback(latencyReason);
+    }
+
+    /** True when {@link #checkIfMustMove} at {@code currentTime} goes on to test the player's position. */
+    public boolean mustMoveDue(long currentTime) {
         final EvictingQueue<Long> movementTimes =
                 player.checkManager.getSimulationProcessor().getLastMovementTime();
-        if (movementTimes.isEmpty()) return;
-        if (player.inVehicle()) return;
+        if (movementTimes.isEmpty()) return false;
+        if (player.inVehicle()) return false;
         final KnockbackHandler knockback = player.checkManager.getKnockbackHandler();
-        if (knockback.lastSent != null) return;
-
-        final long lastMovement = Collections.max(movementTimes);
-        final long currentTime = System.nanoTime();
+        if (knockback.lastSent != null) return false;
 
         // If the player hasn't sent a movement in 1.5 seconds, setback (and send velocity to activate other part)
-        final long elapsed = currentTime - lastMovement;
+        final long elapsed = currentTime - lastMovement();
         final long freezeNanos = TimeUnit.NANOSECONDS.convert(freeze, TimeUnit.MILLISECONDS);
-        if (elapsed > freezeNanos) {
-            // if the player must move
-            if (player.checkManager
-                    .getSimulationProcessor()
-                    .tryToAchievePointThree(new Vec3(player.x, player.y, player.z), player.xRot, player.yRot)
-                    .getFlags()
-                    .isEmpty()) {
-                return;
-            }
-            // This will activate the velocity part of this check
-            final String latencyReason = "move, " + TimeUnit.NANOSECONDS.toMillis(elapsed) + "ms";
-            executeTooHighLatencySetback(latencyReason);
-        }
+        return elapsed > freezeNanos;
+    }
+
+    private long lastMovement() {
+        return Collections.max(player.checkManager.getSimulationProcessor().getLastMovementTime());
     }
 }
