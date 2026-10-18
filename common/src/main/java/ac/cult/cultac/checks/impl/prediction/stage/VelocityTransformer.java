@@ -400,6 +400,11 @@ public class VelocityTransformer {
     }
 
     private static Vec3 getExactControllerModifiedInputStatic(Vec3 rawInputState) {
+        return getExactControllerModifiedInputStatic(rawInputState, 1.0F);
+    }
+
+    /** LocalPlayer#modifyInput with no item in use; {@code movingSlowlyFactor} is LocalPlayer#isMovingSlowly's scale. */
+    public static Vec3 getExactControllerModifiedInputStatic(Vec3 rawInputState, float movingSlowlyFactor) {
         float xxa = (float) rawInputState.x;
         float zza = (float) rawInputState.z;
         float rawLengthSqr = xxa * xxa + zza * zza;
@@ -411,12 +416,13 @@ public class VelocityTransformer {
         float normalizedX = xxa / rawLength;
         float normalizedZ = zza / rawLength;
 
-        float modifiedX = normalizedX * 0.98F;
-        float modifiedZ = normalizedZ * 0.98F;
+        float modifiedX = normalizedX * 0.98F * movingSlowlyFactor;
+        float modifiedZ = normalizedZ * 0.98F * movingSlowlyFactor;
         float modifiedLength = CultMath.sqrt(modifiedX * modifiedX + modifiedZ * modifiedZ);
         if (modifiedLength > 0.0F) {
-            float unitX = modifiedX / modifiedLength;
-            float unitZ = modifiedZ / modifiedLength;
+            float inverseLength = 1.0F / modifiedLength;
+            float unitX = modifiedX * inverseLength;
+            float unitZ = modifiedZ * inverseLength;
             float absX = Math.abs(unitX);
             float absZ = Math.abs(unitZ);
             float ratio = absZ > absX ? absX / absZ : absZ / absX;

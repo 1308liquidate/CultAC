@@ -51,7 +51,17 @@ public final class VelocityCandidates {
 
         CultPlayer player = result.getPlayer();
         if (player != null) {
+            Vec3 moved = diff;
             diff = applyPostMoveLivingFluidCurrent(player, result, diff);
+            Vec3 edge = moved.equals(diff)
+                            && !hasUnknownStuckSpeed(lastPrediction)
+                            && !consumedRequiredStuckSpeedThisMove(result)
+                    ? SneakEdgeBackoff.deltaMovement(result, diff)
+                    : null;
+            if (edge != null) {
+                validPlayerStartingVels.add(edge);
+                return validPlayerStartingVels;
+            }
         }
 
         boolean isX = result.getCollideAxisData().getX().isLikelyCollide();
@@ -86,13 +96,7 @@ public final class VelocityCandidates {
         addVelocityCandidates(validPlayerStartingVels, diff, isX, isY, isZ);
         addPostMoveDeltaMovementCandidates(validPlayerStartingVels, result, isX, isY, isZ, collisionMovementY, stepped);
 
-        if (lastPrediction != null
-                && lastPrediction
-                                .getSimulationContext()
-                                .getWorldData()
-                                .getStuckSpeed()
-                                .getUnknownStuckSpeedMultiplier()
-                        != null) {
+        if (hasUnknownStuckSpeed(lastPrediction)) {
             validPlayerStartingVels.add(Vec3.ZERO);
         }
 
@@ -109,6 +113,16 @@ public final class VelocityCandidates {
         }
 
         return validPlayerStartingVels;
+    }
+
+    private static boolean hasUnknownStuckSpeed(PredictionResult lastPrediction) {
+        return lastPrediction != null
+                && lastPrediction
+                                .getSimulationContext()
+                                .getWorldData()
+                                .getStuckSpeed()
+                                .getUnknownStuckSpeedMultiplier()
+                        != null;
     }
 
     private static Vec3 applyPostMoveLivingFluidCurrent(
