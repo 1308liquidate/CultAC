@@ -392,9 +392,11 @@ public class Collisions {
             List<SimpleCollisionBox> listOfBlocks,
             boolean onlyCheckCollide,
             double entityBottom) {
-        return getCollisionBoxes(
-                player, wantedBB, listOfBlocks, onlyCheckCollide, entityBottom, JavaCollisionState.current(player));
+        return getCollisionBoxes(player, wantedBB, listOfBlocks, onlyCheckCollide, entityBottom, CURRENT_ACTOR);
     }
+
+    // Resolved to JavaCollisionState.current at the first powder snow block, the only block whose shape reads it.
+    private static final JavaCollisionState CURRENT_ACTOR = new JavaCollisionState(0.0, false, false, false);
 
     public static boolean getCollisionBoxes(
             CultPlayer player,
@@ -494,6 +496,8 @@ public class Collisions {
                                             && wantedBB.maxZ > z) return true;
                                     continue;
                                 }
+                                if (actor == CURRENT_ACTOR && BlockIds.is(data, BlockIds.POWDER_SNOW))
+                                    actor = JavaCollisionState.current(player);
                                 CollisionBox collisionBox =
                                         ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor);
                                 if (collisionBox.isNull()) continue;
