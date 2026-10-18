@@ -16,10 +16,45 @@ public record RuntimeArtifact(String build, String entrypoint, String digest) {
     static void validateHost(Path jar, String hostVersion) throws Exception {
         if (hostVersion == null) return;
         try (var archive = new JarFile(jar.toFile())) {
-            String required = archive.getManifest().getMainAttributes().getValue("Cult-Runtime-Host-Version");
-            if (required == null || !required.equals(hostVersion))
-                throw new IOException("Runtime host version " + required + " does not match " + hostVersion);
+            var fields = archive.getManifest().getMainAttributes();
+            String minimum = fields.getValue("Cult-Runtime-Host-Min");
+            String maximum = fields.getValue("Cult-Runtime-Host-Max");
+            if (minimum == null || maximum == null) {
+                String required = fields.getValue("Cult-Runtime-Host-Version");
+                if (required == null || !required.equals(hostVersion))
+                    throw new IOException("Runtime host version " + required + " does not match " + hostVersion);
+                return;
+            }
+            if (!supports(minimum, maximum, hostVersion))
+                throw new IOException(
+                        "Runtime supports host versions " + minimum + " to " + maximum + ", not " + hostVersion);
         }
+    }
+
+    /** The maximum covers its own patch releases: a maximum of 26.3 accepts 26.3.1. */
+    static boolean supports(String minimum, String maximum, String hostVersion) {
+        int[] host = numbers(hostVersion);
+        int[] upper = numbers(maximum);
+        return compare(host, numbers(minimum), Integer.MAX_VALUE) >= 0 && compare(host, upper, upper.length) <= 0;
+    }
+
+    private static int compare(int[] left, int[] right, int length) {
+        for (int i = 0; i < Math.min(length, Math.max(left.length, right.length)); i++) {
+            int a = i < left.length ? left[i] : 0;
+            int b = i < right.length ? right[i] : 0;
+            if (a != b) return Integer.compare(a, b);
+        }
+        return 0;
+    }
+
+    private static int[] numbers(String version) {
+        var parts = version.trim().split("[^0-9.]", 2)[0].split("\\.");
+        var result = new int[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].isEmpty()) throw new IllegalArgumentException("Invalid version " + version);
+            result[i] = Integer.parseInt(parts[i]);
+        }
+        return result;
     }
 
     public static RuntimeArtifact inspect(Path jar, String platform, String loaderVersion) throws Exception {
