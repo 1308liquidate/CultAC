@@ -86,6 +86,7 @@ public class CompensatedEntities {
 
     public void updatePassengerPositions() {
         for (PacketEntity vehicle : entityMap.values()) {
+            if (vehicle.passengers.isEmpty()) continue;
             for (PacketEntity passenger : vehicle.passengers) {
                 tickPassenger(vehicle, passenger);
             }
