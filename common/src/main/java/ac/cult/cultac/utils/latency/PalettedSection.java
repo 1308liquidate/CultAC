@@ -18,6 +18,17 @@ import java.util.function.IntUnaryOperator;
 /** Connection-owned model IDs; shared sections are copied before mutation. */
 public final class PalettedSection {
     private static final int BLOCK_STATES = DataTables.defaults().registry().stateCount();
+    private static final int[] VALUES_PER_WORD = new int[33];
+    private static final long[] WORD_RECIPROCALS = new long[33];
+
+    static {
+        for (int bits = 1; bits <= 32; bits++) {
+            int perWord = 64 / bits;
+            VALUES_PER_WORD[bits] = perWord;
+            WORD_RECIPROCALS[bits] = ((1L << 32) + perWord - 1) / perWord;
+        }
+    }
+
     private final int size, minimumBits, maximumLocalBits, registrySize;
     private int bits, paletteSize;
     private int[] palette;
@@ -172,8 +183,13 @@ public final class PalettedSection {
 
     private int codeAt(int index) {
         if (bits == 0) return 0;
-        int perWord = 64 / bits;
-        return (int) (words[index / perWord] >>> ((index % perWord) * bits) & ((1L << bits) - 1));
+        int word = wordIndex(index, bits);
+        return (int) (words[word] >>> ((index - word * VALUES_PER_WORD[bits]) * bits) & ((1L << bits) - 1));
+    }
+
+    /** {@code index / (64 / bits)}, exact for {@code 0 <= index < 65536}. */
+    static int wordIndex(int index, int bits) {
+        return (int) (index * WORD_RECIPROCALS[bits] >>> 32);
     }
 
     private void setCode(int index, int code) {
