@@ -1,6 +1,8 @@
 package ac.cult.cultac.utils.nmsutil;
 
 import ac.cult.blocksim.engine.SimItemStack;
+import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaFallDistance;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -51,7 +53,17 @@ public final class RiptideUtil {
         if (player.compensatedEntities.getSelf().inVehicle()) {
             return false;
         }
-        return isTouchingWater(player) || player.compensatedWorld.isRaining;
+        return wasTouchingWater(player) || player.compensatedWorld.isRaining;
+    }
+
+    /**
+     * Entity#wasTouchingWater as TridentItem#releaseUsing reads it: Minecraft#handleKeybinds runs before the tick's
+     * baseTick, so the flag is the one the last move left after LivingEntity#checkFallDamage refreshed fluids.
+     */
+    private static boolean wasTouchingWater(CultPlayer player) {
+        PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
+        JavaFallDistance.Moved moved = last == null ? null : last.getJavaCommittedMove();
+        return moved != null ? moved.touchingWater().determineOptimistically() : isTouchingWater(player);
     }
 
     public static boolean isTouchingWater(CultPlayer player) {

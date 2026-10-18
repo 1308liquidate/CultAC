@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
@@ -81,7 +82,8 @@ class StuckStatesFromCurrentWorldTest {
         when(last.getValidMovements()).thenReturn(valid);
         when(last.getLegacyLikePredictionVector()).thenReturn(MOVEMENT);
         when(last.getAcceptedClosestToTarget()).thenReturn(MOVEMENT);
-        when(last.getJavaCommittedMove()).thenReturn(new JavaFallDistance.Moved(0.0D, MOVEMENT, false));
+        when(last.getJavaCommittedMove())
+                .thenReturn(new JavaFallDistance.Moved(0.0D, MOVEMENT, false, DesyncStatus.FALSE));
         return last;
     }
 

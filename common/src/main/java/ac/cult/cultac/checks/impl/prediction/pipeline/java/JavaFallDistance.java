@@ -3,6 +3,7 @@ package ac.cult.cultac.checks.impl.prediction.pipeline.java;
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.BlockTags;
 import ac.cult.blocksim.data.FluidTags;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
@@ -56,7 +57,7 @@ public final class JavaFallDistance {
         return reset ? 0.0 : distance;
     }
 
-    public record Moved(double fallDistance, Vec3 movement, boolean landed) {}
+    public record Moved(double fallDistance, Vec3 movement, boolean landed, DesyncStatus touchingWater) {}
 
     public static Moved afterCollision(CultPlayer player, PredictionResult result, Vec3 acceptedDiff) {
         SimulationContext context = result.getSimulationContext();
@@ -88,7 +89,11 @@ public final class JavaFallDistance {
                 actor.riding != null,
                 waterBelow,
                 actor.isStrider() && context.getWorldData().getInLava().determinePessimistically());
-        return new Moved(storedDistance(context.getVersion(), distance), movement, landed);
+        return new Moved(
+                storedDistance(context.getVersion(), distance),
+                movement,
+                landed,
+                water ? DesyncStatus.TRUE : context.getWorldData().getInWater());
     }
 
     static double afterMoveForActor(
