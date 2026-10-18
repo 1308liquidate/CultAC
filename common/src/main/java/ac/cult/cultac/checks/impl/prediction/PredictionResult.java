@@ -2,6 +2,7 @@ package ac.cult.cultac.checks.impl.prediction;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.impl.prediction.checks.HorizontalAnalyzer;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaFallDistance;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfiles;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.UncertaintyHelper;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.ValidMovements;
@@ -32,6 +33,11 @@ public class PredictionResult {
     // Computed upon compute()
     CollideAxisData collideAxisData;
     ValidMovements validMovements;
+
+    /** The move whose exact-effects inside-block pass built the committed Java carry; null before that commit. */
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    JavaFallDistance.Moved javaCommittedMove;
 
     List<Flag> flags = List.of();
     double flagSeverity = 0; // Cache for performance and to allow exempting

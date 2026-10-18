@@ -128,6 +128,7 @@ public final class JavaMovementEngine implements MovementEngine {
             NextTickVelocityDeriver.Scratch scratch) {
         if (contextUsesExactEffects(result.getSimulationContext())) {
             var moved = JavaFallDistance.afterCollision(player, result, acceptedDiff);
+            result.setJavaCommittedMove(moved);
             Set<Vec3> velocities = NextTickVelocityDeriver.beforeBlockEffects(
                     player, result, lastPrediction, moved.movement(), scratch);
             JavaInsideBlockEffects.Scan scan = JavaInsideBlockEffects.scan(player, result, moved.movement());
@@ -172,6 +173,30 @@ public final class JavaMovementEngine implements MovementEngine {
                 JavaFallDistance.commit(player, result, acceptedDiff),
                 NextTickVelocityDeriver.findVelocitiesForNextTick(
                         player, result, lastPrediction, acceptedDiff, scratch));
+    }
+
+    /**
+     * {@code carry} plus, for each state, the stuck state that {@code last}'s move resolves against the current
+     * world: LivingEntity#aiStep's applyEffectsFromBlocks sets Entity#stuckSpeedMultiplier from the world the client
+     * has when it ends that tick, which can hold a block update the model applies only after it.
+     */
+    public static JavaPredictionCarry withStuckStatesFromCurrentWorld(
+            CultPlayer player, PredictionResult last, JavaPredictionCarry carry) {
+        JavaFallDistance.Moved moved = last.getJavaCommittedMove();
+        if (moved == null) return carry;
+        JavaInsideBlockEffects.Scan scan = JavaInsideBlockEffects.scan(player, last, moved.movement());
+        if (scan == null) return carry;
+        List<JavaPredictionCarry.State> states = new ArrayList<>(carry.states());
+        for (JavaPredictionCarry.State state : carry.states()) {
+            var effects = JavaInsideBlockEffects.resolve(
+                    player, last, scan, moved.fallDistance(), state.velocity(), moved.landed());
+            if (effects.stuckSpeed() == null || effects.stuckSpeed().equals(state.stuckSpeed())) continue;
+            var stuck = new JavaPredictionCarry.State(state.velocity(), effects.fallDistance(), effects.stuckSpeed());
+            if (!states.contains(stuck)) states.add(stuck);
+        }
+        return states.size() == carry.states().size()
+                ? carry
+                : new JavaPredictionCarry(carry.actor(), carry.fallDistance(), states);
     }
 
     private static JavaInsideBlockEffects.State afterActorTick(

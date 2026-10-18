@@ -34,6 +34,7 @@ import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoFallPseudo;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngines;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaPredictionCarry;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfile;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfiles;
 import ac.cult.cultac.checks.impl.prediction.stage.MovementModifiers;
@@ -121,6 +122,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     SimpleCollisionBox pushesWhileLoadingLevel = null;
     int ticksWhileLoadingLevel = 0;
     PredictionCarry profileCarry;
+    /** The carry a stuck-speed block changed on along its move, re-resolved once the world holds the change. */
+    @Nullable
+    private JavaPredictionCarry carryWithChangedStuckBlock;
+
     private boolean bedrockSleepingStateObserved;
     private TeleportData bedrockTeleport;
     private PredictionSetbackState activeBedrockSetbackState;
@@ -1619,10 +1624,18 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                         == (currentPredictionVehicle() == null
                                 ? player.compensatedEntities.getSelf()
                                 : currentPredictionVehicle())) {
+            JavaPredictionCarry carried = carry;
+            if (carried == this.carryWithChangedStuckBlock && lastPrediction != null) {
+                carried = JavaMovementEngine.withStuckStatesFromCurrentWorld(player, lastPrediction, carried);
+                if (!testing) {
+                    this.profileCarry = carried;
+                    this.carryWithChangedStuckBlock = null;
+                }
+            }
             List<SimulationContext> contexts = new ArrayList<>();
             // Every state's context is built from the same inputs before the state is applied to it.
             CarryWorld world = null;
-            for (var state : carry.states()) {
+            for (var state : carried.states()) {
                 SimulationContext context = this.createSimulationContext(
                         player,
                         lastPrediction,
@@ -1638,7 +1651,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                         false,
                         this.currentPredictionVehicle(),
                         world);
-                if (world == null && carry.states().size() > 1) world = CarryWorld.of(context);
+                if (world == null && carried.states().size() > 1) world = CarryWorld.of(context);
                 context.setProfileCarry(new ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaPredictionCarry(
                         carry.actor(), state.fallDistance(), List.of(state)));
                 Vec3 stuck =
@@ -1914,6 +1927,12 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                                     .getWorldData()
                                     .setStuckSpeed(new StuckSpeedData(null, stuckSpeed));
                             this.validPlayerStartingVels.add(Vec3.ZERO);
+                            if (JavaMovementEngine.contextUsesExactEffects(context)
+                                    && !this.player.isBedrockMovement()
+                                    && this.profileCarry instanceof JavaPredictionCarry carry
+                                    && carry.actor() == this.player.compensatedEntities.getSelf()) {
+                                this.carryWithChangedStuckBlock = carry;
+                            }
                         }
                     }
                 }
