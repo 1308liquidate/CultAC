@@ -38,6 +38,8 @@ public class CompensatedWorld {
     private static final int MAX_REINTERN_CONTENT_COMPARISONS_PER_TICK = 10;
     private static final int MAX_REINTERN_HASH_CALCULATIONS_PER_TICK = 50;
     private static final int MAX_REINTERN_ATTEMPTED_COMPARISONS_PER_TICK = 100;
+    private static final Comparator<PendingReinternCandidate> BY_LAST_MUTATED =
+            Comparator.comparingLong(PendingReinternCandidate::lastMutatedNanos);
     private static final byte RECENT_FLUID_WATER = 1;
     private static final byte RECENT_FLUID_LAVA = 1 << 1;
     public final CultPlayer player;
@@ -60,6 +62,9 @@ public class CompensatedWorld {
     private final Long2IntOpenHashMap recentClientFluidChanges = new Long2IntOpenHashMap();
     private final Long2ByteOpenHashMap recentClientFluidChangeKinds = new Long2ByteOpenHashMap();
     private final Map<PendingReinternSection, PendingReinternState> pendingReinternSections = new LinkedHashMap<>();
+    /** One tick end's reintern candidates, empty outside processPendingReinterns; owned by the packet thread. */
+    private final List<PendingReinternCandidate> reinternCandidates = new ArrayList<>();
+
     private final SectionPoolLeaseTracker sectionPoolLeases = new SectionPoolLeaseTracker();
     // 1.17 with datapacks, and 1.18, have negative world offset values
     private int minHeight = 0;
@@ -1065,11 +1070,7 @@ public class CompensatedWorld {
         if (pendingReinternSections.isEmpty()) return;
 
         long now = System.nanoTime();
-        SectionPool.ComparisonBudget comparisonBudget = SectionPool.ComparisonBudget.limited(
-                MAX_REINTERN_CONTENT_COMPARISONS_PER_TICK,
-                MAX_REINTERN_HASH_CALCULATIONS_PER_TICK,
-                MAX_REINTERN_ATTEMPTED_COMPARISONS_PER_TICK);
-        List<PendingReinternCandidate> candidates = new ArrayList<>(pendingReinternSections.size());
+        CachedSection oldest = null;
         Iterator<Map.Entry<PendingReinternSection, PendingReinternState>> iterator =
                 pendingReinternSections.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -1088,31 +1089,50 @@ public class CompensatedWorld {
                 continue;
             }
 
-            candidates.add(new PendingReinternCandidate(key, state, column, section, section.getLastMutatedNanos()));
+            if (oldest == null || section.getLastMutatedNanos() < oldest.getLastMutatedNanos()) oldest = section;
         }
+        // Candidates run oldest write first and stop at the first unstable one.
+        if (oldest == null || !SectionPool.isStableForReintern(oldest, now)) return;
 
-        candidates.sort(Comparator.comparingLong(PendingReinternCandidate::lastMutatedNanos));
-        for (PendingReinternCandidate candidate : candidates) {
-            CachedSection section = candidate.section();
-            if (!SectionPool.isStableForReintern(section, now)) {
-                break;
+        SectionPool.ComparisonBudget comparisonBudget = SectionPool.ComparisonBudget.limited(
+                MAX_REINTERN_CONTENT_COMPARISONS_PER_TICK,
+                MAX_REINTERN_HASH_CALCULATIONS_PER_TICK,
+                MAX_REINTERN_ATTEMPTED_COMPARISONS_PER_TICK);
+        List<PendingReinternCandidate> candidates = reinternCandidates;
+        try {
+            for (Map.Entry<PendingReinternSection, PendingReinternState> entry : pendingReinternSections.entrySet()) {
+                PendingReinternSection key = entry.getKey();
+                PendingReinternState state = entry.getValue();
+                CachedSection section = state.section();
+                candidates.add(new PendingReinternCandidate(
+                        key, state, getChunk(key.chunkX, key.chunkZ), section, section.getLastMutatedNanos()));
             }
 
-            String dimension = dimensionForChunk(candidate.key().chunkX, candidate.key().chunkZ);
-            SectionPool pool = SectionPool.forChunk(
-                    dimension, candidate.key().chunkX, candidate.key().sectionIndex, candidate.key().chunkZ);
-            SectionPool.ReinternResult result =
-                    pool.tryReinternRetained(section, candidate.state().nextComparisonIndex(), comparisonBudget);
-            if (!result.complete()) {
-                candidate.state().nextComparisonIndex = result.nextComparisonIndex();
-                break;
-            }
+            candidates.sort(BY_LAST_MUTATED);
+            for (PendingReinternCandidate candidate : candidates) {
+                CachedSection section = candidate.section();
+                if (!SectionPool.isStableForReintern(section, now)) {
+                    break;
+                }
 
-            CachedSection reinterned = result.section();
-            if (reinterned != section) {
-                candidate.column().setSection(candidate.key().sectionIndex, reinterned);
+                String dimension = dimensionForChunk(candidate.key().chunkX, candidate.key().chunkZ);
+                SectionPool pool = SectionPool.forChunk(
+                        dimension, candidate.key().chunkX, candidate.key().sectionIndex, candidate.key().chunkZ);
+                SectionPool.ReinternResult result =
+                        pool.tryReinternRetained(section, candidate.state().nextComparisonIndex(), comparisonBudget);
+                if (!result.complete()) {
+                    candidate.state().nextComparisonIndex = result.nextComparisonIndex();
+                    break;
+                }
+
+                CachedSection reinterned = result.section();
+                if (reinterned != section) {
+                    candidate.column().setSection(candidate.key().sectionIndex, reinterned);
+                }
+                pendingReinternSections.remove(candidate.key());
             }
-            pendingReinternSections.remove(candidate.key());
+        } finally {
+            candidates.clear();
         }
     }
 
