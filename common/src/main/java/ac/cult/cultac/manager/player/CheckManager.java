@@ -144,6 +144,8 @@ public class CheckManager {
     private final PostPredictionListener[] predictionListeners;
     private final PostPredictionListener[] pseudoListeners;
     private final Map<Class<?>, CheckListener> listenersByClass;
+    private final PacketWorldBorder worldBorder;
+    private final SetbackBlocker setbackBlocker;
 
     List<BlockPlace> placesToCheck = new EvictingQueue<>(20);
 
@@ -204,6 +206,8 @@ public class CheckManager {
                 .putAll(pseudoCheck)
                 .build();
         listenersByClass = new IdentityHashMap<>(allCheckListeners);
+        worldBorder = getListener(PacketWorldBorder.class);
+        setbackBlocker = getListener(SetbackBlocker.class);
 
         List<CheckListener> positionUpdates = new ArrayList<>();
         for (var checks : List.of(prePredictionChecks, positionCheck, packetChecks)) {
@@ -1087,6 +1091,16 @@ public class CheckManager {
 
     public void queuePostFlyingBlockBreak(final BlockBreak blockBreak) {
         breaksToCheck.add(blockBreak);
+    }
+
+    /** {@code getListener(PacketWorldBorder.class)}, read on every collision scan. */
+    public PacketWorldBorder getWorldBorder() {
+        return worldBorder;
+    }
+
+    /** {@code getListener(SetbackBlocker.class)}, read on every Java movement packet. */
+    public SetbackBlocker getSetbackBlocker() {
+        return setbackBlocker;
     }
 
     private ExplosionHandler explosionHandlerCache;

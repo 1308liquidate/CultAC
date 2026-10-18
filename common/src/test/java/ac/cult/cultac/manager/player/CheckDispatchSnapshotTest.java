@@ -2,16 +2,19 @@ package ac.cult.cultac.manager.player;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
+import ac.cult.cultac.checks.impl.movement.SetbackBlocker;
 import ac.cult.cultac.checks.type.BlockPlaceCheck;
 import ac.cult.cultac.checks.type.CheckListener;
 import ac.cult.cultac.checks.type.PositionListener;
 import ac.cult.cultac.checks.type.PostPredictionListener;
 import ac.cult.cultac.checks.type.RotationListener;
+import ac.cult.cultac.events.packets.PacketWorldBorder;
 import ac.cult.cultac.network.TestUsers;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.player.CultPlayer;
@@ -79,6 +82,10 @@ class CheckDispatchSnapshotTest {
             }
             assertNull(manager.getListener(Unregistered.class));
             assertNull(manager.getListener(null));
+            assertNotNull(manager.getWorldBorder());
+            assertSame(manager.getListener(PacketWorldBorder.class), manager.getWorldBorder());
+            assertNotNull(manager.getSetbackBlocker());
+            assertSame(manager.getListener(SetbackBlocker.class), manager.getSetbackBlocker());
         } catch (ReflectiveOperationException exception) {
             throw new AssertionError(exception);
         }

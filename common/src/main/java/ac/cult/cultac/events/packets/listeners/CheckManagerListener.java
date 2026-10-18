@@ -624,7 +624,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
 
         dispatchReceiveHandlers(event, player);
-        player.checkManager.getListener(SetbackBlocker.class).onJavaMovePlayerAfterChecks(event);
+        player.checkManager.getSetbackBlocker().onJavaMovePlayerAfterChecks(event);
         clearTransientPacketState(player);
     }
 

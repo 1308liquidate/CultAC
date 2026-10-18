@@ -322,7 +322,7 @@ public class Collisions {
         // Both 26.2 and 26.3 still add the border in the Entity overload of
         // collectCollidersIgnoringWorldBorder. Only its CollisionContext
         // overload omits it; ordinary entity travel uses the former.
-        final PacketWorldBorder border = player.checkManager.getListener(PacketWorldBorder.class);
+        final PacketWorldBorder border = player.checkManager.getWorldBorder();
         double centerX = border.getCenterX();
         double centerZ = border.getCenterZ();
 
