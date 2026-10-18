@@ -189,6 +189,21 @@ bukkit {
             default = Permission.Default.OP
         }
 
+        register("cult.portal.admin") {
+            description = "Reported to the cloud portal as an admin of this server's organization"
+            default = Permission.Default.FALSE
+        }
+
+        register("cult.portal.moderator") {
+            description = "Reported to the cloud portal as a moderator of this server's organization"
+            default = Permission.Default.FALSE
+        }
+
+        register("cult.portal.viewer") {
+            description = "Reported to the cloud portal as a viewer of this server's organization"
+            default = Permission.Default.FALSE
+        }
+
     }
 }
 

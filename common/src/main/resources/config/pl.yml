@@ -273,6 +273,10 @@ cloud:
   # When true, sends CPU and allocation stack samples of this server to the intake service: short profiles it asks
   # for, recorded off the main thread. Off by default; CULTAC_CLOUD_PERF (true/1/yes, false/0/no) wins when set.
   perf: false
+  # When true, sends the cloud at cloud.url the UUID, name and portal role (viewer, moderator or admin) of players
+  # holding cult.portal.viewer, .moderator or .admin, and of synced players who lost them, so the cloud portal lists
+  # them in this server's organization. Off by default; CULTAC_CLOUD_TEAM_SYNC (true/1/yes, false/0/no) wins when set.
+  team-sync: false
 
 # Velocity only: numbered builds installed with /cult update <build>, /cult update latest [branch] and listed with
 # /cult update builds [branch]. Each setting's CULTAC_UPDATE_* environment variable wins when set and not blank.

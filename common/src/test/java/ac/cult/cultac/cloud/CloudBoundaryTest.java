@@ -38,6 +38,8 @@ class CloudBoundaryTest {
             Map.entry("ac/cult/cultac/command/commands/LabelWizard.java", "cloud command: the label menu"),
             Map.entry("ac/cult/cultac/command/commands/MojangProfiles.java", "cloud command: the label service"),
             Map.entry("ac/cult/cultac/command/commands/TargetLookup.java", "cloud command: the label service"),
+            Map.entry("ac/cult/cultac/manager/portal/PortalSyncClient.java", "team sync: the cloud's HTTP client"),
+            Map.entry("ac/cult/cultac/manager/portal/PortalSyncService.java", "team sync: the cloud's url and key"),
             Map.entry(
                     "ac/cult/cultac/platform/bukkit/CultACBukkitLoaderPlugin.java",
                     "hands the server's cloud glue to CloudModule"),

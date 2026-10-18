@@ -138,8 +138,11 @@ public final class VelocityPlatform implements PlatformLoader, AutoCloseable {
 
     public void load() {
         if (loaded) return;
-        CultAPI.INSTANCE.load(this, (StartableInitable) this::startBedrockBridge, (StartableInitable)
-                () -> CheckPermissions.register(permissions));
+        CultAPI.INSTANCE.load(
+                this,
+                (StartableInitable) this::startBedrockBridge,
+                (StartableInitable) () -> CheckPermissions.register(permissions),
+                new VelocityLuckPermsInitable(proxy));
         loaded = true;
         VelocityBridge.install(bridge);
     }

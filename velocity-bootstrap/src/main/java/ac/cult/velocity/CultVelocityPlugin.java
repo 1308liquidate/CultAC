@@ -46,7 +46,8 @@ import org.slf4j.Logger;
             @Dependency(id = "geyser", optional = true),
             @Dependency(id = "floodgate", optional = true),
             @Dependency(id = "viaversion", optional = true),
-            @Dependency(id = "viabackwards", optional = true)
+            @Dependency(id = "viabackwards", optional = true),
+            @Dependency(id = "luckperms", optional = true)
         })
 public final class CultVelocityPlugin {
     private static final Component REFUSED = Component.text(RuntimeInstance.CONNECTION_REFUSED);

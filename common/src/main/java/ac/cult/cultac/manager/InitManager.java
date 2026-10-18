@@ -59,6 +59,7 @@ public class InitManager {
                 .add(CultAPI.INSTANCE.getDiscordManager())
                 .add(CultAPI.INSTANCE.getSpectateManager())
                 .add(CultAPI.INSTANCE.getDataStoreLifecycle())
+                .add(CultAPI.INSTANCE.getPortalSync())
                 .add(new JavaVersion())
                 .add(new ViaVersion())
                 .add(new NetworkManagerStart())
@@ -73,6 +74,7 @@ public class InitManager {
                 .add(() -> CultAPI.INSTANCE.getEventBus().unregisterAllListeners(CultAPI.INSTANCE.getGrimPlugin()))
                 .add(ac.cult.cultac.protocol.ProtocolCodecs::close)
                 .add(CultAPI.INSTANCE.getDataStoreLifecycle())
+                .add(CultAPI.INSTANCE.getPortalSync())
                 .add(CloudModule::shutdown)
                 .addAll(extraStoppableInitables)
                 .build();

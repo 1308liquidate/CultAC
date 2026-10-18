@@ -251,6 +251,7 @@ class ObserveOnlyCallSiteTest {
             companion/api/ApiModule.java#disable() shutdown
             companion/bridge/BridgeModule.java#disable() cancel
             companion/command/CommandModule.java#disable() cancel
+            manager/portal/PortalSyncService.java#stop() cancel
             platform/bukkit/scheduler/bukkit/BukkitTaskHandle.java#cancel() cancel
             platform/bukkit/scheduler/folia/FoliaTaskHandle.java#cancel() cancel
             platform/velocity/VelocityScheduler.java#entity(CultEntity,GrimPlugin,Runnable,Runnable,long,long) cancel x2

@@ -1,5 +1,6 @@
 package ac.cult.cultac.cloud.labels;
 
+import ac.cult.cultac.cloud.CloudHttp;
 import ac.cult.cultac.cloud.CloudService;
 import ac.cult.cultac.cloud.CloudSettings;
 import ac.cult.cultac.cloud.transport.CloudConnection.CappedBody;
@@ -25,7 +26,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
@@ -51,7 +51,6 @@ public final class LabelClient {
             "Your Minecraft account isn't a moderator of this server's cloud organization.";
     public static final String NOT_ALLOWED = "This server's key isn't allowed to label.";
 
-    static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
     private static final int MAX_ERROR = 160;
     /** The most bytes of an answer read, whatever its status; past it the call fails. */
@@ -65,16 +64,6 @@ public final class LabelClient {
 
     private static final Pattern ID =
             Pattern.compile("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
-
-    /** Built on the first call, so a server that never labels starts no HTTP client. */
-    private static final class Shared {
-        static final Executor CALLS = Executors.newThreadPerTaskExecutor(
-                Thread.ofVirtual().name("cult-cloud-label-", 0).factory());
-        static final HttpClient HTTP = HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
-                .executor(CALLS)
-                .build();
-    }
 
     /**
      * A finished call: the HTTP status, the body, and what masks the caller's key in text read from the body before it
@@ -112,7 +101,7 @@ public final class LabelClient {
     public static @Nullable LabelClient configured() {
         CloudSettings settings = CloudService.settings();
         if (settings.url().isEmpty() || settings.apiKey().isEmpty()) return null;
-        return new LabelClient(settings.url(), settings.apiKey(), Shared.HTTP, Shared.CALLS);
+        return new LabelClient(settings.url(), settings.apiKey(), CloudHttp.HTTP, CloudHttp.CALLS);
     }
 
     public CompletableFuture<Reply> post(JsonObject label) {

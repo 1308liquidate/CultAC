@@ -38,6 +38,9 @@ While the upload is on, each player's session is streamed from the moment they r
   the bytes CultAC's own code allocated by class, garbage-collection pauses, tick times, the online player count, and
   the JVM's name, version and flags, and on Linux the CPU time of the process and of the JVM's own GC, compiler, VM
   and JFR threads, read from `/proc`. It is recorded off the main thread and skipped while the server lags.
+- **Staff portal roles, only with `cloud.team-sync`.** Off by default. When on, the UUID, name and portal role of
+  players holding a `cult.portal.*` permission, and of synced players who lost it, are sent to the intake service so
+  its portal lists them in your organization. See [Team sync](#team-sync).
 
 Each connection also announces the plugin's name, version and build commit, whether it runs observe-only or
 enforcing, and a SHA-256 hash of the parsed config files with `bridge.secret` and `cloud.api-key` left out. The hash
@@ -108,6 +111,7 @@ The `cloud:` block in `plugins/CultAC/config.yml` (`plugins/cultac/config.yml` o
 | `cloud.server-id` | `""` | Each upload socket's server id. Empty picks the platform's default, below. |
 | `cloud.proxy-id` | `""` | On Velocity, this proxy's name. On Paper, this server's own name. |
 | `cloud.perf` | `false` | Lets the intake service ask for performance profiles, below. `CULTAC_CLOUD_PERF` (`true`/`1`/`yes`, `false`/`0`/`no`) overrides it when set. |
+| `cloud.team-sync` | `false` | Reports staff portal roles to the intake service, below. `CULTAC_CLOUD_TEAM_SYNC` (`true`/`1`/`yes`, `false`/`0`/`no`) overrides it when set. |
 
 Empty means off: the upload stays off while `url` or `api-key` is empty. It also stays off, with one warning, while
 `proxy-id` is empty on Paper, or on Velocity while `server-id` uses `{proxy}`, and while `api-key` holds anything but
@@ -143,6 +147,30 @@ Every writer sharing one API key needs distinct ids:
   one; the older logs a warning and tries again a minute later, so a duplicate `proxy-id` shows as a slow flap.
 - Upload from the proxy or from its backends, not both. A backend that uploads on its own while its proxy also uploads
   sends every player twice.
+
+### Team sync
+
+With `cloud.team-sync: true`, players holding `cult.portal.viewer`, `cult.portal.moderator` or `cult.portal.admin` are
+reported to the intake service (`/api/v1/team/sync` at `cloud.url`, with `cloud.api-key` in the `Authorization`
+header) with the highest role they hold. The service's organization settings decide what a report does: it makes the
+player's Minecraft account a member of your organization in the portal with that role, or suggests it for an owner's
+approval; an admin role always waits for an owner. The nodes default to false, so operators do not get them
+implicitly, but a LuckPerms `*` grants admin.
+
+- A player still online two minutes after joining who holds a node is reported.
+- With LuckPerms, a permission change for that player reports the new role when it differs, and none once every node
+  is gone; every 6 hours CultAC asks which accounts the service manages and reports the role LuckPerms stores for
+  those not online. Without LuckPerms there is no offline sweep, and the service removes members not reported for 30
+  days.
+- Only version-4 (Mojang) UUIDs are reported, at most 100 players in one call every 30 seconds, never from the main
+  thread or a connection's event loop. When the service answers that sync is off or paused, or refuses the key,
+  CultAC makes no calls for 6 hours.
+- It needs the upload configured: nothing is sent while the upload is off (`url`, `api-key` or a required `proxy-id`
+  missing). Observe-only does not change it.
+
+On Velocity the online check asks the proxy's permission provider (LuckPerms-Velocity answers it), and the LuckPerms
+change listener and offline sweep run when LuckPerms is installed on the proxy. On Paper they use Paper's permissions
+and LuckPerms the same way.
 
 ## Commands
 

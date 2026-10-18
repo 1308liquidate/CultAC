@@ -7,6 +7,7 @@ import ac.grim.grimac.api.config.ConfigManager;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * The anticheat's only way into the cloud upload. Until {@code cloud.url} or {@code cloud.api-key}, or
@@ -79,6 +80,11 @@ public final class CloudModule {
     public static void superseded(String drainSuffix) {
         superseded = true;
         if (loaded) CloudService.superseded(drainSuffix);
+    }
+
+    /** The upload's current settings; null until a config names the upload. Any thread. */
+    public static @Nullable CloudSettings settings() {
+        return loaded ? CloudService.settings() : null;
     }
 
     /** The upload's status, one line each. */
