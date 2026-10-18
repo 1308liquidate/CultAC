@@ -28,6 +28,7 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult.Flag;
 import ac.cult.cultac.checks.impl.prediction.PredictionSetbackState;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.SimulationContext.HardCollidingEntityCollision;
 import ac.cult.cultac.checks.impl.prediction.checks.PredCheckRunner;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoFallPseudo;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
@@ -40,6 +41,7 @@ import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CarriedPush;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CollisionModifier;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.ValidMovements;
+import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldStageBuilder;
 import ac.cult.cultac.checks.type.ClientTickEndListener;
 import ac.cult.cultac.checks.type.PositionListener;
@@ -610,6 +612,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 frame,
                 profile,
                 false,
+                null,
                 null);
         this.applyProfileCommit(
                 BedrockMovementEngine.INSTANCE.advancePassenger(this.player, this.profileCarry, context));
@@ -1555,6 +1558,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                                 ? player.compensatedEntities.getSelf()
                                 : currentPredictionVehicle())) {
             List<SimulationContext> contexts = new ArrayList<>();
+            // Every state's context is built from the same inputs before the state is applied to it.
+            CarryWorld world = null;
             for (var state : carry.states()) {
                 SimulationContext context = this.createSimulationContext(
                         player,
@@ -1568,7 +1573,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                         yRot,
                         authoredMovementFrame,
                         movementProfile,
-                        false);
+                        false,
+                        this.currentPredictionVehicle(),
+                        world);
+                if (world == null && carry.states().size() > 1) world = CarryWorld.of(context);
                 context.setProfileCarry(new ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaPredictionCarry(
                         carry.actor(), state.fallDistance(), List.of(state)));
                 Vec3 stuck =
@@ -1635,7 +1643,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 authoredMovementFrame,
                 movementProfile,
                 applyLastRequiredStuckSpeed,
-                this.currentPredictionVehicle());
+                this.currentPredictionVehicle(),
+                null);
     }
 
     /**
@@ -1669,7 +1678,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             AuthoredMovementFrame authoredMovementFrame,
             MovementProfile movementProfile,
             boolean applyLastRequiredStuckSpeed,
-            @Nullable PacketEntity riding) {
+            @Nullable PacketEntity riding,
+            @Nullable CarryWorld world) {
         Vec3 vehicleInputs = Float.floatToRawIntBits(player.boatData.vehicleHoriz) == 0
                         && Float.floatToRawIntBits(player.boatData.vehicleForward) == 0
                 ? Vec3.ZERO
@@ -1726,9 +1736,13 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         context.setProfileCarry(this.profileCarry);
         context.setBedrockTeleport(player.isBedrockMovement() ? this.bedrockTeleport : null);
         context = movementProfile.createContext(player, context, authoredMovementFrame);
-        MovementEngine engine = MovementEngines.requireForProfile(movementProfile);
-        context.setWorldData(
-                engine.buildWorld(this.worldStageBuilder, player, context, lastPrediction, contextLastOnGround));
+        if (world == null) {
+            MovementEngine engine = MovementEngines.requireForProfile(movementProfile);
+            context.setWorldData(
+                    engine.buildWorld(this.worldStageBuilder, player, context, lastPrediction, contextLastOnGround));
+        } else {
+            world.attachTo(context);
+        }
         if (applyLastRequiredStuckSpeed && lastPrediction != null) {
             Vec3 lastRequiredStuckSpeed = lastPrediction
                     .getSimulationContext()
@@ -1918,6 +1932,25 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     @Generated
     public void setLastOnGround(DesyncStatus lastOnGround) {
         this.lastOnGround = lastOnGround;
+    }
+
+    /** The world one carry state's context built, as it stood before that state was applied. */
+    private record CarryWorld(
+            WorldData world,
+            List<SimpleCollisionBox> entityCollisionBoxes,
+            List<HardCollidingEntityCollision> hardCollidingEntityCollisions) {
+        private static CarryWorld of(SimulationContext built) {
+            return new CarryWorld(
+                    built.getWorldData().copy(),
+                    built.getEntityCollisionBoxesForMovementTick(),
+                    built.getHardCollidingEntityCollisionsForMovementTick());
+        }
+
+        private void attachTo(SimulationContext context) {
+            context.setWorldData(world.copy());
+            context.cacheEntityCollisionBoxesForMovementTick(entityCollisionBoxes);
+            context.cacheHardCollidingEntityCollisionsForMovementTick(hardCollidingEntityCollisions);
+        }
     }
 
     private static final class CollisionProbeKey {

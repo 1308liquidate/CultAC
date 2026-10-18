@@ -65,6 +65,38 @@ public class WorldData {
     /** The x/z range of the pushes taken while the level loaded, carried into the first loaded travel; null if none. */
     SimpleCollisionBox loadingLevelPushes;
 
+    /** A shallow copy: carry contexts share its sub-objects and boxes, so none may be mutated in place. */
+    public WorldData copy() {
+        return new WorldData(
+                lastOnGround,
+                inWater,
+                inLava,
+                touchingLava,
+                inFlowingLiquid,
+                mightBeInBlock,
+                canJump,
+                canFluidHop,
+                canFloatWhileRidden,
+                couldFloatWhileRidden,
+                climbingAtStart,
+                climbing,
+                numColliding,
+                numCollidingTickingAfterPlayer,
+                numPushing,
+                numCarriedPushing,
+                carriedPush,
+                onBlock,
+                sneak,
+                bubbleColumn,
+                pistonPushes,
+                stuckSpeed,
+                honeySlide,
+                onHoneyBlock,
+                mainSupportingBlockPos,
+                fishingRodPulls,
+                loadingLevelPushes);
+    }
+
     public boolean mustBeInLiquid() {
         return inWater.determinePessimistically() || inLava.determinePessimistically();
     }
