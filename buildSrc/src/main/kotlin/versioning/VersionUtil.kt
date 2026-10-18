@@ -21,7 +21,7 @@ object VersionUtil {
         val commitHash = getGitCommitHash(project)
         val buildNumber = System.getenv("CULT_BUILD_NUMBER")?.trim()?.takeIf { it.matches(Regex("[0-9]+")) }
         if (buildNumber != null) {
-            val branch = sanitizeBranch(getGitBranch(project, true) ?: "unknown")
+            val branch = sanitizeBranch(buildChannel(project) ?: "unknown")
             return "$baseVersion-b$buildNumber-$branch-$commitHash"
         }
         val branch = getGitBranch(project)
@@ -38,6 +38,10 @@ object VersionUtil {
             modifiers?.let { append("+$it") }
         }
     }
+
+    /** The channel a numbered build is published under: CULT_BUILD_CHANNEL, else the git branch. */
+    fun buildChannel(project: Project): String? =
+        System.getenv("CULT_BUILD_CHANNEL")?.trim()?.takeIf { it.isNotEmpty() } ?: getGitBranch(project, true)
 
     fun getGitCommitHash(project: Project, full: Boolean = false): String {
         return try {

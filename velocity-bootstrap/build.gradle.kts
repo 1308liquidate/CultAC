@@ -23,7 +23,7 @@ dependencies {
 val bootstrapVersion = tasks.register("bootstrapVersion") {
     val output = layout.buildDirectory.file("generated/version/ac/cult/velocity/CultBuildVersion.java")
     val version = rootProject.version.toString()
-    val branch = rootProject.ext["git_branch"]?.toString() ?: ""
+    val branch = rootProject.ext["build_channel"]?.toString() ?: ""
     val repository = "${rootProject.ext["git_org"]}/${rootProject.ext["git_repo"]}"
     inputs.property("version", version)
     inputs.property("branch", branch)

@@ -4,7 +4,8 @@
  * Build Flags:
  * -Prelocate=false - Adds 'no_relocate' modifier
  * -Prelease=true   - Removes commit/modifiers for release build
- * CULT_BUILD_NUMBER - Numbered build: <base>-b<N>-<branch>-<commit>
+ * CULT_BUILD_NUMBER - Numbered build: <base>-b<N>-<channel>-<commit>
+ * CULT_BUILD_CHANNEL - The channel of a numbered build; the git branch when unset
  *
  * Logic in: buildSrc/versioning/BuildConfig.kt & VersionUtil.kt
  */
@@ -26,6 +27,7 @@ description = "Libre simulation anticheat with Java 26.3 client action simulatio
 
 ext["timestamp"] = System.currentTimeMillis().toString()
 ext["git_branch"] = VersionUtil.getGitBranch(project, true)
+ext["build_channel"] = VersionUtil.buildChannel(project)
 ext["git_commit"] = VersionUtil.getGitCommitHash(project, true)
 ext["git_org"] = System.getenv("CULT_GIT_ORG") ?: VersionUtil.getGitUser(project)
 ext["git_repo"] = System.getenv("CULT_GIT_REPO") ?: "CultAC"

@@ -1,16 +1,18 @@
 name: Numbered Builds
 
-# Every push to stable, experimental or development becomes build N, N being this workflow's run number: monotonic,
-# unique across branches, and kept by a re-run. With the signing key in the `builds` environment, build N is published
-# as release `build-N` with a signed manifest; `/cult update N` on a Velocity proxy installs it (README.md). Stable
-# builds are full releases and the newest is marked latest; experimental and development builds are prereleases.
+# Every push to main, stable, experimental or dev becomes build N, N being this workflow's run number: monotonic, unique
+# across branches, and kept by a re-run. With the signing key in the `builds` environment, build N is published as
+# release `build-N` with a signed manifest; `/cult update N` on a Velocity proxy installs it (README.md). Builds carry a
+# channel named after the branch, except that main and stable both publish as `stable`. Stable builds are full releases
+# and the newest is marked latest; experimental and dev builds are prereleases.
 
 on:
     push:
         branches:
+            - main
             - stable
             - experimental
-            - development
+            - dev
     workflow_dispatch:
 
 permissions:
@@ -24,6 +26,7 @@ jobs:
 
         env:
             CULT_BUILD_NUMBER: ${{ github.run_number }}
+            CULT_BUILD_CHANNEL: ${{ (github.ref_name == 'main' || github.ref_name == 'stable') && 'stable' || github.ref_name }}
             CULT_GIT_ORG: ${{ github.repository_owner }}
             CULT_GIT_REPO: ${{ github.event.repository.name }}
 
@@ -71,7 +74,7 @@ jobs:
     # holds CULTAC_SIGNING_KEY and admits those branches alone. Without the key the build stays an Actions artifact.
     publish:
         needs: build
-        if: github.ref == 'refs/heads/stable' || github.ref == 'refs/heads/experimental' || github.ref == 'refs/heads/development'
+        if: contains(fromJSON('["refs/heads/main", "refs/heads/stable", "refs/heads/experimental", "refs/heads/dev"]'), github.ref)
         runs-on: ubuntu-latest
         environment: builds
         permissions:
@@ -81,7 +84,7 @@ jobs:
 
         env:
             BUILD: ${{ github.run_number }}
-            BRANCH: ${{ github.ref_name }}
+            CHANNEL: ${{ (github.ref_name == 'main' || github.ref_name == 'stable') && 'stable' || github.ref_name }}
             COMMIT: ${{ github.sha }}
 
         steps:
@@ -126,7 +129,7 @@ jobs:
                   CULTAC_UPDATE_PUBKEY: ${{ vars.CULTAC_UPDATE_PUBKEY || 'MCowBQYDK2VwAyEAxE6sl2rSssawl6S3SA62aWafFKFfvnI5EAkzdQXvBOM=' }}
               run: |
                   java .github/scripts/BuildManifest.java \
-                    --build "$BUILD" --branch "$BRANCH" --commit "$COMMIT" \
+                    --build "$BUILD" --branch "$CHANNEL" --commit "$COMMIT" \
                     --velocity dist/cultac-velocity.jar --companion dist/cultac-companion.jar --out dist
 
             - name: Write the release notes
@@ -139,17 +142,17 @@ jobs:
                     --jq '.[] | select(.tag_name | test("^build-[0-9]+$")) | select(.name | test("^build-[0-9]+ [(][^ ]+ [0-9a-f]+[)]$"))
                           | [(.tag_name | ltrimstr("build-")), (.name | capture("^build-[0-9]+ [(](?<branch>[^ ]+) ").branch)] | @tsv' \
                     > builds.tsv
-                  # Numbers have gaps (other branches, failed or pruned runs): take the newest earlier build of this
-                  # branch whose tag this commit descends from.
+                  # Numbers have gaps (other channels, failed or pruned runs): take the newest earlier build of this
+                  # channel whose tag this commit descends from.
                   previous=""
-                  for candidate in $(awk -F'\t' -v branch="$BRANCH" -v build="$BUILD" '$2 == branch && $1 + 0 < build + 0 { print $1 }' builds.tsv | sort -rn); do
+                  for candidate in $(awk -F'\t' -v branch="$CHANNEL" -v build="$BUILD" '$2 == branch && $1 + 0 < build + 0 { print $1 }' builds.tsv | sort -rn); do
                     if git merge-base --is-ancestor "build-$candidate" "$COMMIT" 2>/dev/null; then
                       previous="$candidate"
                       break
                     fi
                   done
                   {
-                    echo "Build $BUILD of \`$BRANCH\` at $COMMIT."
+                    echo "Build $BUILD of the \`$CHANNEL\` channel (branch \`$GITHUB_REF_NAME\`) at $COMMIT."
                     echo
                     echo "Install it on a Velocity proxy with \`/cult update $BUILD\`."
                     echo
@@ -161,7 +164,7 @@ jobs:
                       changes=$(git log --no-merges --format='- %s (%h)' -n 100 "build-$previous..$COMMIT")
                       echo "${changes:-No new commits.}"
                     else
-                      echo "The first build of \`$BRANCH\`; its newest commits:"
+                      echo "The first build of \`$CHANNEL\`; its newest commits:"
                       echo
                       git log --no-merges --format='- %s (%h)' -n 20 "$COMMIT"
                     fi
@@ -176,7 +179,7 @@ jobs:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   set -euo pipefail
-                  if [ "$BRANCH" = stable ]; then
+                  if [ "$CHANNEL" = stable ]; then
                     channel=(--latest)
                   else
                     channel=(--prerelease --latest=false)
@@ -188,7 +191,7 @@ jobs:
                     dist/cultac-velocity.jar dist/cultac-companion.jar dist/cultac-bukkit.jar \
                     dist/manifest.json dist/manifest.json.sig \
                     --target "$COMMIT" \
-                    --title "build-$BUILD ($BRANCH ${COMMIT:0:7})" \
+                    --title "build-$BUILD ($CHANNEL ${COMMIT:0:7})" \
                     --notes-file notes.md \
                     "${channel[@]}"
                   echo "published=true" >> "$GITHUB_OUTPUT"

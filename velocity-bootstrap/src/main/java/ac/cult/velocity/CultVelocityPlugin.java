@@ -54,7 +54,7 @@ public final class CultVelocityPlugin {
     private static final Duration BOOT_UPDATE_LIMIT = Duration.ofSeconds(10);
 
     private static final String UPDATE_USAGE =
-            "Usage: /cult update <build> | latest [branch] | builds [branch] | <filename.jar>";
+            "Usage: /cult update <build> | latest [channel] | builds [channel] | <filename.jar>";
 
     private final ProxyServer proxy;
     private final Logger logger;
@@ -232,7 +232,7 @@ public final class CultVelocityPlugin {
     }
 
     /**
-     * {@code /cult update <build> | latest [branch] | builds [branch] | <filename.jar>}. A build install ends in one
+     * {@code /cult update <build> | latest [channel] | builds [channel] | <filename.jar>}. A build install ends in one
      * console line, also posted to the update webhook; the network work runs off the proxy's threads.
      */
     private void update(CommandSource source, String[] args) {
