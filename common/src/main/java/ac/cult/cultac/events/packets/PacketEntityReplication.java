@@ -851,9 +851,12 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         if (updatesBoost) {
             CultPlayer.TrackedTransaction proof = player.createTrackedTransactionPacketForDeferredSend();
             if (proof != null) {
+                int proven = proof.transaction();
                 player.latencyUtils.addRealTimeTask(
-                        proof.transaction(),
-                        () -> player.compensatedEntities.updateEntityMetadata(packet.id(), metadata));
+                        proven, () -> player.compensatedEntities.updateEntityMetadata(packet.id(), metadata, proven));
+                if (WatchableIndexUtil.getIndex(metadata, WatchableIndexUtil.ENTITY_POSE) != null) {
+                    retireSizeAt(packet.id(), proven);
+                }
                 // A preceding ping cannot prove receipt of the boost. Match the
                 // inventory path: send the proof after the complete outbound group.
                 event.getTasksAfterSend().add(() -> {
@@ -875,15 +878,22 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             // ordering proves the client processed the metadata packet.
             int transaction = player.sendTransactionAndGetId();
             if (transaction >= 0) {
+                // The ping leads the metadata, so the next one proves it.
+                int proven = transaction + 1;
                 player.latencyUtils.addRealTimeTask(
-                        transaction, () -> player.compensatedEntities.updateEntityMetadata(packet.id(), metadata));
-            } else {
-                player.latencyUtils.addRealTimeTaskNow(
-                        () -> player.compensatedEntities.updateEntityMetadata(packet.id(), metadata));
+                        transaction,
+                        () -> player.compensatedEntities.updateEntityMetadata(packet.id(), metadata, proven));
+                if (WatchableIndexUtil.getIndex(metadata, WatchableIndexUtil.ENTITY_POSE) != null) {
+                    retireSizeAt(packet.id(), proven);
+                }
+                return;
             }
-        } else {
-            player.latencyUtils.addRealTimeTaskNow(
-                    () -> player.compensatedEntities.updateEntityMetadata(packet.id(), metadata));
+        }
+        int proven = player.lastTransactionSent.get() + 1;
+        player.latencyUtils.addRealTimeTaskNow(
+                () -> player.compensatedEntities.updateEntityMetadata(packet.id(), metadata, proven));
+        if (WatchableIndexUtil.getIndex(metadata, WatchableIndexUtil.ENTITY_POSE) != null) {
+            retireSizeAt(packet.id(), proven);
         }
     }
 
@@ -937,26 +947,44 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         int entityID = packet.entityId();
         List<AttributeSnapshot> values = packet.attributes();
 
-        if (entityID == player.entityID || isDirectlyAffectingPlayer(player, entityID)) {
+        PacketEntity entity = player.compensatedEntities.getEntity(entityID);
+        boolean affectsPlayer = entityID == player.entityID || isDirectlyAffectingPlayer(player, entityID);
+        if (affectsPlayer) {
             CultPlayer.TrackedTransaction proof = player.appendTrailingProofTransaction(event);
-            if (proof == null) {
-                player.compensatedEntities.updateAttributes(entityID, values);
+            if (proof != null) {
+                // handleBundlePacket applies the attribute snapshot and its proof in one client task,
+                // before the next client tick. Keep an existing wire bundle rather than nesting one.
+                if (!event.isInsideBundle()) event.bundle();
+                int proven = proof.transaction();
+                player.latencyUtils.addRealTimeTask(
+                        proven, () -> player.compensatedEntities.updateAttributes(entityID, values, proven));
+                if (hasScale(values)) retireSizeAt(entityID, proven);
                 return;
             }
-            // handleBundlePacket applies the attribute snapshot and its proof in one client task,
-            // before the next client tick. Keep an existing wire bundle rather than nesting one.
-            if (!event.isInsideBundle()) event.bundle();
-            player.latencyUtils.addRealTimeTask(
-                    proof.transaction(), () -> player.compensatedEntities.updateAttributes(entityID, values));
-            return;
         }
-
-        PacketEntity entity = player.compensatedEntities.getEntity(entityID);
-        if (entity == null || PacketEntityUtil.isRideable(entity.type)) {
-            player.compensatedEntities.updateAttributes(entityID, values);
+        int proven = player.lastTransactionSent.get() + 1;
+        if (affectsPlayer || entity == null || PacketEntityUtil.isRideable(entity.type)) {
+            player.compensatedEntities.updateAttributes(entityID, values, proven);
         } else {
-            player.latencyUtils.addRealTimeTaskNow(() -> player.compensatedEntities.updateAttributes(entityID, values));
+            player.latencyUtils.addRealTimeTaskNow(
+                    () -> player.compensatedEntities.updateAttributes(entityID, values, proven));
         }
+        if (hasScale(values)) retireSizeAt(entityID, proven);
+    }
+
+    private static boolean hasScale(List<AttributeSnapshot> values) {
+        for (AttributeSnapshot snapshot : values) {
+            if (snapshot.attribute().equals("minecraft:scale")) return true;
+        }
+        return false;
+    }
+
+    // Once the client answers provenAt, entityID's size replacements proven by it are retired.
+    private void retireSizeAt(int entityID, int provenAt) {
+        player.latencyUtils.addRealTimeTask(provenAt, () -> {
+            PacketEntity entity = player.compensatedEntities.getEntity(entityID);
+            if (entity != null) entity.onSizeHandled(provenAt);
+        });
     }
 
     private void handleEntityEvent(PacketSendEvent<ClientboundEntityEvent> event, ClientboundEntityEvent packet) {
@@ -1865,7 +1893,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         int level = player.compensatedWorld.level();
         Runnable addTask = () -> {
             if (!player.isBedrockMovement() && level != player.compensatedWorld.level()) return;
-            player.compensatedEntities.addEntity(entityID, type, position, xRot, yRot, extraData);
+            int replayedProof = player.compensatedEntities.addEntity(entityID, type, position, xRot, yRot, extraData);
+            // A merged held update may carry a proof no retirement awaits.
+            if (replayedProof > player.lastTransactionReceived.get()) retireSizeAt(entityID, replayedProof);
             if (uuid != null
                     && player.compensatedEntities.getEntity(entityID)
                             instanceof ac.cult.cultac.utils.data.packetentity.PacketEntityPlayer remote) {

@@ -203,6 +203,20 @@ class JavaTravelAttributeTest {
     }
 
     @Test
+    void respawnWithoutKeptModifiersDropsScaleAndMovementSpeed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            attribute(f, "minecraft:scale", 1.0, 0.5);
+            attribute(f, "minecraft:movement_speed", 0.1F, -0.05);
+            respawn(f, ClientboundRespawn.KEEP_ATTRIBUTE_MODIFIERS);
+            assertEquals(1.5F, f.player.getScale());
+            assertEquals(0.1F - 0.05, f.player.compensatedEntities.getSelf().playerSpeed, 1.0E-6);
+            respawn(f, (byte) 0);
+            assertEquals(1.0F, f.player.getScale());
+            assertEquals(0.1F, f.player.compensatedEntities.getSelf().playerSpeed, 1.0E-6);
+        }
+    }
+
+    @Test
     void negativeGravityLiftsThePlayer() throws Exception {
         try (var f = new JavaTickFixture()) {
             attribute(f, "minecraft:gravity", 0.08, -0.12);

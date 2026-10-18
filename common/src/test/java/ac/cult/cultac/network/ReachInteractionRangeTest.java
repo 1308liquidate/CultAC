@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import ac.cult.blocksim.data.Components;
 import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.blocksim.entity.EntityTypes;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.impl.combat.EntityHitboxes;
@@ -18,39 +19,51 @@ import ac.cult.cultac.network.codec.ModelRegistryNamesState;
 import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.player.PlayerObserver;
 import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundExplode;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundTeleportEntity;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundUpdateAttributes;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSetCarriedItem;
 import ac.cult.cultac.protocol.value.AttributeModifier;
+import ac.cult.cultac.protocol.value.AttributeSnapshot;
+import ac.cult.cultac.protocol.value.EntityPose;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.protocol.value.PlayerSpawnInfo;
 import ac.cult.cultac.protocol.value.Vec3d;
+import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityPlayer;
 import ac.cult.cultac.utils.inventory.ItemUtil;
 import ac.cult.cultac.utils.latency.ClientComponentRegistries;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
+import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -60,6 +73,8 @@ class ReachInteractionRangeTest {
             new AttributeModifier("minecraft:creative_mode_entity_range", 2.0, AttributeModifier.Operation.ADD_VALUE);
     private static final String REACH = "{\"max_reach\":4.5,\"hitbox_margin\":0.125}";
     private static final String SPEAR = "{\"min_reach\":5,\"max_reach\":4,\"hitbox_margin\":1}";
+    private static final int MANNEQUIN =
+            EntityTypes.defaults().byKey("mannequin").id();
 
     @Test
     void attacksAreBoundedByTheEntityInteractionRangeAttribute() throws Exception {
@@ -163,7 +178,6 @@ class ReachInteractionRangeTest {
             setup.hold("{\"min_reach\":5,\"max_reach\":4,\"hitbox_margin\":1}");
             assertFalse(setup.attack(4.1));
             assertTrue(setup.attack(5.1));
-            assertTrue(setup.attack(3.3));
         }
     }
 
@@ -411,7 +425,7 @@ class ReachInteractionRangeTest {
     }
 
     @Test
-    void aMarginHitOnATargetMovingAwayIsJudgedAtItsFarthestProjection() throws Exception {
+    void aMarginOnlyHitIsJudgedAtTheFarthestCornerOfTheTargetBoxes() throws Exception {
         try (var setup = new Setup()) {
             setup.hold(0, "{\"max_reach\":4.5,\"hitbox_margin\":0.125}");
             setup.hold(1, "{\"min_reach\":2,\"max_reach\":4.5,\"hitbox_margin\":0.125}");
@@ -420,7 +434,170 @@ class ReachInteractionRangeTest {
             assertEquals(List.of(), setup.attackAheadSelecting(.4, 1.5, .6, 1));
             setup.selectSlot(0);
             setup.tickEnd();
-            assertEquals(List.of("PlayerReach"), setup.attackAheadSelecting(.4, 1.5, 0, 1));
+            assertEquals(List.of(), setup.attackAheadSelecting(.4, 1.5, 0, 1));
+        }
+    }
+
+    @Test
+    void aMarginHitOnATargetMovingAwayIsBoundedByItsNearestPointForTheMaximum() throws Exception {
+        try (var setup = new Setup()) {
+            setup.hold(0, "{\"max_reach\":3,\"hitbox_margin\":0.3}");
+            setup.rotate(0);
+            setup.tickEnd();
+            assertEquals(List.of(), setup.attackSelecting(new Vec3(.58, 0, 3.55), new Vec3(0, 0, .6), 0, 0));
+        }
+    }
+
+    @Test
+    void aCrouchingTargetBelowTheAttackerKeepsItsLegalMinimumReach() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackBelow(EntityPose.CROUCHING));
+        }
+    }
+
+    @Test
+    void aStandingTargetBelowTheAttackerHitTooCloseFlagsTheMinimumReach() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of("PlayerReach"), setup.attackBelow(EntityPose.STANDING));
+        }
+    }
+
+    @Test
+    void aStandingPoseTheClientMayNotHaveHandledKeepsTheCrouchingMinimumReach() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackBelowStandingUp(false));
+            assertEquals(List.of("PlayerReach"), setup.attackBelowStandingUp(true));
+        }
+    }
+
+    @Test
+    void aCrouchingMannequinBelowTheAttackerKeepsItsLegalMinimumReach() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackBelow(MANNEQUIN, EntityPose.CROUCHING));
+        }
+    }
+
+    @Test
+    void aStandingMannequinBelowTheAttackerHitTooCloseFlagsTheMinimumReach() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of("EntityReach"), setup.attackBelow(MANNEQUIN, EntityPose.STANDING));
+        }
+    }
+
+    @Test
+    void aScaleTheClientMayNotHaveHandledKeepsTheSmallerMinimumReach() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackBelowScaledUp(false));
+            assertEquals(List.of("PlayerReach"), setup.attackBelowScaledUp(true));
+        }
+    }
+
+    @Test
+    void anEarlierHorseFlagsPingKeepsALaterRideableScaleItCannotProve() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.horseScaledAfterFlags(false, 1));
+        }
+        try (var setup = new Setup()) {
+            assertEquals(List.of("EntityReach"), setup.horseScaledAfterFlags(true, 2));
+        }
+    }
+
+    @Test
+    void anEarlierBoostProofKeepsALaterRideableScaleItCannotProve() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.pigScaledAfterBoost(false, 1));
+        }
+        try (var setup = new Setup()) {
+            assertEquals(List.of("EntityReach"), setup.pigScaledAfterBoost(true, 2));
+        }
+    }
+
+    @Test
+    void aScaleHeldForAnUnansweredSpawnKeepsTheDefaultScaleUntilItsOwnProof() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.horseScaledBeforeSpawnAnswer(false, 2F, 1F, 2));
+        }
+        try (var setup = new Setup()) {
+            assertEquals(List.of("EntityReach"), setup.horseScaledBeforeSpawnAnswer(true, 2F, 2F, 2));
+        }
+    }
+
+    @Test
+    void scalesHeldForAnUnansweredSpawnKeepEveryIntermediateScale() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.horseScaledBeforeSpawnAnswer(false, 2F, .5F, .5, 2));
+        }
+        try (var setup = new Setup()) {
+            assertEquals(List.of("EntityReach"), setup.horseScaledBeforeSpawnAnswer(true, 2F, 2F, .5, 2));
+        }
+    }
+
+    @Test
+    void manyScalesHeldForAnUnansweredSpawnStayBoundedAndKeepTheSmallest() throws Exception {
+        double[] bases = {1.5, .5, 3, 2.5, 1.25, 4, 1.75, 3.5, 2};
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.horseScaledBeforeSpawnAnswer(false, 2F, .5F, bases));
+        }
+        try (var setup = new Setup()) {
+            assertEquals(List.of("EntityReach"), setup.horseScaledBeforeSpawnAnswer(true, 2F, 2F, bases));
+        }
+    }
+
+    @Test
+    void aScaleForTheLastOfManyUnansweredSpawnsIsHeld() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.horseScaledAfterManySpawns());
+        }
+    }
+
+    @Test
+    void attributesForManyIdsNeverSpawnedStayBounded() throws Exception {
+        try (var setup = new Setup()) {
+            setup.holdForUnspawnedIds();
+        }
+    }
+
+    @Test
+    void aHeldScaleMergedIntoALaterSizeNeutralProofRetiresAtThatProof() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of("EntityReach"), setup.horseScaledThenSpedBeforeSpawnAnswer(new double[] {2}, 1F));
+        }
+    }
+
+    @Test
+    void heldScalesMergedIntoALaterSizeNeutralProofKeepTheSmallestUntilIt() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of("EntityReach"), setup.horseScaledThenSpedBeforeSpawnAnswer(new double[] {.5, 2}, .5F));
+        }
+    }
+
+    @Test
+    void interleavedSizeUpdatesNeverBoundTheTargetAboveWhatTheClientMayShow() throws Exception {
+        try (var setup = new Setup()) {
+            setup.convergeThroughSizeUpdates();
+        }
+    }
+
+    @Test
+    void aScaleProvenWhileTheTargetWasTheVehicleLeavesNoSmallerAlternative() throws Exception {
+        try (var setup = new Setup()) {
+            List<String> flagged = setup.attackDismountedScaledHorse(
+                    horse -> assertEquals(2F, horse.leastScale()), horse -> assertEquals(2F, horse.leastScale()));
+            assertEquals(List.of("EntityReach"), flagged);
+        }
+    }
+
+    @Test
+    void aSmallTargetsUnhandledPosesKeepTheirLeastWidthAndHeightSeparately() throws Exception {
+        try (var setup = new Setup()) {
+            List<String> flagged = setup.attackSmallStanderPosedAsleep(target -> {
+                assertEquals(.12F, target.leastPoseWidth(), 1.0E-6F);
+                assertEquals(.2F, target.leastPoseHeight(), 1.0E-6F);
+            });
+            assertEquals(List.of(), flagged);
+            PacketEntityPlayer target = setup.answerPoses();
+            assertEquals(.2F, target.leastPoseWidth(), 1.0E-6F);
+            assertEquals(.2F, target.leastPoseHeight(), 1.0E-6F);
         }
     }
 
@@ -455,30 +632,6 @@ class ReachInteractionRangeTest {
             setup.tickEnd();
             assertEquals(
                     List.of("PlayerHitboxes"), setup.attackSelecting(new Vec3(1, 0, 2.3), new Vec3(0, 0, 0), 1, 0));
-        }
-    }
-
-    @Test
-    void aMarginHitOnAStillTargetIsJudgedByItsLeastProjection() throws Exception {
-        try (var setup = new Setup()) {
-            setup.hold(0, "{\"max_reach\":4.5,\"hitbox_margin\":0.125}");
-            setup.hold(1, "{\"min_reach\":3.6,\"max_reach\":4.5,\"hitbox_margin\":0.125}");
-            setup.rotate(0, -45);
-            setup.tickEnd();
-            assertEquals(
-                    List.of("PlayerReach"), setup.attackSelecting(new Vec3(.35, 1.5, 2.8), new Vec3(0, 0, 0), 1, -45));
-        }
-    }
-
-    @Test
-    void aMarginHitThroughATallTargetsFootIsJudgedByItsOwnProjection() throws Exception {
-        try (var setup = new Setup()) {
-            setup.hold(0, "{\"max_reach\":4.5,\"hitbox_margin\":0.125}");
-            setup.hold(1, "{\"min_reach\":3.5,\"max_reach\":4.5,\"hitbox_margin\":0.125}");
-            setup.rotate(0, -90);
-            setup.tickEnd();
-            assertEquals(
-                    List.of("PlayerReach"), setup.attackSelecting(new Vec3(.35, 3.62, 0), new Vec3(0, 0, 0), 1, -90));
         }
     }
 
@@ -861,6 +1014,407 @@ class ReachInteractionRangeTest {
             return attackAt(position, moved, () -> selectSlot(slot), () -> rotate(0, pitch));
         }
 
+        // A still player in this pose with its feet 1.9 below and 2 ahead of the attacker's, attacked with an item of
+        // minimum reach 2.7 and no margin after a tick ending at yaw 90, pitch 45 and sending yaw 0, pitch 45: the
+        // item ray looks along yaw 90 and misses, so the view hit at 2.02 * sqrt(2) through a crouching target's top
+        // is the vanilla hit.
+        List<String> attackBelow(EntityPose pose) {
+            return attackBelow(EntityTypeIds.PLAYER, pose);
+        }
+
+        // As attackBelow, the target an entity of this type.
+        List<String> attackBelow(int type, EntityPose pose) {
+            return attackBelow(type, 2.7, () -> player.compensatedEntities.getEntity(nextEntity - 1).actionPose = pose);
+        }
+
+        // As attackBelow with minimum reach 2.4, a standing target's attributes scaling it by 1.25 applied at the ping
+        // before it, and the ping after it answered or not: unscaled, the view hit through its top is at 2.43.
+        List<String> attackBelowScaledUp(boolean handled) {
+            return attackBelow(EntityTypeIds.PLAYER, 2.4, () -> {
+                int id = nextEntity - 1;
+                scale(id, 1.25);
+                int before = player.lastTransactionSent.get();
+                pongThrough(handled ? before + 1 : before);
+                assertEquals(1.25F, player.compensatedEntities.getEntity(id).scale);
+            });
+        }
+
+        // A horse 3.5 ahead scaled by 2 while it was the player's vehicle, its proof answered, then left and its later
+        // pings answered, attacked with an item of minimum reach 2.7 and no margin after a tick ending at yaw 90 and
+        // sending yaw 0: the view hit through its near face is at 2.1. afterProof and beforeAttack see the horse then.
+        List<String> attackDismountedScaledHorse(
+                Consumer<PacketEntity> afterProof, Consumer<PacketEntity> beforeAttack) {
+            hold("{\"min_reach\":2.7,\"max_reach\":4.5,\"hitbox_margin\":0}");
+            rotate(90, 0);
+            tickEnd();
+            Vec3 position = new Vec3(player.x, player.y, player.z + 3.5);
+            return attackAt(
+                    EntityTypeIds.HORSE,
+                    position,
+                    Vec3.ZERO,
+                    () -> {
+                        int id = nextEntity - 1;
+                        PacketEntity horse = player.compensatedEntities.getEntity(id);
+                        player.compensatedEntities.vehicles.serverPlayerVehicle = id;
+                        scale(id, 2);
+                        pongThrough(player.lastTransactionSent.get());
+                        afterProof.accept(horse);
+                        player.compensatedEntities.vehicles.serverPlayerVehicle = null;
+                        for (int tick = 0; tick < 3; tick++) tickEnd();
+                        pongThrough(player.lastTransactionSent.get());
+                        beforeAttack.accept(horse);
+                    },
+                    () -> rotate(0, 0));
+        }
+
+        // An update_attributes setting this entity's scale base.
+        private void scale(int id, double base) {
+            attribute(id, "minecraft:scale", base);
+        }
+
+        // An update_attributes setting this base of this entity's attribute.
+        private void attribute(int id, String attribute, double base) {
+            bind();
+            var packet =
+                    new ClientboundUpdateAttributes(id, List.of(new AttributeSnapshot(attribute, base, List.of())));
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.UPDATE_ATTRIBUTES, packet, false);
+            player.packetEntityReplication.onUpdateAttributes(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+        }
+
+        // As attackBelow, a crouching target's entity data standing it up applied at the ping before it, and the ping
+        // after it answered or not.
+        List<String> attackBelowStandingUp(boolean handled) {
+            return attackBelow(EntityTypeIds.PLAYER, 2.7, () -> {
+                int id = nextEntity - 1;
+                player.compensatedEntities.getEntity(id).actionPose = EntityPose.CROUCHING;
+                pose(id, EntityPose.STANDING);
+                int before = player.lastTransactionSent.get();
+                pongThrough(handled ? before + 1 : before);
+                assertEquals(EntityPose.STANDING, player.compensatedEntities.getEntity(id).actionPose);
+            });
+        }
+
+        // A standing player of scale .2 whose feet are 1.5 above and 2.78 ahead of the attacker's, its last move
+        // proven, attacked with an item of minimum reach 2.7 and no margin after a tick ending at yaw 90 and sending
+        // yaw 0: the item ray misses and the view hit through its near face at 2.72 is the vanilla hit. Entity data
+        // posing it sleeping, standing and sleeping is applied at the ping before the attack, the ping after it
+        // unanswered; beforeAttack sees the target then.
+        List<String> attackSmallStanderPosedAsleep(Consumer<PacketEntityPlayer> beforeAttack) {
+            hold("{\"min_reach\":2.7,\"max_reach\":4.5,\"hitbox_margin\":0}");
+            rotate(90, 0);
+            tickEnd();
+            Vec3 position = new Vec3(player.x, player.y + 1.5, player.z + 2.77);
+            return attackAt(
+                    position,
+                    Vec3.ZERO,
+                    () -> {
+                        int id = nextEntity - 1;
+                        var target = (PacketEntityPlayer) player.compensatedEntities.getEntity(id);
+                        target.scale = .2F;
+                        target.onFirstTransaction(true, true, 0, 0, .01, player);
+                        for (int tick = 0; tick < 3; tick++) tickEnd();
+                        target.onSecondTransaction();
+                        pose(id, EntityPose.SLEEPING);
+                        pose(id, EntityPose.STANDING);
+                        pose(id, EntityPose.SLEEPING);
+                        pongThrough(player.lastTransactionSent.get());
+                        assertEquals(EntityPose.SLEEPING, target.actionPose);
+                        beforeAttack.accept(target);
+                    },
+                    () -> rotate(0, 0));
+        }
+
+        // Answers the ping after the last entity data, returning the last target.
+        PacketEntityPlayer answerPoses() {
+            pongThrough(player.lastTransactionSent.get() + 1);
+            return (PacketEntityPlayer) player.compensatedEntities.getEntity(nextEntity - 1);
+        }
+
+        // Entity data posing this entity, applied at the last ping sent.
+        private void pose(int id, EntityPose pose) {
+            metadata(id, WatchableIndexUtil.ENTITY_POSE, pose);
+        }
+
+        // Entity data setting this field of this entity.
+        private void metadata(int id, int index, Object value) {
+            bind();
+            var packet =
+                    new EntityMetadata(id, List.of(new EntityMetadata.Entry(index, value, ByteBuffer.allocate(0))));
+            var event = new PacketSendEvent<>(fixture.user, ConnectionPhase.PLAY, metadataType(), packet, false);
+            player.packetEntityReplication.onSetEntityData(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+        }
+
+        // A horse 3.5 ahead with its feet .5 above the attacker's, its view hit at 2.8 at scale 1 and 2.1 at scale 2,
+        // as in attackRideableScaledAfterData with horse flags as the data; asserts its least scale before the attack.
+        List<String> horseScaledAfterFlags(boolean scaleProven, float leastScale) {
+            int flags =
+                    WatchableIndexUtil.forModel(player.user.getCultConnection()).horseFlags();
+            return attackRideableScaledAfterData(
+                    EntityTypeIds.HORSE,
+                    new Vec3(0, .5, 3.5),
+                    flags,
+                    (byte) 2,
+                    scaleProven,
+                    horse -> assertEquals(leastScale, horse.leastScale()));
+        }
+
+        // A pig 3.2 ahead with its feet 1 above the attacker's, its view hit at 2.75 at scale 1 and 2.3 at scale 2,
+        // as in attackRideableScaledAfterData with its boost time as the data; asserts its least scale before the
+        // attack.
+        List<String> pigScaledAfterBoost(boolean scaleProven, float leastScale) {
+            int boost =
+                    WatchableIndexUtil.forModel(player.user.getCultConnection()).pigBoostTime();
+            return attackRideableScaledAfterData(
+                    EntityTypeIds.PIG,
+                    new Vec3(0, 1, 3.2),
+                    boost,
+                    40,
+                    scaleProven,
+                    pig -> assertEquals(leastScale, pig.leastScale()));
+        }
+
+        // A rideable of this type at this offset from the attacker's feet, attacked with an item of minimum reach 2.7
+        // and no margin after a tick ending at yaw 90 and sending yaw 0, so the view hit is the vanilla hit. Before the
+        // attack, entity data setting this field is sent with its ping N, attributes scaling it by 2 are applied at
+        // once before N's answer, then N is answered, and the scale's own ping too if scaleProven. beforeAttack sees
+        // the target then.
+        List<String> attackRideableScaledAfterData(
+                int type,
+                Vec3 offset,
+                int index,
+                Object value,
+                boolean scaleProven,
+                Consumer<PacketEntity> beforeAttack) {
+            hold("{\"min_reach\":2.7,\"max_reach\":4.5,\"hitbox_margin\":0}");
+            rotate(90, 0);
+            tickEnd();
+            Vec3 position = new Vec3(player.x + offset.x, player.y + offset.y, player.z + offset.z);
+            return attackAt(
+                    type,
+                    position,
+                    Vec3.ZERO,
+                    () -> {
+                        int id = nextEntity - 1;
+                        int before = player.lastTransactionSent.get();
+                        metadata(id, index, value);
+                        int data = player.lastTransactionSent.get();
+                        assertEquals(before + 1, data);
+                        scale(id, 2);
+                        assertEquals(2F, player.compensatedEntities.getEntity(id).scale);
+                        pongThrough(data);
+                        if (scaleProven) pongThrough(data + 1);
+                        beforeAttack.accept(player.compensatedEntities.getEntity(id));
+                    },
+                    () -> rotate(0, 0));
+        }
+
+        // A horse 3.5 ahead with its feet .5 above the attacker's, its view hit at 2.8 at scale 1 and 2.1 at scale 2,
+        // attacked with an item of minimum reach 2.7 and no margin after a tick ending at yaw 90 and sending yaw 0.
+        // It spawns through add_entity with its proof S, attributes with these scale bases follow before S's answer,
+        // then S is answered, and the scales' own ping too if scaleProven; asserts its scale and least scale then.
+        // Once every ping is answered, its least scale is its scale.
+        List<String> horseScaledBeforeSpawnAnswer(boolean scaleProven, float scale, float leastScale, double... bases) {
+            hold("{\"min_reach\":2.7,\"max_reach\":4.5,\"hitbox_margin\":0}");
+            rotate(90, 0);
+            tickEnd();
+            int id = nextEntity++;
+            spawn(id, "minecraft:horse", new Vec3d(player.x, player.y + .5, player.z + 3.5));
+            int spawn = player.lastTransactionSent.get();
+            assertNull(player.compensatedEntities.getEntity(id));
+            for (int held = 1; held <= bases.length; held++) {
+                scale(id, bases[held - 1]);
+                assertEquals(Math.min(held, 4), player.compensatedEntities.heldAttributeUpdates(id));
+            }
+            pongThrough(spawn);
+            if (scaleProven) pongThrough(spawn + 1);
+            PacketEntity horse = player.compensatedEntities.getEntity(id);
+            assertEquals(scale, horse.scale);
+            assertEquals(leastScale, horse.leastScale());
+            List<String> flagged = attackEntity(id, EntityTypeIds.HORSE, () -> rotate(0, 0));
+            pongThrough(player.lastTransactionSent.get() + 1);
+            assertEquals(horse.scale, horse.leastScale());
+            return flagged;
+        }
+
+        // As horseScaledBeforeSpawnAnswer, attributes with these scale bases each followed by a ping, then four
+        // movement_speed-only attributes, all before the spawn proof S's answer: the held updates merge into the last
+        // proof P. Until P is answered the least scale is leastScale; once it is, 2, and the attack flags or not.
+        List<String> horseScaledThenSpedBeforeSpawnAnswer(double[] bases, float leastScale) {
+            hold("{\"min_reach\":2.7,\"max_reach\":4.5,\"hitbox_margin\":0}");
+            rotate(90, 0);
+            tickEnd();
+            int id = nextEntity++;
+            spawn(id, "minecraft:horse", new Vec3d(player.x, player.y + .5, player.z + 3.5));
+            int spawn = player.lastTransactionSent.get();
+            for (double base : bases) {
+                scale(id, base);
+                player.sendTransaction();
+            }
+            for (int sped = 0; sped < 4; sped++) attribute(id, "minecraft:movement_speed", .3);
+            int last = player.lastTransactionSent.get() + 1;
+            assertEquals(4, player.compensatedEntities.heldAttributeUpdates(id));
+            for (int answered = spawn; answered < last; answered++) {
+                pongThrough(answered);
+                assertEquals(
+                        leastScale, player.compensatedEntities.getEntity(id).leastScale(), "after " + answered);
+            }
+            pongThrough(last);
+            PacketEntity horse = player.compensatedEntities.getEntity(id);
+            assertEquals(2F, horse.scale);
+            assertEquals(2F, horse.leastScale());
+            return attackEntity(id, EntityTypeIds.HORSE, () -> rotate(0, 0));
+        }
+
+        // 256 zombies behind the attacker spawn with attributes each, then a horse 4 ahead with its feet .5 above the
+        // attacker's spawns scaled by 2, all before any answer; once every ping is answered, the empty hand attacks
+        // it at yaw 0: its scale-2 near face is at 2.6, within the interaction range 3, and its scale-1 one at 3.3.
+        List<String> horseScaledAfterManySpawns() {
+            for (int filler = 0; filler < 256; filler++) {
+                int id = nextEntity++;
+                spawn(id, "minecraft:zombie", new Vec3d(player.x, player.y, player.z - 20));
+                scale(id, 1);
+            }
+            int id = nextEntity++;
+            spawn(id, "minecraft:horse", new Vec3d(player.x, player.y + .5, player.z + 4));
+            scale(id, 2);
+            assertNull(player.compensatedEntities.getEntity(id));
+            pongThrough(player.lastTransactionSent.get() + 1);
+            PacketEntity horse = player.compensatedEntities.getEntity(id);
+            assertEquals(2F, horse.scale);
+            assertEquals(2F, horse.leastScale());
+            rotate(0, 0);
+            tickEnd();
+            return attackEntity(id, EntityTypeIds.HORSE, () -> rotate(0, 0));
+        }
+
+        // Attributes for 257 ids never spawned hold only the first 256, while a tracked spawn's still hold.
+        void holdForUnspawnedIds() {
+            int first = nextEntity;
+            for (int orphan = 0; orphan < 257; orphan++) scale(nextEntity++, 2);
+            assertEquals(1, player.compensatedEntities.heldAttributeUpdates(first + 255));
+            assertEquals(0, player.compensatedEntities.heldAttributeUpdates(first + 256));
+            int id = nextEntity++;
+            spawn(id, "minecraft:horse", new Vec3d(player.x, player.y, player.z + 4));
+            scale(id, 2);
+            assertEquals(1, player.compensatedEntities.heldAttributeUpdates(id));
+        }
+
+        // An add_entity of this type at this position, its proof unanswered.
+        private void spawn(int id, String type, Vec3d position) {
+            bind();
+            var packet = new ClientboundAddEntity(id, type, position, 0, 0, 0);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ADD_ENTITY, packet, false);
+            player.packetEntityReplication.onAddEntity(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+        }
+
+        // A player 3.2 ahead with its feet .3 below the attacker's eyes takes interleaved pose, scale and size-neutral
+        // entity data, pings and in-order answers. After each step the least size is at most every size the client
+        // may show, and an attack straight ahead with an item of minimum reach 2.7 and no margin, whose view hit lies
+        // between 2.75 and 2.9 for every such size, flags nothing.
+        void convergeThroughSizeUpdates() {
+            hold("{\"min_reach\":2.7,\"max_reach\":4.5,\"hitbox_margin\":0}");
+            rotate(0, 0);
+            tickEnd();
+            bind();
+            int id = nextEntity++;
+            player.compensatedEntities.addEntity(
+                    id, EntityTypeIds.PLAYER, new Vec3(player.x, player.y + 1.32, player.z + 3.2), 0, 0, 0);
+            PacketEntity target = player.compensatedEntities.getEntity(id);
+            EntityPose pose = EntityPose.STANDING;
+            float scale = 1;
+            // Each size the client may show and the transaction whose answer proves it applied it: an attack follows
+            // the answer to every ping before the size, so the client shows a size from the last proven to the last
+            // whose preceding ping is answered.
+            List<float[]> shown = new ArrayList<>(List.of(new float[] {.6F, 1.8F}));
+            List<Integer> provenBy = new ArrayList<>(List.of(Integer.MIN_VALUE));
+            ArrayDeque<Integer> pings = new ArrayDeque<>();
+            List<String> steps = List.of(
+                    "crouch",
+                    "scale 1.25",
+                    "ping",
+                    "flags",
+                    "swim",
+                    "pong",
+                    "scale 1.5",
+                    "ping",
+                    "stand",
+                    "ping",
+                    "pong",
+                    "flags",
+                    "scale 1",
+                    "ping",
+                    "fly",
+                    "pong",
+                    "pong",
+                    "ping",
+                    "pong");
+            for (String step : steps) {
+                int proof = player.lastTransactionSent.get() + 1;
+                String[] words = step.split(" ");
+                switch (words[0]) {
+                    case "crouch" -> pose = EntityPose.CROUCHING;
+                    case "swim" -> pose = EntityPose.SWIMMING;
+                    case "stand" -> pose = EntityPose.STANDING;
+                    case "fly" -> pose = EntityPose.FALL_FLYING;
+                    case "scale" -> scale = Float.parseFloat(words[1]);
+                    default -> {}
+                }
+                switch (words[0]) {
+                    case "crouch", "swim", "stand", "fly" -> pose(id, pose);
+                    case "scale" -> scale(id, scale);
+                    case "flags" -> metadata(id, WatchableIndexUtil.ENTITY_SHARED_FLAGS, (byte) 0);
+                    case "ping" -> {
+                        player.sendTransaction();
+                        pings.add(player.lastTransactionSent.get());
+                    }
+                    case "pong" -> pongThrough(pings.remove());
+                    default -> throw new IllegalArgumentException(step);
+                }
+                if (!words[0].equals("ping") && !words[0].equals("pong") && !words[0].equals("flags")) {
+                    shown.add(new float[] {PacketEntity.avatarWidth(pose, scale), PacketEntity.avatarHeight(pose, scale)
+                    });
+                    provenBy.add(proof);
+                }
+                int received = player.lastTransactionReceived.get();
+                int first = 0;
+                for (int k = 0; k < provenBy.size(); k++) if (provenBy.get(k) <= received) first = k;
+                float width = Float.MAX_VALUE, height = Float.MAX_VALUE;
+                for (int k = first; k < shown.size() && provenBy.get(k) <= received + 1; k++) {
+                    width = Math.min(width, shown.get(k)[0]);
+                    height = Math.min(height, shown.get(k)[1]);
+                }
+                String state = step + ": least " + target.leastPoseWidth() + " x " + target.leastPoseHeight()
+                        + ", shown " + width + " x " + height + ", answered " + received + ", proofs " + provenBy;
+                assertTrue(target.leastPoseWidth() <= width + 1.0E-6F, state);
+                assertTrue(target.leastPoseHeight() <= height + 1.0E-6F, state);
+                assertEquals(List.of(), attackEntity(id, EntityTypeIds.PLAYER, () -> rotate(0, 0)), step);
+            }
+            pongThrough(player.lastTransactionSent.get());
+            assertEquals(PacketEntity.avatarWidth(pose, scale), target.leastPoseWidth(), 1.0E-6F);
+            assertEquals(PacketEntity.avatarHeight(pose, scale), target.leastPoseHeight(), 1.0E-6F);
+        }
+
+        private List<String> attackBelow(int type, double minReach, Runnable beforeAttack) {
+            hold("{\"min_reach\":" + minReach + ",\"max_reach\":4.5,\"hitbox_margin\":0}");
+            rotate(90, 45);
+            tickEnd();
+            Vec3 position = new Vec3(player.x, player.y - 1.9, player.z + 2);
+            return attackAt(type, position, Vec3.ZERO, beforeAttack, () -> rotate(0, 45));
+        }
+
+        @SuppressWarnings("unchecked")
+        private static PacketType<EntityMetadata> metadataType() {
+            return (PacketType<EntityMetadata>) TestProtocolRuntime.catalog().stream()
+                    .filter(type -> type.recordClass() == EntityMetadata.class)
+                    .findFirst()
+                    .orElseThrow();
+        }
+
         // One client tick attacking a player whose hitbox face is this far along a look of this yaw from the seat.
         List<String> attackAlong(float lookYaw, double distance, float yaw) {
             return attackAlong(lookYaw, distance, () -> rotate(yaw));
@@ -916,8 +1470,12 @@ class ReachInteractionRangeTest {
         }
 
         private List<String> attackAt(Vec3 position, Vec3 moved, Runnable beforeAttack, Runnable movement) {
+            return attackAt(EntityTypeIds.PLAYER, position, moved, beforeAttack, movement);
+        }
+
+        private List<String> attackAt(int type, Vec3 position, Vec3 moved, Runnable beforeAttack, Runnable movement) {
             int id = nextEntity++;
-            player.compensatedEntities.addEntity(id, EntityTypeIds.PLAYER, position, 0, 0, 0);
+            player.compensatedEntities.addEntity(id, type, position, 0, 0, 0);
             if (moved.x != 0 || moved.y != 0 || moved.z != 0) {
                 player.compensatedEntities
                         .getEntity(id)
@@ -925,6 +1483,11 @@ class ReachInteractionRangeTest {
                 for (int tick = 0; tick < 3; tick++) tickEnd();
             }
             beforeAttack.run();
+            return attackEntity(id, type, movement);
+        }
+
+        // One client tick attacking this entity, then this movement; returns the checks that flagged.
+        private List<String> attackEntity(int id, int type, Runnable movement) {
             double[] before =
                     checks.stream().mapToDouble(check -> check.violations).toArray();
             var packet = new ServerboundInteract(id, InteractAction.ATTACK, Hand.MAIN_HAND, Optional.empty(), false);
@@ -932,7 +1495,7 @@ class ReachInteractionRangeTest {
                     new PacketReceiveEvent<>(fixture.user, ConnectionPhase.PLAY, ServerboundPackets.INTERACT, packet));
             movement.run();
             tickEnd();
-            assertMeasured(id, EntityTypeIds.PLAYER);
+            assertMeasured(id, type);
             List<String> flagged = new ArrayList<>();
             for (int i = 0; i < checks.size(); i++) {
                 if (checks.get(i).violations > before[i])

@@ -37,6 +37,8 @@ import org.jetbrains.annotations.Nullable;
 
 // You may not copy this check unless your anticheat is licensed under GPL
 public class PacketEntity {
+    private static final EntityPose[] POSES = EntityPose.values();
+
     public long bedrockRuntimeId = -1;
     // Final Bedrock wire attributes, retained even before this actor is locally controlled.
     public ac.cult.cultac.bedrock.prediction.state.BedrockActorAttributes bedrockAttributes =
@@ -68,6 +70,12 @@ public class PacketEntity {
     public byte actionSharedFlags;
     public boolean actionArrowInGround;
     public float scale = 1.0f;
+    // The poses actionPose replaced, as bits by ordinal, and the least scale scale replaced, while the client may not
+    // have handled the replacements.
+    private int replacedPoses;
+    private float replacedScale = Float.NaN;
+    // The transaction whose answer proves the client applied every replacement.
+    private int sizeProvenAt = Integer.MIN_VALUE;
     public boolean onGround = false;
     public Vec3 deltaMovement = Vec3.ZERO;
     public Vec3 clientPhysicalPosition;
@@ -437,6 +445,73 @@ public class PacketEntity {
     // Remove the possibility of the old packet location
     public void onSecondTransaction() {
         this.oldPacketLocation = null;
+    }
+
+    /** Entity data replacing the pose, which the client has applied once it answers provenAt. */
+    public void onPose(EntityPose pose, int provenAt) {
+        if (pose == actionPose) return;
+        replacedPoses |= 1 << actionPose.ordinal();
+        actionPose = pose;
+        sizeProvenAt = Math.max(sizeProvenAt, provenAt);
+    }
+
+    /** An attribute update replacing the scale, which the client has applied once it answers provenAt. */
+    public void onScale(float scale, int provenAt) {
+        if (scale == this.scale) return;
+        if (!(replacedScale <= this.scale)) replacedScale = this.scale;
+        this.scale = scale;
+        sizeProvenAt = Math.max(sizeProvenAt, provenAt);
+    }
+
+    /** The client answered this transaction: once it proves every replacement, it shows only the current size. */
+    public void onSizeHandled(int transaction) {
+        if (transaction < sizeProvenAt) return;
+        replacedPoses = 0;
+        replacedScale = Float.NaN;
+    }
+
+    /** The least scale the client may show. */
+    public float leastScale() {
+        return replacedScale < scale ? replacedScale : scale;
+    }
+
+    /** Whether Avatar#POSES sizes the entity by its pose. */
+    public boolean isAvatar() {
+        return type == EntityTypeIds.PLAYER || EntityTypeUtil.isType(type, "mannequin");
+    }
+
+    /** The least width an avatar's box can have among the poses and scales the client may show. */
+    public float leastPoseWidth() {
+        float scale = leastScale();
+        float width = avatarWidth(actionPose, scale);
+        for (int poses = replacedPoses; poses != 0; poses &= poses - 1) {
+            width = Math.min(width, avatarWidth(POSES[Integer.numberOfTrailingZeros(poses)], scale));
+        }
+        return width;
+    }
+
+    /** The least height an avatar's box can have among the poses and scales the client may show. */
+    public float leastPoseHeight() {
+        float scale = leastScale();
+        float height = avatarHeight(actionPose, scale);
+        for (int poses = replacedPoses; poses != 0; poses &= poses - 1) {
+            height = Math.min(height, avatarHeight(POSES[Integer.numberOfTrailingZeros(poses)], scale));
+        }
+        return height;
+    }
+
+    // LivingEntity#getDimensions with Avatar#POSES: sleeping and dying are fixed, the others scale.
+    public static float avatarWidth(EntityPose pose, float scale) {
+        return pose == EntityPose.SLEEPING || pose == EntityPose.DYING ? .2F : .6F * scale;
+    }
+
+    public static float avatarHeight(EntityPose pose, float scale) {
+        return switch (pose) {
+            case SLEEPING, DYING -> .2F;
+            case FALL_FLYING, SWIMMING, SPIN_ATTACK -> .6F * scale;
+            case CROUCHING -> 1.5F * scale;
+            default -> 1.8F * scale;
+        };
     }
 
     // If the old and new packet location are split, we need to combine bounding boxes

@@ -8,6 +8,7 @@ import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ClientAttributeInstance;
+import ac.cult.cultac.utils.latency.CompensatedEntities;
 import java.util.Collections;
 import java.util.List;
 import lombok.Getter;
@@ -40,8 +41,16 @@ public class PacketEntitySelf extends PacketEntity {
     public final ClientAttributeInstance entityInteractionRange = new ClientAttributeInstance(3.0D, 0.0D, 64.0D);
     // LocalPlayer#modifyInput reads the synced attribute, including plugin and enchantment modifiers.
     public final ClientAttributeInstance sneakingSpeed = new ClientAttributeInstance(0.3D, 0.0D, 1.0D);
-    // The instances behind jumpStrength and blockBreakSpeed .. waterMovementEfficiency: handleRespawn copies bases and
-    // modifiers apart.
+    // The instances behind the attribute-backed scalars: handleRespawn copies bases and modifiers apart.
+    private final ClientAttributeInstance scaleAttribute = new ClientAttributeInstance(1.0D, 0.0625D, 16.0D);
+    private final ClientAttributeInstance gravityAttribute = new ClientAttributeInstance(0.08D, -1.0D, 1.0D);
+    private final ClientAttributeInstance stepHeight = new ClientAttributeInstance(0.6D, 0.0D, 10.0D);
+    // playerSpeed leaves out the sprinting and powder snow modifiers, which are modelled apart.
+    private final ClientAttributeInstance movementSpeedAttribute =
+            new ClientAttributeInstance(0.1F, 0.0D, 1024.0D, CompensatedEntities.EXCLUDED_MODIFIER_IDS);
+    private final ClientAttributeInstance bouncinessAttribute = new ClientAttributeInstance(0.0D, 0.0D, 1.0D);
+    private final ClientAttributeInstance frictionModifierAttribute = new ClientAttributeInstance(1.0D, 0.0D, 2048.0D);
+    private final ClientAttributeInstance airDragModifierAttribute = new ClientAttributeInstance(1.0D, 0.0D, 2048.0D);
     private final ClientAttributeInstance jumpStrengthAttribute = new ClientAttributeInstance(0.42F, 0.0D, 32.0D);
     private final ClientAttributeInstance blockBreakSpeedAttribute = new ClientAttributeInstance(1.0D, 0.0D, 1024.0D);
     private final ClientAttributeInstance miningEfficiencyAttribute = new ClientAttributeInstance(0.0D, 0.0D, 1024.0D);
@@ -65,13 +74,13 @@ public class PacketEntitySelf extends PacketEntity {
 
     private void carryStateFrom(PacketEntitySelf old) {
         this.opLevel = old.getOpLevel();
-        this.scale = old.scale;
-        this.gravity = old.gravity;
-        this.stepHeightAttribute = old.stepHeightAttribute;
-        this.playerSpeed = old.playerSpeed;
-        this.bounciness = old.bounciness;
-        this.frictionModifier = old.frictionModifier;
-        this.airDragModifier = old.airDragModifier;
+        this.scaleAttribute.copyFrom(old.scaleAttribute);
+        this.gravityAttribute.copyFrom(old.gravityAttribute);
+        this.stepHeight.copyFrom(old.stepHeight);
+        this.movementSpeedAttribute.copyFrom(old.movementSpeedAttribute);
+        this.bouncinessAttribute.copyFrom(old.bouncinessAttribute);
+        this.frictionModifierAttribute.copyFrom(old.frictionModifierAttribute);
+        this.airDragModifierAttribute.copyFrom(old.airDragModifierAttribute);
         this.jumpStrengthAttribute.copyFrom(old.jumpStrengthAttribute);
         this.blockBreakSpeedAttribute.copyFrom(old.blockBreakSpeedAttribute);
         this.miningEfficiencyAttribute.copyFrom(old.miningEfficiencyAttribute);
@@ -87,6 +96,13 @@ public class PacketEntitySelf extends PacketEntity {
     /** ClientPacketListener#handleUpdateAttributes for the attributes behind this player's cached scalars. */
     public void onAttributeSnapshot(AttributeSnapshot snapshot) {
         ClientAttributeInstance instance = switch (snapshot.attribute()) {
+            case "minecraft:scale" -> scaleAttribute;
+            case "minecraft:gravity" -> gravityAttribute;
+            case "minecraft:step_height" -> stepHeight;
+            case "minecraft:movement_speed" -> movementSpeedAttribute;
+            case "minecraft:bounciness" -> bouncinessAttribute;
+            case "minecraft:friction_modifier" -> frictionModifierAttribute;
+            case "minecraft:air_drag_modifier" -> airDragModifierAttribute;
             case "minecraft:jump_strength" -> jumpStrengthAttribute;
             case "minecraft:block_break_speed" -> blockBreakSpeedAttribute;
             case "minecraft:mining_efficiency" -> miningEfficiencyAttribute;
@@ -101,6 +117,13 @@ public class PacketEntitySelf extends PacketEntity {
     }
 
     private void refreshAttributeValues() {
+        scale = (float) scaleAttribute.value();
+        gravity = gravityAttribute.value();
+        stepHeightAttribute = stepHeight.value();
+        playerSpeed = movementSpeedAttribute.value();
+        bounciness = bouncinessAttribute.value();
+        frictionModifier = frictionModifierAttribute.value();
+        airDragModifier = airDragModifierAttribute.value();
         jumpStrength = jumpStrengthAttribute.value();
         blockBreakSpeed = blockBreakSpeedAttribute.value();
         miningEfficiency = miningEfficiencyAttribute.value();
@@ -163,6 +186,14 @@ public class PacketEntitySelf extends PacketEntity {
             blockInteractionRange.clearModifiers();
             entityInteractionRange.clearModifiers();
             sneakingSpeed.clearModifiers();
+            float keptScale = scale;
+            scaleAttribute.clearModifiers();
+            gravityAttribute.clearModifiers();
+            stepHeight.clearModifiers();
+            movementSpeedAttribute.clearModifiers();
+            bouncinessAttribute.clearModifiers();
+            frictionModifierAttribute.clearModifiers();
+            airDragModifierAttribute.clearModifiers();
             jumpStrengthAttribute.clearModifiers();
             blockBreakSpeedAttribute.clearModifiers();
             miningEfficiencyAttribute.clearModifiers();
@@ -170,6 +201,7 @@ public class PacketEntitySelf extends PacketEntity {
             movementEfficiencyAttribute.clearModifiers();
             waterMovementEfficiencyAttribute.clearModifiers();
             refreshAttributeValues();
+            if (scale != keptScale) player.refreshPlayerPose();
         }
     }
 
