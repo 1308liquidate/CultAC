@@ -30,9 +30,7 @@ public class ClientBrand extends Check implements CheckListener {
             final PacketReceiveEvent<ServerboundCustomPayload> event,
             CultPlayer player,
             ServerboundCustomPayload packet) {
-        String channelName = packet.channel();
-        if (channelName == null) return;
-        handle(channelName, event.getPacket().data());
+        handle(packet.channel(), event.getPacket().data());
     }
 
     public void handle(String channel, byte[] data) {
@@ -55,11 +53,10 @@ public class ClientBrand extends Check implements CheckListener {
 
                 CultAPI.INSTANCE.getAlertManager().sendBrand(component, null);
             }
-            // Push the now-known brand into the session row. The initial onJoin
-            // upsert ran from PlayerJoinEvent, before the brand packet arrived,
-            // so client_brand was null on disk. observeBrandFromCheck re-issues
-            // the upsert with the same session_id (idempotent) but the brand
-            // column now filled in. NOOP impl skips the work entirely.
+            // The join-time session upsert runs before the brand packet arrives,
+            // so client_brand is null on disk. observeBrandFromCheck re-issues
+            // the upsert with the same session_id (idempotent) and the brand
+            // filled in.
             CultAPI.INSTANCE.getDataStoreLifecycle().liveWriteHooks().observeBrandFromCheck(player);
         }
 

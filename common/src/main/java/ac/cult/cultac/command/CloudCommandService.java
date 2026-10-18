@@ -7,7 +7,9 @@ import ac.cult.cultac.platform.api.manager.cloud.CloudPlatformCommandArguments;
 import ac.cult.cultac.platform.api.sender.Sender;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import io.leangen.geantyref.TypeToken;
+import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import net.kyori.adventure.text.Component;
@@ -25,6 +27,7 @@ import org.incendo.cloud.processors.requirements.RequirementApplicable;
 import org.incendo.cloud.processors.requirements.RequirementApplicable.RequirementApplicableFactory;
 import org.incendo.cloud.processors.requirements.RequirementPostprocessor;
 import org.incendo.cloud.processors.requirements.Requirements;
+import org.incendo.cloud.suggestion.Suggestion;
 
 public class CloudCommandService implements CommandService {
 
@@ -84,16 +87,15 @@ public class CloudCommandService implements CommandService {
         commandsRegistered = true;
     }
 
-    public java.util.concurrent.CompletionStage<Void> execute(Sender sender, String input) {
+    public CompletionStage<Void> execute(Sender sender, String input) {
         return manager.commandExecutor().executeCommand(sender, input).thenApply(ignored -> null);
     }
 
-    public java.util.concurrent.CompletionStage<java.util.List<String>> suggest(Sender sender, String input) {
+    public CompletionStage<List<String>> suggest(Sender sender, String input) {
         return manager.suggestionFactory()
                 .suggest(sender, input)
-                .thenApply(result -> result.list().stream()
-                        .map(org.incendo.cloud.suggestion.Suggestion::suggestion)
-                        .toList());
+                .thenApply(result ->
+                        result.list().stream().map(Suggestion::suggestion).toList());
     }
 
     private void registerExceptionHandlers(CommandManager<Sender> commandManager) {

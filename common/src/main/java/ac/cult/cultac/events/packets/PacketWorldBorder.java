@@ -4,6 +4,7 @@ import ac.cult.cultac.checks.CultProcessor;
 import ac.cult.cultac.checks.type.CheckListener;
 import ac.cult.cultac.checks.type.ClientTickEndListener;
 import ac.cult.cultac.network.CultPacketHandler;
+import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
@@ -45,11 +46,10 @@ public class PacketWorldBorder extends CultProcessor implements CheckListener, C
             }
             // 1.21.11/26.1 WorldBorder collision shapes use getMin/Max(0.0F):
             // the previous world-tick size, until MovingBorderExtent becomes static.
-            long collisionTicks = !player.isBedrockMovement()
-                            && player.getClientVersion()
-                                    .isOlderThan(ac.cult.cultac.network.protocol.ClientVersion.V_26_2)
-                    ? Math.max(0L, lerpElapsedTicks - 1L)
-                    : lerpElapsedTicks;
+            long collisionTicks =
+                    !player.isBedrockMovement() && player.getClientVersion().isOlderThan(ClientVersion.V_26_2)
+                            ? Math.max(0L, lerpElapsedTicks - 1L)
+                            : lerpElapsedTicks;
             double progress = Math.min(1.0D, (double) collisionTicks / (double) lerpDurationTicks);
             return CultMath.lerp(progress, oldDiameter, newDiameter);
         }
@@ -66,7 +66,7 @@ public class PacketWorldBorder extends CultProcessor implements CheckListener, C
     }
 
     @Override
-    public void onPlayerTickEnd(ac.cult.cultac.network.event.PacketReceiveEvent event) {
+    public void onPlayerTickEnd(PacketReceiveEvent event) {
         // ClientLevel#tick advances the border only while world ticks run.
         if (player.isBedrockMovement()
                 || player.packetStateData.serverTicksFrozen
@@ -159,14 +159,8 @@ public class PacketWorldBorder extends CultProcessor implements CheckListener, C
         return serverTicks ? length * 50L : length / 50L;
     }
 
-    static boolean usesTickBasedLerp(
-            ac.cult.cultac.network.protocol.ClientVersion version,
-            double oldDiameter,
-            double newDiameter,
-            long length) {
-        return version.isNewerThanOrEquals(ac.cult.cultac.network.protocol.ClientVersion.V_1_21_11)
-                && length > 0L
-                && oldDiameter != newDiameter;
+    static boolean usesTickBasedLerp(ClientVersion version, double oldDiameter, double newDiameter, long length) {
+        return version.isNewerThanOrEquals(ClientVersion.V_1_21_11) && length > 0L && oldDiameter != newDiameter;
     }
 
     private void setAbsoluteMaxSize(double absoluteMaxSize) {

@@ -45,7 +45,7 @@ public class FastBreak extends Check implements BlockBreakListener {
     double blockDelayBalance = 0;
 
     public void onBlockBreak(BlockBreak blockBreak) {
-        if (blockBreak.action == PlayerAction.START_DESTROY_BLOCK) { // PE DiggingAction.START_DIGGING
+        if (blockBreak.action == PlayerAction.START_DESTROY_BLOCK) {
 
             startBreak = System.currentTimeMillis() - (targetBlockPosition == null ? 50 : 0); // ???
             targetBlockPosition = blockBreak.position;
@@ -77,8 +77,7 @@ public class FastBreak extends Check implements BlockBreakListener {
             clampBalance();
         }
 
-        if (blockBreak.action == PlayerAction.STOP_DESTROY_BLOCK
-                && targetBlockPosition != null) { // PE DiggingAction.FINISHED_DIGGING
+        if (blockBreak.action == PlayerAction.STOP_DESTROY_BLOCK && targetBlockPosition != null) {
             double predictedTime = Math.ceil(1 / maximumBlockDamage) * 50;
             double realTime = System.currentTimeMillis() - startBreak;
             double diff = predictedTime - realTime;

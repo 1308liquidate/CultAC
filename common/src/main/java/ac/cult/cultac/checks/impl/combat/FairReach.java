@@ -92,9 +92,8 @@ public class FairReach extends Check implements CheckListener {
                 () -> applyChanges(entityId, x, y, z, hasAppliedChanges), max_ping_compensation);
     }
 
-    private void addEntity(int entityId, ac.cult.cultac.utils.math.Vec3 spawnPosition) {
-        targetPlayers.put(
-                entityId, new FairReachEntity(entityId, new Vec3(spawnPosition.x, spawnPosition.y, spawnPosition.z)));
+    private void addEntity(int entityId, Vec3 spawnPosition) {
+        targetPlayers.put(entityId, new FairReachEntity(entityId, spawnPosition));
     }
 
     private void handleInteract(final PacketReceiveEvent event, ServerboundInteract attack) {

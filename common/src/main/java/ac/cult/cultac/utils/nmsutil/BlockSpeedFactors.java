@@ -43,20 +43,6 @@ public final class BlockSpeedFactors {
                 1.0F);
     }
 
-    public static float playerForResult(CultPlayer player, PredictionResult result) {
-        // MCP-Reborn Player#getBlockSpeedFactor returns 1.0F while the player is
-        // fall-flying or ability-flying. Use the frozen SimulationContext for
-        // fall-flying; mutable CultPlayer state may already describe a later packet.
-        if (result.getSimulationContext().isGliding() || player.isFlying) {
-            return 1.0f;
-        }
-
-        return BlockProperties.getBlockSpeedFactor(
-                player,
-                result.getSimulationContext().getWorldData().getMainSupportingBlockPos(),
-                result.getSimulationContext().getEnd());
-    }
-
     private static float getEntityBlockSpeedFactor(CultPlayer player, Vec3 position) {
         int inBlock = player.compensatedWorld.getBlockStateIdAt(
                 (int) Math.floor(position.x), (int) Math.floor(position.y), (int) Math.floor(position.z));

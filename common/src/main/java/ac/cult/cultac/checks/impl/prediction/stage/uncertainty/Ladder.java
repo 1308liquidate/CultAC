@@ -35,7 +35,6 @@ public class Ladder implements UncertaintyHandler {
 
             // Ladders restrict the player's movement to 0.15 horizontally
             // They set 0.2 to the end of the tick's velocity, before applying gravity
-            // 1.14+ players can climb underwater
             // There is an edge case when having slow falling for the first tick
             for (boolean falling : lastResult.getIsFalling().getStates()) {
                 double grav = player.compensatedEntities.getEntityInControl().gravity;

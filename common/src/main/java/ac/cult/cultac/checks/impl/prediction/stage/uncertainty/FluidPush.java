@@ -23,17 +23,12 @@ public class FluidPush implements UncertaintyHandler {
             PredVector start,
             Vec3 end) {
         double waterRadius = flowingCurrentRadius(context, lastContext);
-        double horizontalRadius = waterRadius;
         double verticalRadius = FluidPush.verticalRadius(waterRadius, start, end);
-        if (horizontalRadius <= 0.0D && verticalRadius <= 0.0D) {
+        if (waterRadius <= 0.0D) {
             return start;
         }
 
-        PredVector adjusted = start;
-        if (horizontalRadius > 0.0D) {
-            adjusted = UncertaintyHelper.handleCircular(adjusted, end, horizontalRadius);
-        }
-
+        PredVector adjusted = UncertaintyHelper.handleCircular(start, end, waterRadius);
         return verticalRadius > 0.0D ? UncertaintyHelper.handleVertical(adjusted, end, verticalRadius) : adjusted;
     }
 

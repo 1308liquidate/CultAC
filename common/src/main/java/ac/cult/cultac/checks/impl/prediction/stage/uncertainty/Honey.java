@@ -3,6 +3,7 @@ package ac.cult.cultac.checks.impl.prediction.stage.uncertainty;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
@@ -18,9 +19,7 @@ public class Honey implements UncertaintyHandler {
             PredictionResult lastResult,
             PredVector start,
             Vec3 end) {
-        if (!player.isBedrockMovement()
-                && ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine.contextUsesExactEffects(
-                        context)) return start;
+        if (!player.isBedrockMovement() && JavaMovementEngine.contextUsesExactEffects(context)) return start;
         // Based on last tick
         if (lastResult == null
                 || !lastResult

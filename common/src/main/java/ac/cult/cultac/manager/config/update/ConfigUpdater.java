@@ -304,7 +304,7 @@ public final class ConfigUpdater {
             Migration m = spec.migrations.get(v);
             if (m == null) continue;
             MigrationContext ctx =
-                    new ContextImpl(inputView, outputView, filesByName, siblingReadViews, pendingCrossFile, logger);
+                    new ContextImpl(inputView, outputView, filesByName, siblingReadViews, pendingCrossFile);
             try {
                 m.apply(ctx);
             } catch (RuntimeException e) {
@@ -453,8 +453,7 @@ public final class ConfigUpdater {
             @NotNull YamlMap output,
             Map<String, File> filesByName,
             Map<String, Map<String, Object>> siblingReadViews,
-            Map<String, List<WriteLog.Entry>> pendingCrossFile,
-            Logger logger)
+            Map<String, List<WriteLog.Entry>> pendingCrossFile)
             implements MigrationContext {
         @Override
         public @NotNull YamlMap otherFile(@NotNull String fileName) {
@@ -468,7 +467,7 @@ public final class ConfigUpdater {
             // at the end of updateAll(). For single-file update() calls the
             // log still accumulates but never gets flushed (sibling not in
             // the batch); writes get dropped with a warning at flush time.
-            WriteLog log = WriteLog.sibling(fileName, pendingCrossFile, logger);
+            WriteLog log = WriteLog.sibling(fileName, pendingCrossFile);
             return new YamlMapImpl(view, log);
         }
     }

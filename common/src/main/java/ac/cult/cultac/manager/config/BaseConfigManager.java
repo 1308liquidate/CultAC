@@ -22,9 +22,6 @@ public class BaseConfigManager {
     private ConfigManager config = null;
 
     @Getter
-    private boolean printAlertsToConsole = false;
-
-    @Getter
     private boolean observeOnly = false;
 
     @Getter
@@ -58,9 +55,6 @@ public class BaseConfigManager {
 
     @Getter
     private int updatePermissionTicks = -1;
-
-    @Getter
-    private boolean verboseAutoEnable = false;
 
     @Getter
     private int maxPingKnockback = 1000;
@@ -142,7 +136,6 @@ public class BaseConfigManager {
                             : "Switched to enforcing; check violations start from zero");
         }
 
-        printAlertsToConsole = config.getBooleanElse("alerts.print-to-console", true);
         prefix = config.getStringElse("prefix", "&bCult &8»");
 
         webhookNotEnabled = config.getStringElse("webhook-not-enabled", "Discord webhooks are not enabled!");
@@ -156,7 +149,6 @@ public class BaseConfigManager {
                 "<red>An error occurred whilst processing packets. Please contact the administrators.");
         disablePongCancelling = config.getBooleanElse("disable-pong-cancelling", false);
         launchFailOpen = config.getBooleanElse("launch-safety.fail-open", true);
-        verboseAutoEnable = config.getBooleanElse("cult.diagnostics.auto-enable-verbose", false);
         maxPingKnockback = config.getIntElse("cult.prediction.max-knockback-ping-ms", 1000);
 
         // owner-authored config semantics: strip e.g. the " (Velocity)" suffix from brands
@@ -205,9 +197,6 @@ public class BaseConfigManager {
         }
         return config.getBooleanElse("observe-only", false);
     }
-
-    // ran on start, can be used to handle things that can't be done while loading
-    public void start() {}
 
     public boolean isIgnoredClient(String brand) {
         for (Pattern pattern : ignoredClientPatterns) {

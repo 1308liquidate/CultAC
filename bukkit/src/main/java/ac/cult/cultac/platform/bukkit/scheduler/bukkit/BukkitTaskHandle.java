@@ -1,6 +1,7 @@
 package ac.cult.cultac.platform.bukkit.scheduler.bukkit;
 
 import ac.cult.cultac.platform.api.scheduler.TaskHandle;
+import ac.cult.cultac.runtime.RuntimeEnvironment;
 import java.util.Objects;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.Contract;
@@ -13,12 +14,7 @@ public class BukkitTaskHandle implements TaskHandle {
     @Contract(pure = true)
     public BukkitTaskHandle(@NotNull BukkitTask task) {
         this.task = Objects.requireNonNull(task, "task");
-        ac.cult.cultac.runtime.RuntimeEnvironment.track(this, task::cancel);
-    }
-
-    @Override
-    public boolean isSync() {
-        return task.isSync();
+        RuntimeEnvironment.track(this, task::cancel);
     }
 
     @Override

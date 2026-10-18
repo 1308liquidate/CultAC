@@ -64,7 +64,6 @@ public class BouncyBlock implements UncertaintyHandler {
 
         if (minYAmount > 0) return start;
 
-        // Living entities (such as the player) will bounce by 0.8, non-living by 1.0
         // 0.66F for beds, times this multiplier again specified above.
         double bounceMultiplier =
                 player.compensatedEntities.getEntityInControl().isLivingEntity() ? 1.0 : 0.8;

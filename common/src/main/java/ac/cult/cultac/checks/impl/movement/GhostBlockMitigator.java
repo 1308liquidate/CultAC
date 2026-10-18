@@ -10,6 +10,7 @@ import ac.cult.cultac.utils.anticheat.update.BlockPlace;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.blockplace.GhostBlock;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.inventory.ItemTypes;
 import ac.cult.cultac.utils.latency.CompensatedWorld;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientBlockProperties;
@@ -19,7 +20,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.Data;
-import lombok.RequiredArgsConstructor;
 
 // Agreement with bukkit is more important than agreement with the client (for buckets)
 //
@@ -75,8 +75,7 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
 
             for (GhostBlock ghostBlock : pseudoPlaces) {
                 // ignore end crystals
-                if (ghostBlock.getItemUsed() != null
-                        && ghostBlock.getItemUsed().getItem() == ac.cult.cultac.utils.inventory.ItemTypes.END_CRYSTAL)
+                if (ghostBlock.getItemUsed() != null && ghostBlock.getItemUsed().getItem() == ItemTypes.END_CRYSTAL)
                     continue;
 
                 final SimpleCollisionBox place = new SimpleCollisionBox(ghostBlock.getPosition()).expandMax(0, 0.5, 0);
@@ -204,7 +203,6 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
     }
 
     @Data
-    @RequiredArgsConstructor
     public final class GhostData {
         final BlockPos placedPos;
         final SimpleCollisionBox placedBox;

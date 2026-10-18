@@ -3,12 +3,15 @@ package ac.cult.cultac.network;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
+import ac.cult.cultac.runtime.RuntimeEnvironment;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.reload.api.RuntimeInstance;
+import ac.cult.reload.host.Callbacks;
 import io.netty.channel.Channel;
 import io.netty.util.concurrent.EventExecutor;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -22,7 +25,7 @@ final class PacketConnections {
     private volatile UserLifecycleHooks hooks = UserLifecycleHooks.NONE;
 
     void hooks(UserLifecycleHooks hooks) {
-        this.hooks = java.util.Objects.requireNonNull(hooks);
+        this.hooks = Objects.requireNonNull(hooks);
     }
 
     CultConnection get(Channel channel) {
@@ -140,7 +143,7 @@ final class PacketConnections {
             cultPlayer.platformPlayer = player;
             binding.initialize(cultPlayer);
             cultPlayer.updatePermissions();
-            var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+            var host = RuntimeEnvironment.host();
             if (host != null) host.bindUser(session.channel(), user.getUUID(), player.getNative(), cultPlayer);
         }
         session.loginNotified = true;
@@ -203,15 +206,14 @@ final class PacketConnections {
                 completion.completeExceptionally(failure);
             }
         };
-        Runnable accepted = ac.cult.cultac.runtime.RuntimeEnvironment.once(task);
+        Runnable accepted = RuntimeEnvironment.once(task);
         try {
             // Even a hook which closes its own channel finishes creation before teardown.
             owner.execute(accepted);
         } catch (RuntimeException rejected) {
-            var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
+            var host = RuntimeEnvironment.host();
             if (host == null) owner.terminationFuture().addListener(done -> accepted.run());
-            else
-                owner.terminationFuture().addListener(ac.cult.reload.host.Callbacks.future(host.resources(), accepted));
+            else owner.terminationFuture().addListener(Callbacks.future(host.resources(), accepted));
         }
         return completion.minimalCompletionStage();
     }

@@ -4,6 +4,7 @@ import ac.cult.cultac.cloud.CloudModule;
 import ac.cult.cultac.manager.config.ConfigManagerFileImpl;
 import ac.cult.cultac.manager.init.start.StartableInitable;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.runtime.RuntimeEnvironment;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.cultac.utils.anticheat.MessageUtil;
 import ac.cult.cultac.utils.common.ConfigReloadObserver;
@@ -27,7 +28,6 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-// This is used for cult's external API. It has its own class just for organization.
 public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, StartableInitable {
 
     // Holder class — CultExternalAPI is constructed inside CultAPI's ctor,
@@ -97,8 +97,7 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
     }
 
     private static String resolveCultVersion(CultAPI api) {
-        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() != null)
-            return ac.cult.cultac.runtime.RuntimeEnvironment.host().build();
+        if (RuntimeEnvironment.host() != null) return RuntimeEnvironment.host().build();
         try {
             Properties properties = PropertiesUtil.readProperties(CultExternalAPI.class, "cultac.properties");
             String buildVersion = properties.getProperty("build.version");
@@ -161,20 +160,14 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
 
     // on load, load the config & register the service
     public void load() {
-        if (!successfulReload(configManagerFile) && ac.cult.cultac.runtime.RuntimeEnvironment.host() != null)
+        if (!successfulReload(configManagerFile) && RuntimeEnvironment.host() != null)
             throw new IllegalStateException("Runtime configuration rejected");
         api.getLoader().registerAPIService();
     }
 
-    // handles any config loading that's needed to be done after load
     @Override
     public void start() {
         started = true;
-        try {
-            CultAPI.INSTANCE.getConfigManager().start();
-        } catch (Exception e) {
-            LogUtil.error("Failed to start config manager.", e);
-        }
     }
 
     @Override
@@ -214,10 +207,9 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
         try {
             if (read) config.reload();
             CultAPI.INSTANCE.getConfigManager().load(config);
-            if (started) CultAPI.INSTANCE.getConfigManager().start();
             onReload(config);
             if (started) CloudModule.configReloaded();
-            if (started && ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+            if (started && RuntimeEnvironment.host() == null)
                 CultAPI.INSTANCE
                         .getScheduler()
                         .getAsyncScheduler()
@@ -226,7 +218,7 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
         } catch (Exception e) {
             LogUtil.error("Failed to reload config", e);
         }
-        if (started && ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
+        if (started && RuntimeEnvironment.host() == null)
             CultAPI.INSTANCE
                     .getScheduler()
                     .getAsyncScheduler()
@@ -242,9 +234,7 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
         } else {
             configManager = newConfig;
         }
-        // Update variables
         updateVariables();
-        // Restart
         CultAPI.INSTANCE.getAlertManager().reload(configManager);
         CultAPI.INSTANCE.getDiscordManager().reload();
         CultAPI.INSTANCE.getSpectateManager().reload();
@@ -257,7 +247,6 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
         if (CultAPI.INSTANCE.getDataStoreLifecycle() != null) {
             CultAPI.INSTANCE.getDataStoreLifecycle().reload();
         }
-        // Reload checks for all players
         for (CultPlayer player : CultAPI.INSTANCE.getPlayerDataManager().getEntries()) {
             player.runSafely(() -> player.reload(configManager));
         }
@@ -278,7 +267,6 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
                 user -> String.format(
                         "%.2f", CultAPI.INSTANCE.getPlatformServer().getTPS(user.getUniqueId())));
         variableReplacements.putIfAbsent("%version%", GrimUser::getVersionName);
-        // static variables
         staticReplacements.put(
                 "%prefix%",
                 MessageUtil.translateAlternateColorCodes(

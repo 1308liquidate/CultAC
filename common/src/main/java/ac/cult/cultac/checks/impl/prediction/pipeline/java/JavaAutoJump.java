@@ -5,6 +5,7 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.type.PostPredictionListener;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
 
@@ -90,8 +91,7 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         float lookAhead = Math.max(speed * 7.0F, 1.0F / inverse);
         float width = player.pose.width * player.getScale(), height = player.getBukkitHeight();
         Vec3 far = end.add(direction.scale(lookAhead));
-        var query = new ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox(
-                        begin.x, begin.y, begin.z, far.x, far.y + height, far.z)
+        var query = new SimpleCollisionBox(begin.x, begin.y, begin.z, far.x, far.y + height, far.z)
                 .sort()
                 .inflate(width, 0, width);
         Vec3 offset = new Vec3(-direction.z, 0, direction.x).scale(width * 0.5F);

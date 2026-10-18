@@ -31,7 +31,7 @@ public class CultStopSpectating implements BuildableCommand {
                     if (ctx.sender().hasPermission("cult.spectate.stophere")) {
                         return List.of(Suggestion.suggestion("here"));
                     }
-                    return List.of(); // No suggestions if no permission
+                    return List.of();
                 }))
                 .handler(this::onStopSpectate)
                 .apply(CloudCommandService.REQUIREMENT_FACTORY.create(PlayerSenderRequirement.INSTANCE)));

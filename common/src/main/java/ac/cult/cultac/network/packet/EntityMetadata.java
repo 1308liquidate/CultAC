@@ -1,5 +1,6 @@
 package ac.cult.cultac.network.packet;
 
+import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPacket;
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -34,7 +35,7 @@ public record EntityMetadata(int id, List<Entry> packedItems) implements Clientb
         }
 
         /** Serializer IDs are source-verified for every supported observed version. */
-        public static Entry health(int index, ac.cult.cultac.protocol.ProtocolVersion version, float value) {
+        public static Entry health(int index, ProtocolVersion version, float value) {
             int serializer = switch (version) {
                 case V1_21_3, V1_21_4, V1_21_5, V1_21_6, V1_21_7, V1_21_9, V1_21_11, V26_1, V26_2, V26_3 -> 3;
             };

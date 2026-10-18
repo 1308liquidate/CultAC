@@ -2,6 +2,7 @@ package ac.cult.cultac.network.codec;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.ItemRegistry;
+import ac.cult.blocksim.data.nbt.NbtValue;
 import ac.cult.blocksim.entity.PaintingSize;
 import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.protocol.ProtocolVersion;
@@ -48,8 +49,7 @@ final class ModelEntityMetadataValues {
         var entries = new ArrayList<EntityMetadata.Entry>();
         for (var value : decoder.metadata(version, input, registries, ModelNbtFactory.INSTANCE)) {
             Object converted = switch (value.kind()) {
-                case "item" ->
-                    items.item((WireValueDecoder.DecodedItem<ac.cult.blocksim.data.nbt.NbtValue>) value.value());
+                case "item" -> items.item((WireValueDecoder.DecodedItem<NbtValue>) value.value());
                 case "painting_variant" ->
                     value.value() instanceof int[] size
                             ? new PaintingSize(size[0], size[1])

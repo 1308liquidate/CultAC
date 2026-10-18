@@ -10,7 +10,6 @@ import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerAction;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSwing;
-import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.PlayerAction;
 
 @CheckData(
@@ -61,9 +60,6 @@ public class MultiActionsE extends Check implements CheckListener {
     }
 
     private boolean isActivelyUsingItem() {
-        return player.isClientUsingItem()
-                && (player.usesModernJavaItemUse()
-                        || player.packetStateData.lastSlotSelected == player.packetStateData.getSlowedByUsingItemSlot()
-                        || player.getClientItemUseHand() == Hand.OFF_HAND);
+        return MultiActionsA.isActivelyUsingItem(player);
     }
 }

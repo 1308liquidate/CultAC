@@ -2,6 +2,7 @@ package ac.cult.cultac.utils.nmsutil;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.blocksim.entity.EntityTypes;
+import ac.cult.cultac.bedrock.prediction.state.BedrockBoatProperties;
 import ac.cult.cultac.bedrock.prediction.state.BedrockHorseProperties;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
@@ -13,18 +14,7 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityTrackXRot;
 import ac.cult.cultac.utils.math.Vec3;
 
-/**
- * Yeah, I know this is a bad class
- * I just can't figure out how to PR it to PacketEvents due to babies, slimes, and other irregularities
- * <p>
- * I could PR a ton of classes in order to accomplish it but then no one would use it
- * (And even if they did they would likely be breaking my license...)
- */
 public class BoundingBoxSize {
-
-    public static float getWidth(PacketEntity packetEntity) {
-        return getWidth(packetEntity, ClientVersion.V_26_2);
-    }
 
     public static float getWidth(CultPlayer player, PacketEntity packetEntity) {
         return getWidth(packetEntity, player.getClientVersion(), player.isBedrockMovement());
@@ -34,7 +24,7 @@ public class BoundingBoxSize {
         if (bedrock && packetEntity.isBoat()) {
             return (float)
                     (packetEntity.bedrockBoat == null
-                            ? ac.cult.cultac.bedrock.prediction.state.BedrockBoatProperties.DIMENSIONS.width()
+                            ? BedrockBoatProperties.DIMENSIONS.width()
                             : packetEntity.bedrockBoat.dimensions().width());
         }
         if (bedrock && BedrockHorseProperties.supports(packetEntity.type)) {
@@ -87,15 +77,6 @@ public class BoundingBoxSize {
             PacketEntity entity, PacketEntity passenger, CultPlayer player, SimpleCollisionBox box) {
         return getRidingOffsetFromVehicle(
                 entity, passenger, player, box, entity.passengers.indexOf(passenger), entity.passengers.size());
-    }
-
-    public static Vec3 getRidingOffsetFromVehicle(
-            PacketEntity entity,
-            PacketEntity passenger,
-            CultPlayer player,
-            SimpleCollisionBox box,
-            int passengerIndex) {
-        return getRidingOffsetFromVehicle(entity, passenger, player, box, passengerIndex, entity.passengers.size());
     }
 
     public static Vec3 getRidingOffsetFromVehicle(
@@ -181,7 +162,7 @@ public class BoundingBoxSize {
         if (bedrock && packetEntity.isBoat()) {
             return (float)
                     (packetEntity.bedrockBoat == null
-                            ? ac.cult.cultac.bedrock.prediction.state.BedrockBoatProperties.DIMENSIONS.height()
+                            ? BedrockBoatProperties.DIMENSIONS.height()
                             : packetEntity.bedrockBoat.dimensions().height());
         }
         if (bedrock && BedrockHorseProperties.supports(packetEntity.type)) {
@@ -196,63 +177,6 @@ public class BoundingBoxSize {
 
     public static float getHeight(PacketEntity packetEntity) {
         return getHeight(packetEntity, ClientVersion.V_26_2);
-    }
-
-    public static double getMyRidingOffset(PacketEntity packetEntity) {
-        // Attachment points require virtual passenger pairs to preserve animated offsets.
-        if ((packetEntity.type == EntityTypeIds.PIGLIN)
-                || (packetEntity.type == EntityTypeIds.ZOMBIFIED_PIGLIN)
-                || (packetEntity.type == EntityTypeIds.ZOMBIE)) {
-            return packetEntity.isBaby ? -0.05 : -0.45;
-        } else if ((packetEntity.type == EntityTypeIds.SKELETON)) {
-            return -0.6;
-        } else if ((packetEntity.type == EntityTypeIds.ENDERMITE) || (packetEntity.type == EntityTypeIds.SILVERFISH)) {
-            return 0.1;
-        } else if ((packetEntity.type == EntityTypeIds.EVOKER)
-                || (packetEntity.type == EntityTypeIds.ILLUSIONER)
-                || (packetEntity.type == EntityTypeIds.PILLAGER)
-                || (packetEntity.type == EntityTypeIds.RAVAGER)
-                || (packetEntity.type == EntityTypeIds.VINDICATOR)
-                || (packetEntity.type == EntityTypeIds.WITCH)) {
-            return -0.45;
-        } else if ((packetEntity.type == EntityTypeIds.PLAYER)) {
-            return -0.35;
-        }
-
-        if (EntityTypeUtil.isAnimal(packetEntity.type)) {
-            return 0.14;
-        }
-
-        return 0;
-    }
-
-    public static double getPassengerRidingOffset(CultPlayer player, PacketEntity packetEntity) {
-        if (packetEntity instanceof PacketEntityHorse) return (getHeight(player, packetEntity) * 0.75) - 0.25;
-
-        if (EntityTypeUtil.isMinecart(packetEntity.type)) {
-            return 0;
-        } else if (EntityTypeUtil.isBoat(packetEntity.type)) {
-            return -0.1;
-        } else if ((packetEntity.type == EntityTypeIds.HOGLIN) || (packetEntity.type == EntityTypeIds.ZOGLIN)) {
-            return getHeight(player, packetEntity) - (packetEntity.isBaby ? 0.2 : 0.15);
-        } else if ((packetEntity.type == EntityTypeIds.LLAMA)) {
-            return getHeight(player, packetEntity) * 0.67;
-        } else if ((packetEntity.type == EntityTypeIds.PIGLIN)) {
-            return getHeight(player, packetEntity) * 0.92;
-        } else if ((packetEntity.type == EntityTypeIds.RAVAGER)) {
-            return 2.1;
-        } else if ((packetEntity.type == EntityTypeIds.SKELETON)) {
-            return (getHeight(player, packetEntity) * 0.75) - 0.1875;
-        } else if ((packetEntity.type == EntityTypeIds.SPIDER)) {
-            return getHeight(player, packetEntity) * 0.5;
-        } else if ((packetEntity.type
-                == EntityTypeIds
-                        .STRIDER)) { // depends on animation position, good luck getting it exactly, this is the best
-            // you can do
-            // though
-            return getHeight(player, packetEntity) - 0.19;
-        }
-        return getHeight(player, packetEntity) * 0.75;
     }
 
     private static float getHeightMinusBaby(PacketEntity packetEntity, ClientVersion version) {

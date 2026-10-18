@@ -122,7 +122,7 @@ public final class CultDebugVelocity implements BuildableCommand {
             Integer vehicleId = player.compensatedEntities.vehicles.serverPlayerVehicle;
             var packet = new ClientboundEntityMotion(
                     vehicleId == null ? player.entityID : vehicleId, new Vec3d(velocity.x, velocity.y, velocity.z));
-            player.user.write(silent ? new CultWrite(packet, true) : new CultWrite(packet, false));
+            player.user.write(new CultWrite(packet, silent));
             sender.sendMessage(Component.text(
                     "Sent " + (silent ? "silent " : "") + "velocity " + velocity + " via a Java packet.",
                     NamedTextColor.GRAY));

@@ -844,8 +844,7 @@ public class CheckManager {
     private static final ClassValue<Boolean> OVERRIDES_POSITION_UPDATE = new ClassValue<>() {
         @Override
         protected Boolean computeValue(Class<?> type) {
-            Class<?> owner = callbackOwner(type, "onPositionUpdate", PositionUpdate.class);
-            return owner != CheckListener.class && owner != PositionListener.class;
+            return callbackOwner(type, "onPositionUpdate", PositionUpdate.class) != CheckListener.class;
         }
     };
 

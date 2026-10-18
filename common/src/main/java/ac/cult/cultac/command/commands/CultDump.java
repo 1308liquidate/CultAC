@@ -69,8 +69,7 @@ public class CultDump implements BuildableCommand {
         // state of different properties
         JsonObject states = new JsonObject();
         base.add("states", states);
-        if (CultAPI.INSTANCE.isInitialized())
-            states.addProperty("platform", CultAPI.INSTANCE.getPlatform().toString());
+        states.addProperty("platform", CultAPI.INSTANCE.getPlatform().toString());
         if (ViaVersionUtil.isAvailable()) states.addProperty("has_viaversion", true);
         if (PAPER) states.addProperty("has_paper", true);
         // include some relevant settings if not default

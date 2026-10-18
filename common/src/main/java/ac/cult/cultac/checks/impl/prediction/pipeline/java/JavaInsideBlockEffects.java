@@ -4,6 +4,7 @@ import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.BlockProps;
 import ac.cult.blocksim.engine.shapes.Shapes;
 import ac.cult.blocksim.engine.shapes.VoxelShape;
+import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
@@ -11,6 +12,7 @@ import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.InsideBlockEffectScan;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
@@ -81,10 +83,7 @@ public final class JavaInsideBlockEffects {
                         if (stuckAllowed) {
                             if (powder && powderAllowed) speed = new Vec3(0.9F, 1.5, 0.9F);
                             if (web) speed = Collisions.getCobwebStuckSpeed(player);
-                            if (berry
-                                    && living
-                                    && actor.type != ac.cult.blocksim.entity.EntityTypeIds.FOX
-                                    && actor.type != ac.cult.blocksim.entity.EntityTypeIds.BEE)
+                            if (berry && living && actor.type != EntityTypeIds.FOX && actor.type != EntityTypeIds.BEE)
                                 speed = new Vec3(0.8F, 0.75, 0.8F);
                         }
                         if (speed != null) state = new State(0, state.velocity(), speed);
@@ -97,8 +96,7 @@ public final class JavaInsideBlockEffects {
                                             .geometry()
                                             .collision(above, pos)
                                             .isEmpty()
-                                    && ac.cult.cultac.utils.nmsutil.ClientFluidQueries.modelFluid(above)
-                                            .isEmpty();
+                                    && ClientFluidQueries.modelFluid(above).isEmpty();
                             // AbstractBoat overrides the surface callback without changing client velocity.
                             if (context.getVehicle() == null) {
                                 // Player bubble velocity uses the existing uncertainty handler;

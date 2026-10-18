@@ -76,10 +76,6 @@ public final class ObservedPacketValues implements PacketValueAdapter {
         configurationTags.clear();
     }
 
-    WireValueDecoder decoder() {
-        return decoder;
-    }
-
     WireRegistryState names() {
         return names;
     }

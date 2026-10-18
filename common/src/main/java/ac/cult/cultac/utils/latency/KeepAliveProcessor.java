@@ -40,7 +40,6 @@ public class KeepAliveProcessor extends CultProcessor implements CheckListener {
             // some clients when tabbed out won't send transaction packets, so
             // if the player hasn't rotated in the past 20 seconds, ignore them
             final long lastRotated = time - player.lastRotated;
-            //
             debug(() -> "diff=" + diff + " ping=" + this.lastKeepAlivePing + " lr=" + lastRotated);
             if (diff > 25 && lastRotated < 20000 && data.getTransReceived() != 0) {
                 player.checkManager

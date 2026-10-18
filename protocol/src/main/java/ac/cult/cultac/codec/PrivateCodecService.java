@@ -2,6 +2,8 @@ package ac.cult.cultac.codec;
 
 import ac.cult.cultac.protocol.*;
 import ac.cult.cultac.protocol.data.*;
+import ac.cult.cultac.protocol.wire.NbtSkipper;
+import ac.cult.cultac.protocol.wire.RegistryValueCodec;
 import ac.cult.cultac.protocol.wire.Wire;
 import ac.cult.shaded.vialib.ViaManagerImpl;
 import ac.cult.shaded.vialib.api.data.MappingData;
@@ -174,12 +176,6 @@ public final class PrivateCodecService implements WireValueDecoder {
     }
 
     @Override
-    public boolean canWriteComponent(String component) {
-        checkOpen();
-        return ComponentWrites.supports(component);
-    }
-
-    @Override
     public void writeComponent(
             ProtocolVersion version, ByteBuf output, String component, byte[] value, Registries registries) {
         checkOpen();
@@ -257,12 +253,10 @@ public final class PrivateCodecService implements WireValueDecoder {
                 layoutBytes = ByteBufUtil.getBytes(output);
             }
             // Via's component writers preserve fields that the persistent NBT codec omits.
-            var encodings = new java.util.HashMap<String, ComponentEncoding>();
+            var encodings = new HashMap<String, ComponentEncoding>();
             for (var data : item.dataContainer().data().values()) {
                 if (data.isEmpty()) continue;
-                encodings.put(
-                        ac.cult.shaded.vialib.util.Key.namespaced(data.key().identifier()),
-                        ComponentValues.wireEncoding(data, context));
+                encodings.put(Key.namespaced(data.key().identifier()), ComponentValues.wireEncoding(data, context));
             }
             return new ItemValue(
                     item.identifier(),
@@ -509,10 +503,9 @@ public final class PrivateCodecService implements WireValueDecoder {
             Types.VAR_INT.readPrimitive(input);
             Types.VAR_INT.readPrimitive(input);
             Types.VAR_INT.readPrimitive(input);
-        } else if (type == Types.TRUSTED_TAG || type == Types.COMPOUND_TAG)
-            ac.cult.cultac.protocol.wire.NbtSkipper.skip(input, 512);
+        } else if (type == Types.TRUSTED_TAG || type == Types.COMPOUND_TAG) NbtSkipper.skip(input, 512);
         else if (type == Types.TRUSTED_OPTIONAL_TAG) {
-            if (input.readBoolean()) ac.cult.cultac.protocol.wire.NbtSkipper.skip(input, 512);
+            if (input.readBoolean()) NbtSkipper.skip(input, 512);
         } else type.read(input); // Via supplies boundaries for particle arguments and other complex values.
     }
 
@@ -525,7 +518,7 @@ public final class PrivateCodecService implements WireValueDecoder {
     @Override
     public RegistryValues registry(ByteBuf input) {
         checkOpen();
-        return ac.cult.cultac.protocol.wire.RegistryValueCodec.read(input);
+        return RegistryValueCodec.read(input);
     }
 
     @Override

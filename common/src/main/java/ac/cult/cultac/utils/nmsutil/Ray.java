@@ -1,19 +1,13 @@
 package ac.cult.cultac.utils.nmsutil;
 
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.utils.data.Pair;
 import ac.cult.cultac.utils.math.Vector3dm;
 
 // Copied directly from Hawk
-public class Ray implements Cloneable {
+public class Ray {
 
     private Vector3dm origin;
     private Vector3dm direction;
-
-    public Ray(Vector3dm origin, Vector3dm direction) {
-        this.origin = origin;
-        this.direction = direction;
-    }
 
     public Ray(CultPlayer player, double x, double y, double z, float xRot, float yRot) {
         this.origin = new Vector3dm(x, y, z);
@@ -33,44 +27,13 @@ public class Ray implements Cloneable {
         return vector;
     }
 
-    public Ray clone() {
-        // Deep copy: origin and direction are mutable Vectors shared with callers.
-        return new Ray(origin.clone(), direction.clone());
-    }
-
-    public String toString() {
-        return "origin: " + origin + " direction: " + direction;
-    }
-
     public Vector3dm getPointAtDistance(double distance) {
         Vector3dm dir = new Vector3dm(direction.getX(), direction.getY(), direction.getZ());
         Vector3dm orig = new Vector3dm(origin.getX(), origin.getY(), origin.getZ());
         return orig.add(dir.multiply(distance));
     }
 
-    // https://en.wikipedia.org/wiki/Skew_lines#Nearest_Points
-    public Pair<Vector3dm, Vector3dm> closestPointsBetweenLines(Ray other) {
-        Vector3dm n1 = direction.clone().crossProduct(other.direction.clone().crossProduct(direction));
-        Vector3dm n2 = other.direction.clone().crossProduct(direction.clone().crossProduct(other.direction));
-
-        Vector3dm c1 = origin.clone()
-                .add(direction
-                        .clone()
-                        .multiply(other.origin.clone().subtract(origin).dot(n2) / direction.dot(n2)));
-        Vector3dm c2 = other.origin
-                .clone()
-                .add(other.direction
-                        .clone()
-                        .multiply(origin.clone().subtract(other.origin).dot(n1) / other.direction.dot(n1)));
-
-        return new Pair<>(c1, c2);
-    }
-
     public Vector3dm getOrigin() {
         return origin;
-    }
-
-    public Vector3dm calculateDirection() {
-        return direction;
     }
 }

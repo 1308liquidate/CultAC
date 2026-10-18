@@ -3,6 +3,7 @@ package ac.cult.cultac.checks.impl.breaking;
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
+import ac.cult.cultac.checks.EyePositions;
 import ac.cult.cultac.checks.impl.verbose.VerboseCodecs;
 import ac.cult.cultac.checks.type.BlockBreakListener;
 import ac.cult.cultac.network.CultPacketHandler;
@@ -36,20 +37,12 @@ public class PositionBreakA extends Check implements BlockBreakListener {
 
     public void onBlockBreak(BlockBreak blockBreak) {
         if (player.inVehicle()
-                || blockBreak.action == PlayerAction.ABORT_DESTROY_BLOCK // PE DiggingAction.CANCELLED_DIGGING
+                || blockBreak.action == PlayerAction.ABORT_DESTROY_BLOCK
                 || BlockIds.is(blockBreak.block, BlockIds.REDSTONE_WIRE)) return;
 
         SimpleCollisionBox combined = blockBreak.getCombinedBox();
 
-        double minEyeHeight = Double.MAX_VALUE;
-        double maxEyeHeight = Double.MIN_VALUE;
-        for (double height : player.getPossibleEyeHeights()) {
-            minEyeHeight = Math.min(minEyeHeight, height);
-            maxEyeHeight = Math.max(maxEyeHeight, height);
-        }
-
-        SimpleCollisionBox eyePositions = new SimpleCollisionBox(
-                player.x, player.y + minEyeHeight, player.z, player.x, player.y + maxEyeHeight, player.z);
+        SimpleCollisionBox eyePositions = EyePositions.box(player, player.getPossibleEyeHeights());
         if (!didLastMovementIncludePosition) {
             eyePositions.expand(player.getMovementThreshold());
         }
@@ -60,8 +53,7 @@ public class PositionBreakA extends Check implements BlockBreakListener {
             return;
         }
 
-        // So now we have the player's possible eye positions
-        // So then look at the face that the player has clicked
+        // Compare the player's possible eye positions against the clicked face
         boolean flag = switch (blockBreak.face) {
             case NORTH -> eyePositions.minZ > combined.minZ; // Z- face
             case SOUTH -> eyePositions.maxZ < combined.maxZ; // Z+ face

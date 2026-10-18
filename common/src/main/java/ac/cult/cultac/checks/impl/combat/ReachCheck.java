@@ -74,7 +74,6 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     private double hitX, hitY, hitZ;
     private final List<QueuedAttack> playerAttackQueue = new ArrayList<>();
     private final List<QueuedAttack> measuredAttacks = new ArrayList<>();
-    private static final List<Integer> blacklisted = Arrays.asList(EntityTypeIds.SHULKER);
 
     private boolean cancelImpossibleHits;
     private double threshold;
@@ -411,9 +410,6 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             double lookZ = looks[look * 3 + 2];
             for (int candidate = 0; candidate < fromCandidates.size(); candidate++) {
                 Vec3 from = fromCandidates.get(candidate);
-                if (from == null) {
-                    continue;
-                }
                 for (double height : EYE_HEIGHTS) {
                     double eyeY = from.y + height * scale;
                     if (look < viewLooks) {
@@ -437,9 +433,6 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         float length = player.headArcLength;
         for (int candidate = 0; candidate < fromCandidates.size(); candidate++) {
             Vec3 eye = fromCandidates.get(candidate);
-            if (eye == null) {
-                continue;
-            }
             float aim = (float) Math.toDegrees(Math.atan2(eye.x - centerX, centerZ - eye.z));
             float into = aim - from;
             into -= 360.0F * (float) Math.floor(into / 360.0F);
@@ -853,7 +846,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     }
 
     private boolean isReachExempt(PacketEntity reachEntity) {
-        return blacklisted.contains(reachEntity.type) || EntityTypeUtil.isBoat(reachEntity.type);
+        return reachEntity.type == EntityTypeIds.SHULKER || EntityTypeUtil.isBoat(reachEntity.type);
     }
 
     @Override

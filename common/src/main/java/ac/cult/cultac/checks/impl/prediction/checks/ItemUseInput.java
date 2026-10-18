@@ -9,10 +9,6 @@ import ac.cult.cultac.utils.math.Vec3;
 public final class ItemUseInput {
     private ItemUseInput() {}
 
-    public static double offset(PredictionResult result, float multiplier) {
-        return offset(residual(result), multiplier);
-    }
-
     public static ItemUseBurstResult residual(PredictionResult result) {
         var context = result.getSimulationContext();
         Vec3 residual =

@@ -12,11 +12,6 @@ public record KnownInput(
     }
 
     @Contract(pure = true)
-    public boolean moving() {
-        return forward || backward || left || right || jump;
-    }
-
-    @Contract(pure = true)
     public float strafeImpulse() {
         return calculateImpulse(left, right);
     }

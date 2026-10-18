@@ -46,10 +46,6 @@ public class PacketEntityHorse extends PacketEntityTrackXRot {
         }
     }
 
-    public void tickClientAnimation() {
-        tickStandAnimation();
-    }
-
     private void tickStandAnimation() {
         // MCP-Reborn AbstractHorse#tick decrements standCounter before updating standAnim.
         boolean clientJumpStanding = clientRidingJumpStandTicks > 0 && --clientRidingJumpStandTicks > 0;

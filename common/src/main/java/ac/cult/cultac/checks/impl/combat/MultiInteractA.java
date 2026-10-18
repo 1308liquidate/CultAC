@@ -6,12 +6,12 @@ import ac.cult.cultac.checks.type.CheckListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSpectatorAction;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundTeleportToEntity;
+import ac.cult.cultac.protocol.value.InteractAction;
 import ac.grim.grimac.api.storage.verbose.Verbose;
 
 @CheckData(
@@ -35,13 +35,7 @@ public class MultiInteractA extends Check implements CheckListener {
     public void onInteractEntity(
             PacketReceiveEvent<ServerboundInteract> event, CultPlayer player, ServerboundInteract packet) {
         onInteract(
-                event,
-                packet.entityId(),
-                (packet.action() == ac.cult.cultac.protocol.value.InteractAction.ATTACK
-                                && ProtocolVersion.V26_3.protocol()
-                                        >= ac.cult.cultac.protocol.ProtocolVersion.V26_1.protocol())
-                        ? lastSneaking
-                        : packet.sneaking());
+                event, packet.entityId(), packet.action() == InteractAction.ATTACK ? lastSneaking : packet.sneaking());
     }
 
     @CultPacketHandler

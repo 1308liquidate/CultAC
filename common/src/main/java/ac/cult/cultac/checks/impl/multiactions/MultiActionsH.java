@@ -2,6 +2,7 @@ package ac.cult.cultac.checks.impl.multiactions;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump;
 import ac.cult.cultac.checks.type.CheckListener;
 import ac.cult.cultac.checks.type.ClientTickEndListener;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
@@ -19,8 +20,8 @@ public class MultiActionsH extends Check implements CheckListener, ClientTickEnd
         super(player);
     }
 
-    private ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump autoJump() {
-        return player.checkManager.getListener(ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump.class);
+    private JavaAutoJump autoJump() {
+        return player.checkManager.getListener(JavaAutoJump.class);
     }
 
     @Override

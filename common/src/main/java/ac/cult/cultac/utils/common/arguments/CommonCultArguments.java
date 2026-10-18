@@ -11,8 +11,6 @@ public class CommonCultArguments {
             .supportEnv()
             .build();
 
-    public static final SystemArgument<Boolean> KICK_ON_TRANSACTION_ERRORS =
-            FACTORY.create(string("KickOnTransactionTaskErrors", true));
     public static final SystemArgument<String> API_URL =
             FACTORY.create(string("APIUrl", "https://api.grim.ac/v1/server/"));
     public static final SystemArgument<String> PASTE_URL = FACTORY.create(string("PasteUrl", "https://paste.grim.ac/"));

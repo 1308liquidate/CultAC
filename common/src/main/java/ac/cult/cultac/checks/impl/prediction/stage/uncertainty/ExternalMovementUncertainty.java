@@ -11,15 +11,7 @@ public final class ExternalMovementUncertainty {
     private ExternalMovementUncertainty() {}
 
     public static Snapshot capture(PredictionResult result, PredictionResult lastResult) {
-        Snapshot movement = capture(result.getSimulationContext(), lastResult);
-
-        return new Snapshot(
-                movement.lastPistonTargetEnvelope(),
-                movement.lastShulkerTargetEnvelope(),
-                movement.currentPistonTargetEnvelope(),
-                movement.currentShulkerTargetEnvelope(),
-                movement.combinedTargetEnvelope(),
-                movement.combinedClientPositionOnlyEnvelope());
+        return capture(result.getSimulationContext(), lastResult);
     }
 
     /** False exactly when every push box {@link #capture(SimulationContext, PredictionResult)} reads is empty. */
@@ -165,10 +157,6 @@ public final class ExternalMovementUncertainty {
             SimpleCollisionBox currentShulkerTargetEnvelope,
             SimpleCollisionBox combinedTargetEnvelope,
             SimpleCollisionBox combinedClientPositionOnlyEnvelope) {
-        public boolean hasAnyUncertainty() {
-            return hasExternalMove();
-        }
-
         public boolean hasExternalMove() {
             return !combinedTargetEnvelope.isEmpty();
         }

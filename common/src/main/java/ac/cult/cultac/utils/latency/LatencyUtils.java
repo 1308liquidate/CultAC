@@ -10,15 +10,6 @@ public class LatencyUtils {
         this.player = player;
     }
 
-    // run when not on the player's netty thread
-    public void addRealTimeTaskNowAsync(Runnable task) {
-        addRealTimeTask(player.lastTransactionSent.get(), true, task);
-    }
-
-    public void addRealTimeTaskNextAsync(Runnable task) {
-        addRealTimeTask(player.lastTransactionSent.get() + 1, true, task);
-    }
-
     public void addRealTimeTaskNow(Runnable task) {
         addRealTimeTask(player.lastTransactionSent.get(), task);
     }
@@ -27,35 +18,7 @@ public class LatencyUtils {
         addRealTimeTask(player.lastTransactionSent.get() + 1, task);
     }
 
-    public void addRealTimeTask(int transaction, Runnable runnable) {
-        addRealTimeTask(transaction, false, runnable);
-    }
-
-    private Thread nettyThread = null;
-
-    public boolean isThreadDebugEnabled() {
-        return this.nettyThread != null;
-    }
-
-    public void disableThreadDebug() {
-        this.nettyThread = null;
-    }
-
-    public void enableThreadDebug() {
-        this.nettyThread = Thread.currentThread();
-    }
-
-    private void assertNettyThread() {
-        if (this.nettyThread != null && Thread.currentThread() != this.nettyThread)
-            throw new RuntimeException("Task ran on incorrect thread!");
-    }
-
-    public void addRealTimeTask(int transaction, boolean async, Runnable task) {
-        if (async) {
-            player.user.execute(() -> addRealTimeTask(transaction, false, task));
-            return;
-        }
-        assertNettyThread();
+    public void addRealTimeTask(int transaction, Runnable task) {
         if (player.lastTransactionReceived.get()
                 >= transaction) { // If the player already responded to this transaction
             task.run();
@@ -66,7 +29,6 @@ public class LatencyUtils {
 
     public void addRealTimeTaskWithNextTransaction(
             int transaction, Runnable runnable, Runnable nextTransactionRunnable) {
-        assertNettyThread();
         if (player.lastTransactionReceived.get()
                 >= transaction) { // If the player already responded to this transaction
             runnable.run();

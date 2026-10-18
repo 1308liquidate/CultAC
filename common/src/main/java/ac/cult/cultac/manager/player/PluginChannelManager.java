@@ -28,10 +28,7 @@ public class PluginChannelManager extends CultProcessor implements CheckListener
             return;
         }
         String channel = packet.channel();
-        if (channel == null) {
-            return;
-        }
-        if (!"minecraft:brand".equals(channel) && !"MC|Brand".equals(channel)) {
+        if (!"minecraft:brand".equals(channel)) {
             handleChannelRegistered(channel);
         }
         handle(channel, event.getPacket().data(), event);
@@ -69,20 +66,6 @@ public class PluginChannelManager extends CultProcessor implements CheckListener
         }
     }
 
-    public void refresh(String clientBrand, Set<String> currentChannels) {
-        if (this.brand == null && clientBrand != null && !clientBrand.isBlank()) {
-            updateBrand(clientBrand);
-        }
-        for (String channel : Set.copyOf(registeredChannels)) {
-            if (!currentChannels.contains(channel)) {
-                handleChannelUnregistered(channel);
-            }
-        }
-        for (String channel : currentChannels) {
-            handleChannelRegistered(channel);
-        }
-    }
-
     public void handleChannelRegistered(String channel) {
         if (channel == null || channel.isBlank() || registeredChannels.contains(channel)) {
             return;
@@ -93,13 +76,6 @@ public class PluginChannelManager extends CultProcessor implements CheckListener
             return;
         }
         registeredChannels.add(channel);
-    }
-
-    public void handleChannelUnregistered(String channel) {
-        if (channel == null || channel.isBlank()) {
-            return;
-        }
-        registeredChannels.remove(channel);
     }
 
     private void updateBrand(String brand) {

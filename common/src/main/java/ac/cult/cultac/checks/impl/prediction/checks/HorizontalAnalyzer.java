@@ -183,10 +183,6 @@ public class HorizontalAnalyzer implements EngineCheck {
                         distanceToValid / 500); // Not that bad to flag
             }
         }
-
-        // We once had a check for making sure non-whole inputs were not allowed, but it was removed due to sneaking
-        // Maybe it can come back, eventually.
-        // Probably not, what would it even be checking?
     }
 
     /** The flag amount for the horizontal input {@code (absX, 0, absZ)}. */

@@ -12,7 +12,6 @@ import ac.grim.grimac.api.storage.history.SessionSummary;
 import ac.grim.grimac.api.storage.history.ViolationEntry;
 import ac.grim.grimac.api.storage.query.Page;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -94,7 +93,7 @@ public final class HistoryComponentRenderer {
         // Emit both %max_pages% (new) and %maxPages% (pre-cutover spelling) so
         // operators upgrading from 1.x with a legacy cult-history-header that
         // still references %maxPages% see a correctly-rendered count.
-        String maxPagesStr = Integer.toString(Math.max(1, maxPages));
+        String maxPagesStr = Integer.toString(maxPages);
         out.add(parse(
                         sender,
                         cfg,
@@ -529,10 +528,6 @@ public final class HistoryComponentRenderer {
         if (minutes > 0) sb.append(minutes).append("m ");
         if (seconds > 0 || sb.isEmpty()) sb.append(seconds).append("s");
         return sb.toString().trim();
-    }
-
-    public static @NotNull String formatAbsolute(long epochMs) {
-        return new Date(epochMs).toString();
     }
 
     private static @NotNull String nullToUnknown(@Nullable String s) {

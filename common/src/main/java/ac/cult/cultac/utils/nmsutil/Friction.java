@@ -76,8 +76,7 @@ public final class Friction {
         // Normal friction is this well known formula, account for slow falling, has lowest priority
         boolean use26Dot2 = player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_2);
         float frictionUnderPlayer =
-                getPlayerFriction(player, from, context.getLastTickMainSupportingBlockData(), onGround, false, false);
-        // Vec3 arithmetic as scalars: multiplying by 1 and adding -0 keep a component's bits.
+                getPlayerFriction(player, from, context.getLastTickMainSupportingBlockData(), onGround);
         double x = playerVelocity.x * frictionUnderPlayer;
         double y = playerVelocity.y;
         double z = playerVelocity.z * frictionUnderPlayer;
@@ -85,7 +84,7 @@ public final class Friction {
         if (player.compensatedEntities.getLevitationAmplifier() != null) {
             // This supports both positive and negative levitation
             y += (0.05 * (player.compensatedEntities.getLevitationAmplifier() + 1) - y) * 0.2;
-        } else if (player.compensatedEntities.getEntityInControl().hasGravity) {
+        } else {
             y += -gravity;
         }
 
@@ -116,7 +115,7 @@ public final class Friction {
             double gravity,
             boolean falling,
             Vec3 movement) {
-        if (!player.compensatedEntities.getEntityInControl().hasGravity || gravity == 0.0D) {
+        if (gravity == 0.0D) {
             if (!finiteOnly || isFinite(movement)) addDistinct(results, from, movement);
             return;
         }
@@ -174,14 +173,7 @@ public final class Friction {
     }
 
     public static float getPlayerFriction(
-            CultPlayer player,
-            Vec3 from,
-            MainSupportingBlockData mainSupportingBlockData,
-            boolean onGround,
-            boolean isGliding,
-            boolean isFlying) {
-        if (isGliding || isFlying) return 1.0f;
-
+            CultPlayer player, Vec3 from, MainSupportingBlockData mainSupportingBlockData, boolean onGround) {
         // MCP-Reborn 26.2 LivingEntity#travelInAir passes the block friction and the
         // 0.91 air drag through the friction_modifier / air_drag_modifier attributes.
         if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_2)) {

@@ -113,8 +113,7 @@ final class VelocityPlayer implements PlatformPlayer {
         player.sendMessage(message);
     }
 
-    @Override
-    public Sender getSender() {
+    private Sender getSender() {
         return senders.wrap(player);
     }
 

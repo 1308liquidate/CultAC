@@ -46,9 +46,9 @@ public class BadPacketsV extends Check implements CheckListener {
             int positionAtLeastEveryNTicks = 19;
 
             if (noReminderTicks < positionAtLeastEveryNTicks) {
-                final double x = packet.xOr(player.x);
-                final double y = packet.yOr(player.y);
-                final double z = packet.zOr(player.z);
+                final double x = packet.x();
+                final double y = packet.y();
+                final double z = packet.z();
                 final double deltaSq =
                         CultMath.square(sentX - x) + CultMath.square(sentY - y) + CultMath.square(sentZ - z);
                 if (deltaSq <= player.getMovementThreshold() * player.getMovementThreshold()) {
@@ -57,9 +57,9 @@ public class BadPacketsV extends Check implements CheckListener {
                 }
             }
 
-            sentX = packet.xOr(player.x);
-            sentY = packet.yOr(player.y);
-            sentZ = packet.zOr(player.z);
+            sentX = packet.x();
+            sentY = packet.y();
+            sentZ = packet.z();
             noReminderTicks = 0;
         } else {
             noReminderTicks++;

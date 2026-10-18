@@ -4,8 +4,8 @@ import ac.cult.cultac.checks.BedrockSupported;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckInfo;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
-import ac.cult.cultac.checks.impl.prediction.profile.MovementProfiles;
 import ac.cult.cultac.checks.type.PostPredictionListener;
+import ac.cult.cultac.manager.player.SetbackTeleportUtil;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
@@ -73,7 +73,7 @@ public class Phase extends Check implements PostPredictionListener {
 
     private void checkMovement(Vec3 location, boolean bedrock, boolean teleportOrExempt) {
         SimpleCollisionBox historyBox = boxAt(location, 1.8f, bedrock);
-        if ((bedrock && oldBox == null) || !MovementProfiles.forPlayer(player).shouldRunPhaseCheck(player)) {
+        if (bedrock && oldBox == null) {
             oldBox = historyBox;
             return;
         }
@@ -113,8 +113,7 @@ public class Phase extends Check implements PostPredictionListener {
 
                 // Simply resync if the player has ghost blocks.
                 if (hasGhostBlocks) {
-                    final ac.cult.cultac.manager.player.SetbackTeleportUtil setbackUtil =
-                            player.getSetbackTeleportUtil();
+                    final SetbackTeleportUtil setbackUtil = player.getSetbackTeleportUtil();
                     setbackUtil.executeForceResync("phase");
                 } else if (flagWithSetback()) {
                     final String playerName = player.getName();

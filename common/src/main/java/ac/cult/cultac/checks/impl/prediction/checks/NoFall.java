@@ -9,7 +9,6 @@ import ac.cult.cultac.utils.anticheat.NumFormatter;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
 
-// @CheckData(name = "NoFall")
 public class NoFall implements EngineCheck {
     private static final VanillaStepProof STEP_PROOF = new VanillaStepProof();
 
@@ -32,15 +31,14 @@ public class NoFall implements EngineCheck {
         if (!canCollideDown
                 && result.getSimulationContext().isOnGround()
                 && !STEP_PROOF.canStandAtDestination(player, result)) {
-            result.addFlag(player.checkManager.getListener(NoFallPseudo.class), () -> "true", 0.1);
+            result.addFlag(noFallPseudo, () -> "true", 0.1);
             flaggedNoFall = true;
         }
 
         SimpleCollisionBox valid = result.getValidMovements().getCollisionIgnoredMaxStartingVelExtents();
         // The player is off the ground and can collide to the ground
         if (!result.getSimulationContext().isOnGround()
-                && downCollide != null
-                && downCollide.isLikelyCollide()
+                && canCollideDown
                 && valid.maxY + 0.001 < result.getTarget().y // And their valid Y is below their actual movement
                 && downCollide.inMovementSpace(result.getSimulationContext().getLastStuckSpeed().y) + 0.001
                         >= result.getTarget().y) { // And they recovered by colliding

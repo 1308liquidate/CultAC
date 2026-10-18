@@ -1,5 +1,6 @@
 package ac.cult.cultac.command.commands;
 
+import ac.cult.blocksim.data.DataTables;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bridge.protocol.ServerCapability;
 import ac.cult.cultac.command.BuildableCommand;
@@ -20,6 +21,7 @@ import org.incendo.cloud.Command;
 import org.incendo.cloud.CommandManager;
 import org.incendo.cloud.context.CommandContext;
 import org.incendo.cloud.description.Description;
+import org.incendo.cloud.parser.standard.DoubleParser;
 import org.incendo.cloud.parser.standard.StringParser;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -29,7 +31,6 @@ public class CultDebug implements BuildableCommand {
     public void register(CommandManager<Sender> commandManager, CloudPlatformCommandArguments arguments) {
         Command.Builder<Sender> cultCommand = commandManager.commandBuilder("cult", "cultac", "grim", "grimac");
 
-        // Register "debug" subcommand
         Command.Builder<Sender> debugCommand = cultCommand
                 .literal("debug", Description.of("Toggle debug output for a player"))
                 .permission("cult.debug")
@@ -79,7 +80,6 @@ public class CultDebug implements BuildableCommand {
                 .optional("target", arguments.singlePlayerSelectorParser())
                 .handler(context -> handleDebugProxyTicks(context, true)));
 
-        // Register "consoledebug" subcommand
         Command.Builder<Sender> consoleDebugCommand = cultCommand
                 .literal("consoledebug", Description.of("Toggle console debug output for a player"))
                 .permission("cult.consoledebug")
@@ -129,10 +129,9 @@ public class CultDebug implements BuildableCommand {
                 .literal("debug")
                 .literal("ignoreinteract", Description.of("Ignore your interactions, then resync"))
                 .permission("cult.debug")
-                .required("seconds", org.incendo.cloud.parser.standard.DoubleParser.doubleParser(0, 300))
+                .required("seconds", DoubleParser.doubleParser(0, 300))
                 .handler(this::handleIgnoreInteract));
 
-        // Register command
         commandManager.command(debugCommand);
         commandManager.command(consoleDebugCommand);
     }
@@ -415,7 +414,7 @@ public class CultDebug implements BuildableCommand {
 
     /** Parses {@code namespace:block[property=value,...]} into a model block state. */
     private static int parseBlockState(String text) {
-        var registry = ac.cult.blocksim.data.DataTables.defaults().registry();
+        var registry = DataTables.defaults().registry();
         int properties = text.indexOf('[');
         String key = properties < 0 ? text : text.substring(0, properties);
         int state = registry.block(key).defaultState();
@@ -443,10 +442,7 @@ public class CultDebug implements BuildableCommand {
 
     private static String compensatedBlockId(CultPlayer target, int x, int y, int z) {
         int state = target.compensatedWorld.getBlockStateIdAt(x, y, z);
-        return ac.cult.blocksim.data.DataTables.defaults()
-                .registry()
-                .block(state)
-                .key();
+        return DataTables.defaults().registry().block(state).key();
     }
 
     private void handleDebug(@NotNull CommandContext<Sender> context) {
@@ -488,14 +484,14 @@ public class CultDebug implements BuildableCommand {
         if (cultPlayer == null) return;
 
         String requestedState = context.getOrDefault("state", "toggle");
-        boolean isOutput = switch (requestedState.toLowerCase(java.util.Locale.ROOT)) {
+        boolean isOutput = switch (requestedState.toLowerCase(Locale.ROOT)) {
             case "on", "true", "enable", "enabled" ->
                 cultPlayer.checkManager.getDebugHandler().setConsoleOutput(true);
             case "off", "false", "disable", "disabled" ->
                 cultPlayer.checkManager.getDebugHandler().setConsoleOutput(false);
             default -> cultPlayer.checkManager.getDebugHandler().toggleConsoleOutput();
         };
-        String playerName = cultPlayer.user.getProfile().getName(); // Use user profile for name
+        String playerName = cultPlayer.user.getProfile().getName();
 
         Component message = Component.text()
                 .append(Component.text("Console output for ", NamedTextColor.GRAY))

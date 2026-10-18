@@ -49,10 +49,8 @@ class CheckDispatchSnapshotTest {
             for (var map : List.of(manager.prePredictionChecks, manager.positionCheck, manager.packetChecks)) {
                 for (CheckListener check : map.values()) {
                     if (declaresCallback(
-                            check.getClass(),
-                            "onPositionUpdate",
-                            PositionUpdate.class,
-                            Set.of(CheckListener.class, PositionListener.class))) positions.add(check);
+                            check.getClass(), "onPositionUpdate", PositionUpdate.class, Set.of(CheckListener.class)))
+                        positions.add(check);
                 }
             }
             assertEquals(positions, array(manager, "positionUpdateListeners"));
@@ -110,7 +108,6 @@ class CheckDispatchSnapshotTest {
     void theSkippedDefaultsAreEmpty() throws ReflectiveOperationException, IOException {
         for (Method method : List.of(
                 CheckListener.class.getMethod("onPositionUpdate", PositionUpdate.class),
-                PositionListener.class.getMethod("onPositionUpdate", PositionUpdate.class),
                 PostPredictionListener.class.getMethod("onPredictionComplete", PredictionComplete.class))) {
             assertTrue(method.isDefault(), method.toString());
             Path source = Path.of(

@@ -143,17 +143,6 @@ public class PredVector extends Vec3 {
         return false;
     }
 
-    public boolean hasVectorInLineage(Vec3 vector, double maxDelta) {
-        PredVector current = this;
-        while (current != null) {
-            if (maxAbsDelta(current, vector) <= maxDelta) {
-                return true;
-            }
-            current = current.lastVector;
-        }
-        return false;
-    }
-
     public <T extends PredVector> T firstInLineage(Class<T> type) {
         PredVector current = this;
         while (current != null) {
@@ -205,18 +194,6 @@ public class PredVector extends Vec3 {
 
     public Vec3 collisionStuckSpeedMultiplier(SimulationContext context) {
         return lastVector == null ? context.getLastStuckSpeed() : lastVector.collisionStuckSpeedMultiplier(context);
-    }
-
-    public Vec3 resolvedMovementDelta() {
-        return lastVector == null ? null : lastVector.resolvedMovementDelta();
-    }
-
-    private static double maxAbsDelta(Vec3 first, Vec3 second) {
-        if (first == null || second == null) {
-            return Double.POSITIVE_INFINITY;
-        }
-        return Math.max(
-                Math.max(Math.abs(first.x - second.x), Math.abs(first.y - second.y)), Math.abs(first.z - second.z));
     }
 
     public int packetModifiersLength() {

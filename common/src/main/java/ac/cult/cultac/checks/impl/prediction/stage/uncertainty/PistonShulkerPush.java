@@ -42,7 +42,7 @@ public class PistonShulkerPush implements UncertaintyHandler {
         ExternalMovementUncertainty.Snapshot snapshot = ExternalMovementUncertainty.capture(context, lastResult);
         SimpleCollisionBox expanded = snapshot.combinedTargetEnvelopeCopy();
 
-        if (expanded == null || expanded.isEmpty()) return trace;
+        if (expanded.isEmpty()) return trace;
 
         result.getSimulationContext().getWorldData().setLastOnGround(DesyncStatus.UNKNOWN);
 
@@ -63,8 +63,7 @@ public class PistonShulkerPush implements UncertaintyHandler {
             // target in pre-stuck coordinates, so convert the position-only shove
             // back to raw client movement before deriving next tick velocity.
             Vec3 stuckSpeed = context.getLastStuckSpeed();
-            Vec3 multiplier = stuckSpeed == null ? new Vec3(1.0D, 1.0D, 1.0D) : stuckSpeed;
-            Vec3 positionOnlyDelta = targetSpaceOffset.multiply(multiplier.x, multiplier.y, multiplier.z);
+            Vec3 positionOnlyDelta = targetSpaceOffset.multiply(stuckSpeed.x, stuckSpeed.y, stuckSpeed.z);
             trace = trace.addPositionOnlyDelta(positionOnlyDelta);
         }
         return trace.addCollisionBaseOffset(targetSpaceOffset);

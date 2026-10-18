@@ -3,10 +3,13 @@ package ac.cult.cultac.utils.visibility;
 import ac.cult.blocksim.data.BlockFamilies;
 import ac.cult.blocksim.data.ItemComponents;
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.blocksim.entity.EntityTypes;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.protocol.value.GameMode;
+import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.utils.collisions.ClientBlockShapes;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.TransactionVel;
@@ -16,7 +19,11 @@ import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /** Selection geometry shared by block use, digging, entity attacks and entity interactions. */
 public final class ClientVisibility {
@@ -154,7 +161,7 @@ public final class ClientVisibility {
         return index + 3;
     }
 
-    private boolean hiddenForEverySelection(java.util.function.Supplier<Boolean> query) {
+    private boolean hiddenForEverySelection(Supplier<Boolean> query) {
         if (selections.isEmpty()) return query.get();
         Selection previous = activeSelection;
         try {
@@ -289,9 +296,8 @@ public final class ClientVisibility {
         return envelope;
     }
 
-    public boolean entityHidden(ac.cult.cultac.utils.data.packetentity.PacketEntity entity, double positionError) {
-        double pickRadius =
-                EntityTypeUtil.modelType(entity.type).has(ac.cult.blocksim.entity.EntityTypes.PROJECTILE) ? 1.0F : 0;
+    public boolean entityHidden(PacketEntity entity, double positionError) {
+        double pickRadius = EntityTypeUtil.modelType(entity.type).has(EntityTypes.PROJECTILE) ? 1.0F : 0;
         // ProjectileUtil#getEntityHitResult clips the physical bounding box,
         // inflated only by the native pick radius/item margin. Reach's separate
         // 0.03125 expansion can invent an exposed point across a solid corner.
@@ -304,8 +310,7 @@ public final class ClientVisibility {
     }
 
     public boolean entityInteractionHidden(PacketEntity entity, double positionError) {
-        double pickRadius =
-                EntityTypeUtil.modelType(entity.type).has(ac.cult.blocksim.entity.EntityTypes.PROJECTILE) ? 1.0F : 0;
+        double pickRadius = EntityTypeUtil.modelType(entity.type).has(EntityTypes.PROJECTILE) ? 1.0F : 0;
         return hiddenForEverySelection(() -> {
             var target = entity.getPossibleMovementCollisionBoxes();
             var self = player.compensatedEntities.getSelf();
@@ -351,16 +356,12 @@ public final class ClientVisibility {
 
     private ItemComponents.AttackRange currentAttackRange() {
         if (player.gamemode == GameMode.SPECTATOR) return null;
-        if (player.getClientVersion().isOlderThan(ac.cult.cultac.network.protocol.ClientVersion.V_1_21_11)) return null;
-        var hand = player.isClientUsingItem()
-                ? player.getClientItemUseHand()
-                : ac.cult.cultac.protocol.value.Hand.MAIN_HAND;
-        var item = hand == ac.cult.cultac.protocol.value.Hand.MAIN_HAND
+        if (player.getClientVersion().isOlderThan(ClientVersion.V_1_21_11)) return null;
+        var hand = player.isClientUsingItem() ? player.getClientItemUseHand() : Hand.MAIN_HAND;
+        var item = hand == Hand.MAIN_HAND
                 ? player.getInventory().getClientSelectedHeldItem()
                 : player.getInventory().getOffHand();
-        if (hand == ac.cult.cultac.protocol.value.Hand.MAIN_HAND
-                && player.isClientUsingItem()
-                && !player.usesModernJavaItemUse())
+        if (hand == Hand.MAIN_HAND && player.isClientUsingItem() && !player.usesModernJavaItemUse())
             item = player.getInventory()
                     .inventory
                     .getInventoryStorage()
@@ -407,14 +408,13 @@ public final class ClientVisibility {
         // Ordinary visible picks need no local shape queries or buffered origins.
         return () -> {
             double radius = EyePositionTolerance.BUFFER + positionError;
-            var shapes = new java.util.HashMap<Vec3, List<SimpleCollisionBox>>();
-            java.util.function.Predicate<Vec3> valid = eye -> trackedEyes.contains(eye)
+            var shapes = new HashMap<Vec3, List<SimpleCollisionBox>>();
+            Predicate<Vec3> valid = eye -> trackedEyes.contains(eye)
                     || EyePositionTolerance.outside(eye, shapes.computeIfAbsent(eye, e -> nearbyEyeShapes(e, radius)));
-            return java.util.stream.Stream.concat(
+            return Stream.concat(
                             eyes.stream().filter(valid),
                             eyes.stream().filter(valid).flatMap(eye -> {
-                                if (hiddenAcrossBuffer(eye, radius, targets, excluded, range))
-                                    return java.util.stream.Stream.empty();
+                                if (hiddenAcrossBuffer(eye, radius, targets, excluded, range)) return Stream.empty();
                                 var bounds = EyePositionTolerance.bounds(
                                         eye,
                                         positionError,
@@ -478,7 +478,7 @@ public final class ClientVisibility {
 
     private List<SimpleCollisionBox> selectionBoxes(BlockPos position) {
         int state = player.compensatedWorld.getBlockStateIdAt(position);
-        // Visibility deliberately treats shulker boxes as closed, independent of lid animation.
+        // Shulker boxes count as closed regardless of lid animation.
         if (BlockFamilies.SHULKER_BOX.test(state)) return List.of(new SimpleCollisionBox(position));
         List<SimpleCollisionBox> result = new ArrayList<>();
         ClientBlockShapes.visual(player, state, position.getX(), position.getY(), position.getZ())

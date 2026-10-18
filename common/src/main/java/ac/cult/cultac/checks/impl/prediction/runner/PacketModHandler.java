@@ -98,10 +98,6 @@ public class PacketModHandler extends Check implements EngineCheck, PostPredicti
     @Override
     public void onPredictionComplete(final PredictionComplete predictionComplete) {
         this.wasExempt = false;
-        if (!MovementProfiles.forPlayer(player).usesPacketVelocityModifiers(player)) {
-            handleAllDoneWithVels();
-            return;
-        }
         if (predictionComplete.isTeleport() && player.isBedrockMovement()) {
             TeleportData teleport = predictionComplete.getPredictionResult().getSetBackData();
             // The Bedrock wire order, not the eventual auth-input arrival, determines
@@ -175,7 +171,6 @@ public class PacketModHandler extends Check implements EngineCheck, PostPredicti
                 String offsetDescription =
                         offset == Double.MAX_VALUE ? "ignored" : NumFormatter.formatNumberStandard(offset);
                 flag("offset=" + offsetDescription + " threshold=" + NumFormatter.formatNumberStandard(threshold));
-                //
                 if (offset >= immediate || threshold >= maxAdvantage) {
                     setbackIfAboveSetbackVL();
                 }
@@ -200,12 +195,10 @@ public class PacketModHandler extends Check implements EngineCheck, PostPredicti
         return null;
     }
 
-    // TODO: OOP
     public void exempt() {
         handleTeleport(null);
     }
 
-    @Getter
     private boolean wasExempt = false;
 
     private void markVelocityOverriddenByTeleport() {
@@ -385,19 +378,5 @@ public class PacketModHandler extends Check implements EngineCheck, PostPredicti
             lastSent = null;
         }
         overriddenVels.removeIf(vel -> vel.getSourceEntityId() == entityId);
-    }
-
-    public void keepOnlyVelocitiesFromSourceEntity(int entityId) {
-        if (firstBread != null && firstBread.getSourceEntityId() != entityId) {
-            firstBread.setConsumed(true);
-            firstBread = null;
-        }
-        if (secondBread != null && secondBread.getSourceEntityId() != entityId) {
-            secondBread = null;
-        }
-        if (lastSent != null && lastSent.getSourceEntityId() != entityId) {
-            lastSent = null;
-        }
-        overriddenVels.removeIf(vel -> vel.getSourceEntityId() != entityId);
     }
 }

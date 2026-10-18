@@ -4,7 +4,9 @@ import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.command.BuildableCommand;
 import ac.cult.cultac.platform.api.manager.cloud.CloudPlatformCommandArguments;
 import ac.cult.cultac.platform.api.sender.Sender;
+import ac.cult.cultac.runtime.RuntimeEnvironment;
 import ac.cult.cultac.utils.anticheat.MessageUtil;
+import ac.grim.grimac.api.GrimAbstractAPI;
 import net.kyori.adventure.text.Component;
 import org.incendo.cloud.CommandManager;
 import org.incendo.cloud.context.CommandContext;
@@ -23,11 +25,10 @@ public class CultReload implements BuildableCommand {
     private void handleReload(@NotNull CommandContext<Sender> context) {
         Sender sender = context.sender();
 
-        // reload config
         sender.sendMessage(MessageUtil.getParsedComponent(sender, "reloading", "%prefix% &7Reloading config..."));
 
-        var host = ac.cult.cultac.runtime.RuntimeEnvironment.host();
-        (host == null ? CultAPI.INSTANCE.getExternalAPI() : (ac.grim.grimac.api.GrimAbstractAPI) host.publicApi())
+        var host = RuntimeEnvironment.host();
+        (host == null ? CultAPI.INSTANCE.getExternalAPI() : (GrimAbstractAPI) host.publicApi())
                 .reloadAsync()
                 .exceptionally(throwable -> false)
                 .thenAccept(bool -> {

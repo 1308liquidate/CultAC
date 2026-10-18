@@ -4,6 +4,8 @@ import ac.cult.blocksim.SimAction;
 import ac.cult.blocksim.SimInput;
 import ac.cult.blocksim.SimResult;
 import ac.cult.blocksim.data.DataTables;
+import ac.cult.blocksim.engine.BlockSimClientVersion;
+import ac.cult.blocksim.engine.Direction;
 import ac.cult.blocksim.engine.EntityCollisionContext;
 import ac.cult.blocksim.engine.SimInventory;
 import ac.cult.blocksim.engine.SimItemStack;
@@ -19,6 +21,7 @@ import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.utils.anticheat.update.BlockPlace;
 import ac.cult.cultac.utils.data.ClientItemUseState;
 import ac.cult.cultac.utils.data.ItemUseInventory;
+import ac.cult.cultac.utils.inventory.ItemTypes;
 import ac.cult.cultac.utils.latency.BlockSimulatorInventory;
 import ac.cult.cultac.utils.latency.ClientComponentRegistries;
 import ac.cult.cultac.utils.nmsutil.ClientMiningState;
@@ -66,11 +69,7 @@ public final class ClientBlockActions {
         var action = new SimAction.UseOn(
                 hand(place.getHand()),
                 new BlockHit(
-                        position(pos),
-                        ac.cult.blocksim.engine.Direction.valueOf(
-                                place.getDirection().name()),
-                        hit,
-                        place.isInside()));
+                        position(pos), Direction.valueOf(place.getDirection().name()), hit, place.isInside()));
         return predict(player, action, yaw, pitch);
     }
 
@@ -254,8 +253,7 @@ public final class ClientBlockActions {
                         player.boundingBox.minY,
                         player.isSneaking,
                         collision == null ? 0.0 : collision.fallDistance(),
-                        player.getInventory().getBoots().getItem()
-                                == ac.cult.cultac.utils.inventory.ItemTypes.LEATHER_BOOTS,
+                        player.getInventory().getBoots().getItem() == ItemTypes.LEATHER_BOOTS,
                         false),
                 new SimPlayer.Movement(player.isGliding));
         var world = new BlockSimulatorWorldView(
@@ -268,8 +266,7 @@ public final class ClientBlockActions {
                 ClientMiningState.of(player),
                 BreakSession.State.initial(items.empty()),
                 binding.tags(),
-                ac.cult.blocksim.engine.BlockSimClientVersion.of(
-                        binding.client().protocol()));
+                BlockSimClientVersion.of(binding.client().protocol()));
         var result = binding.simulator().simulate(action, input);
         var writes = result.writes().stream()
                 .map(write -> Map.entry(

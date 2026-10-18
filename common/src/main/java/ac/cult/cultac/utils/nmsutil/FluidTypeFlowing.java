@@ -2,6 +2,7 @@ package ac.cult.cultac.utils.nmsutil;
 
 import ac.cult.blocksim.data.BlockFamilies;
 import ac.cult.blocksim.data.BlockTags;
+import ac.cult.blocksim.engine.FluidQueries;
 import ac.cult.blocksim.engine.SimFluidState;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
@@ -21,18 +22,18 @@ public class FluidTypeFlowing {
 
     public static Vec3 flow(CultPlayer player, BlockPos pos, SimFluidState state) {
         // The dispatcher model is pinned to 26.3, including for older clients.
-        var result = ac.cult.blocksim.engine.FluidQueries.flow(
+        var result = FluidQueries.flow(
                 new FlowView(player), new ac.cult.blocksim.engine.BlockPos(pos.getX(), pos.getY(), pos.getZ()), state);
         return new Vec3(result.x(), result.y(), result.z());
     }
 
-    private record FlowView(CultPlayer player) implements ac.cult.blocksim.engine.FluidQueries.View {
+    private record FlowView(CultPlayer player) implements FluidQueries.View {
         private BlockPos position(ac.cult.blocksim.engine.BlockPos pos) {
             return new BlockPos(pos.x(), pos.y(), pos.z());
         }
 
         @Override
-        public ac.cult.blocksim.engine.SimFluidState fluidAt(ac.cult.blocksim.engine.BlockPos pos) {
+        public SimFluidState fluidAt(ac.cult.blocksim.engine.BlockPos pos) {
             return ClientFluidQueries.modelFluid(player.compensatedWorld.getBlockStateIdAt(pos.x(), pos.y(), pos.z()));
         }
 

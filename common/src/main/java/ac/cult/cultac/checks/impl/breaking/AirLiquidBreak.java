@@ -13,6 +13,7 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.utils.anticheat.update.BlockBreak;
+import ac.cult.cultac.utils.inventory.ItemTypes;
 import ac.cult.cultac.utils.nmsutil.ClientBlockProperties;
 import ac.grim.grimac.api.storage.verbose.Verbose;
 import org.jetbrains.annotations.NotNull;
@@ -37,15 +38,12 @@ public class AirLiquidBreak extends Check implements BlockBreakListener {
 
     public void onBlockBreak(BlockBreak blockBreak) {
         if (blockBreak.action != PlayerAction.START_DESTROY_BLOCK
-                && blockBreak.action
-                        != PlayerAction.STOP_DESTROY_BLOCK) // PE DiggingAction.START_DIGGING / FINISHED_DIGGING
-        return;
+                && blockBreak.action != PlayerAction.STOP_DESTROY_BLOCK) return;
 
         final int block = blockBreak.block;
 
-        // Fixes false from breaking kelp underwater
-        // The client sends two start digging packets to the server both in the same tick. AirLiquidBreak gets called
-        // twice, doesn't false the first time, but falses the second
+        // When breaking kelp underwater, the client sends two start digging packets in the same tick.
+        // AirLiquidBreak gets called twice, doesn't false the first time, but falses the second
         // One ends up breaking the kelp, the other ends up doing nothing besides falsing this check because we think
         // they're trying to mine water
         // I am explicitly making this patch as narrow and specific as possible to potentially discover other blocks
@@ -63,10 +61,8 @@ public class AirLiquidBreak extends Check implements BlockBreakListener {
 
         // the block does not have a hitbox
         boolean invalid = (BlockIds.is(block, BlockIds.LIGHT)
-                        && !(player.getInventory().getHeldItem().getItem()
-                                        == ac.cult.cultac.utils.inventory.ItemTypes.LIGHT
-                                || player.getInventory().getOffHand().getItem()
-                                        == ac.cult.cultac.utils.inventory.ItemTypes.LIGHT))
+                        && !(player.getInventory().getHeldItem().getItem() == ItemTypes.LIGHT
+                                || player.getInventory().getOffHand().getItem() == ItemTypes.LIGHT))
                 || DataTables.defaults().registry().facts(block).has(StateFacts.AIR)
                 || BlockIds.is(block, BlockIds.WATER)
                 || BlockIds.is(block, BlockIds.LAVA)

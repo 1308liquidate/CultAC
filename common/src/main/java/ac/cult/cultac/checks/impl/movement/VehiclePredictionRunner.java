@@ -115,8 +115,7 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
             // no wire bit to supply that result after this collision inference.
             if ((!vehicleUpdate.isHasOnGround()
                             || !reality.getSimulationContext().isOnGround())
-                    && downCollide != null
-                    && downCollide.isLikelyCollide()
+                    && canCollideDown
                     && valid.maxY + 0.001 < reality.getTarget().y // And their valid Y is below their actual movement
                     && downCollide.inMovementSpace(
                                             reality.getSimulationContext().getLastStuckSpeed().y)
@@ -241,7 +240,7 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
         player.boatData.useNextInputForBoatTick();
     }
 
-    private boolean usesStagedVehicleInput(PacketEntity root) {
+    public static boolean usesStagedVehicleInput(PacketEntity root) {
         return root != null
                 && (EntityTypeUtil.isBoat(root.type)
                         || EntityTypeUtil.isHorseFamily(root.type)

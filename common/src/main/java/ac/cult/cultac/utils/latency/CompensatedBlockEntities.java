@@ -2,15 +2,21 @@ package ac.cult.cultac.utils.latency;
 
 import ac.cult.blocksim.behavior.BehaviorRegistry;
 import ac.cult.blocksim.data.DataTables;
+import ac.cult.blocksim.data.InteractionRegistries;
 import ac.cult.blocksim.data.nbt.NbtValue;
 import ac.cult.blocksim.engine.BlockEntityData;
 import ac.cult.blocksim.engine.BlockEntityPrototypes;
+import ac.cult.blocksim.engine.JukeboxPlayback;
+import ac.cult.blocksim.engine.ShulkerAnimation;
 import ac.cult.cultac.network.packet.WorldPackets.BlockEntityUpdate;
+import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.data.ModelBlockStates;
 import ac.cult.cultac.protocol.value.BlockPos;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Objects;
 import java.util.function.Supplier;
 
 /** Sparse packet inputs applied at the existing compensated transaction boundary. */
@@ -29,24 +35,23 @@ public final class CompensatedBlockEntities {
 
     // Ordinary block writes need lookups but hold no block entity. Allocate storage on the first retained entry.
     private Long2ObjectOpenHashMap<Entry> entries;
-    private final Supplier<ac.cult.blocksim.data.InteractionRegistries> registries;
+    private final Supplier<InteractionRegistries> registries;
     private final ModelBlockStates states;
 
-    public CompensatedBlockEntities(ac.cult.cultac.player.CultPlayer player) {
+    public CompensatedBlockEntities(CultPlayer player) {
         this(() -> player.registryState == null
-                ? ac.cult.blocksim.data.InteractionRegistries.defaults()
+                ? InteractionRegistries.defaults()
                 : player.registryState.blockSimulatorRegistries(Rules.DATA).interactions());
     }
 
-    public CompensatedBlockEntities(Supplier<ac.cult.blocksim.data.InteractionRegistries> registries) {
+    public CompensatedBlockEntities(Supplier<InteractionRegistries> registries) {
         this(registries, Rules.STATES);
     }
 
-    public CompensatedBlockEntities(
-            Supplier<ac.cult.blocksim.data.InteractionRegistries> registries, ModelBlockStates states) {
+    public CompensatedBlockEntities(Supplier<InteractionRegistries> registries, ModelBlockStates states) {
         this.registries = registries;
-        this.states = java.util.Objects.requireNonNull(states);
-        java.util.Objects.requireNonNull(Rules.DATA); // Load static facts before any prediction action.
+        this.states = Objects.requireNonNull(states);
+        Objects.requireNonNull(Rules.DATA); // Load static facts before any prediction action.
     }
 
     private Entry entry(BlockPos pos, int state) {
@@ -91,7 +96,7 @@ public final class CompensatedBlockEntities {
         }
         var loaded = packet.type().equals("minecraft:jukebox")
                 ? ClientJukeboxFields.load(tag, entry.data(), registries.get())
-                : ClientBlockEntityFields.load(packet.type(), tag, states.toModel(stateId));
+                : ClientBlockEntityFields.load(packet.type(), tag);
         if (loaded.data().keys().isEmpty()) return;
         put(
                 packet.position().asLong(),
@@ -101,7 +106,7 @@ public final class CompensatedBlockEntities {
     private static BlockEntityData retainShulkerAnimation(BlockEntityData data, BlockEntityData previous) {
         if (data.type().equals("minecraft:shulker_box")) {
             // Inventory/component packets do not reset the running client animation.
-            for (String key : java.util.List.of("animation_status", "progress", "progress_old"))
+            for (String key : List.of("animation_status", "progress", "progress_old"))
                 if (previous.data().has(key))
                     data = new BlockEntityData(
                             data.type(), data.data().with(key, previous.data().get(key)), data.savedData());
@@ -112,11 +117,7 @@ public final class CompensatedBlockEntities {
     public void blockEvent(BlockPos pos, int state, int action, int parameter) {
         var entry = entry(pos, states.toModel(state));
         if (entry != null)
-            put(
-                    pos.asLong(),
-                    new Entry(
-                            ac.cult.blocksim.engine.ShulkerAnimation.event(entry.data(), action, parameter),
-                            entry.state()));
+            put(pos.asLong(), new Entry(ShulkerAnimation.event(entry.data(), action, parameter), entry.state()));
     }
 
     public void tick() {
@@ -125,10 +126,10 @@ public final class CompensatedBlockEntities {
         while (iterator.hasNext()) {
             var slot = iterator.next();
             var entry = slot.getValue();
-            var next = ac.cult.blocksim.engine.ShulkerAnimation.tick(entry.data());
+            var next = ShulkerAnimation.tick(entry.data());
             if (next.type().equals("minecraft:jukebox")
                     && Rules.DATA.registry().value(entry.state(), "has_record").equals("true"))
-                next = ac.cult.blocksim.engine.JukeboxPlayback.tick(next);
+                next = JukeboxPlayback.tick(next);
             if (next != entry.data()) slot.setValue(new Entry(next, entry.state()));
         }
     }

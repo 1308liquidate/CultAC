@@ -1,6 +1,7 @@
 package ac.cult.cultac.platform.bukkit.scheduler.folia;
 
 import ac.cult.cultac.platform.api.scheduler.TaskHandle;
+import ac.cult.cultac.runtime.RuntimeEnvironment;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import java.util.Objects;
 import org.jetbrains.annotations.Contract;
@@ -13,12 +14,7 @@ public class FoliaTaskHandle implements TaskHandle {
     @Contract(pure = true)
     public FoliaTaskHandle(@NotNull ScheduledTask task) {
         this.task = Objects.requireNonNull(task, "task");
-        ac.cult.cultac.runtime.RuntimeEnvironment.track(this, task::cancel);
-    }
-
-    @Override
-    public boolean isSync() {
-        return false;
+        RuntimeEnvironment.track(this, task::cancel);
     }
 
     @Override

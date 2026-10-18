@@ -1,5 +1,7 @@
 package ac.cult.cultac.command.commands;
 
+import static ac.cult.cultac.command.commands.HistoryCommandLog.logBoth;
+
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.command.BuildableCommand;
 import ac.cult.cultac.manager.datastore.ClientVersionResolver;
@@ -23,6 +25,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.incendo.cloud.CommandManager;
 import org.incendo.cloud.context.CommandContext;
+import org.incendo.cloud.description.Description;
 
 /**
  * {@code /cult history migrate [--delete]} — on-demand v0 → v1 migration outside
@@ -50,8 +53,7 @@ public class CultHistoryMigrate implements BuildableCommand {
                 .permission("cult.history.migrate")
                 .flag(commandManager
                         .flagBuilder("delete")
-                        .withDescription(org.incendo.cloud.description.Description.of(
-                                "Drop the legacy v0 tables after migration completes")))
+                        .withDescription(Description.of("Drop the legacy v0 tables after migration completes")))
                 .handler(this::handle));
     }
 
@@ -173,23 +175,5 @@ public class CultHistoryMigrate implements BuildableCommand {
             return DriverManager.getConnection(source.jdbcUrl());
         }
         return DriverManager.getConnection(source.jdbcUrl(), source.username(), source.password());
-    }
-
-    private static void logBoth(Sender sender, Component msg) {
-        sender.sendMessage(msg);
-        // Console log in plain text so operators still see progress if the
-        // command channel (RCON connection) closes mid-run.
-        LogUtil.info(plain(msg));
-    }
-
-    private static String plain(Component c) {
-        StringBuilder sb = new StringBuilder();
-        flatten(c, sb);
-        return sb.toString();
-    }
-
-    private static void flatten(Component c, StringBuilder sb) {
-        if (c instanceof net.kyori.adventure.text.TextComponent tc) sb.append(tc.content());
-        for (Component child : c.children()) flatten(child, sb);
     }
 }

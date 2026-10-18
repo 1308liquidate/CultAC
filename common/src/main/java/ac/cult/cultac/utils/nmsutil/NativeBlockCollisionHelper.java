@@ -13,15 +13,12 @@ import ac.cult.cultac.utils.collisions.datatypes.CollisionBox;
 import ac.cult.cultac.utils.collisions.datatypes.ComplexCollisionBox;
 import ac.cult.cultac.utils.collisions.datatypes.NoCollisionBox;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class NativeBlockCollisionHelper {
     private NativeBlockCollisionHelper() {}
-
-    public static CollisionBox getCollisionBox(CultPlayer player, int state, int x, int y, int z) {
-        return getCollisionBox(player, state, x, y, z, player == null ? Double.NaN : player.y);
-    }
 
     public static CollisionBox getCollisionBox(CultPlayer player, int state, int x, int y, int z, double entityBottom) {
         return getCollisionBox(
@@ -48,8 +45,7 @@ public final class NativeBlockCollisionHelper {
         // faces when a server update places the actor partly inside a shape.
         boolean voxelMovement = !player.isBedrockMovement();
         if (voxelMovement && !shape.isEmpty())
-            return new ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox(shape, shape == Shapes.block())
-                    .offset(x, y, z);
+            return new VoxelShapeCollisionBox(shape, shape == Shapes.block()).offset(x, y, z);
         return fromShape(shape, x, y, z);
     }
 
@@ -134,7 +130,7 @@ public final class NativeBlockCollisionHelper {
             return Shapes.empty();
         }
 
-        // Selected-target checks deliberately use a closed shulker; movement retains the real lid.
+        // Selected-target checks use a closed shulker; movement keeps the real lid.
         if (player.compensatedWorld.isReadingSelectionSnapshot() && BlockFamilies.SHULKER_BOX.test(state))
             return Shapes.block();
 
@@ -196,7 +192,6 @@ public final class NativeBlockCollisionHelper {
     }
 
     public static EntityCollisionContext entityContext(CultPlayer player, double entityBottom) {
-        if (player == null) return EntityCollisionContext.emptyContext();
         String key = heldItem(player);
         return new EntityCollisionContext(entityBottom, player.isSneaking, 0, false, false, key, false, false, false);
     }

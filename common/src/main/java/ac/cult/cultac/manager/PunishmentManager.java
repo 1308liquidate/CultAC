@@ -293,7 +293,7 @@ class ParsedCommand {
     public final int threshold;
     public final int interval;
     public final String command;
-    // Legacy M=0 gate: execute once for this loaded command state.
+    // For M=0, a non-zero count keeps the command from running again in this loaded state.
     public int executeCount;
     // For M>0, the next active violation count that should run this command.
     public int nextBoundary;

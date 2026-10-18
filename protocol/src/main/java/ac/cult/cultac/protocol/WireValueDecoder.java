@@ -180,8 +180,6 @@ public interface WireValueDecoder extends AutoCloseable {
         }
     }
 
-    boolean canWriteComponent(String component);
-
     /** Writes a changed component from its portable persistent encoding, using the target schema. */
     void writeComponent(ProtocolVersion version, ByteBuf output, String component, byte[] value, Registries registries);
 

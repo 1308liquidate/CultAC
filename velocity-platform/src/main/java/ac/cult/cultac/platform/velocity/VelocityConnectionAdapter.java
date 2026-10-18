@@ -2,14 +2,19 @@ package ac.cult.cultac.platform.velocity;
 
 import ac.cult.cultac.manager.tick.BackendTickEstimator;
 import ac.cult.cultac.network.CultConnection;
+import ac.cult.cultac.network.PacketOwner;
 import ac.cult.cultac.network.PlatformConnection;
 import ac.cult.cultac.network.codec.ConnectionModelValues;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.protocol.ProtocolVersion;
+import ac.cult.cultac.protocol.WireValueDecoder;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import io.netty.channel.Channel;
 import io.netty.util.concurrent.EventExecutor;
+import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import net.kyori.adventure.text.Component;
 
 final class VelocityConnectionAdapter implements PlatformConnection {
@@ -35,8 +40,8 @@ final class VelocityConnectionAdapter implements PlatformConnection {
             Player nativePlayer,
             VelocityPlayer player,
             EventExecutor eventLoop,
-            ac.cult.cultac.protocol.WireValueDecoder codecs,
-            ac.cult.cultac.network.PacketOwner bedrock) {
+            WireValueDecoder codecs,
+            PacketOwner bedrock) {
         this.proxy = proxy;
         this.nativePlayer = nativePlayer;
         this.player = player;
@@ -77,7 +82,7 @@ final class VelocityConnectionAdapter implements PlatformConnection {
                     if (!connection.disconnected()) connection.execute(task);
                 },
                 delayNanos,
-                java.util.concurrent.TimeUnit.NANOSECONDS);
+                TimeUnit.NANOSECONDS);
         return () -> future.cancel(false);
     }
 
@@ -133,16 +138,16 @@ final class VelocityConnectionAdapter implements PlatformConnection {
 
     void bindProtocols(VelocityProtocols.Versions protocols) {
         if (this.protocols != null) throw new IllegalStateException("Velocity client protocols already bound");
-        this.protocols = java.util.Objects.requireNonNull(protocols);
+        this.protocols = Objects.requireNonNull(protocols);
     }
 
     @Override
-    public ac.cult.cultac.protocol.ProtocolVersion getObservedProtocol() {
+    public ProtocolVersion getObservedProtocol() {
         return protocols == null ? null : protocols.observed();
     }
 
     @Override
-    public ac.cult.cultac.protocol.ProtocolVersion getClientProtocol() {
+    public ProtocolVersion getClientProtocol() {
         return protocols == null ? null : protocols.client();
     }
 

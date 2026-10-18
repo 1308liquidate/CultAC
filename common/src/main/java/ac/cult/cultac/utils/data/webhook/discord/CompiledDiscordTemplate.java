@@ -41,7 +41,7 @@ public record CompiledDiscordTemplate(Segment[] segments) {
         NONE
     }
 
-    // Identical to the existing pattern
+    // Matches MessageUtil's UNIFIED_PLACEHOLDER_PATTERN.
     private static final Pattern PLACEHOLDER = Pattern.compile("%([a-zA-Z0-9_]+)%");
 
     private sealed interface Segment permits Literal, Placeholder {}

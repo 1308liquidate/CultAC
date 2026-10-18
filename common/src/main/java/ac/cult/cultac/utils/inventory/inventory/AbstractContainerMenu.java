@@ -20,7 +20,6 @@ public abstract class AbstractContainerMenu {
     @Getter
     List<Slot> slots = new ArrayList<>();
 
-    @Getter
     @NotNull
     SimItemStack carriedItem;
 
@@ -35,7 +34,6 @@ public abstract class AbstractContainerMenu {
     }
 
     public Slot addSlot(Slot slot) {
-        slot.slotListIndex = this.slots.size();
         this.slots.add(slot);
         return slot;
     }
@@ -47,19 +45,11 @@ public abstract class AbstractContainerMenu {
     }
 
     public SimItemStack getCarried() {
-        return getCarriedItem();
+        return carriedItem;
     }
 
     public void setCarried(SimItemStack stack) {
         carriedItem = stack == null ? SimItemStack.EMPTY : stack;
-    }
-
-    public SimItemStack getPlayerInventoryItem(int slot) {
-        return playerInventory.getInventoryStorage().getItem(slot);
-    }
-
-    public void setPlayerInventoryItem(int slot, SimItemStack stack) {
-        playerInventory.getInventoryStorage().setItem(slot, stack);
     }
 
     public Slot getSlot(int slotID) {

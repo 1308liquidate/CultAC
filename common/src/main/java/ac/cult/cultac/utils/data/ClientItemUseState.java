@@ -269,10 +269,6 @@ public final class ClientItemUseState {
         return obligation != null;
     }
 
-    public float obligationMultiplier(ClientVersion version) {
-        return obligation == null ? 1 : effects(obligation.stack(), version).speedMultiplier();
-    }
-
     public void reset() {
         release();
         lastPreparedTick = Integer.MIN_VALUE;

@@ -6,6 +6,7 @@ import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.netty.ChannelInitializationBarrier;
 import ac.cult.cultac.protocol.netty.CultDecoder;
 import ac.cult.cultac.protocol.netty.CultEncoder;
+import ac.cult.cultac.runtime.RuntimeEnvironment;
 import io.netty.channel.Channel;
 import io.papermc.paper.network.ChannelInitializeListenerHolder;
 import java.lang.reflect.Field;
@@ -98,8 +99,7 @@ final class PaperInjector {
 
     synchronized CompletionStage<Void> unregister() {
         registered = false;
-        if (ac.cult.cultac.runtime.RuntimeEnvironment.host() == null)
-            ChannelInitializeListenerHolder.removeListener(KEY);
+        if (RuntimeEnvironment.host() == null) ChannelInitializeListenerHolder.removeListener(KEY);
         return CompletableFuture.allOf(manager.connections().stream()
                 .map(connection -> {
                     var completion = new CompletableFuture<Void>();

@@ -3,6 +3,7 @@ package ac.cult.cultac.manager;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.manager.init.ReloadableInitable;
 import ac.cult.cultac.manager.init.start.StartableInitable;
+import ac.cult.cultac.manager.init.stop.StoppableInitable;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.runtime.RuntimeEnvironment;
 import ac.cult.cultac.utils.anticheat.LogUtil;
@@ -44,8 +45,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-public class DiscordManager
-        implements StartableInitable, ReloadableInitable, ac.cult.cultac.manager.init.stop.StoppableInitable {
+public class DiscordManager implements StartableInitable, ReloadableInitable, StoppableInitable {
     private static final Predicate<String> WEBHOOK_REGEX = Pattern.compile(
                     "^https://(?:canary\\.)?discord\\.com/api(?:/v\\d+)?/webhooks/\\d+/[\\w-]+(\\?thread_id=\\d+)?$")
             .asMatchPredicate();
@@ -91,12 +91,7 @@ public class DiscordManager
     @Override
     public void reload() {
         try {
-            // Yes all of these fields should technically be volatile so they will be updated correctly on reload for
-            // HTTP threads to read
-            // No we're not going to pay for atomic reads in the hot loop however cheap for a one in a billion chance to
-            // read an outdated config
-            // When your discord webhook settings are changed (who changes them in prod?) that can be fixed with a
-            // restart
+            // These fields are not volatile: an HTTP thread may briefly read the previous config after a reload.
             ConfigManager config = CultAPI.INSTANCE.getConfigManager().getConfig();
             if (!config.getBooleanElse("enabled", false)) {
                 url = null;
@@ -196,11 +191,11 @@ public class DiscordManager
         Embed embed = new Embed(content)
                 .color(embedColor)
                 .title(embedTitle)
-                .imageURL(MessageUtil.replacePlaceholders(player, embedImageUrl, false))
-                .thumbnailURL(MessageUtil.replacePlaceholders(player, embedThumbnailUrl, false))
+                .imageURL(MessageUtil.replacePlaceholders(player, embedImageUrl))
+                .thumbnailURL(MessageUtil.replacePlaceholders(player, embedThumbnailUrl))
                 .footer(new EmbedFooter(
-                        MessageUtil.replacePlaceholders(player, embedFooterText, false),
-                        MessageUtil.replacePlaceholders(player, embedFooterUrl, false)));
+                        MessageUtil.replacePlaceholders(player, embedFooterText),
+                        MessageUtil.replacePlaceholders(player, embedFooterUrl)));
 
         if (includeTimestamp) embed.timestamp(Instant.now());
 

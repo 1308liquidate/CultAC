@@ -14,6 +14,7 @@ import ac.cult.cultac.utils.data.SprintingState;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityNautilus;
+import ac.cult.cultac.utils.inventory.ClientGlider;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 
@@ -42,11 +43,7 @@ public class PacketEntityAction {
 
                 // ElytraA evaluates the pre-command glide state after the
                 // grounded rejection, but before equipment validation.
-                // This direct callback bypasses CheckManager's Bedrock
-                // support filter, so retain that boundary explicitly.
-                if (!player.isBedrockMovement()) {
-                    player.checkManager.getCheck(ElytraA.class).onStartGliding(event);
-                }
+                player.checkManager.getCheck(ElytraA.class).onStartGliding(event);
 
                 if (canGlideUsingEquippedItem(player)) {
                     player.isGliding = true;
@@ -114,7 +111,7 @@ public class PacketEntityAction {
 
     private boolean canGlideUsingEquippedItem(CultPlayer player) {
         for (EquipmentSlot slot : EquipmentSlot.values()) {
-            ac.cult.blocksim.engine.SimItemStack itemStack = getEquippedItem(player, slot);
+            SimItemStack itemStack = getEquippedItem(player, slot);
             if (canGlideUsing(itemStack, slot)) {
                 return true;
             }
@@ -123,8 +120,8 @@ public class PacketEntityAction {
         return false;
     }
 
-    private static boolean canGlideUsing(ac.cult.blocksim.engine.SimItemStack itemStack, EquipmentSlot slot) {
-        return ac.cult.cultac.utils.inventory.ClientGlider.canUse(itemStack, slot);
+    private static boolean canGlideUsing(SimItemStack itemStack, EquipmentSlot slot) {
+        return ClientGlider.canUse(itemStack, slot);
     }
 
     private SimItemStack getEquippedItem(CultPlayer player, EquipmentSlot slot) {
