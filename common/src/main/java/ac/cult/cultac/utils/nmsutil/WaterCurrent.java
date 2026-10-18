@@ -3,6 +3,7 @@ package ac.cult.cultac.utils.nmsutil;
 import ac.cult.blocksim.data.FluidTags;
 import ac.cult.blocksim.engine.SimFluidState;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -132,7 +133,10 @@ public final class WaterCurrent {
         Vec3 accumulatedCurrent = Vec3.ZERO;
         int currentCount = 0;
         double height = 0.0;
-        double entityMinY = entityBox.minY;
+        // 1.21.11 Entity#updateFluidHeightAndDoFluidPushing measures fluid height from the deflated box;
+        // 26.1 and 26.2 EntityFluidInteraction#update measure it from the entity's bounding box.
+        double entityMinY =
+                player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_1) ? entityBox.minY : fluidBox.minY;
         BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
 
         for (int x = minX; x <= maxX; x++) {
@@ -140,7 +144,8 @@ public final class WaterCurrent {
                 for (int z = minZ; z <= maxZ; z++) {
                     mutablePos.set(x, y, z);
                     SimFluidState fluidState = ClientFluidQueries.fluidAt(player.compensatedWorld, mutablePos);
-                    if (!ClientFluidQueries.is(player, fluidState, fluidTag)) {
+                    // An empty cell is in no fluid tag; skipping it keeps a dry tick off the client tag projection.
+                    if (fluidState.isEmpty() || !ClientFluidQueries.is(player, fluidState, fluidTag)) {
                         continue;
                     }
 

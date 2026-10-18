@@ -118,21 +118,55 @@ public final class VelocityCandidates {
         if (context == null
                 || vehicle != null && (EntityTypeUtil.isBoat(vehicle.type) || vehicle instanceof PacketEntityHappyGhast)
                 || player.getClientVersion() == ClientVersion.V_1_21_4
-                || context.getWorldData().getInWater().determineOptimistically()
-                || !context.getWorldData().getInLava().determinePessimistically()) {
+                || context.getWorldData().getInWater().determineOptimistically()) {
             return postMoveDelta;
         }
 
-        // Modern 2.0 PlayerBaseTick/MovementTicker already modeled this exact
-        // LivingEntity#checkFallDamage path. Entity#move updates the position,
-        // then LivingEntity#checkFallDamage calls updateFluidInteraction again
-        // when the entity is not in water. That second lava current does not
-        // affect the packet-visible move which just completed; it does affect
-        // deltaMovement before block speed and travel drag derive the next tick.
-        Vec3 current = WaterCurrent.calculateLavaCurrent(player, context, context.getEnd(), postMoveDelta);
+        // Entity#move updates the position, then LivingEntity#checkFallDamage
+        // pushes the entity by the water current at its post-move box when it
+        // was not in water before the move. The current does not affect the
+        // packet-visible move which just completed; it does affect deltaMovement
+        // before block speed and travel drag derive the next tick.
+        // The current's 0.003 minimum-push test reads deltaMovement before Entity#move zeroes collided axes.
+        Vec3 moving = preCollisionDeltaMovement(result, postMoveDelta);
+        Vec3 delta = postMoveDelta;
+        if (vehicle == null || vehicle.isLivingEntity()) {
+            Vec3 water = WaterCurrent.calculateWaterCurrent(player, context, context.getEnd(), moving);
+            delta = addFinite(delta, water);
+            moving = addFinite(moving, water);
+        }
+        // Before 26.1 checkFallDamage runs updateInWaterStateAndDoWaterCurrentPushing, which pushes water only.
+        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_1)
+                && context.getWorldData().getInLava().determinePessimistically()) {
+            delta = addFinite(delta, WaterCurrent.calculateLavaCurrent(player, context, context.getEnd(), moving));
+        }
+        return delta;
+    }
+
+    /**
+     * Entity#deltaMovement while Entity#move runs checkFallDamage: the selected velocity plus the accepted
+     * LivingEntity#moveRelative input, or zero when the move consumed a stuck-speed multiplier.
+     */
+    private static Vec3 preCollisionDeltaMovement(PredictionResult result, Vec3 fallback) {
+        if (consumedRequiredStuckSpeedThisMove(result)) {
+            return Vec3.ZERO;
+        }
+        if (result.getValidMovements() == null
+                || result.getValidMovements().getClosestTrace() == null
+                || result.getAcceptedClosestToTarget() == null) {
+            return fallback;
+        }
+        Vec3 input = result.getLegacyLikePredictionVector().subtract(result.getAcceptedClosestToTarget());
+        return result.getValidMovements()
+                .getClosestTrace()
+                .preCollisionVelocity()
+                .add(input);
+    }
+
+    private static Vec3 addFinite(Vec3 delta, Vec3 current) {
         return current != null && Double.isFinite(current.x) && Double.isFinite(current.y) && Double.isFinite(current.z)
-                ? postMoveDelta.add(current)
-                : postMoveDelta;
+                ? delta.add(current)
+                : delta;
     }
 
     private static OptionalDouble requiredPacketVisibleSlimeBounceY(PredictionResult result, double clippedY) {
