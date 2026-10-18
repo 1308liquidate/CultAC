@@ -57,7 +57,7 @@ public final class JavaMovementEngine implements MovementEngine {
             var filtered = new java.util.HashSet<Vec3>();
             for (var state : selected.states())
                 if (startingVelocities.contains(state.velocity())) filtered.add(state.velocity());
-            if (filtered.isEmpty()) return List.of();
+            if (filtered.isEmpty()) return new ArrayList<>();
             startingVelocities = filtered;
         }
         return modifiers.applyModifers(player, startingVelocities, context, lastPrediction, canTickSkip);

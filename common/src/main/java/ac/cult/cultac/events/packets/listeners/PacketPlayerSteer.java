@@ -5,6 +5,7 @@ import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHappyGhast;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityNautilus;
@@ -23,8 +24,18 @@ public class PacketPlayerSteer {
         player.isSneaking = packet.shift();
         ServerboundPlayerInput input = packet;
         // Vanilla sends input only when key state changes; keep the latest raw state even before mounting.
-        float vehicleHoriz = input.left() ? 1.0F : (input.right() ? -1.0F : 0.0F);
-        float vehicleForward = input.forward() ? 1.0F : (input.backward() ? -1.0F : 0.0F);
+        // Living vehicles read the KeyboardInput impulses (xxa/zza), where opposing keys cancel.
+        // AbstractBoat#setInput instead receives the raw key bits, kept separately in vehicleKeys.
+        KnownInput vehicleKeys = new KnownInput(
+                input.forward(),
+                input.backward(),
+                input.left(),
+                input.right(),
+                input.jump(),
+                input.shift(),
+                input.sprint());
+        float vehicleHoriz = vehicleKeys.strafeImpulse();
+        float vehicleForward = vehicleKeys.forwardImpulse();
         boolean vehicleJump = input.jump();
         // MCP-Reborn LocalPlayer#tick sends ServerboundPlayerInputPacket before the move packet when
         // lastSentInput changes, and Input contains the full forward/back/left/right key bitset.
@@ -34,6 +45,7 @@ public class PacketPlayerSteer {
         player.boatData.nextVehicleHoriz = vehicleHoriz;
         player.boatData.nextVehicleForward = vehicleForward;
         player.boatData.nextVehicleJump = vehicleJump;
+        player.boatData.nextVehicleKeys = vehicleKeys;
         final PacketEntity riding = player.compensatedEntities.getSelf().getRiding();
         Integer serverVehicleId = player.compensatedEntities.vehicles.serverPlayerVehicle;
         PacketEntity serverVehicle =
@@ -50,6 +62,7 @@ public class PacketPlayerSteer {
             player.boatData.vehicleHoriz = vehicleHoriz;
             player.boatData.vehicleForward = vehicleForward;
             player.boatData.vehicleJump = vehicleJump;
+            player.boatData.vehicleKeys = vehicleKeys;
         }
     }
 
