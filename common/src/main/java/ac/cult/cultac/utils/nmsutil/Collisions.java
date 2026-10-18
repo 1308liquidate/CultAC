@@ -410,6 +410,9 @@ public class Collisions {
             ac.cult.blocksim.data.Box.validateBounds(
                     wantedBB.minX, wantedBB.minY, wantedBB.minZ, wantedBB.maxX, wantedBB.maxY, wantedBB.maxZ);
         ac.cult.blocksim.engine.shapes.VoxelShape queryShape = null;
+        boolean resolvedDirect = false;
+        boolean direct = false;
+        var registry = DataTables.defaults().registry();
 
         boolean collided = addWorldBorder(player, wantedBB, listOfBlocks, onlyCheckCollide);
         if (onlyCheckCollide && collided) return true;
@@ -466,9 +469,7 @@ public class Collisions {
                             int z = currZ | chunkZGlobalPos;
 
                             int data = section.getStateId(CachedChunk.index(x & 0xF, y & 0xF, z & 0xF));
-                            var facts = ac.cult.blocksim.data.DataTables.defaults()
-                                    .registry()
-                                    .facts(data);
+                            var facts = registry.facts(data);
                             if (facts.has(ac.cult.blocksim.data.StateFacts.AIR)) continue;
                             // Thanks SpottedLeaf for this optimization, I took edgeCount from Tuinity
                             int edgeCount = ((x == minBlockX || x == maxBlockX) ? 1 : 0)
@@ -483,10 +484,15 @@ public class Collisions {
                                                     modernJava
                                                             ? ac.cult.blocksim.data.BlockIds.MOVING_PISTON
                                                             : ac.cult.blocksim.data.BlockIds.PISTON_HEAD))) {
+                                // Scans that reach no shape lookup never read the client version.
+                                if (!resolvedDirect) {
+                                    direct = !ClientBlockShapes.hasMovementAlternatives(player);
+                                    resolvedDirect = true;
+                                }
                                 if (modernJava
                                         && onlyCheckCollide
                                         && ClientBlockShapes.hasStaticFullMovement(
-                                                player, data, x, y, z, entityBottom)) {
+                                                player, data, x, y, z, entityBottom, direct)) {
                                     // Paper's check-only scan: no collider, translation or query shape is needed.
                                     if (wantedBB.minX < x + 1.0
                                             && wantedBB.maxX > x
@@ -499,7 +505,7 @@ public class Collisions {
                                 if (actor == CURRENT_ACTOR && BlockIds.is(data, BlockIds.POWDER_SNOW))
                                     actor = JavaCollisionState.current(player);
                                 CollisionBox collisionBox =
-                                        ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor);
+                                        ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor, direct);
                                 if (collisionBox.isNull()) continue;
                                 if (modernJava
                                         && queryShape == null
