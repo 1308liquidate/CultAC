@@ -27,7 +27,7 @@ public class CompensatedFireworks extends CultProcessor implements PostPredictio
     }
 
     public void addNewFirework(int entityID) {
-        activeFireworks.add(entityID);
+        if (!activeFireworks.contains(entityID)) activeFireworks.add(entityID);
     }
 
     public void removeFirework(int entityID) {
