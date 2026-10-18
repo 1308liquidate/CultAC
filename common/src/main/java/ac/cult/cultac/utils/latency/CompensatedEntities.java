@@ -45,6 +45,8 @@ public class CompensatedEntities {
     public final CompensatedVehicleState vehicles;
     public List<SimpleCollisionBox> fishingRodPulls = new EvictingQueue<>(100); // sanity limit to prevent leaks.
     private long nextClientEntityTickOrder = 1L;
+    // The entityMap values in the order addEntity put them.
+    private final ArrayList<PacketEntity> addOrder = new ArrayList<>();
     // The sum of passengers.size() over entityMap values.
     private int trackedPassengers;
 
@@ -90,6 +92,7 @@ public class CompensatedEntities {
     public void clearEntityMap() {
         for (PacketEntity entity : entityMap.values()) untrack(entity);
         entityMap.clear();
+        addOrder.clear();
     }
 
     private void track(PacketEntity entity) {
@@ -130,6 +133,7 @@ public class CompensatedEntities {
         pendingEquipment.remove(entityID);
         if (entity == null) return;
         untrack(entity);
+        addOrder.remove(entity);
 
         boolean removedSelfVehicle = vehicles.serverPlayerVehicle != null && vehicles.serverPlayerVehicle == entityID;
         if (removedSelfVehicle) {
@@ -505,7 +509,11 @@ public class CompensatedEntities {
         // assuming server entity IDs match tick order.
         packetEntity.setClientTickOrder(nextClientEntityTickOrder++);
         PacketEntity replaced = entityMap.put(entityID, packetEntity);
-        if (replaced != null) untrack(replaced);
+        if (replaced != null) {
+            untrack(replaced);
+            addOrder.remove(replaced);
+        }
+        addOrder.add(packetEntity);
         track(packetEntity);
         int replayedProof = Integer.MIN_VALUE;
         List<HeldAttributes> held = pendingAttributes.remove(entityID);
@@ -922,15 +930,48 @@ public class CompensatedEntities {
     }
 
     public void tickClientEntities(Consumer<PacketEntity> tick) {
-        var roots = new ArrayList<>(entityMap.values());
-        roots.add(getSelf());
-        roots.removeIf(entity -> entity.getRiding() != null || !isTicking(entity));
-        roots.sort(Comparator.comparingLong(PacketEntity::getClientTickOrder));
+        List<PacketEntity> roots = rootsInAddOrder();
+        if (roots == null) {
+            roots = new ArrayList<>(entityMap.values());
+            roots.add(getSelf());
+            roots.removeIf(entity -> entity.getRiding() != null || !isTicking(entity));
+            roots.sort(Comparator.comparingLong(PacketEntity::getClientTickOrder));
+        }
         boolean frozen =
                 player.packetStateData.serverTicksFrozen && player.packetStateData.serverFrozenTickStepsRemaining == 0;
         for (PacketEntity root : roots) {
             if (!frozen || containsPlayer(root)) tickEntityTree(root, tick);
         }
+    }
+
+    /**
+     * The ticking roots, self included, in the stable client tick order sort of entityMap values then self; null
+     * unless the add order holds exactly the entityMap values with strictly increasing tick orders.
+     */
+    private List<PacketEntity> rootsInAddOrder() {
+        int size = addOrder.size();
+        if (size != entityMap.size()) return null;
+        PacketEntity self = getSelf();
+        long selfOrder = self.getClientTickOrder();
+        boolean selfPending = self.getRiding() == null && isTicking(self);
+        List<PacketEntity> roots = new ArrayList<>(size + 1);
+        long previous = 0L;
+        for (int i = 0; i < size; i++) {
+            PacketEntity entity = addOrder.get(i);
+            long order = entity.getClientTickOrder();
+            if (i > 0 && order <= previous) return null;
+            // Distinct orders make the entries distinct, so with equal sizes this proves the sets equal.
+            if (entityMap.get(entity.getEntityId()) != entity) return null;
+            previous = order;
+            // Self ticks after an entity sharing its order.
+            if (selfPending && selfOrder < order) {
+                roots.add(self);
+                selfPending = false;
+            }
+            if (entity.getRiding() == null && isTicking(entity)) roots.add(entity);
+        }
+        if (selfPending) roots.add(self);
+        return roots;
     }
 
     private static boolean containsPlayer(PacketEntity entity) {
