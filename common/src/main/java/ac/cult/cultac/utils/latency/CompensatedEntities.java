@@ -45,6 +45,8 @@ public class CompensatedEntities {
     public final CompensatedVehicleState vehicles;
     public List<SimpleCollisionBox> fishingRodPulls = new EvictingQueue<>(100); // sanity limit to prevent leaks.
     private long nextClientEntityTickOrder = 1L;
+    // The sum of passengers.size() over entityMap values.
+    private int trackedPassengers;
 
     CultPlayer player;
 
@@ -72,7 +74,7 @@ public class CompensatedEntities {
 
     /** A replacement ClientLevel cannot retain remote entities or their queued values. */
     public void clearClientLevel() {
-        entityMap.clear();
+        clearEntityMap();
         pendingAttributes.clear();
         pendingEquipment.clear();
         fishingRodPulls.clear();
@@ -84,7 +86,35 @@ public class CompensatedEntities {
         updatePassengerPositions();
     }
 
+    /** Drops every tracked entity, keeping their riding links. */
+    public void clearEntityMap() {
+        for (PacketEntity entity : entityMap.values()) untrack(entity);
+        entityMap.clear();
+    }
+
+    private void track(PacketEntity entity) {
+        entity.setTracker(this);
+        trackedPassengers += entity.passengers.size();
+    }
+
+    private void untrack(PacketEntity entity) {
+        if (entity.getTracker() != this) return;
+        entity.setTracker(null);
+        trackedPassengers -= entity.passengers.size();
+    }
+
+    /** Called when PacketEntity#mount adds a passenger to an entity in this tracker's entityMap. */
+    public void onPassengerAdded() {
+        trackedPassengers++;
+    }
+
+    /** Called when PacketEntity#eject removes a passenger from an entity in this tracker's entityMap. */
+    public void onPassengerRemoved() {
+        trackedPassengers--;
+    }
+
     public void updatePassengerPositions() {
+        if (trackedPassengers == 0) return;
         for (PacketEntity vehicle : entityMap.values()) {
             if (vehicle.passengers.isEmpty()) continue;
             for (PacketEntity passenger : vehicle.passengers) {
@@ -99,6 +129,7 @@ public class CompensatedEntities {
         pendingAttributes.remove(entityID);
         pendingEquipment.remove(entityID);
         if (entity == null) return;
+        untrack(entity);
 
         boolean removedSelfVehicle = vehicles.serverPlayerVehicle != null && vehicles.serverPlayerVehicle == entityID;
         if (removedSelfVehicle) {
@@ -473,7 +504,9 @@ public class CompensatedEntities {
         // in that insertion order, so mirror the client's add sequence instead of
         // assuming server entity IDs match tick order.
         packetEntity.setClientTickOrder(nextClientEntityTickOrder++);
-        entityMap.put(entityID, packetEntity);
+        PacketEntity replaced = entityMap.put(entityID, packetEntity);
+        if (replaced != null) untrack(replaced);
+        track(packetEntity);
         int replayedProof = Integer.MIN_VALUE;
         List<HeldAttributes> held = pendingAttributes.remove(entityID);
         if (held != null) {

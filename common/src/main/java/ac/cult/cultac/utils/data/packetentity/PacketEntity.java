@@ -26,6 +26,7 @@ import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.BoatData;
 import ac.cult.cultac.utils.data.ReachInterpolationData;
 import ac.cult.cultac.utils.enums.BoatEntityStatus;
+import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
@@ -55,7 +56,10 @@ public class PacketEntity {
     private final boolean happyGhast;
 
     public PacketEntity riding;
-    public List<PacketEntity> passengers = new ArrayList<>(0);
+    // Mutated only through mount and eject, which keep the tracker's passenger count.
+    public final List<PacketEntity> passengers = new ArrayList<>(0);
+    // The tracker whose entityMap holds this entity; null while untracked.
+    private @Nullable CompensatedEntities tracker;
     public boolean isDead = false;
     public boolean isBaby = false;
     public boolean hasGravity = true;
@@ -709,14 +713,24 @@ public class PacketEntity {
     public void mount(PacketEntity vehicle) {
         if (riding != null) eject();
         vehicle.passengers.add(this);
+        if (vehicle.tracker != null) vehicle.tracker.onPassengerAdded();
         riding = vehicle;
     }
 
     public void eject() {
-        if (riding != null) {
-            riding.passengers.remove(this);
+        if (riding != null && riding.passengers.remove(this) && riding.tracker != null) {
+            riding.tracker.onPassengerRemoved();
         }
         this.riding = null;
+    }
+
+    public @Nullable CompensatedEntities getTracker() {
+        return tracker;
+    }
+
+    /** Called by the tracker when it adds this entity to its entityMap (non-null) or drops it (null). */
+    public void setTracker(@Nullable CompensatedEntities tracker) {
+        this.tracker = tracker;
     }
 
     // This is for handling riding and entities attached to one another.

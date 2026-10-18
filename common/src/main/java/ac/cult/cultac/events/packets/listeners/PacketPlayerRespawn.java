@@ -274,7 +274,7 @@ public class PacketPlayerRespawn {
                 if (setbacks.isDebug()) {
                     LogUtil.info(player.getName() + " moved to a new world!");
                 }
-                player.compensatedEntities.entityMap.clear();
+                player.compensatedEntities.clearEntityMap();
                 player.compensatedWorld.clearPistonLikeState();
                 player.compensatedWorld.clearChunksForDimension(previousClientboundDimension);
                 player.compensatedWorld.resetClientPredictions();
