@@ -78,7 +78,7 @@ public final class ConnectionFixture {
     }
 
     public static CloudSettings settings(String url, String key, List<Integer> protocols) {
-        return new CloudSettings(url, key, CloudSettings.DEFAULT_SERVER_ID, "proxy", protocols);
+        return new CloudSettings(url, key, CloudSettings.DEFAULT_SERVER_ID, "proxy", protocols, false);
     }
 
     public static void await(BooleanSupplier condition, String what) throws InterruptedException {

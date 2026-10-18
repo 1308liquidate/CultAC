@@ -840,6 +840,8 @@ public final class CloudCapture implements PlayerObserver {
             case IntakeWire.DiagCutReply cut ->
                 PredictionDiagnostics.INSTANCE.cut(player, uplink.diagnostics(), cut.cut());
             case IntakeWire.DiagLimitsReply ignored -> {}
+            case IntakeWire.PerfLimitsReply ignored -> {}
+            case IntakeWire.PerfStartReply ignored -> {}
             case IntakeWire.Event ignored -> {}
             case IntakeWire.Capture capture -> {
                 if (!unstreamed) stream.capture(capture.serverbound(), capture.clientbound(), capture.dimension());

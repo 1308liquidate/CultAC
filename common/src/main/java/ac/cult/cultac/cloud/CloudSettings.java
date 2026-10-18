@@ -12,10 +12,11 @@ import java.util.regex.Pattern;
 /**
  * The upload's settings, read from the config and the environment. An empty {@code url} or {@code apiKey}, or no {@code protocols},
  * leaves the upload off. {@code serverIdTemplate} names each socket's server id through {@link CloudServerIds};
- * {@code protocols} are the intake protocols this platform offers, highest last.
+ * {@code protocols} are the intake protocols this platform offers, highest last. {@code perf} offers the service CPU and
+ * allocation profiles of this process.
  */
 public record CloudSettings(
-        String url, String apiKey, String serverIdTemplate, String proxyId, List<Integer> protocols) {
+        String url, String apiKey, String serverIdTemplate, String proxyId, List<Integer> protocols, boolean perf) {
     public static final String DEFAULT_SERVER_ID = "{proxy}.{server}";
     /** A server's default: its own name, since no proxy shares its key. */
     public static final String OWN_SERVER_ID = "{server}";
@@ -28,7 +29,7 @@ public record CloudSettings(
     /** Visible ASCII only, so the key always makes a valid {@code Authorization} header. */
     private static final Pattern API_KEY = Pattern.compile("[\\x21-\\x7E]+");
 
-    public static final CloudSettings OFF = new CloudSettings("", "", DEFAULT_SERVER_ID, "", List.of());
+    public static final CloudSettings OFF = new CloudSettings("", "", DEFAULT_SERVER_ID, "", List.of(), false);
 
     public CloudSettings {
         url = url == null ? "" : url.strip().replaceAll("/+$", "");
@@ -40,9 +41,10 @@ public record CloudSettings(
     }
 
     /**
-     * Reads {@code cloud.url}, {@code cloud.api-key}, {@code cloud.server-id} and {@code cloud.proxy-id}, an empty
-     * {@code cloud.server-id} picking {@code defaultServerId}. {@code CULTAC_CLOUD_URL} and
-     * {@code CULTAC_CLOUD_API_KEY} win over the config; an empty {@code cloud.proxy-id} takes {@code CULTAC_PROXY_ID}.
+     * Reads {@code cloud.url}, {@code cloud.api-key}, {@code cloud.server-id}, {@code cloud.proxy-id} and
+     * {@code cloud.perf}, an empty {@code cloud.server-id} picking {@code defaultServerId}. {@code CULTAC_CLOUD_URL}
+     * and {@code CULTAC_CLOUD_API_KEY} win over the config; an empty {@code cloud.proxy-id} takes
+     * {@code CULTAC_PROXY_ID}.
      */
     public static CloudSettings read(ConfigManager config, List<Integer> protocols, String defaultServerId) {
         return read(config, protocols, defaultServerId, System::getenv);
@@ -67,12 +69,27 @@ public record CloudSettings(
                     + " copy the key again");
             apiKey = "";
         }
-        return new CloudSettings(url, apiKey, serverId.isBlank() ? defaultServerId : serverId, proxyId, protocols);
+        return new CloudSettings(
+                url, apiKey, serverId.isBlank() ? defaultServerId : serverId, proxyId, protocols, perf(config, env));
     }
 
     /** The service's address: {@code CULTAC_CLOUD_URL}, else {@code cloud.url}; empty is off. */
     static String url(ConfigManager config, Function<String, String> env) {
         return CloudModule.setting(config, env, "cloud.url", "CULTAC_CLOUD_URL", "");
+    }
+
+    /**
+     * Whether connect offers perf profiles: {@code CULTAC_CLOUD_PERF} when it is true/1/yes or false/0/no, else
+     * {@code cloud.perf}, off by default.
+     */
+    static boolean perf(ConfigManager config, Function<String, String> env) {
+        String value = env.apply("CULTAC_CLOUD_PERF");
+        String normalized = value == null ? "" : value.strip().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "true", "1", "yes" -> true;
+            case "false", "0", "no" -> false;
+            default -> config.getBooleanElse("cloud.perf", false);
+        };
     }
 
     /**
@@ -113,6 +130,6 @@ public record CloudSettings(
     @Override
     public String toString() {
         return "CloudSettings[url=" + url + ", apiKey=" + (apiKey.isEmpty() ? "" : "<set>") + ", serverIdTemplate="
-                + serverIdTemplate + ", proxyId=" + proxyId + ", protocols=" + protocols + "]";
+                + serverIdTemplate + ", proxyId=" + proxyId + ", protocols=" + protocols + ", perf=" + perf + "]";
     }
 }

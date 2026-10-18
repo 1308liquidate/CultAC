@@ -10,6 +10,7 @@ import ac.cult.cultac.cloud.intake.v3.IntakeMessage;
 import ac.cult.cultac.cloud.intake.v3.Join;
 import ac.cult.cultac.cloud.intake.v3.Leave;
 import ac.cult.cultac.cloud.intake.v3.Meta;
+import ac.cult.cultac.cloud.intake.v3.PerfLimits;
 import ac.cult.cultac.cloud.intake.v3.Registry;
 import ac.cult.cultac.cloud.intake.v3.Replies;
 import ac.cult.cultac.cloud.intake.v3.Unstreamed;
@@ -172,7 +173,7 @@ public final class IntakeWire {
     // Field numbers of intake.proto: Replies.replies; Reply's kinds, capture first; Capture's three id lists.
     private static final int REPLIES_REPLY = 1;
     private static final int REPLY_CAPTURE = 1;
-    private static final int REPLY_LAST_KIND = 6;
+    private static final int REPLY_LAST_KIND = 8;
     private static final int CAPTURE_FIRST_IDS = 2;
 
     private IntakeWire() {}
@@ -983,7 +984,15 @@ public final class IntakeWire {
         }
     }
 
-    public sealed interface Reply permits Capture, Refused, Event, DiagLimitsReply, DiagWatchReply, DiagCutReply {
+    public sealed interface Reply
+            permits Capture,
+                    Refused,
+                    Event,
+                    DiagLimitsReply,
+                    DiagWatchReply,
+                    DiagCutReply,
+                    PerfLimitsReply,
+                    PerfStartReply {
         /** The player it is for; null for a reply to the whole socket. */
         UUID player();
     }
@@ -1008,6 +1017,22 @@ public final class IntakeWire {
 
     /** Diagnostics: send the player's SuperDebug of a range. */
     public record DiagCutReply(UUID player, Cut cut) implements Reply {}
+
+    /** Perf: the socket's new limits. */
+    public record PerfLimitsReply(PerfLimits limits) implements Reply {
+        @Override
+        public UUID player() {
+            return null;
+        }
+    }
+
+    /** Perf: record a profile of {@code seconds} under {@code profile}. */
+    public record PerfStartReply(UUID profile, int seconds) implements Reply {
+        @Override
+        public UUID player() {
+            return null;
+        }
+    }
 
     /** A whole message from the service. Kinds this client does not know are skipped. */
     public static List<Reply> replies(byte[] message) {
@@ -1069,6 +1094,14 @@ public final class IntakeWire {
                                         cut.getToSeq(),
                                         cut.getFullFromSeq(),
                                         cut.getFullToSeq())));
+                    }
+                }
+                case PERF_LIMITS -> replies.add(new PerfLimitsReply(reply.getPerfLimits()));
+                case PERF_START -> {
+                    var start = reply.getPerfStart();
+                    if (start.getProfile().size() == 16) {
+                        replies.add(new PerfStartReply(uuid(start.getProfile()), (int)
+                                Math.min(Integer.MAX_VALUE, Integer.toUnsignedLong(start.getSeconds()))));
                     }
                 }
                 default -> {}

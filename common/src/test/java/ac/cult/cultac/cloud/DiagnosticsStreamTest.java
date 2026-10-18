@@ -190,7 +190,7 @@ class DiagnosticsStreamTest {
 
     /** The player logs in on backend "a", whose socket connects with diagnostics on and answers the JOIN. */
     private void start(CaptureFixture fixture, Receiver receiver) throws Exception {
-        connections.configure(new CloudSettings(receiver.url(), "test-key", "{server}", "", List.of(3)));
+        connections.configure(new CloudSettings(receiver.url(), "test-key", "{server}", "", List.of(3), false));
         CloudCapture.uplinks(new CloudService.ConnectionUplinks(connections));
         CloudCapture.segmentBinder((player, bind, playing) -> bind.accept("a"));
         fixture.player.gamemode = GameMode.SURVIVAL;

@@ -32,6 +32,11 @@ While the upload is on, each player's session is streamed from the moment they r
   other players included, the player's name and the world name, under a header with the plugin version, client
   version, brand and ping) and uploads a window of it when the service asks for one. Nothing is kept or sent for
   unwatched players.
+- **Performance profiles, only with `cloud.perf` and on request.** Off by default. When on, the intake service may ask
+  for a short JFR profile of the whole server process: CPU and allocation stack samples (class and method names),
+  the bytes CultAC's own code allocated by class, garbage-collection pauses, tick times, the online player count, and
+  the JVM's name, version and flags, and on Linux the CPU time of the process and of the JVM's own GC, compiler, VM
+  and JFR threads, read from `/proc`. It is recorded off the main thread and skipped while the server lags.
 
 Each connection also announces the plugin's name, version and build commit, whether it runs observe-only or
 enforcing, and a SHA-256 hash of the parsed config files with `bridge.secret` and `cloud.api-key` left out. The hash
@@ -101,6 +106,7 @@ The `cloud:` block in `plugins/CultAC/config.yml` (`plugins/cultac/config.yml` o
 | `cloud.api-key` | `""` | The key your intake service issued. |
 | `cloud.server-id` | `""` | Each upload socket's server id. Empty picks the platform's default, below. |
 | `cloud.proxy-id` | `""` | On Velocity, this proxy's name. On Paper, this server's own name. |
+| `cloud.perf` | `false` | Lets the intake service ask for performance profiles, below. `CULTAC_CLOUD_PERF` (`true`/`1`/`yes`, `false`/`0`/`no`) overrides it when set. |
 
 Empty means off: the upload stays off while `url` or `api-key` is empty. It also stays off, with one warning, while
 `proxy-id` is empty on Paper, or on Velocity while `server-id` uses `{proxy}`, and while `api-key` holds anything but
