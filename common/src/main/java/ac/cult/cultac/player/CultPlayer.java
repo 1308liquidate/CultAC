@@ -196,6 +196,8 @@ public class CultPlayer implements GrimUser {
 
     @Getter
     private long playerClockAtLeast = System.nanoTime();
+    /** The last poll that held pings for a protocol switch; the timeout runs from no earlier than this. */
+    private long pingsHeldAt = playerClockAtLeast;
 
     public int powderSnowFrozenTicks = 0;
     public double x;
@@ -664,7 +666,14 @@ public class CultPlayer implements GrimUser {
 
     private boolean canSendTransactionNow() {
         var phase = user.getEncoderState();
-        return user.getPlayer() != null && (phase == ConnectionPhase.PLAY || phase == ConnectionPhase.CONFIGURATION);
+        return user.getPlayer() != null
+                && !protocolSwitchPending()
+                && (phase == ConnectionPhase.PLAY || phase == ConnectionPhase.CONFIGURATION);
+    }
+
+    /** A ping the client reads with an unacknowledged terminal packet hits ProtocolSwapHandler's empty pipeline. */
+    private boolean protocolSwitchPending() {
+        return user.getEncoderState() != user.getConnectionState();
     }
 
     public int sendTransactionAndGetId() {
@@ -1058,7 +1067,10 @@ public class CultPlayer implements GrimUser {
         if (lastTransSent != 0 && lastTransSent + 80 < System.currentTimeMillis()) {
             sendTransaction(true); // send on netty thread
         }
-        if ((System.nanoTime() - getPlayerClockAtLeast()) > maxTransactionTime * 1e9) {
+        long now = System.nanoTime();
+        if (protocolSwitchPending()) {
+            pingsHeldAt = now;
+        } else if (now - Math.max(getPlayerClockAtLeast(), pingsHeldAt) > maxTransactionTime * 1e9) {
             timedOut();
         }
 
