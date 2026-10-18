@@ -152,6 +152,8 @@ public class CultPlayer implements GrimUser {
             new HashMap<>(4);
     /** Ping ids a client cannot predict from the ones it has answered. */
     private final SecureRandom wireIds = wireIdSource();
+    /** Backend pings in flight, whose ids a CultAC ping must not take or the backend's pong is swallowed. */
+    private final ForeignPings foreignPings = new ForeignPings();
 
     public final @NotNull AtomicInteger lastTransactionSent = new AtomicInteger(0);
     public final @NotNull AtomicInteger lastTransactionReceived = new AtomicInteger(0);
@@ -196,6 +198,8 @@ public class CultPlayer implements GrimUser {
 
     @Getter
     private long playerClockAtLeast = System.nanoTime();
+    /** The last poll that held pings for a protocol switch; the timeout runs from no earlier than this. */
+    private long pingsHeldAt = playerClockAtLeast;
 
     public int powderSnowFrozenTicks = 0;
     public double x;
@@ -664,7 +668,14 @@ public class CultPlayer implements GrimUser {
 
     private boolean canSendTransactionNow() {
         var phase = user.getEncoderState();
-        return user.getPlayer() != null && (phase == ConnectionPhase.PLAY || phase == ConnectionPhase.CONFIGURATION);
+        return user.getPlayer() != null
+                && !protocolSwitchPending()
+                && (phase == ConnectionPhase.PLAY || phase == ConnectionPhase.CONFIGURATION);
+    }
+
+    /** A ping the client reads with an unacknowledged terminal packet hits ProtocolSwapHandler's empty pipeline. */
+    private boolean protocolSwitchPending() {
+        return user.getEncoderState() != user.getConnectionState();
     }
 
     public int sendTransactionAndGetId() {
@@ -814,24 +825,38 @@ public class CultPlayer implements GrimUser {
         return true;
     }
 
+    /** Records a ping CultAC did not write, so no CultAC ping takes its id while it is in flight. */
+    public synchronized void foreignPingSent(int id) {
+        foreignPings.add(id);
+    }
+
+    public synchronized void foreignPongReceived(int id) {
+        foreignPings.remove(id);
+    }
+
     private int nextTransactionId() {
+        return nextTransactionId(wireIds);
+    }
+
+    int nextTransactionId(SecureRandom random) {
         int id;
         boolean used;
         do {
-            id = nextWireId(wireIds);
+            id = nextWireId(random);
             used = false;
             for (SentTransaction sent : transactionsSent) used |= sent.id() == id;
             used |= transactionsPendingSend.containsKey(id);
+            used |= foreignPings.contains(id);
         } while (used);
         return id;
     }
 
-    /** A ping id outside the signed-short range, which is left to pings from the backend. */
+    /** A ping id in [MIN_VALUE, -32769]; backend anticheats use non-negative ids or the signed-short range. */
     static int nextWireId(SecureRandom random) {
         int id;
         do {
-            id = random.nextInt();
-        } while (id >= Short.MIN_VALUE && id <= Short.MAX_VALUE);
+            id = random.nextInt() | Integer.MIN_VALUE;
+        } while (id >= Short.MIN_VALUE);
         return id;
     }
 
@@ -1058,7 +1083,10 @@ public class CultPlayer implements GrimUser {
         if (lastTransSent != 0 && lastTransSent + 80 < System.currentTimeMillis()) {
             sendTransaction(true); // send on netty thread
         }
-        if ((System.nanoTime() - getPlayerClockAtLeast()) > maxTransactionTime * 1e9) {
+        long now = System.nanoTime();
+        if (protocolSwitchPending()) {
+            pingsHeldAt = now;
+        } else if (now - Math.max(getPlayerClockAtLeast(), pingsHeldAt) > maxTransactionTime * 1e9) {
             timedOut();
         }
 
