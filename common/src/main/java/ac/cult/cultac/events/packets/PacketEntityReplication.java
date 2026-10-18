@@ -5,6 +5,7 @@ import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.prediction.integration.BedrockVehicleControl;
 import ac.cult.cultac.checks.CultProcessor;
 import ac.cult.cultac.checks.impl.combat.FairReach;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldStageBuilder;
 import ac.cult.cultac.checks.type.CheckListener;
@@ -1176,6 +1177,11 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 if (dismountSeat != null
                         && !player.compensatedEntities.getSelf().inVehicle()) {
                     player.compensatedEntities.commitDismountSeat(dismountSeat);
+                }
+                if (!player.isBedrockMovement()) {
+                    // Player#tick clears a passenger's ground state every ride tick.
+                    player.onGround = false;
+                    player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.FALSE);
                 }
                 player.compensatedEntities.vehicles.clearServerVehicle(vehicleId, transaction);
                 // Vehicle-switch state changes at the passenger transaction boundary.
