@@ -1,6 +1,7 @@
 package ac.cult.cultac.utils.collisions.datatypes;
 
 import ac.cult.blocksim.data.Box;
+import ac.cult.blocksim.engine.shapes.Shapes;
 import ac.cult.blocksim.engine.shapes.VoxelShape;
 import ac.cult.cultac.utils.nmsutil.ClientShapeBoxes;
 import java.util.List;
@@ -20,6 +21,12 @@ public final class VoxelShapeCollisionBox extends SimpleCollisionBox {
         this.shape = shape;
         this.fullBlock = fullBlock;
         if (shape.isEmpty()) throw new IllegalArgumentException("Empty voxel collider");
+        if (shape == Shapes.block()) {
+            minX = minY = minZ = 0.0;
+            maxX = maxY = maxZ = 1.0;
+            isFullBlock = true;
+            return;
+        }
         var boxes = ClientShapeBoxes.cached(shape);
         int count;
         if (boxes != null) {
