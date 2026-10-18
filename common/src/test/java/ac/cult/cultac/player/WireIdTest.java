@@ -16,6 +16,7 @@ import java.security.SecureRandom;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 import org.junit.jupiter.api.Test;
 
 class WireIdTest {
@@ -24,7 +25,7 @@ class WireIdTest {
 
     @Test
     void pingIdsAreNotSequential() {
-        SecureRandom random = new SecureRandom();
+        var random = words(new SecureRandom());
         Set<Integer> seen = new HashSet<>();
         int steps = 0;
         int previous = CultPlayer.nextWireId(random);
@@ -43,7 +44,7 @@ class WireIdTest {
         assertEquals(
                 Short.MIN_VALUE - 1, CultPlayer.nextWireId(scripted(-1, Short.MIN_VALUE, -12345, Short.MIN_VALUE - 1)));
 
-        SecureRandom random = new SecureRandom();
+        var random = words(new SecureRandom());
         for (int i = 0; i < 100_000; i++) {
             int id = CultPlayer.nextWireId(random);
             assertTrue(id <= Short.MIN_VALUE - 1, "id " + id);
@@ -88,15 +89,81 @@ class WireIdTest {
         });
     }
 
-    private static SecureRandom scripted(int... script) {
-        return new SecureRandom() {
-            private int next;
+    @Test
+    void idsAreTheWordsSecureRandomNextIntReadsFromTheSameByteStream() {
+        var perInt = new ByteStream();
+        var blocks = new ByteStream();
+        var ids = words(blocks);
+        int count = 3 * WireIds.BLOCK_BYTES / 4 + 7;
+        for (int i = 0; i < count; i++) assertEquals(perInt.nextInt(), ids.getAsInt());
+        assertEquals(4, blocks.draws);
+        assertEquals(4L * count, perInt.position);
+        assertEquals(4L * WireIds.BLOCK_BYTES, blocks.position);
+    }
 
-            @Override
-            public int nextInt() {
-                return script[next++];
+    @Test
+    void theSameIdsComeFromTheSameDrbgOutput() throws Exception {
+        var seed = new byte[] {1, 2, 3, 4, 5, 6, 7, 8};
+        var direct = SecureRandom.getInstance("SHA1PRNG");
+        direct.setSeed(seed);
+        var buffered = SecureRandom.getInstance("SHA1PRNG");
+        buffered.setSeed(seed);
+        var ids = words(buffered);
+        var block = new byte[WireIds.BLOCK_BYTES];
+        for (int round = 0; round < 4; round++) {
+            direct.nextBytes(block);
+            for (int i = 0; i < block.length; i += 4) {
+                int word = (block[i] << 24)
+                        | (block[i + 1] & 0xFF) << 16
+                        | (block[i + 2] & 0xFF) << 8
+                        | (block[i + 3] & 0xFF);
+                assertEquals(word, ids.getAsInt());
             }
-        };
+        }
+    }
+
+    @Test
+    void aSeededSha1PrngGivesTheIdsItsNextIntWould() throws Exception {
+        var seed = new byte[] {9, 8, 7, 6};
+        var direct = SecureRandom.getInstance("SHA1PRNG");
+        direct.setSeed(seed);
+        var buffered = SecureRandom.getInstance("SHA1PRNG");
+        buffered.setSeed(seed);
+        var ids = words(buffered);
+        for (int i = 0; i < 5 * WireIds.BLOCK_BYTES; i++)
+            assertEquals(CultPlayer.nextWireId(direct::nextInt), CultPlayer.nextWireId(ids));
+    }
+
+    @Test
+    void anotherSourceIsReadFromItsFirstByte() {
+        var block = new WireIds();
+        var first = new ByteStream();
+        block.next(first);
+        var replaced = new ByteStream();
+        var reference = new ByteStream();
+        for (int i = 0; i < 70; i++) assertEquals(reference.nextInt(), block.next(replaced));
+    }
+
+    /** A deterministic byte stream that is the same however its reads are split. */
+    private static final class ByteStream extends SecureRandom {
+        long position;
+        int draws;
+
+        @Override
+        public void nextBytes(byte[] bytes) {
+            draws++;
+            for (int i = 0; i < bytes.length; i++) bytes[i] = (byte) (position++ * 0x9E3779B97F4A7C15L >>> 56);
+        }
+    }
+
+    private static IntSupplier words(SecureRandom random) {
+        var block = new WireIds();
+        return () -> block.next(random);
+    }
+
+    private static IntSupplier scripted(int... script) {
+        int[] next = {0};
+        return () -> script[next[0]++];
     }
 
     private static void withPlayer(Consumer<CultPlayer> body) {

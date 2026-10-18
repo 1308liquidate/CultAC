@@ -91,6 +91,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.IntSupplier;
 import lombok.Getter;
 import lombok.Setter;
 import net.kyori.adventure.text.Component;
@@ -153,6 +154,9 @@ public class CultPlayer implements GrimUser {
             new HashMap<>(4);
     /** Ping ids a client cannot predict from the ones it has answered. */
     private final SecureRandom wireIds = wireIdSource();
+
+    private final WireIds wireIdBlock = new WireIds();
+    private final IntSupplier nextWireWord = () -> wireIdBlock.next(wireIds);
     /** Backend pings in flight, whose ids a CultAC ping must not take or the backend's pong is swallowed. */
     private final ForeignPings foreignPings = new ForeignPings();
 
@@ -836,10 +840,10 @@ public class CultPlayer implements GrimUser {
     }
 
     private int nextTransactionId() {
-        return nextTransactionId(wireIds);
+        return nextTransactionId(nextWireWord);
     }
 
-    int nextTransactionId(SecureRandom random) {
+    int nextTransactionId(IntSupplier random) {
         int id;
         boolean used;
         do {
@@ -853,10 +857,10 @@ public class CultPlayer implements GrimUser {
     }
 
     /** A ping id in [MIN_VALUE, -32769]; backend anticheats use non-negative ids or the signed-short range. */
-    static int nextWireId(SecureRandom random) {
+    static int nextWireId(IntSupplier random) {
         int id;
         do {
-            id = random.nextInt() | Integer.MIN_VALUE;
+            id = random.getAsInt() | Integer.MIN_VALUE;
         } while (id >= Short.MIN_VALUE);
         return id;
     }
