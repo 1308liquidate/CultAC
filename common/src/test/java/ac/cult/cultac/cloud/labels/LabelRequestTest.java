@@ -77,6 +77,8 @@ class LabelRequestTest {
     @Test
     void rejectsWhatTheCommandDoesNotOffer() {
         assertThrows(IllegalArgumentException.class, () -> LabelRequest.cheat("speed", "high", "24h", null));
+        assertThrows(IllegalArgumentException.class, () -> LabelRequest.cheat("aimassist", "high", "24h", null));
+        assertThrows(IllegalArgumentException.class, () -> LabelRequest.cheat("inventory", "high", "24h", null));
         assertThrows(IllegalArgumentException.class, () -> LabelRequest.cheat("other", "confirmed", "24h", null));
         assertThrows(IllegalArgumentException.class, () -> LabelRequest.cheat("other", "high", "day", null));
         assertThrows(IllegalArgumentException.class, () -> LabelRequest.cheat("other", "high", "90d", null));
@@ -110,11 +112,17 @@ class LabelRequestTest {
 
     @Test
     void aWindowLabelCarriesItsOwnSpan() {
-        LabelRequest.Window window = LabelRequest.Window.cheat("AimAssist", "Extreme", NOW - 5 * DAY, NOW, " n ");
+        LabelRequest.Window window = LabelRequest.Window.cheat("KillAura", "Extreme", NOW - 5 * DAY, NOW, " n ");
         JsonObject body = window.body(PLAYER, "Mod", MOD);
         assertEquals(NOW - 5 * DAY, body.get("fromEpochMillis").getAsLong());
         assertEquals(NOW, body.get("toEpochMillis").getAsLong());
-        assertEquals("aimassist", body.get("cheat").getAsString());
+        assertEquals("killaura", body.get("cheat").getAsString());
+        assertEquals(
+                "chest-stealer",
+                LabelRequest.Window.cheat("Chest-Stealer", "high", NOW - DAY, NOW, null)
+                        .body(PLAYER, "Mod", MOD)
+                        .get("cheat")
+                        .getAsString());
         assertEquals("positive", body.get("value").getAsString());
         assertEquals("extreme", body.get("confidence").getAsString());
         assertEquals("n", body.get("evidence").getAsString());

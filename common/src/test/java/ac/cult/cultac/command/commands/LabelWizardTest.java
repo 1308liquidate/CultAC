@@ -24,7 +24,7 @@ class LabelWizardTest {
     void cleanSkipsTheChecksAndComesBackToTheVerdict() {
         LabelWizard wizard = new LabelWizard(STAFF, NOTCH, 7);
         wizard.choose(Verdict.CHEATING);
-        wizard.toggle("aimassist");
+        wizard.toggle("killaura");
         assertEquals(Page.SPAN, wizard.choose(Verdict.CLEAN));
         assertEquals(List.of(), wizard.checks());
         assertTrue(wizard.asksConfidence());
@@ -66,17 +66,17 @@ class LabelWizardTest {
     void checksToggleInTheOrderPicked() {
         LabelWizard wizard = new LabelWizard(STAFF, NOTCH, 7);
         wizard.choose(Verdict.CHEATING);
-        assertEquals(Page.CHECKS, wizard.toggle("aimassist"));
+        assertEquals(Page.CHECKS, wizard.toggle("killaura"));
         wizard.toggle("triggerbot");
         wizard.toggle("crystalaura");
         wizard.toggle("crystalaura");
         wizard.toggle("speed");
-        assertEquals(List.of("aimassist", "triggerbot"), wizard.checks());
+        assertEquals(List.of("killaura", "triggerbot"), wizard.checks());
         wizard.window(null, 7f, NOW);
         List<LabelRequest.Window> labels = wizard.labels(null);
         assertEquals(
                 List.of(
-                        LabelRequest.Window.cheat("aimassist", "high", NOW - 7 * DAY, NOW, null),
+                        LabelRequest.Window.cheat("killaura", "high", NOW - 7 * DAY, NOW, null),
                         LabelRequest.Window.cheat("triggerbot", "high", NOW - 7 * DAY, NOW, null)),
                 labels);
     }

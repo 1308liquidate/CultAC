@@ -197,7 +197,7 @@ final class LabelWizard {
     private static Map<String, String> names() {
         Map<String, String> names = new LinkedHashMap<>();
         names.put("triggerbot", "Triggerbot");
-        names.put("aimassist", "Aim Assist");
+        names.put("killaura", "KillAura");
         names.put("autoclicker", "Autoclicker");
         names.put("autototem", "Auto Totem");
         names.put("crystalaura", "Crystal Aura");
@@ -206,6 +206,7 @@ final class LabelWizard {
         names.put("shieldbreaker", "Shield Breaker");
         names.put("autostunslam", "Auto Stun Slam");
         names.put("jumpreset", "Jump Reset");
+        names.put("chest-stealer", "Chest Stealer");
         names.put("other", "Other");
         if (!List.copyOf(names.keySet()).equals(LabelRequest.CHEATS)) {
             throw new IllegalStateException("every label cheat has one display name, in order");

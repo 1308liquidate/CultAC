@@ -194,7 +194,7 @@ final class LabelLines {
         return "Label failed for " + player + ": " + reason;
     }
 
-    /** What a confirm labelled: {@code Labelled Notch cheating (Aim Assist), high (last 7 days)}. */
+    /** What a confirm labelled: {@code Labelled Notch cheating (KillAura), high (last 7 days)}. */
     static String echo(
             String player, Verdict verdict, List<String> checks, boolean asksConfidence, String confidence, int days) {
         String what = verdict == Verdict.CLEAN

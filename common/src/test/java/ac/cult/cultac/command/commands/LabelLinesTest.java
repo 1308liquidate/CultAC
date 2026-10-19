@@ -26,13 +26,16 @@ class LabelLinesTest {
 
     @Test
     void flagCountsAreSingularAndPlural() {
-        Map<String, Integer> flags = Map.of("aimassist", 14, "triggerbot", 1, "other", 9);
-        assertEquals("Aim Assist · 14 flags in the last 7 days", plain(LabelLines.check("aimassist", flags, 7)));
+        Map<String, Integer> flags = Map.of("killaura", 14, "triggerbot", 1, "other", 9);
+        assertEquals("KillAura · 14 flags in the last 7 days", plain(LabelLines.check("killaura", flags, 7)));
         assertEquals("Triggerbot · 1 flag in the last 1 day", plain(LabelLines.check("triggerbot", flags, 1)));
         assertEquals("Other", plain(LabelLines.check("other", flags, 7)));
         assertEquals("Auto Mace", plain(LabelLines.check("automace", flags, 7)));
-        assertEquals("Aim Assist", plain(LabelLines.check("aimassist", Map.of(), 7)));
-        assertEquals("Aim Assist", plain(LabelLines.check("aimassist", null, 7)));
+        assertEquals(
+                "Chest Stealer · 2 flags in the last 7 days",
+                plain(LabelLines.check("chest-stealer", Map.of("chest-stealer", 2), 7)));
+        assertEquals("KillAura", plain(LabelLines.check("killaura", Map.of(), 7)));
+        assertEquals("KillAura", plain(LabelLines.check("killaura", null, 7)));
     }
 
     @Test
@@ -72,12 +75,12 @@ class LabelLinesTest {
 
     @Test
     void cleanClashesWithAnyActiveCheatLabelWhenever() {
-        JsonObject old = label("aimassist", "positive", FROM - 300 * DAY, FROM - 299 * DAY, null);
+        JsonObject old = label("killaura", "positive", FROM - 300 * DAY, FROM - 299 * DAY, null);
         assertSame(old, LabelLines.conflict(Verdict.CLEAN, List.of(old), FROM, TO));
         JsonObject oldClean = label("all", "negative", FROM - 300 * DAY, FROM - 299 * DAY, null);
         assertNull(LabelLines.conflict(Verdict.CHEATING, List.of(oldClean), FROM, TO));
         JsonObject bySession = JsonParser.parseString(
-                        "{\"cheat\":\"aimassist\",\"value\":\"positive\",\"sessionId\":\"x\",\"tickFrom\":1,\"tickTo\":9}")
+                        "{\"cheat\":\"killaura\",\"value\":\"positive\",\"sessionId\":\"x\",\"tickFrom\":1,\"tickTo\":9}")
                 .getAsJsonObject();
         assertNull(LabelLines.conflict(Verdict.CLEAN, List.of(bySession), FROM, TO));
     }
@@ -104,7 +107,7 @@ class LabelLinesTest {
     void aRevokedLabelOrAnotherCheatDoesNotClash() {
         JsonObject revoked = label("all", "negative", FROM, TO, "2026-10-14T00:00:00Z");
         assertNull(LabelLines.conflict(Verdict.CHEATING, List.of(revoked), FROM, TO));
-        JsonObject cheat = label("aimassist", "positive", FROM, TO, null);
+        JsonObject cheat = label("killaura", "positive", FROM, TO, null);
         assertNull(LabelLines.conflict(Verdict.CHEATING, List.of(cheat), FROM, TO));
         assertSame(cheat, LabelLines.conflict(Verdict.CLEAN, List.of(revoked, cheat), FROM, TO));
         JsonObject suspected = label("triggerbot", "suspected", FROM, TO, null);
@@ -141,7 +144,7 @@ class LabelLinesTest {
                 LabelLines.conflictLines(Verdict.CHEATING, clean, REPLY).stream()
                         .map(LabelLinesTest::plain)
                         .toList());
-        JsonObject cheat = label("aimassist", "positive", FROM - 10 * DAY, TO + 20 * DAY, null);
+        JsonObject cheat = label("killaura", "positive", FROM - 10 * DAY, TO + 20 * DAY, null);
         cheat.addProperty("labeller", "Alex");
         assertEquals(
                 List.of("⚠ Active Cheating label · Alex · Sep 28 → Nov 4", "This will be refused; revoke it first."),
@@ -171,8 +174,8 @@ class LabelLinesTest {
         assertEquals(NamedTextColor.RED, LabelLines.resultColor(0, 2));
         assertEquals("Label failed for Notch: HTTP 409", LabelLines.failed("Notch", "HTTP 409"));
         assertEquals(
-                "Labelled Notch cheating (Aim Assist, Triggerbot), high (last 7 days)",
-                LabelLines.echo("Notch", Verdict.CHEATING, List.of("aimassist", "triggerbot"), true, "high", 7));
+                "Labelled Notch cheating (KillAura, Triggerbot), high (last 7 days)",
+                LabelLines.echo("Notch", Verdict.CHEATING, List.of("killaura", "triggerbot"), true, "high", 7));
         assertEquals(
                 "Labelled Notch suspected (Other) (last 1 day)",
                 LabelLines.echo("Notch", Verdict.SUSPECTED, List.of("other"), false, "high", 1));

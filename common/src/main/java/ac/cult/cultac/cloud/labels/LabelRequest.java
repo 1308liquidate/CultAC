@@ -17,7 +17,7 @@ public record LabelRequest(
         String cheat, String confidence, @Nullable Span span, String note) {
     public static final List<String> CHEATS = List.of(
             "triggerbot",
-            "aimassist",
+            "killaura",
             "autoclicker",
             "autototem",
             "crystalaura",
@@ -26,6 +26,7 @@ public record LabelRequest(
             "shieldbreaker",
             "autostunslam",
             "jumpreset",
+            "chest-stealer",
             "other");
 
     public static final String ALL = "all";
