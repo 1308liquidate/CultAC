@@ -126,6 +126,8 @@ final class SneakEdgeBackoff {
                 && world.getClimbingAtStart() == DesyncStatus.FALSE
                 && !world.isMightBeInBlock()
                 && context.getMaxAttackSlow() == 0
+                // LivingEntity#checkAutoSpinAttack can reset sprinting after travel.
+                && player.riptideSpinAttackTicks == 0
                 && (world.getInWater() == DesyncStatus.FALSE
                         || world.getInWater() == DesyncStatus.TRUE && stillWaterInput(context))
                 && !IsUsingItem.isUsingItem(player)
@@ -162,8 +164,8 @@ final class SneakEdgeBackoff {
         Vec3 modified = VelocityTransformer.getExactControllerModifiedInputStatic(
                 new Vec3(keys.strafeImpulse(), 0.0D, keys.forwardImpulse()), movingSlowlyFactor);
         boolean water = context.getWorldData().getInWater() == DesyncStatus.TRUE;
-        // LivingEntity#getSpeed carries minecraft:sprinting only with the modifier tracked at travel.
-        float speed = !water && context.isSprintModifier()
+        // LivingEntity#getSpeed carries minecraft:sprinting only while the client's movement_speed holds the modifier.
+        float speed = !water && player.sprintState.modifier()
                 ? context.getSprintingGroundMoveRelativeSpeed(player)
                 : context.getMoveRelativeSpeed(player, true, water, false);
         return inputVector(context, modified, speed);
