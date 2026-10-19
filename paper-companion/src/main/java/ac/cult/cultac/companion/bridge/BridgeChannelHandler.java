@@ -12,6 +12,8 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
+import java.lang.reflect.Method;
 import java.util.UUID;
 import java.util.logging.Level;
 import net.minecraft.network.Connection;
@@ -38,22 +40,24 @@ final class BridgeChannelHandler extends ChannelInboundHandlerAdapter {
     static {
         try {
             MethodHandles.Lookup lookup = MethodHandles.publicLookup();
-            Class<?> idType = DiscardedPayload.class.getMethod("id").getReturnType();
-            Class<?> dataType = DiscardedPayload.class.getMethod("data").getReturnType();
+            Method id = DiscardedPayload.class.getMethod("id");
+            Method data = DiscardedPayload.class.getMethod("data");
+            Class<?> idType = id.getReturnType();
+            Class<?> dataType = data.getReturnType();
             CHANNEL = idType.getMethod("parse", String.class).invoke(null, BridgeProtocol.CHANNEL);
             MethodHandle wrap =
                     lookup.findStatic(Unpooled.class, "wrappedBuffer", methodType(ByteBuf.class, byte[].class));
-            PAYLOAD_ID = lookup.findVirtual(DiscardedPayload.class, "id", methodType(idType))
-                    .asType(methodType(Object.class, DiscardedPayload.class));
-            MethodHandle data = lookup.findVirtual(DiscardedPayload.class, "data", methodType(dataType));
-            PAYLOAD_DATA = (dataType == ByteBuf.class ? data : MethodHandles.filterReturnValue(data, wrap))
-                    .asType(methodType(ByteBuf.class, DiscardedPayload.class));
+            MethodType untyped = methodType(Object.class, Object.class);
+            PAYLOAD_ID = lookup.unreflect(id).asType(untyped);
+            MethodHandle read = lookup.unreflect(data);
+            PAYLOAD_DATA =
+                    (dataType == ByteBuf.class ? read : MethodHandles.filterReturnValue(read, wrap)).asType(untyped);
             MethodHandle create = MethodHandles.insertArguments(
                     lookup.findConstructor(DiscardedPayload.class, methodType(void.class, idType, dataType)),
                     0,
                     CHANNEL);
             NEW_PAYLOAD = (dataType == ByteBuf.class ? MethodHandles.filterArguments(create, 0, wrap) : create)
-                    .asType(methodType(DiscardedPayload.class, byte[].class));
+                    .asType(untyped);
         } catch (ReflectiveOperationException failure) {
             throw new ExceptionInInitializerError(failure);
         }
@@ -145,13 +149,13 @@ final class BridgeChannelHandler extends ChannelInboundHandlerAdapter {
 
         @Override
         boolean runInPacketOrder(Runnable task) {
-            return OrderedTask.schedule(MinecraftServer.getServer(), connection.getPacketListener(), task);
+            return OrderedTask.schedule(MinecraftServer.getServer().overworld(), connection.getPacketListener(), task);
         }
     }
 
     private static Object invoke(MethodHandle handle, Object argument) {
         try {
-            return handle.invoke(argument);
+            return (Object) handle.invokeExact(argument);
         } catch (RuntimeException | Error failure) {
             throw failure;
         } catch (Throwable failure) {

@@ -81,7 +81,7 @@ public final class BridgeModule {
         }
         try {
             MethodHandles.lookup().ensureInitialized(BridgeChannelHandler.class);
-        } catch (ExceptionInInitializerError | IllegalAccessException unsupported) {
+        } catch (LinkageError | IllegalAccessException unsupported) {
             plugin.getLogger()
                     .log(
                             Level.WARNING,
