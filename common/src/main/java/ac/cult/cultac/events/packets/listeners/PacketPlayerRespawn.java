@@ -9,6 +9,7 @@ import ac.cult.cultac.checks.impl.badpackets.BadPacketsF;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsG;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsH;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsM;
+import ac.cult.cultac.checks.impl.breaking.AirLiquidBreak;
 import ac.cult.cultac.checks.impl.combat.FairReach;
 import ac.cult.cultac.checks.impl.elytra.ElytraC;
 import ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor;
@@ -144,6 +145,7 @@ public class PacketPlayerRespawn {
                 player.compensatedEntities.clearClientLevel();
                 player.compensatedWorld.isRaining = false;
                 player.checkManager.getListener(BadPacketsA.class).resetCarriedIndex();
+                player.checkManager.getListener(AirLiquidBreak.class).resetPending();
                 if (newJavaLocalPlayer) {
                     player.actionManager.onJavaPlayerReplacement();
                     // LocalPlayer starts from Input.EMPTY and sends PLAYER_INPUT once its keys differ from it.
