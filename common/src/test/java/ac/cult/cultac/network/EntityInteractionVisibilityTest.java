@@ -14,6 +14,7 @@ import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
@@ -39,6 +40,7 @@ import ac.cult.cultac.utils.visibility.ClientVisibility;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import com.google.gson.JsonParser;
 import io.netty.buffer.ByteBuf;
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -275,6 +277,44 @@ class EntityInteractionVisibilityTest {
             setup.wall("stone");
             assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
             setup.player.compensatedEntities.vehicles.applyVehiclePassengers(41, new int[] {42});
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void anInteractionIsPickedByItsReceivedWidthAndHeight(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            // A 2.5 by 5 interaction: its box is 2.69 from the eye, its position 4.79.
+            setup.player.compensatedEntities.addEntity(
+                    42,
+                    EntityTypes.defaults().byKey("minecraft:interaction").id(),
+                    new Vec3(.5 - .83046, 64 - 1.04918, -1.5 + 3.89156),
+                    0,
+                    0,
+                    0);
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            setup.player.compensatedEntities.updateEntityMetadata(
+                    42,
+                    List.of(
+                            new EntityMetadata.Entry(8, 2.5F, ByteBuffer.allocate(0)),
+                            new EntityMetadata.Entry(9, 5.0F, ByteBuffer.allocate(0))));
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void anInteractionWithANegativeWidthAndHeightSpansBelowItsPosition(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            // The box spans y 65..70 and z .25..2.75, 1.75 from the eye; above the position it would be out of range.
+            setup.player.compensatedEntities.addEntity(
+                    42, EntityTypes.defaults().byKey("minecraft:interaction").id(), new Vec3(.5, 70, 1.5), 0, 0, 0);
+            setup.player.compensatedEntities.updateEntityMetadata(
+                    42,
+                    List.of(
+                            new EntityMetadata.Entry(8, -2.5F, ByteBuffer.allocate(0)),
+                            new EntityMetadata.Entry(9, -5.0F, ByteBuffer.allocate(0))));
             assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
         }
     }

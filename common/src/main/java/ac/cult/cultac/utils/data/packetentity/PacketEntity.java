@@ -28,6 +28,7 @@ import ac.cult.cultac.utils.data.ReachInterpolationData;
 import ac.cult.cultac.utils.enums.BoatEntityStatus;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.ArrayList;
@@ -876,14 +877,17 @@ public class PacketEntity {
 
     /**
      * Moves {@code box}, one of this entity's position boxes (minY at its position), onto its Java bounding box:
-     * {@code AbstractWindCharge#makeBoundingBox} starts the box 0.15F below the position. Bedrock clients keep the
-     * position box. Readers of the position itself (riding offsets, eye positions) use the position box.
+     * {@code AbstractWindCharge#makeBoundingBox} starts the box 0.15F below the position, and {@code AABB} orders the
+     * corners, so a negative height spans below the position. Bedrock clients keep the position box. Readers of the
+     * position itself (riding offsets, eye positions) use the position box.
      */
     public SimpleCollisionBox toBoundingBox(CultPlayer player, SimpleCollisionBox box) {
         if (player.isBedrockMovement()) return box;
         if (type == EntityTypeIds.WIND_CHARGE || type == EntityTypeIds.BREEZE_WIND_CHARGE) {
             box.offset(0, -0.15F, 0);
         }
+        if (BoundingBoxSize.spansBelowPosition(player, this))
+            box.offset(0, -BoundingBoxSize.getHeight(player, this), 0);
         return box;
     }
 

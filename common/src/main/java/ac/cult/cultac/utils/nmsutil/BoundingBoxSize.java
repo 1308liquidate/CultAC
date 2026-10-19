@@ -9,6 +9,7 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityInteraction;
 import ac.cult.cultac.utils.data.packetentity.PacketEntitySizeable;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityTrackXRot;
@@ -38,6 +39,8 @@ public class BoundingBoxSize {
     }
 
     private static float getWidthMinusBaby(PacketEntity packetEntity, ClientVersion version) {
+        // Interaction#getDimensions: EntityDimensions.scalable(DATA_WIDTH_ID, DATA_HEIGHT_ID).
+        if (packetEntity instanceof PacketEntityInteraction interaction) return interaction.actionWidth;
         if (packetEntity instanceof PacketEntitySizeable sizeable) {
             if ((packetEntity.type == EntityTypeIds.MAGMA_CUBE) || (packetEntity.type == EntityTypeIds.SLIME)) {
                 return 2.04f * (0.255f * (float) sizeable.size);
@@ -61,7 +64,8 @@ public class BoundingBoxSize {
             Float independent = independentBabyWidth(entity, version);
             width = independent == null ? width * getBabyScale(entity, version) : independent;
         }
-        return width * entity.scale;
+        // AABB orders the corners, so a negative width spans the same box.
+        return Math.abs(width) * entity.scale;
     }
 
     public static Vec3 getRidingOffsetFromVehicle(PacketEntity entity, CultPlayer player) {
@@ -180,6 +184,7 @@ public class BoundingBoxSize {
     }
 
     private static float getHeightMinusBaby(PacketEntity packetEntity, ClientVersion version) {
+        if (packetEntity instanceof PacketEntityInteraction interaction) return interaction.actionHeight;
         if (packetEntity instanceof PacketEntitySizeable sizeable) {
             if ((packetEntity.type == EntityTypeIds.MAGMA_CUBE) || (packetEntity.type == EntityTypeIds.SLIME)) {
                 return 2.04f * (0.255f * (float) sizeable.size);
@@ -200,7 +205,12 @@ public class BoundingBoxSize {
             Float independent = independentBabyHeight(entity, version);
             height = independent == null ? height * getBabyScale(entity, version) : independent;
         }
-        return height * entity.scale;
+        return Math.abs(height) * entity.scale;
+    }
+
+    /** Whether the entity's height is negative, which {@code AABB} spans below its position. */
+    public static boolean spansBelowPosition(CultPlayer player, PacketEntity entity) {
+        return entity instanceof PacketEntityInteraction && getHeightMinusBaby(entity, player.getClientVersion()) < 0;
     }
 
     private static float getBabyScale(PacketEntity entity, ClientVersion version) {

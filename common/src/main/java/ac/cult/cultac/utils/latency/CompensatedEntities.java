@@ -823,6 +823,8 @@ public class CompensatedEntities {
             var height = WatchableIndexUtil.getIndex(watchableObjects, 9);
             if (width != null && width.value() instanceof Float value) interaction.actionWidth = value;
             if (height != null && height.value() instanceof Float value) interaction.actionHeight = value;
+            // Interaction#onSyncedDataUpdated refreshes its dimensions on either field.
+            if (width != null || height != null) interaction.refreshDimensions(player);
         }
         var modelType = EntityTypeUtil.modelType(entity.type);
         if (modelType != null && modelType.has(ac.cult.blocksim.entity.EntityTypes.ARROW)) {
