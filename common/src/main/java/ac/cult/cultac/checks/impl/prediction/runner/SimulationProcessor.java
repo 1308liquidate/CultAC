@@ -30,6 +30,7 @@ import ac.cult.cultac.checks.impl.prediction.PredictionSetbackState;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext.HardCollidingEntityCollision;
 import ac.cult.cultac.checks.impl.prediction.checks.PredCheckRunner;
+import ac.cult.cultac.checks.impl.prediction.checks.StepCollisionMemo;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoFallPseudo;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
@@ -140,6 +141,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     private final CollisionModifier collisionProbe = new CollisionModifier();
     private final Map<CollisionProbeKey, CollideAxisData> collisionProbeCache = new HashMap<>();
     private final NextTickVelocityDeriver.Scratch velocityScratch = new NextTickVelocityDeriver.Scratch();
+    private final StepCollisionMemo stepCollisionMemo = new StepCollisionMemo();
 
     public SimulationProcessor(CultPlayer playerData) {
         super(playerData);
@@ -158,6 +160,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 movement.z,
                 box,
                 onGround);
+    }
+
+    public StepCollisionMemo getStepCollisionMemo() {
+        return this.stepCollisionMemo;
     }
 
     public Set<Vec3> getValidPlayerStartingVels() {
@@ -1501,6 +1507,39 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     }
 
     public PredictionResult getPredictionResult(
+            CultPlayer player,
+            Set<Vec3> startingVel,
+            PredictionResult lastPrediction,
+            Vec3 target,
+            Vec3 start,
+            Vec3 end,
+            LastInstance lastTickSkip,
+            boolean testing,
+            float xRot,
+            float yRot,
+            AuthoredMovementFrame authoredMovementFrame,
+            MovementProfile movementProfile) {
+        stepCollisionMemo.open(!player.isBedrockMovement());
+        try {
+            return predict(
+                    player,
+                    startingVel,
+                    lastPrediction,
+                    target,
+                    start,
+                    end,
+                    lastTickSkip,
+                    testing,
+                    xRot,
+                    yRot,
+                    authoredMovementFrame,
+                    movementProfile);
+        } finally {
+            stepCollisionMemo.close();
+        }
+    }
+
+    private PredictionResult predict(
             CultPlayer player,
             Set<Vec3> startingVel,
             PredictionResult lastPrediction,

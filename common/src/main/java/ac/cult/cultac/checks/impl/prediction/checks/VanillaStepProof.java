@@ -50,13 +50,12 @@ final class VanillaStepProof {
     }
 
     private boolean hasCollisionDirectlyBelowDestination(CultPlayer player, PredictionResult result) {
-        Vec3 downwardCollision = Collisions.collide(
-                player,
-                result.getSimulationContext().getToCubeCollision(),
-                0.0D,
-                -SimpleCollisionBox.COLLISION_EPSILON,
-                0.0D);
-        return downwardCollision.y != -SimpleCollisionBox.COLLISION_EPSILON;
+        return memo(player)
+                .collidesDirectlyBelow(player, result.getSimulationContext().getToCubeCollision());
+    }
+
+    private static StepCollisionMemo memo(CultPlayer player) {
+        return player.checkManager.getSimulationProcessor().getStepCollisionMemo();
     }
 
     private boolean hasSourceProvenStepCandidate(CultPlayer player, PredictionResult result) {
@@ -114,15 +113,15 @@ final class VanillaStepProof {
         Vec3 collidedMovement;
         Vec3 collisionWithoutStep = null;
         if (order != null && !player.isBedrockMovement()) {
-            Collisions.SteppedCollision collision = Collisions.collideWithStepComparison(
-                    player,
-                    result.getSimulationContext().getFromActualPose(),
-                    desiredX,
-                    desiredY,
-                    desiredZ,
-                    order,
-                    Collections.emptyList(),
-                    result.getSimulationContext().getLastOnGround().determineOptimistically());
+            Collisions.SteppedCollision collision = memo(player)
+                    .steppedCollision(
+                            player,
+                            result.getSimulationContext().getFromActualPose(),
+                            desiredX,
+                            desiredY,
+                            desiredZ,
+                            order,
+                            result.getSimulationContext().getLastOnGround().determineOptimistically());
             collidedMovement = collision.movement();
             collisionWithoutStep = collision.withoutStep();
         } else {
