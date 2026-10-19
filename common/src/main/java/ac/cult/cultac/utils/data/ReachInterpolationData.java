@@ -68,6 +68,11 @@ public class ReachInterpolationData {
     private double boundsMinX, boundsMinY, boundsMinZ, boundsMaxX, boundsMaxY, boundsMaxZ;
     private boolean boundsFullBlock;
 
+    private boolean settled;
+    private Transform probeCurrent;
+    private int probeYaw, probePitch, probeRemaining, probeSpeed;
+    private long probeMinX, probeMinY, probeMinZ, probeMaxX, probeMaxY, probeMaxZ;
+
     private ReachInterpolationData(ReachInterpolationData other) {
         this.targetLocation = other.targetLocation.copy();
         this.interpolationQueue = other.interpolationQueue == null ? null : new ArrayDeque<>(other.interpolationQueue);
@@ -188,6 +193,7 @@ public class ReachInterpolationData {
 
     public void setPhysicalBeforePathAppend(
             EntityPositionPath path, float targetYaw, float targetPitch, Vec3 position, float yaw, float pitch) {
+        settled = false;
         if (interpolationQueue != null && !matchesActiveSteppedTarget(path, targetYaw, targetPitch)) {
             boundsValid = false;
             steppedCurrent = new Transform(position, yaw, pitch);
@@ -197,6 +203,7 @@ public class ReachInterpolationData {
     }
 
     public void appendPath(EntityPositionPath path, float yaw, float pitch) {
+        settled = false;
         if (interpolationQueue == null) throw new IllegalStateException("Not a stepped entity");
         appendSteppedPath(path, yaw, pitch);
         boundsValid = false;
@@ -616,6 +623,7 @@ public class ReachInterpolationData {
     }
 
     public void setExactMovementLocation(SimpleCollisionBox exactLocation) {
+        settled = false;
         boundsValid = false;
         if (interpolationQueue != null) {
             if (!steppedCurrentIs(exactLocation, currentYaw, currentPitch)) {
@@ -725,6 +733,7 @@ public class ReachInterpolationData {
     }
 
     public void shiftTargetIfCollisionFree(CultPlayer player, Vec3 movement) {
+        settled = false;
         if (movement.lengthSqr() == 0.0D) {
             return;
         }
@@ -738,6 +747,7 @@ public class ReachInterpolationData {
     }
 
     public void shiftRootVehicleTargetIfCollisionFree(CultPlayer player, PacketEntity entity, Vec3 movement) {
+        settled = false;
         if (movement.lengthSqr() == 0.0D) {
             return;
         }
@@ -755,6 +765,7 @@ public class ReachInterpolationData {
     }
 
     public void shiftTargetRotationByPhysical(float physicalYaw, float physicalPitch) {
+        settled = false;
         if (interpolationStepsLowBound != interpolationStepsHighBound || !hasActiveInterpolationTarget()) {
             return;
         }
@@ -786,6 +797,7 @@ public class ReachInterpolationData {
     }
 
     public void setExactRotation(float yaw, float pitch) {
+        settled = false;
         if (interpolationQueue != null) {
             boundsValid = false;
             steppedCurrent = new Transform(steppedCurrent.position(), yaw, pitch);
@@ -795,6 +807,7 @@ public class ReachInterpolationData {
     }
 
     public void setCurrentAndTargetRotation(float yaw, float pitch) {
+        settled = false;
         this.currentYaw = yaw;
         this.currentPitch = pitch;
         this.targetYaw = yaw;
@@ -807,6 +820,7 @@ public class ReachInterpolationData {
     }
 
     public void updatePossibleStartingLocation(SimpleCollisionBox possibleLocationCombined) {
+        settled = false;
         if (interpolationQueue != null) return;
         boundsValid = false;
         // CultACBukkitLoaderPlugin.staticGetLogger().info(ChatColor.BLUE + "Updated new starting location as second
@@ -816,6 +830,65 @@ public class ReachInterpolationData {
         // hasn't arrived " + startingLocation);
     }
 
+    /**
+     * Whether an idle client tick has proven itself a no-op on this state and no mutator has run since. Only the idle
+     * tick paths {@link #beginIdleProbe} admits reach this.
+     */
+    public boolean isSettled() {
+        return settled;
+    }
+
+    /**
+     * Records the fields an idle client tick writes, returning false when the state is not idle: a stepped
+     * interpolation with an empty queue, or a legacy one with both step bounds at the final step.
+     */
+    public boolean beginIdleProbe() {
+        if (interpolationQueue != null) {
+            if (!interpolationQueue.isEmpty()) return false;
+            probeCurrent = steppedCurrent;
+            probeYaw = Float.floatToRawIntBits(currentYaw);
+            probePitch = Float.floatToRawIntBits(currentPitch);
+            probeRemaining = Float.floatToRawIntBits(remainingTicks);
+            probeSpeed = Float.floatToRawIntBits(interpolationSpeed);
+            return true;
+        }
+        int steps = getInterpolationSteps();
+        if (interpolationStepsLowBound != steps || interpolationStepsHighBound != steps) return false;
+        probeMinX = Double.doubleToRawLongBits(startingLocation.minX);
+        probeMinY = Double.doubleToRawLongBits(startingLocation.minY);
+        probeMinZ = Double.doubleToRawLongBits(startingLocation.minZ);
+        probeMaxX = Double.doubleToRawLongBits(startingLocation.maxX);
+        probeMaxY = Double.doubleToRawLongBits(startingLocation.maxY);
+        probeMaxZ = Double.doubleToRawLongBits(startingLocation.maxZ);
+        return true;
+    }
+
+    /** Marks this state settled when the idle tick since {@link #beginIdleProbe} left every field it writes as it was. */
+    public boolean settleIfIdleTickUnchanged() {
+        boolean unchanged;
+        if (interpolationQueue != null) {
+            unchanged = interpolationQueue.isEmpty()
+                    && steppedCurrent == probeCurrent
+                    && Float.floatToRawIntBits(currentYaw) == probeYaw
+                    && Float.floatToRawIntBits(currentPitch) == probePitch
+                    && Float.floatToRawIntBits(remainingTicks) == probeRemaining
+                    && Float.floatToRawIntBits(interpolationSpeed) == probeSpeed;
+        } else {
+            int steps = getInterpolationSteps();
+            unchanged = interpolationStepsLowBound == steps
+                    && interpolationStepsHighBound == steps
+                    && Double.doubleToRawLongBits(startingLocation.minX) == probeMinX
+                    && Double.doubleToRawLongBits(startingLocation.minY) == probeMinY
+                    && Double.doubleToRawLongBits(startingLocation.minZ) == probeMinZ
+                    && Double.doubleToRawLongBits(startingLocation.maxX) == probeMaxX
+                    && Double.doubleToRawLongBits(startingLocation.maxY) == probeMaxY
+                    && Double.doubleToRawLongBits(startingLocation.maxZ) == probeMaxZ;
+        }
+        probeCurrent = null;
+        settled = unchanged;
+        return unchanged;
+    }
+
     public ReachInterpolationData copyAdvancedForClientTick(boolean incrementLowBound, boolean tickingReliably) {
         ReachInterpolationData copy = new ReachInterpolationData(this);
         copy.tickMovement(incrementLowBound, tickingReliably);
@@ -823,6 +896,7 @@ public class ReachInterpolationData {
     }
 
     public void tickMovement(boolean incrementLowBound, boolean tickingReliably) {
+        settled = false;
         boundsValid = false;
         if (interpolationQueue != null) {
             Transform transform =

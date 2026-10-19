@@ -101,6 +101,10 @@ public class PacketEntity {
     private SimpleCollisionBox exactAfterClientTickBox;
     // Holds the current interpolation location only while carrying the target reads its position.
     private SimpleCollisionBox carryLocationBox;
+    private @Nullable ReachInterpolationData settledInterpolation;
+    private @Nullable Vec3 settledPhysicalPosition;
+    // Equivalence tests clear this so a reference fixture runs every settled tick.
+    private static boolean skipsSettledTicks = true;
 
     public HashMap<MovementEffect, Integer> potionsMap = null;
     public BoatEntityStatus boatStatus = null;
@@ -599,6 +603,20 @@ public class PacketEntity {
             }
             return;
         }
+        ReachInterpolationData interpolation = newPacketLocation;
+        Vec3 physicalBefore = clientPhysicalPosition;
+        boolean idleProbe = false;
+        if (oldPacketLocation == null
+                && interpolation != null
+                && clientPhysicalPositionExact
+                && !player.isBedrockMovement()) {
+            // A settled state with the inputs it settled on makes this tick a no-op.
+            if (interpolation == settledInterpolation
+                    && physicalBefore == settledPhysicalPosition
+                    && interpolation.isSettled()
+                    && skipsSettledTicks) return;
+            idleProbe = interpolation.beginIdleProbe();
+        }
         carryInterpolationTargetByLocalPhysics(player);
         SimpleCollisionBox exactAfterClientTick = exactInterpolatedLocationAfterClientTick(player);
         float exactYawAfterClientTick = exactYawAfterClientTick();
@@ -627,6 +645,15 @@ public class PacketEntity {
         if (oldPacketLocation != null) {
             oldPacketLocation.tickMovement(true, tickingReliably);
             newPacketLocation.updatePossibleStartingLocation(oldPacketLocation.getPossibleMovementLocationCombined());
+        }
+        if (idleProbe
+                && newPacketLocation == interpolation
+                && oldPacketLocation == null
+                && clientPhysicalPosition == physicalBefore
+                && clientPhysicalPositionExact
+                && interpolation.settleIfIdleTickUnchanged()) {
+            settledInterpolation = interpolation;
+            settledPhysicalPosition = physicalBefore;
         }
     }
 
