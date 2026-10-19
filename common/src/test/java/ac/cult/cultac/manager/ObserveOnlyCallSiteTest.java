@@ -225,6 +225,8 @@ class ObserveOnlyCallSiteTest {
             cloud/transport/SharedTransport.java#stopIfDone() shutdown x2
             manager/InitManager.java#<init>(Initable[]) shutdown
             manager/datastore/SharedDataStoreLifecycle.java#close() shutdown
+            manager/datastore/SharedDataStoreLifecycle.java#disablePersistenceAfterLostOwnership() shutdown
+            manager/datastore/SharedDataStoreLifecycle.java#disableStorageAfterDuplicate() shutdown
             manager/tick/impl/ClientVersionSetter.java#tick() disconnect
             network/CultNetworkManager.java#disconnect(Channel) disconnect
             network/CultNetworkManager.java#disconnect(User) disconnect

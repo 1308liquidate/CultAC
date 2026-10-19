@@ -899,6 +899,7 @@ public final class SharedDataStoreLifecycle implements AutoCloseable {
         retentionSweeper = null;
         sessionTracker = SessionTracker.NOOP;
         liveWriteHooks = StorageWriteHooks.NOOP;
+        playerToggleStore.shutdown();
         playerToggleStore = PlayerToggleStore.NOOP;
         instanceRegistry = null;
         verboseRegistry = null;
@@ -1092,6 +1093,7 @@ public final class SharedDataStoreLifecycle implements AutoCloseable {
         stopRecoverySweep();
         sessionTracker = SessionTracker.NOOP;
         liveWriteHooks = StorageWriteHooks.NOOP;
+        playerToggleStore.shutdown();
         playerToggleStore = PlayerToggleStore.NOOP;
         if (violationSink != null) {
             violationSink.shutDown();
