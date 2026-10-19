@@ -28,8 +28,7 @@ public class ValidMovements {
             UncertaintyPipeline.MODIFIERS.toArray(new UncertaintyHandler[0]);
 
     static {
-        // ElytraTransform's skip holds only for the start trace, so computeAABB may filter it only as the first
-        // handler.
+        // ElytraTransform's skip holds only for the start trace, which only the first handler sees.
         if (!(MODIFIERS[0] instanceof ElytraTransform)) {
             throw new IllegalStateException("ElytraTransform must run first in UncertaintyPipeline.MODIFIERS");
         }
