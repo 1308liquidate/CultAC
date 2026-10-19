@@ -100,6 +100,9 @@ class SettledInterpolationParityTest {
             Random random = new Random(seed);
             for (int step = 0; step < steps; step++) {
                 long op = random.nextLong();
+                // Timer checks pace ticks against the wall clock; both fixtures must stay inside their balance.
+                reference.resetTimerBalances();
+                candidate.resetTimerBalances();
                 skipSettledTicks(false);
                 try {
                     old.apply(op);
