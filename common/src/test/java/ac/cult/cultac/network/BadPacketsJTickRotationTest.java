@@ -2,19 +2,25 @@ package ac.cult.cultac.network;
 
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsJ;
+import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
+import ac.cult.cultac.network.codec.ModelRegistryNamesState;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItem;
+import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
+import ac.cult.cultac.protocol.value.PlayerSpawnInfo;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -58,6 +64,53 @@ class BadPacketsJTickRotationTest {
             f.tickEnd();
             assertEquals(1, t.check.getViolations());
         }
+    }
+
+    @Test
+    void useItemsBeforeTheClientHasLoadedHaveNoTickRotation() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            var t = new Ticks(f);
+            respawnBeforeTheClientLoads(f, t);
+
+            t.useItem(YAW);
+            f.tickEnd();
+            t.useItem(YAW_AFTER);
+            f.tickEnd();
+            assertEquals(0, t.check.getViolations());
+        }
+    }
+
+    @Test
+    void theFirstMovingTickAfterLoadingComparesItsUseItem() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            var t = new Ticks(f);
+            respawnBeforeTheClientLoads(f, t);
+
+            t.useItem(YAW);
+            f.tickEnd();
+            t.useItem(YAW_AFTER);
+            t.posRot(START, YAW);
+            f.tickEnd();
+            assertEquals(1, t.check.getViolations());
+        }
+    }
+
+    /** The client sent YAW last; then the server's respawn, whose new LocalPlayer has not loaded. */
+    private static void respawnBeforeTheClientLoads(JavaTickFixture f, Ticks t) {
+        f.place(START, Vec3.ZERO);
+        t.posRot(START, YAW);
+        f.tickEnd();
+        var spawnInfo = new PlayerSpawnInfo(
+                ModelRegistryNamesState.defaults().id("minecraft:dimension_type", "minecraft:the_end"),
+                f.player.compensatedWorld.getLastClientboundDimension().dimension(),
+                GameMode.SURVIVAL);
+        var packet = new ClientboundRespawn(spawnInfo, (byte) 0);
+        var event =
+                new PacketSendEvent<>(f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.RESPAWN, packet, false);
+        new PacketPlayerRespawn().onRespawn(event, f.player, packet);
+        event.getTasksAfterSend().forEach(Runnable::run);
+        f.pongThrough(f.player.lastTransactionSent.get());
+        assertFalse(f.player.packetStateData.playerLoadedIntoLevel, "the respawn did not reach the client");
     }
 
     /** The client sent YAW last; set_passengers seats it and no ping has returned since. */

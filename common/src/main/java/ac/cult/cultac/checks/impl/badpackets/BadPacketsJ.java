@@ -3,6 +3,7 @@ package ac.cult.cultac.checks.impl.badpackets;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
 import ac.cult.cultac.checks.type.DecodedPacketReceiveListener;
+import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
@@ -73,8 +74,13 @@ public class BadPacketsJ extends Check implements DecodedPacketReceiveListener {
         }
 
         if (this.rotations > 0) {
-            // LocalPlayer#sendPosition sends no rotation while the player's equals the last one it sent
-            onTickPacket(player.packetStateData.lastSentTickYaw, player.packetStateData.lastSentTickPitch);
+            // The client sends no tick movement, so no rotation, until ClientPacketListener#hasClientLoaded
+            if (CheckManagerListener.localPlayerTicked(player)) {
+                // LocalPlayer#sendPosition sends no rotation while the player's equals the last one it sent
+                onTickPacket(player.packetStateData.lastSentTickYaw, player.packetStateData.lastSentTickPitch);
+            } else {
+                this.rotations = 0;
+            }
         }
     }
 
