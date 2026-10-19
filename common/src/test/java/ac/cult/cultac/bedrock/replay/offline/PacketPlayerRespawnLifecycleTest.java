@@ -378,6 +378,33 @@ public final class PacketPlayerRespawnLifecycleTest {
     }
 
     @Test
+    public void loginReceiptDropsRocketsOfTheOldLevel() throws Exception {
+        OfflineCultTestBootstrap.installConfig();
+        CultPlayer player = offlineJavaPlayer();
+        try {
+            player.compensatedFireworks.addNewFirework(7);
+            player.compensatedFireworks.addNewFirework(8);
+            player.compensatedFireworks.removeFirework(8);
+            ClientboundLogin login = loginPacket(true);
+            var loginEvent = sendEvent(player, ClientboundPackets.LOGIN, login);
+            int receipt = player.lastTransactionSent.get() + 1;
+            new PacketPlayerRespawn().onLogin(loginEvent, player, login);
+            assertEquals(
+                    "Rockets stay until LOGIN receipt",
+                    2,
+                    player.compensatedFireworks.getMaxFireworksAppliedPossible());
+
+            loginEvent.tasksAfter().forEach(Runnable::run);
+            player.lastTransactionReceived.set(receipt);
+            player.latencyUtils.handleNettySyncTransaction(receipt);
+
+            assertEquals(0, player.compensatedFireworks.getMaxFireworksAppliedPossible());
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
+    @Test
     public void bedrockLoginKeepsActorsUntilTheirNativeRemoval() throws Exception {
         OfflineCultTestBootstrap.installConfig();
         CultPlayer player = offlinePlayer(true);

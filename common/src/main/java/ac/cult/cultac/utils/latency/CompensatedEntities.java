@@ -93,6 +93,7 @@ public class CompensatedEntities {
         for (PacketEntity entity : entityMap.values()) untrack(entity);
         entityMap.clear();
         addOrder.clear();
+        player.compensatedFireworks.clearLevel();
     }
 
     private void track(PacketEntity entity) {
