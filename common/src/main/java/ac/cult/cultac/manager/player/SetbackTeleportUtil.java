@@ -55,6 +55,7 @@ import ac.cult.cultac.utils.nmsutil.IsUsingItem;
 import ac.grim.grimac.api.event.events.GrimPlayerSetbackEvent;
 import ac.grim.grimac.api.event.events.GrimTeleportEvent;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -99,6 +100,11 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
     }
 
     private static final float ROTATION_TELEPORT_EPSILON = 1.0E-4F;
+    /**
+     * Paper honours only its newest teleport ID and a client accepts each teleport within a round trip, so only a
+     * client that withholds its accepts holds more than a few. Past this many the oldest is dropped.
+     */
+    private static final int MAX_PENDING_JAVA_TELEPORTS = 64;
 
     // Sync to netty
     public final ConcurrentLinkedDeque<TeleportData> pendingTeleports = new ConcurrentLinkedDeque<>();
@@ -322,6 +328,15 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         blockOffsets = false;
         // Latency is measured from the next movement of the placed player, not the last one before it died.
         player.checkManager.getSimulationProcessor().getLastMovementTime().clear();
+    }
+
+    /**
+     * A Java client accepts each teleport before it acknowledges the configuration that precedes a LOGIN, so a
+     * teleport still pending at LOGIN send was withheld. It can no longer be accepted, and the new backend reuses its
+     * ID.
+     */
+    public void loginSent() {
+        pendingTeleports.removeIf(SetbackTeleportUtil::isJavaIdTeleport);
     }
 
     public boolean executeTooHighLatencySetback(String cause) {
@@ -1645,6 +1660,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         }
 
         pendingTeleports.add(data);
+        dropOldestJavaTeleports();
 
         data = data.copyWithLocation(safePosition);
         this.requiredSetBack = new SetBackData(data, player.xRot, player.yRot, null, false, plugin);
@@ -1653,6 +1669,25 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             this.lastKnownGoodPosition =
                     new SetbackPosWithVector(safePosition, Vec3.ZERO, player.totalFlyingPacketsSent);
         }
+    }
+
+    // The newest is the required setback, so it is never the one dropped.
+    private void dropOldestJavaTeleports() {
+        int excess = -MAX_PENDING_JAVA_TELEPORTS;
+        for (TeleportData pending : pendingTeleports) {
+            if (isJavaIdTeleport(pending)) excess++;
+        }
+        for (Iterator<TeleportData> it = pendingTeleports.iterator(); excess > 0 && it.hasNext(); ) {
+            if (isJavaIdTeleport(it.next())) {
+                it.remove();
+                excess--;
+            }
+        }
+    }
+
+    /** A player_position teleport, which the Java client accepts by ID. */
+    private static boolean isJavaIdTeleport(TeleportData pending) {
+        return !pending.isRotationOnly() && !pending.isPositionOnly() && pending.getBedrockTransportRevision() < 0L;
     }
 
     public void addImmediatePlayerTeleport(

@@ -23,6 +23,7 @@ import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
 import ac.cult.cultac.utils.nmsutil.NativeBlockCollisionHelper;
 import io.netty.buffer.ByteBuf;
 import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2IntLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -35,6 +36,18 @@ import net.kyori.adventure.text.format.NamedTextColor;
 public class CompensatedWorld {
     private static final int RECENT_CLIENT_COLLISION_CHANGE_TICKS = 3;
     private static final int RECENT_CLIENT_FLUID_CHANGE_TICKS = 3;
+    /**
+     * Recent changes expire only at client_tick_end, which every supported client sends each tick, so a ticking
+     * client holds three ticks of changes. Past this many the oldest is dropped; only a client that stops ending
+     * ticks, or a change of thousands of blocks within three ticks, gets there.
+     */
+    private static final int MAX_RECENT_CLIENT_CHANGES = 4096;
+    /**
+     * The selection snapshot ends at every client_tick_end and a vanilla client predicts a handful of blocks per
+     * tick, so only a client that stops ending ticks reaches this many; the snapshot then records no more.
+     */
+    private static final int MAX_SELECTION_ORIGINAL_STATES = 1024;
+
     private static final int MAX_PENDING_PREDICTIONS = 1024;
     private static final int MAX_REINTERN_CONTENT_COMPARISONS_PER_TICK = 10;
     private static final int MAX_REINTERN_HASH_CALCULATIONS_PER_TICK = 50;
@@ -59,8 +72,9 @@ public class CompensatedWorld {
     // Initial ClientListenerCookie uses DEFAULT_FLAGS; ClientLevelData begins at NORMAL.
     private Set<String> clientEnabledFeatures = Set.of("minecraft:vanilla");
     private boolean clientPeaceful;
-    private final Long2IntOpenHashMap recentClientCollisionChanges = new Long2IntOpenHashMap();
-    private final Long2IntOpenHashMap recentClientFluidChanges = new Long2IntOpenHashMap();
+    // Insertion-ordered so the oldest change is the one dropped at MAX_RECENT_CLIENT_CHANGES.
+    private final Long2IntLinkedOpenHashMap recentClientCollisionChanges = new Long2IntLinkedOpenHashMap();
+    private final Long2IntLinkedOpenHashMap recentClientFluidChanges = new Long2IntLinkedOpenHashMap();
     private final Long2ByteOpenHashMap recentClientFluidChangeKinds = new Long2ByteOpenHashMap();
     private final Map<PendingReinternSection, PendingReinternState> pendingReinternSections = new LinkedHashMap<>();
     /** One tick end's reintern candidates, empty outside processPendingReinterns; owned by the packet thread. */
@@ -872,7 +886,9 @@ public class CompensatedWorld {
     }
 
     void markRecentClientCollisionChange(BlockPos pos) {
-        recentClientCollisionChanges.put(pos.asLong(), RECENT_CLIENT_COLLISION_CHANGE_TICKS);
+        recentClientCollisionChanges.putAndMoveToLast(pos.asLong(), RECENT_CLIENT_COLLISION_CHANGE_TICKS);
+        if (recentClientCollisionChanges.size() > MAX_RECENT_CLIENT_CHANGES)
+            recentClientCollisionChanges.removeFirstInt();
     }
 
     private void markRecentClientFluidChange(BlockPos pos, int oldState, int newState) {
@@ -882,8 +898,12 @@ public class CompensatedWorld {
         }
 
         long key = pos.asLong();
-        recentClientFluidChanges.put(key, RECENT_CLIENT_FLUID_CHANGE_TICKS);
+        recentClientFluidChanges.putAndMoveToLast(key, RECENT_CLIENT_FLUID_CHANGE_TICKS);
         recentClientFluidChangeKinds.put(key, kinds);
+        if (recentClientFluidChanges.size() > MAX_RECENT_CLIENT_CHANGES) {
+            recentClientFluidChangeKinds.remove(recentClientFluidChanges.firstLongKey());
+            recentClientFluidChanges.removeFirstInt();
+        }
     }
 
     private void markRecentClientCollisionChange(BlockPos pos, int oldState, int newState) {
@@ -954,7 +974,9 @@ public class CompensatedWorld {
         BlockPos asVector = new BlockPos(x, y, z);
         BlockPrediction prediction = originalServerBlocks.get(asVector.asLong());
         int original = getBlockStateIdAt(asVector);
-        if (isCurrentlyPredicting && selectionSnapshotActive) {
+        if (isCurrentlyPredicting
+                && selectionSnapshotActive
+                && selectionOriginalStates.size() < MAX_SELECTION_ORIGINAL_STATES) {
             selectionOriginalStates.putIfAbsent(asVector.asLong(), original);
         }
 
