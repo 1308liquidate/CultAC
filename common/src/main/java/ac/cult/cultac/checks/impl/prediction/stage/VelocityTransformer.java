@@ -5,6 +5,7 @@ import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHappyGhast;
@@ -72,8 +73,28 @@ public class VelocityTransformer {
         // utils.nmsutil.NextTickVelocityDeriver.findVelocitiesForNextTick(...), which derives
         // the carried delta from the accepted packet movement after the move.
 
+        boolean abilityFlying = simulationContext.getVehicle() == null && player.isFlying;
+        if (abilityFlying) input = applyFlightInput(player, input);
         input = applyMovementThreshold(input, simulationContext.getVersion(), simulationContext.getVehicle() == null);
-        return applyJumps(player, input);
+        // Player#isAffectedByFluids is false in flight, so LivingEntity#aiStep runs neither jump.
+        return abilityFlying ? input : applyJumps(player, input);
+    }
+
+    /**
+     * LocalPlayer#aiStep adds three times the abilities' flying speed to the delta movement's Y while jump is held
+     * in flight and subtracts it while shift is held, before LivingEntity#aiStep's movement threshold. The keys are
+     * the ones LocalPlayer#sendChanges reports in the player_input preceding this tick's move.
+     */
+    private static List<PredVector> applyFlightInput(CultPlayer player, List<PredVector> velocities) {
+        KnownInput keys = player.packetStateData.knownInput;
+        int inputYa = (keys.jump() ? 1 : 0) - (keys.shift() ? 1 : 0);
+        if (inputYa == 0) return velocities;
+        double impulse = (float) inputYa * player.flySpeed * 3.0F;
+        List<PredVector> outputs = new ArrayList<>(velocities.size());
+        for (PredVector velocity : velocities) {
+            outputs.add(velocity.add(0, impulse, 0, "Flight input"));
+        }
+        return outputs;
     }
 
     private boolean shouldThresholdBeforeItemControlledRiddenInput(CultPlayer player) {
