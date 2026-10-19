@@ -57,6 +57,11 @@ public class PacketWorldBorder extends CultProcessor implements CheckListener, C
         return d0 < 1.0D ? CultMath.lerp(d0, oldDiameter, newDiameter) : newDiameter;
     }
 
+    /** True when {@link #getCurrentDiameter} reads no clock: a tick-based lerp or a time-based one between equal sizes. */
+    public boolean hasClockIndependentDiameter() {
+        return tickBasedLerp || oldDiameter == newDiameter && newDiameter != 0.0D;
+    }
+
     /** 26.3 WorldBorder.isWithinBounds calls getMin/Max(0.0F), using the previous world-tick size. */
     public double getBlockInteractionDiameter() {
         if (!tickBasedLerp) return getCurrentDiameter();
