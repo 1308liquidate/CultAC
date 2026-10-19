@@ -899,10 +899,12 @@ public class CompensatedEntities {
 
         Object value = sizeData.value();
         if (value instanceof Integer) {
-            ((PacketEntitySizeable) entity).size = Math.max((int) value, 1);
+            ((PacketEntitySizeable) entity).size = (int) value;
         } else if (value instanceof Byte) {
-            ((PacketEntitySizeable) entity).size = Math.max((byte) value, 1);
+            ((PacketEntitySizeable) entity).size = (byte) value;
         }
+        // AbstractCubeMob#onSyncedDataUpdated and Phantom#onSyncedDataUpdated refresh dimensions on ID_SIZE.
+        entity.refreshDimensions(player);
     }
 
     private void applyShulkerMetadata(PacketEntity entity, List<EntityMetadata.Entry> watchableObjects) {

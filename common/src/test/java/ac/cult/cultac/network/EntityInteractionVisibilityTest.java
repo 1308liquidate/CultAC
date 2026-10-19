@@ -36,6 +36,8 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.inventory.ItemUtil;
 import ac.cult.cultac.utils.latency.ClientComponentRegistries;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
+import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
 import ac.cult.cultac.utils.visibility.ClientVisibility;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import com.google.gson.JsonParser;
@@ -320,6 +322,90 @@ class EntityInteractionVisibilityTest {
     }
 
     @Test
+    void aMagmaCubeIsPickedByItsSizeFromSpawnAndAfterEachSizeUpdate() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3)) {
+            // A magma cube 3.6 from the player: in range at size 4, out of range at size 1, its spawn size.
+            setup.spawn(42, "minecraft:magma_cube", new Vec3d(.5, 64, -1.5 + 3.6), new Vec3d(0, 0, 0));
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            setup.size(42, 18, 4);
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            setup.size(42, 18, 1);
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @Test
+    void aSlimeOfSizeZeroIsPickedAtItsPosition() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3)) {
+            // At eye height 3.1 from the eye: its size 1 box is 2.84 away.
+            setup.spawn(42, "minecraft:slime", new Vec3d(.5, 65.62, 1.6), Vec3d.ZERO);
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            setup.size(42, 18, 0);
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            // Bedrock sizing keeps the floor of 1.
+            setup.player.movementPlatform = MovementPlatform.BEDROCK;
+            var slime = setup.player.compensatedEntities.getEntity(42);
+            assertEquals(2.04F * 0.255F, BoundingBoxSize.getWidth(setup.player, slime));
+            assertEquals(2.04F * 0.255F, BoundingBoxSize.getHeight(setup.player, slime));
+        }
+    }
+
+    @Test
+    void bedrockSizesAPhantomAsBefore() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3)) {
+            setup.player.movementPlatform = MovementPlatform.BEDROCK;
+            setup.spawn(43, "minecraft:phantom", new Vec3d(.5, 65, 3), Vec3d.ZERO);
+            var phantom = setup.player.compensatedEntities.getEntity(43);
+            // Without size data, size 4; 0.9 + 0.2 * size wide and the type's 0.5 tall.
+            assertEquals(0.9F + 4 * 0.2F, BoundingBoxSize.getWidth(setup.player, phantom));
+            assertEquals(0.5F, BoundingBoxSize.getHeight(setup.player, phantom));
+            setup.size(43, WatchableIndexUtil.PHANTOM_SIZE, 0);
+            assertEquals(0.9F + 0.2F, BoundingBoxSize.getWidth(setup.player, phantom));
+            assertEquals(0.5F, BoundingBoxSize.getHeight(setup.player, phantom));
+        }
+    }
+
+    @Test
+    void aSlimeOfNegativeSizeSpansBelowItsPosition() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3)) {
+            // Size -4 is 2.08 by 2.08 below the position, 2.13 from the eye; above it, the box would be 3.32 away.
+            setup.spawn(42, "minecraft:slime", new Vec3d(.5, 68.22, 1.6), Vec3d.ZERO);
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            setup.size(42, 18, -4);
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @Test
+    void aPhantomIsScaledByOnePlusFifteenHundredthsOfItsSize() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3)) {
+            // 42 is in range from size 6 on, 43 from size 1; 0 is the spawn size.
+            setup.spawn(42, "minecraft:phantom", new Vec3d(.5, 65.2, 2.3), Vec3d.ZERO);
+            setup.spawn(43, "minecraft:phantom", new Vec3d(.5, 65.2, 1.98), Vec3d.ZERO);
+            assertTrue(setup.route(43, InteractAction.INTERACT_AT).isCancelled());
+            setup.size(43, WatchableIndexUtil.PHANTOM_SIZE, 1);
+            assertFalse(setup.route(43, InteractAction.INTERACT_AT).isCancelled());
+            setup.size(43, WatchableIndexUtil.PHANTOM_SIZE, 0);
+            assertTrue(setup.route(43, InteractAction.INTERACT_AT).isCancelled());
+            setup.size(42, WatchableIndexUtil.PHANTOM_SIZE, 4);
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            setup.size(42, WatchableIndexUtil.PHANTOM_SIZE, 6);
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void anInteractionWithoutSizeDataIsOneByOne(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            // The 1 by 1 box is 2.9 from the eye, the position 3.44.
+            setup.player.compensatedEntities.addEntity(
+                    42, EntityTypes.defaults().byKey("minecraft:interaction").id(), new Vec3(.5, 65.12, 1.9), 0, 0, 0);
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @Test
     void aPre263BundledSyncSetsAnEntityWithoutInterpolationOntoItsPosition() throws Exception {
         for (int type : new int[] {EntityTypeIds.FIREBALL, EntityTypeIds.ZOMBIE}) {
             try (var setup = new Setup(ProtocolVersion.V1_21_11)) {
@@ -442,6 +528,11 @@ class EntityInteractionVisibilityTest {
                     fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_MOTION, packet, false);
             player.packetEntityReplication.onSetEntityMotion(event, player, packet);
             acknowledge(event);
+        }
+
+        void size(int id, int index, int size) {
+            player.compensatedEntities.updateEntityMetadata(
+                    id, List.of(new EntityMetadata.Entry(index, size, ByteBuffer.allocate(0))));
         }
 
         private void acknowledge(PacketSendEvent<?> event) {

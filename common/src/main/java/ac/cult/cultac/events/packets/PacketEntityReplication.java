@@ -371,7 +371,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         if (player.isBedrockMovement()) return;
         PredictionResult lastPrediction =
                 player.checkManager.getSimulationProcessor().getLastPrediction();
-        if (lastPrediction != null) WorldStageBuilder.recountCollidingTickingAfterPlayer(lastPrediction);
+        if (lastPrediction != null) WorldStageBuilder.recountCollidingTickingAfterPlayer(player, lastPrediction);
     }
 
     private void tickEntityInterpolationAtClientTickEnd() {

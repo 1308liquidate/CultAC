@@ -841,12 +841,12 @@ public class PacketEntity {
         return new Vec3(x, y, z);
     }
 
+    /** {@code Entity#refreshDimensions}: the current and pending positions take the entity's new dimensions. */
     public void refreshDimensions(CultPlayer player) {
-        if (desyncClientPos == null) {
-            return;
-        }
-        setPositionRaw(GetBoundingBox.getPacketEntityBoundingBox(
-                player, desyncClientPos.x, desyncClientPos.y, desyncClientPos.z, this));
+        float width = BoundingBoxSize.getWidth(player, this);
+        float height = BoundingBoxSize.getHeight(player, this);
+        newPacketLocation.resize(width, height);
+        if (oldPacketLocation != null) oldPacketLocation.resize(width, height);
     }
 
     public SimpleCollisionBox getPossibleCollisionBoxes() {

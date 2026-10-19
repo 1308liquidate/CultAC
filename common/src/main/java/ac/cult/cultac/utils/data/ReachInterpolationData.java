@@ -675,6 +675,18 @@ public class ReachInterpolationData {
         targetLocation.offset(stepFrom.apply(feet(targetLocation)));
     }
 
+    /** {@code Entity#reapplyPosition}: every box keeps its position and takes the new dimensions. */
+    public void resize(float width, float height) {
+        boundsValid = false;
+        startingLocation = resized(startingLocation, width, height);
+        targetLocation = resized(targetLocation, width, height);
+    }
+
+    private static SimpleCollisionBox resized(SimpleCollisionBox box, float width, float height) {
+        Vec3 feet = feet(box);
+        return GetBoundingBox.getBoundingBoxFromPosAndSize(feet.x, feet.y, feet.z, width, height);
+    }
+
     public void shiftTargetIfCollisionFree(CultPlayer player, Vec3 movement) {
         if (movement.lengthSqr() == 0.0D) {
             return;
