@@ -598,6 +598,33 @@ class BuildUpdatesTest {
     }
 
     @Test
+    void aBootBuildThatFailsToStartFallsBackToTheBundledRuntime() throws Exception {
+        engine.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        var reports = new CopyOnWriteArrayList<String>();
+        var restarted = new GenerationManager(
+                directory.resolve("Restarted"),
+                "paper",
+                this,
+                controls,
+                null,
+                getClass().getClassLoader(),
+                reports::add);
+        Path bootBuild = Files.copy(
+                jar("b142.jar", "0.1.0-b142-main-bbbbbbb", "broken"), directory.resolve("build-142-0123456789ab.jar"));
+        restarted.loadInitial(Files.newInputStream(jar("bundled.jar", BUNDLED, "initial")), bootBuild);
+        restarted.startInitial();
+        assertEquals(BUNDLED, restarted.currentBuild());
+        assertFalse(Files.exists(bootBuild));
+        assertTrue(
+                reports.stream()
+                        .anyMatch(line -> line.startsWith("Starting the bundled CultAC runtime; 0.1.0-b142")),
+                reports.toString());
+        restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        assertTrue(events.contains("broken:close"), events.toString());
+        engine = restarted;
+    }
+
+    @Test
     void aBootBuildStartsInPlaceOfTheBundledRuntime() throws Exception {
         engine.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
         var reports = new CopyOnWriteArrayList<String>();

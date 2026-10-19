@@ -41,6 +41,7 @@ public final class GenerationManager implements AutoCloseable {
     private final HostApiRouter api = new HostApiRouter(this);
     private Generation current;
     private String bundledDigest;
+    private boolean initialBundled;
     private boolean closing;
     private final CompletableFuture<Void> shutdown = new CompletableFuture<>();
     private final java.util.concurrent.atomic.AtomicInteger ticks = new java.util.concurrent.atomic.AtomicInteger();
@@ -159,7 +160,10 @@ public final class GenerationManager implements AutoCloseable {
                 report.accept("Starting the bundled CultAC runtime; the persisted runtime failed to load: " + failure);
             }
         }
-        if (generation == null) generation = prepare(bundled, false);
+        if (generation == null) {
+            generation = prepare(bundled, false);
+            initialBundled = true;
+        }
         synchronized (this) {
             current = generation;
         }
@@ -188,14 +192,28 @@ public final class GenerationManager implements AutoCloseable {
         synchronized (this) {
             generation = Objects.requireNonNull(current, "Runtime not loaded");
         }
-        // Platform startup runs on its own thread, which the engine may need; nothing older can take over anyway.
-        invoke(generation, () -> {
-            generation.runtime.start();
-            return null;
-        });
-        try (var settings = new ConfigFiles(directory, generation.runtime.configurationFiles())) {
-            persist(generation);
-            settings.commit();
+        try {
+            startGeneration(generation);
+        } catch (Throwable failure) {
+            if (initialBundled) throw failure;
+            // A boot build or persisted runtime that cannot start gives way to the bundled runtime.
+            report.accept("Starting the bundled CultAC runtime; " + generation.artifact.display()
+                    + " failed to start: " + failure);
+            synchronized (this) {
+                generation.state = State.DRAINING;
+            }
+            retire(generation);
+            try {
+                generation = prepare(directory.resolve("runtime/default.jar"), false);
+                initialBundled = true;
+                synchronized (this) {
+                    current = generation;
+                }
+                startGeneration(generation);
+            } catch (Throwable fallback) {
+                fallback.addSuppressed(failure);
+                throw fallback;
+            }
         }
         synchronized (this) {
             generation.state = State.CURRENT;
@@ -212,6 +230,18 @@ public final class GenerationManager implements AutoCloseable {
             } catch (IOException | UncheckedIOException failure) {
                 report.accept("CultAC leftover runtime cleanup failed: " + failure);
             }
+        }
+    }
+
+    private void startGeneration(Generation generation) throws Exception {
+        // Platform startup runs on its own thread, which the engine may need; nothing older can take over anyway.
+        invoke(generation, () -> {
+            generation.runtime.start();
+            return null;
+        });
+        try (var settings = new ConfigFiles(directory, generation.runtime.configurationFiles())) {
+            persist(generation);
+            settings.commit();
         }
     }
 
