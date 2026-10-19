@@ -382,7 +382,7 @@ public class CompensatedWorld {
         private void recalcCounts() {
             nonEmptyBlockCount = 0;
             fluidCount = 0;
-            states.forEachCount((state, count) -> {
+            states.forEachCountWithin(DataTables.defaults().registry().stateCount(), (state, count) -> {
                 var facts = facts(state);
                 if (!facts.has(ac.cult.blocksim.data.StateFacts.AIR)) {
                     nonEmptyBlockCount += count;
