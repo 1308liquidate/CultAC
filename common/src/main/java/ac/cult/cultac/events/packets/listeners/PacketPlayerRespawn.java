@@ -146,6 +146,9 @@ public class PacketPlayerRespawn {
                 player.checkManager.getListener(BadPacketsA.class).resetCarriedIndex();
                 if (newJavaLocalPlayer) {
                     player.actionManager.onJavaPlayerReplacement();
+                    // LocalPlayer starts from Input.EMPTY and sends PLAYER_INPUT once its keys differ from it.
+                    player.packetStateData.knownInput = KnownInput.DEFAULT;
+                    player.boatData.clearInput();
                     player.onGround = player.lastOnGround = false;
                     player.isSneaking = false;
                     player.isGliding = false;
