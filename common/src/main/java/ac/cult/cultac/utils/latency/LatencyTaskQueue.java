@@ -2,8 +2,16 @@ package ac.cult.cultac.utils.latency;
 
 final class LatencyTaskQueue {
     private static final int MAX_RECYCLED_TASKS = 256;
+    private static final int RUNS = 4;
+    // Each run keeps its tasks in insertion order with non-decreasing transactions, so its ready tasks are a prefix.
+    private final TaskNode[] runFirst = new TaskNode[RUNS];
+    private final TaskNode[] runLast = new TaskNode[RUNS];
+    // Tasks no run could take, in insertion order with any transactions.
     private TaskNode firstTask;
     private TaskNode lastTask;
+    // Insertion order across the runs and the overflow; a continuation keeps its task's sequence.
+    private long nextSequence;
+    private final TaskNode[] readyChains = new TaskNode[RUNS + 1];
     private TaskNode recycledTasks;
     private int recycledTaskCount;
 
@@ -44,11 +52,26 @@ final class LatencyTaskQueue {
     private TaskNode nextTransactionTask(TaskNode task) {
         if (task.nextTransactionRunnable == null) return null;
         TaskNode continuation = acquire(task.transaction + 1, task.nextTransactionRunnable, null);
+        continuation.sequence = task.sequence;
         task.nextTransactionRunnable = null;
         return continuation;
     }
 
     private void add(TaskNode task) {
+        task.sequence = nextSequence++;
+        for (int run = 0; run < RUNS; run++) {
+            TaskNode last = runLast[run];
+            if (last == null) {
+                runFirst[run] = task;
+                runLast[run] = task;
+                return;
+            }
+            if (last.transaction <= task.transaction) {
+                last.next = task;
+                runLast[run] = task;
+                return;
+            }
+        }
         if (lastTask == null) {
             firstTask = task;
         } else {
@@ -58,6 +81,100 @@ final class LatencyTaskQueue {
     }
 
     synchronized TaskNode drainReady(int transaction) {
+        for (int run = 0; run < RUNS; run++) readyChains[run] = drainRun(run, transaction);
+        readyChains[RUNS] = drainOverflow(transaction);
+        int ready = -1;
+        for (int i = 0; i <= RUNS; i++) {
+            if (readyChains[i] == null) continue;
+            if (ready >= 0) return mergeReadyChains();
+            ready = i;
+        }
+        if (ready < 0) return null;
+        TaskNode only = readyChains[ready];
+        readyChains[ready] = null;
+        return only;
+    }
+
+    // Chains never share a sequence: a continuation stays in its task's chain, so their order does not matter here.
+    private TaskNode mergeReadyChains() {
+        int chains = 0;
+        for (int i = 0; i <= RUNS; i++) {
+            if (readyChains[i] != null) readyChains[chains++] = readyChains[i];
+        }
+        for (int i = chains; i <= RUNS; i++) readyChains[i] = null;
+        TaskNode first = null;
+        TaskNode last = null;
+        while (chains > 1) {
+            int chain = 0;
+            for (int i = 1; i < chains; i++) {
+                if (readyChains[i].sequence < readyChains[chain].sequence) chain = i;
+            }
+            TaskNode task = readyChains[chain];
+            if (task.next == null) {
+                readyChains[chain] = readyChains[--chains];
+                readyChains[chains] = null;
+            } else {
+                readyChains[chain] = task.next;
+            }
+            if (first == null) {
+                first = task;
+            } else {
+                last.next = task;
+            }
+            last = task;
+        }
+        last.next = readyChains[0];
+        readyChains[0] = null;
+        return first;
+    }
+
+    /**
+     * The run's ready prefix in order, a continuation that is also ready right after its task. Continuations that are
+     * not ready take their task's place; they are due at transaction + 1, no later than any task left in the run.
+     */
+    private TaskNode drainRun(int run, int transaction) {
+        TaskNode current = runFirst[run];
+        if (current == null || transaction < current.transaction) return null;
+        TaskNode readyFirst = null;
+        TaskNode readyLast = null;
+        TaskNode keptFirst = null;
+        TaskNode keptLast = null;
+        while (current != null && transaction >= current.transaction) {
+            TaskNode next = current.next;
+            current.next = null;
+            if (readyFirst == null) {
+                readyFirst = current;
+            } else {
+                readyLast.next = current;
+            }
+            readyLast = current;
+            TaskNode continuation = nextTransactionTask(current);
+            if (continuation != null) {
+                if (continuation.transaction <= transaction) {
+                    current.next = continuation;
+                    readyLast = continuation;
+                } else if (keptFirst == null) {
+                    keptFirst = continuation;
+                    keptLast = continuation;
+                } else {
+                    keptLast.next = continuation;
+                    keptLast = continuation;
+                }
+            }
+            current = next;
+        }
+        if (keptFirst == null) {
+            runFirst[run] = current;
+            if (current == null) runLast[run] = null;
+        } else {
+            keptLast.next = current;
+            runFirst[run] = keptFirst;
+            if (current == null) runLast[run] = keptLast;
+        }
+        return readyFirst;
+    }
+
+    private TaskNode drainOverflow(int transaction) {
         TaskNode previous = null;
         TaskNode current = firstTask;
         TaskNode readyFirst = null;
@@ -65,8 +182,6 @@ final class LatencyTaskQueue {
 
         while (current != null) {
             TaskNode next = current.next;
-            // Receipt callbacks can append earlier transactions behind later ones.
-            // Keep scanning so future tasks cannot hide ready work.
             if (transaction < current.transaction) {
                 previous = current;
                 current = next;
@@ -140,11 +255,13 @@ final class LatencyTaskQueue {
         if (firstTask == null) {
             lastTask = null;
         }
+        if (readyLast != null) readyLast.next = null;
         return readyFirst;
     }
 
     static final class TaskNode {
         private int transaction;
+        private long sequence;
         private Runnable runnable;
         private Runnable nextTransactionRunnable;
         private TaskNode next;
