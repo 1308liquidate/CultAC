@@ -116,6 +116,11 @@ public class PacketEntitySelf extends PacketEntity {
         refreshAttributeValues();
     }
 
+    /** movement_speed with LivingEntity#setSprinting's modifier, which {@link #playerSpeed} leaves out. */
+    public double sprintingPlayerSpeed() {
+        return movementSpeedAttribute.valueWith(CompensatedEntities.SPRINTING_SPEED_MODIFIER);
+    }
+
     private void refreshAttributeValues() {
         scale = (float) scaleAttribute.value();
         gravity = gravityAttribute.value();

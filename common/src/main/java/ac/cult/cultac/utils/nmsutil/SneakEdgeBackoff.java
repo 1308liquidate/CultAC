@@ -126,19 +126,10 @@ final class SneakEdgeBackoff {
                 && !world.isMightBeInBlock()
                 && context.getMaxAttackSlow() == 0
                 && (world.getInWater() == DesyncStatus.FALSE
-                        ? notSprinting(player)
-                        : world.getInWater() == DesyncStatus.TRUE && stillWaterInput(context))
+                        || world.getInWater() == DesyncStatus.TRUE && stillWaterInput(context))
                 && !IsUsingItem.isUsingItem(player)
                 && result.getValidMovements() != null
                 && result.getValidMovements().getPositionOnlyDelta().lengthSqr() <= 1.0E-14;
-    }
-
-    /** A client hiding its sprint state carries less velocity, not more. */
-    private static boolean notSprinting(CultPlayer player) {
-        return !player.isSprinting
-                && player.sprintState.flagKnown()
-                && !player.sprintState.flag()
-                && !player.sprintState.modifier();
     }
 
     /**
@@ -170,7 +161,11 @@ final class SneakEdgeBackoff {
         Vec3 modified = VelocityTransformer.getExactControllerModifiedInputStatic(
                 new Vec3(keys.strafeImpulse(), 0.0D, keys.forwardImpulse()), movingSlowlyFactor);
         boolean water = context.getWorldData().getInWater() == DesyncStatus.TRUE;
-        return inputVector(context, modified, context.getMoveRelativeSpeed(player, true, water, false));
+        // LivingEntity#getSpeed carries minecraft:sprinting only with the modifier tracked at travel.
+        float speed = !water && context.isSprintModifier()
+                ? context.getSprintingGroundMoveRelativeSpeed(player)
+                : context.getMoveRelativeSpeed(player, true, water, false);
+        return inputVector(context, modified, speed);
     }
 
     /** Entity#getInputVector. */

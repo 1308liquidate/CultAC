@@ -33,6 +33,9 @@ import org.jetbrains.annotations.Nullable;
 public class CompensatedEntities {
     public final ClientPlayerModes clientPlayerModes = new ClientPlayerModes();
     private static final String SPRINTING_MODIFIER_ID = "minecraft:sprinting";
+    /** LivingEntity#SPEED_MODIFIER_SPRINTING, which LivingEntity#setSprinting adds to movement_speed. */
+    public static final AttributeModifier SPRINTING_SPEED_MODIFIER =
+            new AttributeModifier(SPRINTING_MODIFIER_ID, 0.3F, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
     public static final String SNOW_MODIFIER_ID = "minecraft:powder_snow";
     public static final Set<String> EXCLUDED_MODIFIER_IDS = Set.of(SPRINTING_MODIFIER_ID, SNOW_MODIFIER_ID);
     private static final String ATTRIBUTE_NAMESPACE = "minecraft:";
@@ -304,6 +307,12 @@ public class CompensatedEntities {
     // TODO: This doesn't belong here at all
     public double getPlayerMovementSpeed() {
         double speed = player.compensatedEntities.getSelf().playerSpeed;
+        return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
+    }
+
+    /** {@link #getPlayerMovementSpeed} while movement_speed carries the sprinting modifier. */
+    public double getSprintingPlayerMovementSpeed() {
+        double speed = player.compensatedEntities.getSelf().sprintingPlayerSpeed();
         return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
     }
 
