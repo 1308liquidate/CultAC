@@ -454,23 +454,23 @@ public final class GenerationManager implements AutoCloseable {
     private void release(Object connection, Generation owner, CompletionStage<Void> cleanup) {
         cleanup.whenComplete((ignored, failure) -> {
             Session session;
+            boolean failedWhileClosing;
             synchronized (this) {
                 session = sessions.get(connection);
                 if (session == null || session.owner != owner) return;
-                if (failure == null) {
-                    sessions.remove(connection);
-                    owner.leases--;
-                }
+                sessions.remove(connection);
+                owner.leases--;
+                failedWhileClosing = failure != null && closing;
+                // Shutdown retires a generation at zero leases, so its failure is recorded under the same lock.
+                if (failedWhileClosing) owner.state = State.CLEANUP_FAILED;
             }
+            unbindUser(connection);
             if (failure != null) {
                 report.accept("CultAC session cleanup failed for " + owner.id + ": " + failure);
                 if (session.disconnect != null)
                     session.disconnect.completeExceptionally(RuntimeFailures.detached(failure));
-                if (closing) failedCleanup(owner, failure);
-                return;
-            }
-            unbindUser(connection);
-            if (session.disconnect != null) session.disconnect.complete(null);
+                if (failedWhileClosing) failedCleanup(owner, failure);
+            } else if (session.disconnect != null) session.disconnect.complete(null);
             management.execute(() -> retire(owner));
         });
     }
