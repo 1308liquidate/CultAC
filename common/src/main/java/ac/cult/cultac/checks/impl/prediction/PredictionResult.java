@@ -44,6 +44,10 @@ public class PredictionResult {
     private Boolean cachedAnyRealityControlsVerticalMovement;
     private Boolean cachedAnyRealityDidTickSkipGravity;
 
+    /** VanillaStepProof's source-proven step for this result; one handleResult pass reads it from two checks. */
+    @EqualsAndHashCode.Exclude
+    Boolean sourceProvenStep;
+
     @Getter
     @Setter
     boolean isExempt = false;

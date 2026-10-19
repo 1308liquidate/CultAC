@@ -60,6 +60,15 @@ final class VanillaStepProof {
     }
 
     private boolean hasSourceProvenStepCandidate(CultPlayer player, PredictionResult result) {
+        Boolean proven = result.getSourceProvenStep();
+        if (proven == null) {
+            proven = proveSourceStep(player, result);
+            result.setSourceProvenStep(proven);
+        }
+        return proven;
+    }
+
+    private boolean proveSourceStep(CultPlayer player, PredictionResult result) {
         boolean requireSelectedStep =
                 !hasUnknownCollisionAtDestination(result) && !hasCollisionDirectlyBelowDestination(player, result);
         Vec3 target = result.getTarget();
