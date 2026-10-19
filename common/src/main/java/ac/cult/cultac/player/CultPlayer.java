@@ -845,6 +845,15 @@ public class CultPlayer implements GrimUser {
         foreignPings.remove(id);
     }
 
+    /** Whether {@code id} is a ping CultAC created whose response has not arrived yet. */
+    public synchronized boolean awaitsTransactionResponse(int id) {
+        if (transactionsPendingSend.containsKey(id)) return true;
+        for (SentTransaction sent : transactionsSent) {
+            if (sent.id() == id) return true;
+        }
+        return false;
+    }
+
     private int nextTransactionId() {
         return nextTransactionId(nextWireWord);
     }

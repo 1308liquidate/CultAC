@@ -538,7 +538,7 @@ public final class GeyserBedrockBridgeRuntime {
         else player.user.getCultConnection().platform().runInModel(task);
     }
 
-    private static CultPlayer playerForSession(GeyserSession session) {
+    static CultPlayer playerForSession(GeyserSession session) {
         var tap = PACKET_TAPS.get(session);
         return tap == null ? null : tap.currentPlayer();
     }
