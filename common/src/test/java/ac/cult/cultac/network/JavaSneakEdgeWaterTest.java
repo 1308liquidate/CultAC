@@ -3,6 +3,7 @@ package ac.cult.cultac.network;
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
@@ -26,6 +27,8 @@ class JavaSneakEdgeWaterTest {
             new ServerboundPlayerInput(true, false, true, false, false, true, true);
     private static final ServerboundPlayerInput RELEASE_AND_JUMP =
             new ServerboundPlayerInput(true, false, true, false, true, false, true);
+    private static final ServerboundPlayerInput SNEAK_IN_WATER =
+            new ServerboundPlayerInput(true, false, true, false, false, true, false);
     private static final ServerboundPlayerInput FORWARD_JUMP =
             new ServerboundPlayerInput(true, false, false, false, true, false, true);
 
@@ -51,6 +54,37 @@ class JavaSneakEdgeWaterTest {
             f.input(FORWARD_JUMP);
             assertExact(f, -136.68690490722656F, 16.74895477294922F, 218.7734634929508, 61.01887101063653, 190.41562408045826, false);
             assertExact(f, -139.54896545410156F, 9.669137954711914F, 218.79837399643162, 61.057648142321376, 190.27270188513194, false);
+        }
+    }
+
+    /**
+     * The same pool edge with the sprint flag never set, so Entity#updateSwimming cannot swim the player and
+     * LocalPlayer#aiStep crouches it: an un-crouched input that only the full scale reproduces carries nothing.
+     */
+    @Test
+    void aCrouchingPlayerThatCannotSwimCarriesNoUncrouchedInput() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            pool(f);
+            float yaw = -132.16786193847656F;
+            rotate(f, yaw, 20.0F);
+            Vec3 position = recorded(218.7649958282314, 61.0, 190.70004288072602);
+            Vec3 velocity = new Vec3(-0.004, 0.0, -0.08);
+            f.place(position, velocity);
+            f.input(SNEAK_IN_WATER);
+            for (int tick = 0; tick < 3; tick++) {
+                // travelInWater's moveRelative(0.02F) at the full scale; the edge leaves only the move along it.
+                Vec3 delta = velocity.add(ClientMoveInput.of(f, SNEAK_IN_WATER, 1.0F, 0.02F, yaw));
+                position = position.add(delta.x, 0.0, 0.0);
+                PredictionResult result = f.tick(position, true);
+                double carriedZ = delta.z * 0.8F;
+                if (tick > 0) {
+                    assertFalse(
+                            f.player.checkManager.getSimulationProcessor().getValidPlayerStartingVels().stream()
+                                    .anyMatch(next -> Math.abs(next.z - carriedZ) < 1.0E-7),
+                            "carried the un-crouched input: " + describe(result));
+                }
+                velocity = new Vec3(delta.x * 0.8F, 0.0, carriedZ);
+            }
         }
     }
 

@@ -56,12 +56,13 @@ final class SneakEdgeBackoff {
             return deltaMovementFrom(
                     player, result, context, accepted, context.isLastSneaking() ? sneakingSpeed : 1.0F);
         }
-        // LocalPlayer#aiStep crouches only a player that is not swimming, and Entity#updateSwimming reads the local
-        // sprint and eye state, so a crouch-held water move is proven with either scale and kept when one alone
-        // reproduces it.
-        Vec3 full = deltaMovementFrom(player, result, context, accepted, 1.0F);
-        if (!context.isLastSneaking()) return full;
+        if (!context.isLastSneaking()) return deltaMovementFrom(player, result, context, accepted, 1.0F);
+        // LocalPlayer#aiStep crouches a shift-holding player unless it swims. Entity#updateSwimming, in baseTick before
+        // aiStep, swims only a player whose sprint flag is set, and its eye state is local, so with the flag set a
+        // crouch-held water move is proven with either scale and kept when one alone reproduces it.
         Vec3 crouching = deltaMovementFrom(player, result, context, accepted, sneakingSpeed);
+        if (!player.sprintState.flagBeforeAiStep()) return crouching;
+        Vec3 full = deltaMovementFrom(player, result, context, accepted, 1.0F);
         if (full == null) return crouching;
         return crouching == null || crouching.equals(full) ? full : null;
     }
