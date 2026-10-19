@@ -1986,10 +1986,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private boolean isLocalAuthoritativeRootVehicle(int entityId) {
-        PacketEntity vehicle = player.compensatedEntities.getEntity(entityId);
         return player.compensatedEntities.vehicles.serverPlayerVehicle != null
                 && player.compensatedEntities.vehicles.serverPlayerVehicle == entityId
-                && player.compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(vehicle);
+                && player.compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(
+                        player.compensatedEntities.getEntity(entityId));
     }
 
     private void applyDeltaMovementUpdate(PacketEntity entity, DeltaMovementChange update) {
