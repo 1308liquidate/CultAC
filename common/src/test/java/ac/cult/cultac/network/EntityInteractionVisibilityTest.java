@@ -8,6 +8,7 @@ import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.blocksim.entity.EntityTypes;
 import ac.cult.cultac.CultAPI;
+import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.checks.impl.visibility.InteractEntityVisibility;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.network.event.PacketListenerPriority;
@@ -29,6 +30,8 @@ import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.protocol.wire.Wire;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.inventory.ItemUtil;
 import ac.cult.cultac.utils.latency.ClientComponentRegistries;
 import ac.cult.cultac.utils.math.Vec3;
@@ -257,6 +260,48 @@ class EntityInteractionVisibilityTest {
             for (int tick = 0; tick < 4; tick++) setup.clientTick();
             assertEquals(-1.5, charge.clientPhysicalPosition.z, 1.0E-9);
         }
+    }
+
+    @Test
+    void aPre263BundledSyncSetsAnEntityWithoutInterpolationOntoItsPosition() throws Exception {
+        for (int type : new int[] {EntityTypeIds.FIREBALL, EntityTypeIds.ZOMBIE}) {
+            try (var setup = new Setup(ProtocolVersion.V1_21_11)) {
+                JavaTickFixture.setField(
+                        CultPlayer.class, setup.player, "resolvedClientVersion", ClientVersion.V_1_21_11);
+                afterBundledSync(setup, type);
+                assertEquals(
+                        type == EntityTypeIds.ZOMBIE,
+                        setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            }
+        }
+    }
+
+    @Test
+    void bundledSyncsOn263AndBedrockStartTheInterpolationAtThePreviousPosition() throws Exception {
+        for (var platform : MovementPlatform.values()) {
+            for (var client : new ClientVersion[] {ClientVersion.V_1_21_11, ClientVersion.V_26_3}) {
+                try (var setup =
+                        new Setup(client == ClientVersion.V_26_3 ? ProtocolVersion.V26_3 : ProtocolVersion.V1_21_11)) {
+                    JavaTickFixture.setField(CultPlayer.class, setup.player, "resolvedClientVersion", client);
+                    setup.player.movementPlatform = platform;
+                    var fireball = afterBundledSync(setup, EntityTypeIds.FIREBALL);
+                    double top = fireball.newPacketLocation.getPossibleLocationCombined(new SimpleCollisionBox()).maxY;
+                    boolean placed = platform == MovementPlatform.JAVA && client == ClientVersion.V_1_21_11;
+                    assertEquals(!placed, top > SYNC_FROM.y, platform + " " + client);
+                }
+            }
+        }
+    }
+
+    // The sync moves a fireball 19.3 from the eye to a box 2.83 from it.
+    private static final Vec3 SYNC_FROM = new Vec3(.5 + 8.0858, 64 + 9.5144, -1.5 + 15.5905);
+    private static final Vec3 SYNC_TO = new Vec3(.5 + .9772, 64 + 1.7351, -1.5 + 3.2842);
+
+    private static PacketEntity afterBundledSync(Setup setup, int type) {
+        setup.player.compensatedEntities.addEntity(42, type, SYNC_FROM, 0, 0, 0);
+        var entity = setup.player.compensatedEntities.getEntity(42);
+        entity.onBundledPositionSyncTransaction(SYNC_TO.x, SYNC_TO.y, SYNC_TO.z, setup.player);
+        return entity;
     }
 
     @Test

@@ -7,6 +7,7 @@ public final class EntityTypeIds {
     public static final int BEE = id("bee");
     public static final int FOX = id("fox");
     public static final int BAT = id("bat");
+    public static final int BLOCK_DISPLAY = id("block_display");
     public static final int BREEZE_WIND_CHARGE = id("breeze_wind_charge");
     public static final int CAMEL = id("camel");
     public static final int CHICKEN = id("chicken");
@@ -18,6 +19,7 @@ public final class EntityTypeIds {
     public static final int ENDERMITE = id("endermite");
     public static final int END_CRYSTAL = id("end_crystal");
     public static final int EVOKER = id("evoker");
+    public static final int EXPERIENCE_ORB = id("experience_orb");
     public static final int FALLING_BLOCK = id("falling_block");
     public static final int FIREBALL = id("fireball");
     public static final int TNT = id("tnt");
@@ -29,6 +31,7 @@ public final class EntityTypeIds {
     public static final int HORSE = id("horse");
     public static final int ILLUSIONER = id("illusioner");
     public static final int ITEM = id("item");
+    public static final int ITEM_DISPLAY = id("item_display");
     public static final int LLAMA = id("llama");
     public static final int MAGMA_CUBE = id("magma_cube");
     public static final int MOOSHROOM = id("mooshroom");
@@ -52,6 +55,7 @@ public final class EntityTypeIds {
     public static final int SPIDER = id("spider");
     public static final int STRIDER = id("strider");
     public static final int TADPOLE = id("tadpole");
+    public static final int TEXT_DISPLAY = id("text_display");
     public static final int TROPICAL_FISH = id("tropical_fish");
     public static final int TURTLE = id("turtle");
     public static final int VINDICATOR = id("vindicator");
