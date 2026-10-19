@@ -20,6 +20,7 @@ public final class ProtocolRuntime {
     private final Map<String, PacketType<?>> byKey;
     private final Map<PacketType<?>, Integer> slots;
     private final Set<PacketType<?>> supported;
+    private final int[][] encodeIds;
 
     private ProtocolRuntime(ProtocolData data, List<PacketType<?>> catalog, int commandInputLimit) {
         this.data = data;
@@ -82,6 +83,29 @@ public final class ProtocolRuntime {
         this.byKey = Map.copyOf(keys);
         this.slots = Map.copyOf(slots);
         this.supported = Set.copyOf(supported);
+        encodeIds = new int[ConnectionPhase.values().length][catalog.size()];
+        for (ConnectionPhase phase : ConnectionPhase.values()) {
+            for (int slot = 0; slot < catalog.size(); slot++) {
+                encodeIds[phase.ordinal()][slot] = singleEncodeId(phase, catalog.get(slot));
+            }
+        }
+    }
+
+    private int singleEncodeId(ConnectionPhase phase, PacketType<?> type) {
+        var names = type.wireNames();
+        var packets = data.packets(phase, type.direction());
+        for (int i = 0; i < names.size(); i++) {
+            int candidateId = packets.id(names.get(i));
+            var candidate = binding(phase, type.direction(), candidateId);
+            if (candidate != null && candidate.type() == type) return candidateId;
+        }
+        return -1;
+    }
+
+    /** The first of a non-variant family's names bound to it in {@code phase}; -1 when none is. */
+    int encodeId(ConnectionPhase phase, PacketType<?> type) {
+        Integer slot = slots.get(type);
+        return slot == null ? -1 : encodeIds[phase.ordinal()][slot];
     }
 
     private static <R> ResolvedPacket<R> resolve(PacketType<R> type, ProtocolContext context, int slot) {
@@ -192,19 +216,8 @@ public final class ProtocolRuntime {
             id = data.packets(phase, type.direction()).id(name);
             bound = binding(phase, type.direction(), id);
         } else {
-            // Eager validation permits exactly one present name for a non-variant family.
-            // Reuse its existing binding; neither a filtered list nor another routing cache is needed.
-            var names = type.wireNames();
-            var packets = data.packets(phase, type.direction());
-            for (int i = 0; i < names.size(); i++) {
-                int candidateId = packets.id(names.get(i));
-                var candidate = binding(phase, type.direction(), candidateId);
-                if (candidate != null && candidate.type() == type) {
-                    id = candidateId;
-                    bound = candidate;
-                    break;
-                }
-            }
+            id = encodeId(phase, type);
+            bound = binding(phase, type.direction(), id);
         }
         if (bound == null || bound.type() != type) {
             throw new UnsupportedOnVersionException(type + " is unavailable in " + phase);
