@@ -8,6 +8,7 @@ import ac.cult.cultac.checks.impl.badpackets.BadPacketsF;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsG;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsH;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsM;
+import ac.cult.cultac.checks.impl.combat.FairReach;
 import ac.cult.cultac.checks.impl.elytra.ElytraC;
 import ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor;
 import ac.cult.cultac.events.packets.RegistryGenerationAlerts;
@@ -98,6 +99,7 @@ public class PacketPlayerRespawn {
         // A proxy may rewrite it independently of the backend's native entity ID.
         player.entityID = packet.playerId();
         if (!player.isBedrockMovement()) player.compensatedEntities.serverPositionsMap.clear();
+        clearFairReachLevel(player);
         player.compensatedEntities.vehicles.clearServerVehicle();
         final PacketEntitySelf freshSelf = new PacketEntitySelf(player);
         player.compensatedEntities.playerEntity = freshSelf;
@@ -184,6 +186,11 @@ public class PacketPlayerRespawn {
         }
     }
 
+    private static void clearFairReachLevel(CultPlayer player) {
+        FairReach fairReach = player.checkManager.getListener(FairReach.class);
+        if (fairReach != null) fairReach.clearLevel();
+    }
+
     @CultPacketHandler
     public void onRespawn(PacketSendEvent<ClientboundRespawn> event, CultPlayer player, ClientboundRespawn packet) {
         PlayerObserver observer = player.observer;
@@ -213,6 +220,7 @@ public class PacketPlayerRespawn {
 
         if (worldChange) {
             player.compensatedEntities.serverPositionsMap.clear();
+            clearFairReachLevel(player);
             player.compensatedWorld.serverWorldChangeSent();
         }
         // ClientPacketListener#handleRespawn creates a LocalPlayer with full food, adjusts its abilities to the
