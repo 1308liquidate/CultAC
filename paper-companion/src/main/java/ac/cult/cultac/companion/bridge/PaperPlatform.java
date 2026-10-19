@@ -74,8 +74,14 @@ final class PaperPlatform implements BridgePlatform {
         Map<String, String> settings = new LinkedHashMap<>();
         try {
             GlobalConfiguration.UnsupportedSettings unsupported = GlobalConfiguration.get().unsupportedSettings;
-            settings.put(
-                    "update-equipment-on-player-actions", String.valueOf(unsupported.updateEquipmentOnPlayerActions));
+            try {
+                settings.put(
+                        "update-equipment-on-player-actions",
+                        String.valueOf(GlobalConfiguration.UnsupportedSettings.class
+                                .getField("updateEquipmentOnPlayerActions")
+                                .getBoolean(unsupported)));
+            } catch (ReflectiveOperationException absentBefore1214) {
+            }
             settings.put(
                     "skip-vanilla-damage-tick-when-shield-blocked",
                     String.valueOf(unsupported.skipVanillaDamageTickWhenShieldBlocked));

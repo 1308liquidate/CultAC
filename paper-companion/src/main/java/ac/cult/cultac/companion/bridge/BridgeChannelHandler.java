@@ -1,12 +1,17 @@
 package ac.cult.cultac.companion.bridge;
 
+import static java.lang.invoke.MethodType.methodType;
+
 import ac.cult.cultac.bridge.protocol.BridgeCodec;
 import ac.cult.cultac.bridge.protocol.BridgeMessage;
 import ac.cult.cultac.bridge.protocol.BridgeProtocol;
 import ac.cult.cultac.bridge.protocol.BridgeProtocolException;
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
 import java.util.UUID;
 import java.util.logging.Level;
 import net.minecraft.network.Connection;
@@ -14,7 +19,6 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.DiscardedPayload;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerCommonPacketListenerImpl;
@@ -23,7 +27,37 @@ import org.jetbrains.annotations.Nullable;
 /** Consumes inbound {@code cultac:bridge} payloads; every other packet passes after one instanceof check. */
 final class BridgeChannelHandler extends ChannelInboundHandlerAdapter {
     static final String NAME = "cultac-bridge";
-    static final Identifier CHANNEL = Identifier.parse(BridgeProtocol.CHANNEL);
+
+    // DiscardedPayload's id is a ResourceLocation before 1.21.11 and an Identifier after; its data is a ByteBuf on
+    // 1.21.2-1.21.3 and a byte[] after.
+    private static final Object CHANNEL;
+    private static final MethodHandle PAYLOAD_ID;
+    private static final MethodHandle PAYLOAD_DATA;
+    private static final MethodHandle NEW_PAYLOAD;
+
+    static {
+        try {
+            MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+            Class<?> idType = DiscardedPayload.class.getMethod("id").getReturnType();
+            Class<?> dataType = DiscardedPayload.class.getMethod("data").getReturnType();
+            CHANNEL = idType.getMethod("parse", String.class).invoke(null, BridgeProtocol.CHANNEL);
+            MethodHandle wrap =
+                    lookup.findStatic(Unpooled.class, "wrappedBuffer", methodType(ByteBuf.class, byte[].class));
+            PAYLOAD_ID = lookup.findVirtual(DiscardedPayload.class, "id", methodType(idType))
+                    .asType(methodType(Object.class, DiscardedPayload.class));
+            MethodHandle data = lookup.findVirtual(DiscardedPayload.class, "data", methodType(dataType));
+            PAYLOAD_DATA = (dataType == ByteBuf.class ? data : MethodHandles.filterReturnValue(data, wrap))
+                    .asType(methodType(ByteBuf.class, DiscardedPayload.class));
+            MethodHandle create = MethodHandles.insertArguments(
+                    lookup.findConstructor(DiscardedPayload.class, methodType(void.class, idType, dataType)),
+                    0,
+                    CHANNEL);
+            NEW_PAYLOAD = (dataType == ByteBuf.class ? MethodHandles.filterArguments(create, 0, wrap) : create)
+                    .asType(methodType(DiscardedPayload.class, byte[].class));
+        } catch (ReflectiveOperationException failure) {
+            throw new ExceptionInInitializerError(failure);
+        }
+    }
 
     private final BridgeService service;
     private final ConnectionEndpoint endpoint;
@@ -37,19 +71,22 @@ final class BridgeChannelHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
         if (!(msg instanceof ServerboundCustomPayloadPacket packet)
                 || !(packet.payload() instanceof DiscardedPayload payload)
-                || !CHANNEL.equals(payload.id())) {
+                || !CHANNEL.equals(invoke(PAYLOAD_ID, payload))) {
             ctx.fireChannelRead(msg);
             return;
         }
         BridgeMessage message;
+        ByteBuf data = (ByteBuf) invoke(PAYLOAD_DATA, payload);
         try {
-            message = BridgeCodec.decode(Unpooled.wrappedBuffer(payload.data()));
+            message = BridgeCodec.decode(data);
         } catch (BridgeProtocolException failure) {
             service.protocolError(failure);
             return;
         } catch (RuntimeException failure) {
             service.debug("Dropping undecodable bridge frame: " + failure);
             return;
+        } finally {
+            data.release();
         }
         try {
             service.receive(endpoint, message);
@@ -94,8 +131,8 @@ final class BridgeChannelHandler extends ChannelInboundHandlerAdapter {
 
         @Override
         void send(BridgeMessage message) {
-            Packet<?> packet =
-                    new ClientboundCustomPayloadPacket(new DiscardedPayload(CHANNEL, BridgeCodec.toBytes(message)));
+            Packet<?> packet = new ClientboundCustomPayloadPacket(
+                    (DiscardedPayload) invoke(NEW_PAYLOAD, BridgeCodec.toBytes(message)));
             if (connection.getPacketListener() instanceof ServerCommonPacketListenerImpl listener)
                 listener.send(packet);
             else connection.send(packet);
@@ -108,8 +145,17 @@ final class BridgeChannelHandler extends ChannelInboundHandlerAdapter {
 
         @Override
         boolean runInPacketOrder(Runnable task) {
-            return OrderedTask.schedule(
-                    MinecraftServer.getServer().packetProcessor(), connection.getPacketListener(), task);
+            return OrderedTask.schedule(MinecraftServer.getServer(), connection.getPacketListener(), task);
+        }
+    }
+
+    private static Object invoke(MethodHandle handle, Object argument) {
+        try {
+            return handle.invoke(argument);
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Throwable failure) {
+            throw new IllegalStateException(failure);
         }
     }
 }
