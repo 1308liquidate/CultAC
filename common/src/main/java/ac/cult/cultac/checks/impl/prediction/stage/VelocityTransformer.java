@@ -50,6 +50,14 @@ public class VelocityTransformer {
             return applyJumps(player, input);
         }
 
+        if (simulationContext.getVehicle() instanceof PacketEntityHorse) {
+            // LivingEntity#aiStep thresholds deltaMovement before travelRidden runs
+            // AbstractHorse#tickRidden's rider jump and travel adds the ridden input.
+            input = applyMovementThreshold(input, simulationContext.getVersion(), false);
+            input = applyRideableInput(player, input);
+            return applyJumps(player, input);
+        }
+
         input = applyRideableInput(player, input);
 
         // MCP-Reborn LivingEntity#handleRelativeFrictionAndCalculateMovement moves
@@ -63,12 +71,6 @@ public class VelocityTransformer {
         // The corresponding next-tick friction still belongs in
         // utils.nmsutil.NextTickVelocityDeriver.findVelocitiesForNextTick(...), which derives
         // the carried delta from the accepted packet movement after the move.
-
-        // Horse jumping is done before movement threshold
-        if (simulationContext.getVehicle() instanceof PacketEntityHorse) {
-            input = applyJumps(player, input);
-            return applyMovementThreshold(input, simulationContext.getVersion(), false);
-        }
 
         input = applyMovementThreshold(input, simulationContext.getVersion(), simulationContext.getVehicle() == null);
         return applyJumps(player, input);
