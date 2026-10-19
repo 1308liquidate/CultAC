@@ -1,6 +1,7 @@
 package ac.cult.cultac.command.render;
 
 import ac.cult.cultac.CultAPI;
+import ac.cult.cultac.command.CloudCommandService;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.platform.api.sender.Sender;
 import ac.cult.cultac.utils.anticheat.MessageUtil;
@@ -125,7 +126,8 @@ public final class HistoryComponentRenderer {
         String crashedMarker = (!ongoing && s.endedUnexpectedly())
                 ? cfg.getStringElse("cult-history-crashed-marker", " &8(&ccrashed&8)")
                 : "";
-        String detailCommand = "/cult history player " + playerDisplayName + " session " + s.sessionOrdinal();
+        String detailCommand =
+                CloudCommandService.command("history player " + playerDisplayName + " session " + s.sessionOrdinal());
         RenderedTemplate rendered = parse(
                 sender,
                 cfg,

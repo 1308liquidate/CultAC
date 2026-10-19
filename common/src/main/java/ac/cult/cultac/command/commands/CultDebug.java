@@ -4,6 +4,7 @@ import ac.cult.blocksim.data.DataTables;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bridge.protocol.ServerCapability;
 import ac.cult.cultac.command.BuildableCommand;
+import ac.cult.cultac.command.CloudCommandService;
 import ac.cult.cultac.manager.player.SmoketestControlBridge;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.platform.api.command.PlayerSelector;
@@ -29,7 +30,7 @@ import org.jetbrains.annotations.Nullable;
 public class CultDebug implements BuildableCommand {
 
     public void register(CommandManager<Sender> commandManager, CloudPlatformCommandArguments arguments) {
-        Command.Builder<Sender> cultCommand = commandManager.commandBuilder("cult", "cultac", "grim", "grimac");
+        Command.Builder<Sender> cultCommand = BuildableCommand.root(commandManager);
 
         Command.Builder<Sender> debugCommand = cultCommand
                 .literal("debug", Description.of("Toggle debug output for a player"))
@@ -162,7 +163,8 @@ public class CultDebug implements BuildableCommand {
                     Component.text("Item slowdown debugging requires a Java 1.21.2+ player.", NamedTextColor.RED));
             return;
         }
-        String stopCommand = "/grim debug itemslow" + (selector == null ? "" : " " + target.getName());
+        String stopCommand =
+                CloudCommandService.command("debug itemslow") + (selector == null ? "" : " " + target.getName());
         target.runSafely(() -> {
             boolean enabled = target.checkManager.getDebugHandler().toggleItemSlowListener(sender);
             sender.sendMessage(Component.text(
@@ -223,7 +225,8 @@ public class CultDebug implements BuildableCommand {
     private void handleDebugVisibility(@NotNull CommandContext<Sender> context) {
         Sender sender = context.sender();
         if (!sender.isPlayer()) {
-            sender.sendMessage(Component.text("Run /grim debug visibility in-game.", NamedTextColor.RED));
+            sender.sendMessage(Component.text(
+                    "Run " + CloudCommandService.command("debug visibility") + " in-game.", NamedTextColor.RED));
             return;
         }
         CultPlayer player = CultAPI.INSTANCE.getPlayerDataManager().getPlayer(sender.getUniqueId());
@@ -255,7 +258,8 @@ public class CultDebug implements BuildableCommand {
     /** The command sender's own tracked player, or null after telling them why not. */
     private static @Nullable CultPlayer senderPlayer(Sender sender, String command) {
         if (!sender.isPlayer()) {
-            sender.sendMessage(Component.text("Run /cult debug " + command + " in-game.", NamedTextColor.RED));
+            sender.sendMessage(Component.text(
+                    "Run " + CloudCommandService.command("debug " + command) + " in-game.", NamedTextColor.RED));
             return null;
         }
         CultPlayer player = CultAPI.INSTANCE.getPlayerDataManager().getPlayer(sender.getUniqueId());
@@ -282,7 +286,7 @@ public class CultDebug implements BuildableCommand {
         String command = ghostOnly ? "validationpacketblock" : "validationblock";
         if (args.size() != 4 && args.size() != 5) {
             sender.sendMessage(Component.text(
-                    "Usage: /cult debug " + command + " [player] <x> <y> <z> <block|*>"
+                    "Usage: " + CloudCommandService.command("debug " + command) + " [player] <x> <y> <z> <block|*>"
                             + (ghostOnly ? " [silent]" : ""),
                     NamedTextColor.RED));
             return;

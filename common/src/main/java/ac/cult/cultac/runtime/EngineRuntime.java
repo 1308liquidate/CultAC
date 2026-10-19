@@ -125,11 +125,18 @@ public abstract class EngineRuntime implements RuntimeInstance {
 
     @Override
     public CompletionStage<Void> execute(Object nativeSender, String input) {
-        return ((CloudCommandService) CultAPI.INSTANCE.getCommandService()).execute(sender(nativeSender), input);
+        return ((CloudCommandService) CultAPI.INSTANCE.getCommandService())
+                .execute(sender(nativeSender), CloudCommandService.onRegisteredRoot(input));
     }
 
     @Override
     public CompletionStage<List<String>> suggest(Object nativeSender, String input) {
-        return ((CloudCommandService) CultAPI.INSTANCE.getCommandService()).suggest(sender(nativeSender), input);
+        return ((CloudCommandService) CultAPI.INSTANCE.getCommandService())
+                .suggest(sender(nativeSender), CloudCommandService.onRegisteredRoot(input));
+    }
+
+    @Override
+    public List<String> commandRoots() {
+        return CloudCommandService.roots();
     }
 }

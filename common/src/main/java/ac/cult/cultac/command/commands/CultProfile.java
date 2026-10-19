@@ -17,8 +17,7 @@ import org.jetbrains.annotations.NotNull;
 public class CultProfile implements BuildableCommand {
     @Override
     public void register(CommandManager<Sender> commandManager, CloudPlatformCommandArguments arguments) {
-        commandManager.command(commandManager
-                .commandBuilder("cult", "cultac", "grim", "grimac")
+        commandManager.command(BuildableCommand.root(commandManager)
                 .literal("profile")
                 .permission("cult.profile")
                 .required("target", arguments.singlePlayerSelectorParser())

@@ -35,6 +35,7 @@ public final class GenerationManager implements AutoCloseable {
     private final Map<UUID, List<UserBinding>> usersByUuid = new HashMap<>();
     private final IdentityHashMap<Object, UserBinding> nativeUsers = new IdentityHashMap<>();
     private java.util.function.Function<Object, Object> upstream = ignored -> null;
+    private volatile Runnable activated = () -> {};
     private long generationOrder, bindingOrder;
     private final Map<String, Object> shared = new LinkedHashMap<>();
     private final HostApiRouter api = new HostApiRouter(this);
@@ -282,6 +283,11 @@ public final class GenerationManager implements AutoCloseable {
                             throw failure;
                         }
                         report.accept("Activated CultAC runtime " + next.artifact.display() + " (" + next.id + ")");
+                        try {
+                            activated.run();
+                        } catch (RuntimeException failure) {
+                            report.accept("Activation listener failed: " + failure);
+                        }
                         if (previous != null) {
                             superseded(previous);
                             retire(previous);
@@ -334,6 +340,10 @@ public final class GenerationManager implements AutoCloseable {
             if (failure instanceof Exception error) throw error;
             throw (Error) failure;
         }
+    }
+
+    public void onActivated(Runnable listener) {
+        activated = Objects.requireNonNull(listener);
     }
 
     /** Native integrations resolve the physical upstream once, before downstream admission. */
@@ -701,6 +711,15 @@ public final class GenerationManager implements AutoCloseable {
             return call(currentId(), runtime -> List.copyOf(runtime.placeholders()));
         } catch (Exception failure) {
             return List.of();
+        }
+    }
+
+    public List<String> commandRoots() {
+        try {
+            List<String> roots = call(currentId(), runtime -> List.copyOf(runtime.commandRoots()));
+            return roots.isEmpty() ? RuntimeInstance.DEFAULT_COMMAND_ROOTS : roots;
+        } catch (Exception failure) {
+            return RuntimeInstance.DEFAULT_COMMAND_ROOTS;
         }
     }
 

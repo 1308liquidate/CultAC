@@ -33,7 +33,7 @@ import org.incendo.cloud.parser.standard.IntegerParser;
 public final class CultDebugVelocity implements BuildableCommand {
     @Override
     public void register(CommandManager<Sender> manager, CloudPlatformCommandArguments arguments) {
-        manager.command(manager.commandBuilder("cult", "cultac", "grim", "grimac")
+        manager.command(BuildableCommand.root(manager)
                 .literal("debug")
                 .literal("velocity", Description.of("Send yourself or your vehicle a velocity after a delay in ticks"))
                 .permission("cult.debug")

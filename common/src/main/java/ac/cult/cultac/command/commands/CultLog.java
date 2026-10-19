@@ -93,8 +93,7 @@ public class CultLog implements BuildableCommand {
 
     @Override
     public void register(CommandManager<Sender> commandManager, CloudPlatformCommandArguments arguments) {
-        Command<Sender> command = commandManager
-                .commandBuilder("cult", "cultac", "grim", "grimac")
+        Command<Sender> command = BuildableCommand.root(commandManager)
                 .literal("log", "logs")
                 .permission("cult.log")
                 .required("flagId", IntegerParser.integerParser())

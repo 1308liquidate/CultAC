@@ -19,6 +19,7 @@ import ac.cult.cultac.bridge.protocol.BridgeMessage.CommandDone;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.CommandOutput;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Suggest;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Suggestions;
+import ac.cult.cultac.bridge.protocol.CommandRoots;
 import ac.cult.cultac.bridge.protocol.ServerCapability;
 import ac.cult.cultac.platform.velocity.bridge.BridgeSession;
 import ac.cult.cultac.platform.velocity.bridge.FakeBridgeSession;
@@ -78,6 +79,7 @@ class BridgeCommandHandlerTest {
     private Set<String> foreignRoots = Set.of();
     private final BridgeCommandHandler handler = new BridgeCommandHandler(
             commands,
+            () -> CommandRoots.DEFAULT,
             root -> !foreignRoots.contains(root),
             id -> STAFF.equals(id) ? staff : null,
             () -> now,
@@ -108,14 +110,29 @@ class BridgeCommandHandlerTest {
     @Test
     void onlyOwnedCultAcRootsAreForwardableInAnyCase() {
         Predicate<String> owned = root -> !root.equals("grim");
-        assertTrue(BridgeCommandHandler.forwardable("CULT", owned));
-        assertFalse(BridgeCommandHandler.forwardable("gl", owned));
-        assertTrue(BridgeCommandHandler.forwardable("GrimAC alerts", owned));
-        assertTrue(BridgeCommandHandler.forwardable("cultac reload", owned));
-        assertFalse(BridgeCommandHandler.forwardable("GRIM reload", owned));
-        assertFalse(BridgeCommandHandler.forwardable("cultacx reload", owned));
-        assertFalse(BridgeCommandHandler.forwardable("velocity reload", owned));
-        assertFalse(BridgeCommandHandler.forwardable("", owned));
+        List<String> roots = CommandRoots.DEFAULT;
+        assertTrue(BridgeCommandHandler.forwardable("CULT", roots, owned));
+        assertFalse(BridgeCommandHandler.forwardable("gl", roots, owned));
+        assertTrue(BridgeCommandHandler.forwardable("GrimAC alerts", roots, owned));
+        assertTrue(BridgeCommandHandler.forwardable("cultac reload", roots, owned));
+        assertFalse(BridgeCommandHandler.forwardable("GRIM reload", roots, owned));
+        assertFalse(BridgeCommandHandler.forwardable("cultacx reload", roots, owned));
+        assertFalse(BridgeCommandHandler.forwardable("velocity reload", roots, owned));
+        assertFalse(BridgeCommandHandler.forwardable("", roots, owned));
+    }
+
+    @Test
+    void onlyTheProxysConfiguredRootsAreForwardable() {
+        List<String> roots = List.of("guard", "gd");
+        Predicate<String> owned = roots::contains;
+        assertTrue(BridgeCommandHandler.forwardable("guard alerts", roots, owned));
+        assertTrue(BridgeCommandHandler.forwardable("GD reload", roots, owned));
+        assertFalse(BridgeCommandHandler.forwardable("guard update x.jar", roots, owned));
+        assertFalse(BridgeCommandHandler.forwardable("guard findings Victim", roots, owned));
+        for (String root : CommandRoots.DEFAULT) {
+            assertFalse(BridgeCommandHandler.forwardable(root + " alerts", roots, registered -> true), root);
+        }
+        assertFalse(BridgeCommandHandler.forwardable("guard alerts", roots, root -> false));
     }
 
     @Test

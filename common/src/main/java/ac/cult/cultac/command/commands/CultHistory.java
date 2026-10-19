@@ -4,6 +4,7 @@ import static ac.cult.cultac.command.commands.HistoryCommandLog.logBoth;
 
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.command.BuildableCommand;
+import ac.cult.cultac.command.CloudCommandService;
 import ac.cult.cultac.command.render.HistoryComponentRenderer;
 import ac.cult.cultac.manager.datastore.DataStoreLifecycle;
 import ac.cult.cultac.platform.api.manager.cloud.CloudPlatformCommandArguments;
@@ -84,8 +85,7 @@ public class CultHistory implements BuildableCommand {
         SuggestionProvider<Sender> violationPageSuggestions = violationPageSuggestions();
         SuggestionProvider<Sender> targetSuggestions = targetSuggestions(arguments);
 
-        commandManager.command(commandManager
-                .commandBuilder("cult", "cultac", "grim", "grimac")
+        commandManager.command(BuildableCommand.root(commandManager)
                 .literal("history", "hist")
                 .literal("repair")
                 .literal("check-ids")
@@ -121,8 +121,7 @@ public class CultHistory implements BuildableCommand {
             SuggestionProvider<Sender> violationPageSuggestions) {
         // Fresh builder per branch — reusing one cross-pollinates siblings.
         Supplier<Command.Builder<Sender>> base = () -> {
-            Command.Builder<Sender> b = commandManager
-                    .commandBuilder("cult", "cultac", "grim", "grimac")
+            Command.Builder<Sender> b = BuildableCommand.root(commandManager)
                     .literal("history", "hist")
                     .permission("cult.history");
             if (withPlayerLiteral) b = b.literal("player");
@@ -291,7 +290,7 @@ public class CultHistory implements BuildableCommand {
         // dispatch on the same branch — a target that needed the 'player'
         // escape hatch (e.g. someone named 'repair') would route through
         // the wrong literal if the help printed the bare form.
-        String addressPrefix = "/cult history " + (viaPlayer ? "player " : "");
+        String addressPrefix = CloudCommandService.command("history ") + (viaPlayer ? "player " : "");
         sender.sendMessage(Component.text()
                 .append(Component.text(addressPrefix, NamedTextColor.GRAY))
                 .append(Component.text(target, NamedTextColor.WHITE))

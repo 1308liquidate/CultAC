@@ -49,6 +49,12 @@ public interface RuntimeInstance {
         return java.util.concurrent.CompletableFuture.completedFuture(java.util.List.of());
     }
 
+    java.util.List<String> DEFAULT_COMMAND_ROOTS = java.util.List.of("cult", "cultac", "grim", "grimac");
+
+    default java.util.List<String> commandRoots() {
+        return DEFAULT_COMMAND_ROOTS;
+    }
+
     default java.util.Map<String, byte[]> configurationFiles() throws Exception {
         return java.util.Map.of();
     }

@@ -15,8 +15,7 @@ import org.jetbrains.annotations.NotNull;
 public class CultReload implements BuildableCommand {
     @Override
     public void register(CommandManager<Sender> commandManager, CloudPlatformCommandArguments arguments) {
-        commandManager.command(commandManager
-                .commandBuilder("cult", "cultac", "grim", "grimac")
+        commandManager.command(BuildableCommand.root(commandManager)
                 .literal("reload")
                 .permission("cult.reload")
                 .handler(this::handleReload));

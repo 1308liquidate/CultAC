@@ -1,11 +1,15 @@
 package ac.cult.cultac.command;
 
+import ac.cult.cultac.CultAPI;
+import ac.cult.cultac.bridge.protocol.CommandRoots;
 import ac.cult.cultac.command.commands.*;
 import ac.cult.cultac.command.handler.CultCommandFailureHandler;
+import ac.cult.cultac.manager.config.BaseConfigManager;
 import ac.cult.cultac.platform.api.command.CommandService;
 import ac.cult.cultac.platform.api.manager.cloud.CloudPlatformCommandArguments;
 import ac.cult.cultac.platform.api.sender.Sender;
 import ac.cult.cultac.utils.anticheat.LogUtil;
+import ac.grim.grimac.api.config.ConfigManager;
 import io.leangen.geantyref.TypeToken;
 import java.util.List;
 import java.util.Locale;
@@ -37,22 +41,60 @@ public class CloudCommandService implements CommandService {
     public static final RequirementApplicableFactory<Sender, SenderRequirement> REQUIREMENT_FACTORY =
             RequirementApplicable.factory(REQUIREMENT_KEY);
 
+    /** Fixed when the commands register; a reload does not register them again. */
+    private static volatile List<String> roots = CommandRoots.DEFAULT;
+
     private boolean commandsRegistered = false;
     private CommandManager<Sender> manager;
 
     private final Supplier<CommandManager<Sender>> commandManagerSupplier;
     private final CloudPlatformCommandArguments commandArguments;
+    private final Supplier<List<String>> rootsSupplier;
 
     public CloudCommandService(
             Supplier<CommandManager<Sender>> commandManagerSupplier, CloudPlatformCommandArguments commandArguments) {
+        this(commandManagerSupplier, commandArguments, CloudCommandService::configuredRoots);
+    }
+
+    public CloudCommandService(
+            Supplier<CommandManager<Sender>> commandManagerSupplier,
+            CloudPlatformCommandArguments commandArguments,
+            Supplier<List<String>> rootsSupplier) {
         this.commandManagerSupplier = commandManagerSupplier;
         this.commandArguments = commandArguments;
+        this.rootsSupplier = rootsSupplier;
+    }
+
+    public static List<String> roots() {
+        return roots;
+    }
+
+    public static String primaryRoot() {
+        return roots.getFirst();
+    }
+
+    public static String command(String arguments) {
+        return "/" + primaryRoot() + " " + arguments;
+    }
+
+    public static String onRegisteredRoot(String input) {
+        String line = input.stripLeading();
+        int space = line.indexOf(' ');
+        String first = (space < 0 ? line : line.substring(0, space)).toLowerCase(Locale.ROOT);
+        return roots.contains(first) ? input : primaryRoot() + (space < 0 ? "" : line.substring(space));
+    }
+
+    private static List<String> configuredRoots() {
+        BaseConfigManager configManager = CultAPI.INSTANCE.getConfigManager();
+        ConfigManager config = configManager == null ? null : configManager.getConfig();
+        return BaseConfigManager.resolveCommandRoots(config, LogUtil::warn);
     }
 
     public void registerCommands() {
         if (commandsRegistered) return;
         CommandManager<Sender> commandManager = commandManagerSupplier.get();
         manager = commandManager;
+        roots = rootsSupplier.get();
         new CultDebug().register(commandManager, commandArguments);
         new CultDebugVelocity().register(commandManager, commandArguments);
         new CultDebugExplosion().register(commandManager, commandArguments);
@@ -103,7 +145,7 @@ public class CloudCommandService implements CommandService {
         registerExceptionHandler(
                 commandManager,
                 NoSuchCommandException.class,
-                exception -> Component.text("Invalid command. Use /cult help for available commands."));
+                exception -> Component.text("Invalid command. Use " + command("help") + " for available commands."));
         registerExceptionHandler(
                 commandManager,
                 NoPermissionException.class,
@@ -128,13 +170,17 @@ public class CloudCommandService implements CommandService {
             Sender sender = context.context().sender();
             if (isHistoryInput(context.context().rawInput().input())) {
                 sender.sendMessage(Component.text("Invalid history syntax.", NamedTextColor.RED));
-                sender.sendMessage(Component.text("Use: /cult history <player> [page <N>]", NamedTextColor.GRAY));
+                sender.sendMessage(
+                        Component.text("Use: " + command("history <player> [page <N>]"), NamedTextColor.GRAY));
                 sender.sendMessage(Component.text(
-                        "Use: /cult history <player> session <N|latest> [page <N>] [-d] [-v]", NamedTextColor.GRAY));
+                        "Use: " + command("history <player> session <N|latest> [page <N>] [-d] [-v]"),
+                        NamedTextColor.GRAY));
                 sender.sendMessage(Component.text(
-                        "Tip: /cult history <player> session shows filter and detail options.", NamedTextColor.GRAY));
+                        "Tip: " + command("history <player> session") + " shows filter and detail options.",
+                        NamedTextColor.GRAY));
                 sender.sendMessage(Component.text(
-                        "Use /cult history player <player> ... for names that collide with history subcommands.",
+                        "Use " + command("history player <player> ...")
+                                + " for names that collide with history subcommands.",
                         NamedTextColor.GRAY));
                 return;
             }
@@ -148,10 +194,7 @@ public class CloudCommandService implements CommandService {
         if (input.startsWith("/")) input = input.substring(1).strip();
         String[] tokens = input.toLowerCase(Locale.ROOT).split("\\s+");
         return tokens.length >= 2
-                && (tokens[0].equals("cult")
-                        || tokens[0].equals("cultac")
-                        || tokens[0].equals("grim")
-                        || tokens[0].equals("grimac"))
+                && roots.contains(tokens[0])
                 && (tokens[1].equals("history") || tokens[1].equals("hist"));
     }
 

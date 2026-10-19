@@ -3,6 +3,7 @@ package ac.cult.cultac.command.commands;
 import ac.cult.cultac.cloud.labels.LabelClient;
 import ac.cult.cultac.cloud.labels.LabelRequest;
 import ac.cult.cultac.command.BuildableCommand;
+import ac.cult.cultac.command.CloudCommandService;
 import ac.cult.cultac.platform.api.manager.cloud.CloudPlatformCommandArguments;
 import ac.cult.cultac.platform.api.sender.Sender;
 import ac.cult.cultac.utils.anticheat.LogUtil;
@@ -86,10 +87,7 @@ public class CultLabel implements BuildableCommand {
     }
 
     private static Command.Builder<Sender> label(CommandManager<Sender> commandManager) {
-        return commandManager
-                .commandBuilder("cult", "cultac", "grim", "grimac")
-                .literal("label")
-                .permission(CloudArguments.LABEL);
+        return BuildableCommand.root(commandManager).literal("label").permission(CloudArguments.LABEL);
     }
 
     /** The confidence, span and note a cheat label takes. */
@@ -114,7 +112,7 @@ public class CultLabel implements BuildableCommand {
             UUID labellerId = labellerId(sender);
             if (labellerId == null) return;
             if (!menu.showable(sender)) {
-                sender.sendMessage(Component.text(LabelLines.JAVA_ONLY, NamedTextColor.RED));
+                sender.sendMessage(Component.text(LabelLines.javaOnly(), NamedTextColor.RED));
                 return;
             }
             if (!CloudArguments.labelingAllowed(sender)) return;
@@ -265,7 +263,7 @@ public class CultLabel implements BuildableCommand {
     private static Component id(String id) {
         if (!LabelClient.isId(id)) return Component.text("  " + id, NamedTextColor.WHITE);
         return Component.text("  " + id, NamedTextColor.WHITE)
-                .clickEvent(ClickEvent.suggestCommand("/cult label revoke " + id + " "))
+                .clickEvent(ClickEvent.suggestCommand(CloudCommandService.command("label revoke " + id + " ")))
                 .hoverEvent(HoverEvent.showText(Component.text("Click to revoke", NamedTextColor.GRAY)));
     }
 

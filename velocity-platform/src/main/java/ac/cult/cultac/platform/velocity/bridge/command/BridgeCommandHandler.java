@@ -6,7 +6,6 @@ import ac.cult.cultac.bridge.protocol.BridgeMessage.CommandDone;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.CommandOutput;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Suggest;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Suggestions;
-import ac.cult.cultac.bridge.protocol.BridgeProtocol;
 import ac.cult.cultac.bridge.protocol.ServerCapability;
 import ac.cult.cultac.platform.velocity.bridge.BridgeMessageListener;
 import ac.cult.cultac.platform.velocity.bridge.BridgeService;
@@ -14,12 +13,14 @@ import ac.cult.cultac.platform.velocity.bridge.BridgeSession;
 import com.velocitypowered.api.command.CommandManager;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.proxy.Player;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
@@ -46,6 +47,7 @@ final class BridgeCommandHandler implements BridgeMessageListener {
     private static final Pattern WORD_BREAK = Pattern.compile("[\\p{javaWhitespace}\\p{Z}]+");
 
     private final CommandManager commands;
+    private final Supplier<? extends Collection<String>> roots;
     private final Predicate<String> ownedRoot;
     private final Function<UUID, Player> players;
     private final LongSupplier clock;
@@ -55,11 +57,13 @@ final class BridgeCommandHandler implements BridgeMessageListener {
     /** @param ownedRoot whether a lower-case root is still registered by CultAC on the proxy */
     BridgeCommandHandler(
             CommandManager commands,
+            Supplier<? extends Collection<String>> roots,
             Predicate<String> ownedRoot,
             Function<UUID, Player> players,
             LongSupplier clock,
             Logger logger) {
         this.commands = commands;
+        this.roots = roots;
         this.ownedRoot = ownedRoot;
         this.players = players;
         this.clock = clock;
@@ -83,7 +87,7 @@ final class BridgeCommandHandler implements BridgeMessageListener {
     private void execute(BridgeSession session, Command command) {
         int requestId = command.requestId();
         String line = stripSlash(command.line());
-        if (!forwardable(line, ownedRoot)) {
+        if (!forwardable(line, roots.get(), ownedRoot)) {
             refuse(session, requestId, NOT_CULTAC);
             return;
         }
@@ -133,7 +137,7 @@ final class BridgeCommandHandler implements BridgeMessageListener {
                 ? new RelayCommandSource(message -> {}, clock)
                 : connectedPlayer(session, suggest.sender());
         if (source == null
-                || !forwardable(line, ownedRoot)
+                || !forwardable(line, roots.get(), ownedRoot)
                 || !session.admitControl(source instanceof RelayCommandSource)) {
             session.send(new Suggestions(requestId, List.of()));
             return;
@@ -159,10 +163,10 @@ final class BridgeCommandHandler implements BridgeMessageListener {
      * no control characters, which Velocity trims before the loader reads its arguments. Words split on any Unicode
      * whitespace or space, as CultAC's command parser skips them.
      */
-    static boolean forwardable(String line, Predicate<String> ownedRoot) {
+    static boolean forwardable(String line, Collection<String> roots, Predicate<String> ownedRoot) {
         if (line.chars().anyMatch(Character::isISOControl)) return false;
         String root = root(line);
-        if (!BridgeProtocol.COMMAND_ROOTS.contains(root) || !ownedRoot.test(root)) return false;
+        if (!roots.contains(root) || !ownedRoot.test(root)) return false;
         String[] words = WORD_BREAK.split(line, 3);
         return words.length < 2
                 || (LOADER_COMMANDS.stream().noneMatch(words[1]::equalsIgnoreCase)

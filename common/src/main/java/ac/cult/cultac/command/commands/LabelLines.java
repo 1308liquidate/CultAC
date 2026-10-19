@@ -2,6 +2,7 @@ package ac.cult.cultac.command.commands;
 
 import ac.cult.cultac.cloud.labels.LabelClient;
 import ac.cult.cultac.cloud.labels.LabelRequest;
+import ac.cult.cultac.command.CloudCommandService;
 import ac.cult.cultac.command.commands.LabelWizard.Verdict;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -23,9 +24,12 @@ import org.jetbrains.annotations.Nullable;
  * clash with.
  */
 final class LabelLines {
-    static final String JAVA_ONLY = "The label menu needs a Java client. "
-            + "Use /cult label <player> <cheat> <high|extreme> <24h|3d|7d|30d> [note], "
-            + "or /cult label <player> clean <high|extreme> [note].";
+    static String javaOnly() {
+        return "The label menu needs a Java client. "
+                + "Use " + CloudCommandService.command("label <player> <cheat> <high|extreme> <24h|3d|7d|30d> [note]")
+                + ", or " + CloudCommandService.command("label <player> clean <high|extreme> [note]") + ".";
+    }
+
     static final String PICK_ONE = "Pick at least one check.";
     /** A Clean label's window: the service labels the stored play and keeps the player clean until it is revoked. */
     static final String ALWAYS = "Always: stored play and from now on, until revoked";

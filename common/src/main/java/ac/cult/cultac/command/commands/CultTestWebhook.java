@@ -13,8 +13,7 @@ import org.jetbrains.annotations.NotNull;
 public class CultTestWebhook implements BuildableCommand {
     @Override
     public void register(CommandManager<Sender> commandManager, CloudPlatformCommandArguments arguments) {
-        commandManager.command(commandManager
-                .commandBuilder("cult", "cultac", "grim", "grimac")
+        commandManager.command(BuildableCommand.root(commandManager)
                 .literal("testwebhook")
                 .permission("cult.testwebhook")
                 .handler(this::handleTestWebhook));

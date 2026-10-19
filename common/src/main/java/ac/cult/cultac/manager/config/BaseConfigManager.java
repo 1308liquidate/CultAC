@@ -1,14 +1,17 @@
 package ac.cult.cultac.manager.config;
 
+import ac.cult.cultac.bridge.protocol.CommandRoots;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.grim.grimac.api.config.ConfigManager;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import lombok.Getter;
+import org.jetbrains.annotations.Nullable;
 
 /*
  * This is to hold whatever config manager was set via the reload method in the API
@@ -196,6 +199,11 @@ public class BaseConfigManager {
             }
         }
         return config.getBooleanElse("observe-only", false);
+    }
+
+    public static List<String> resolveCommandRoots(@Nullable ConfigManager config, Consumer<String> warn) {
+        List<String> configured = config == null ? null : config.getStringListElse(CommandRoots.KEY, null);
+        return CommandRoots.resolve(configured, warn);
     }
 
     public boolean isIgnoredClient(String brand) {

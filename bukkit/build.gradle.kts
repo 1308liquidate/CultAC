@@ -87,13 +87,6 @@ bukkit {
         "jedis",
     )
 
-    commands {
-        register("cult") {
-            description = "CultAC administration"
-            aliases = listOf("cultac", "grim", "grimac")
-        }
-    }
-
     permissions {
         register("cult.update") { default = Permission.Default.OP }
         register("cult.runtimes") { default = Permission.Default.OP }

@@ -23,8 +23,7 @@ public class CultStopSpectating implements BuildableCommand {
 
     @Override
     public void register(CommandManager<Sender> commandManager, CloudPlatformCommandArguments arguments) {
-        commandManager.command(commandManager
-                .commandBuilder("cult", "cultac", "grim", "grimac")
+        commandManager.command(BuildableCommand.root(commandManager)
                 .literal("stopspectating")
                 .permission("cult.spectate")
                 .optional("here", StringParser.stringParser(), SuggestionProvider.blocking((ctx, in) -> {

@@ -94,7 +94,7 @@ class CultLabelTest {
         } finally {
             CultLabel.menu(null);
         }
-        assertEquals(List.of(LabelLines.JAVA_ONLY), sent);
+        assertEquals(List.of(LabelLines.javaOnly()), sent);
     }
 
     @Test

@@ -4,6 +4,7 @@ import static ac.cult.cultac.command.commands.HistoryCommandLog.logBoth;
 
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.command.BuildableCommand;
+import ac.cult.cultac.command.CloudCommandService;
 import ac.cult.cultac.manager.datastore.ClientVersionResolver;
 import ac.cult.cultac.manager.datastore.DataStoreLifecycle;
 import ac.cult.cultac.manager.datastore.V0Sources;
@@ -46,8 +47,7 @@ public class CultHistoryMigrate implements BuildableCommand {
 
     @Override
     public void register(CommandManager<Sender> commandManager, CloudPlatformCommandArguments arguments) {
-        commandManager.command(commandManager
-                .commandBuilder("cult", "cultac", "grim", "grimac")
+        commandManager.command(BuildableCommand.root(commandManager)
                 .literal("history")
                 .literal("migrate")
                 .permission("cult.history.migrate")
@@ -124,7 +124,8 @@ public class CultHistoryMigrate implements BuildableCommand {
         SqliteBackend v1 = lifecycle.sqliteBackendForCommands();
         if (v1 == null) {
             throw new BackendException("no SQLite backend in routing — legacy migration needs SQLite as its target; "
-                    + "switch a category to sqlite in database.yml or use /cult history copy instead");
+                    + "switch a category to sqlite in database.yml or use "
+                    + CloudCommandService.command("history copy") + " instead");
         }
         CheckRegistry registry = lifecycle.checkRegistryForCommands();
         long gapMs = lifecycle.config().session().gapMs();

@@ -28,7 +28,9 @@ import io.netty.channel.Channel;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -54,8 +56,7 @@ public final class CultVelocityPlugin {
     /** The proxy does not listen before initialization ends, so this is all a slow download can delay startup. */
     private static final Duration BOOT_UPDATE_LIMIT = Duration.ofSeconds(10);
 
-    private static final String UPDATE_USAGE =
-            "Usage: /cult update <build> | latest [channel] | builds [channel] | <filename.jar>";
+    private static final String UPDATE_USAGE = " update <build> | latest [channel] | builds [channel] | <filename.jar>";
 
     private final ProxyServer proxy;
     private final Logger logger;
@@ -66,6 +67,8 @@ public final class CultVelocityPlugin {
     private BridgeChannelGuard bridgeGuard;
     private final UpdateWebhook webhook = new UpdateWebhook();
     private volatile String bundledVersion = "";
+    private SimpleCommand command;
+    private final Set<String> registeredRoots = new HashSet<>();
 
     @Inject
     public CultVelocityPlugin(ProxyServer proxy, Logger logger, @DataDirectory Path directory) {
@@ -122,12 +125,7 @@ public final class CultVelocityPlugin {
                     .repeat(java.time.Duration.ofMillis(50))
                     .schedule();
             GrimAPIProvider.init((GrimAbstractAPI) engine.publicApi());
-            var metadata = proxy.getCommandManager()
-                    .metaBuilder("cult")
-                    .aliases("cultac", "grim", "grimac")
-                    .plugin(this)
-                    .build();
-            proxy.getCommandManager().register(metadata, new SimpleCommand() {
+            command = new SimpleCommand() {
                 public void execute(Invocation invocation) {
                     var source = invocation.source();
                     var args = invocation.arguments();
@@ -144,7 +142,7 @@ public final class CultVelocityPlugin {
                         }
                         if (args.length != (devSwap ? 1 : 2)) {
                             source.sendMessage(net.kyori.adventure.text.Component.text(
-                                    devSwap ? "Usage: /cult devswap" : "Usage: /cult update <filename.jar>"));
+                                    "Usage: /" + primaryRoot() + (devSwap ? " devswap" : " update <filename.jar>")));
                             return;
                         }
                         engine.update(devSwap ? "CultAC-velocity.jar" : args[1])
@@ -162,15 +160,21 @@ public final class CultVelocityPlugin {
                         Object target =
                                 name == null ? source : proxy.getPlayer(name).orElse(null);
                         engine.execute(
-                                source, "cult " + String.join(" ", args), target, CommandRouting.aggregate(args));
+                                source,
+                                primaryRoot() + " " + String.join(" ", args),
+                                target,
+                                CommandRouting.aggregate(args));
                     }
                 }
 
                 public CompletableFuture<List<String>> suggestAsync(Invocation invocation) {
-                    return engine.suggest(invocation.source(), "cult " + String.join(" ", invocation.arguments()))
+                    return engine.suggest(
+                                    invocation.source(), primaryRoot() + " " + String.join(" ", invocation.arguments()))
                             .toCompletableFuture();
                 }
-            });
+            };
+            engine.onActivated(this::registerCommandRoots);
+            registerCommandRoots();
         } catch (Throwable failure) {
             if (engine != null) {
                 try {
@@ -182,6 +186,24 @@ public final class CultVelocityPlugin {
             engine = null;
             logger.error("CultAC is disabled and players join uninspected: it failed to initialize.", failure);
         }
+    }
+
+    private synchronized void registerCommandRoots() {
+        List<String> fresh = engine.commandRoots().stream()
+                .filter(root -> !registeredRoots.contains(root))
+                .toList();
+        if (fresh.isEmpty()) return;
+        var metadata = proxy.getCommandManager()
+                .metaBuilder(fresh.getFirst())
+                .aliases(fresh.subList(1, fresh.size()).toArray(String[]::new))
+                .plugin(this)
+                .build();
+        proxy.getCommandManager().register(metadata, command);
+        registeredRoots.addAll(fresh);
+    }
+
+    private String primaryRoot() {
+        return engine.commandRoots().getFirst();
     }
 
     @Subscribe
@@ -275,7 +297,7 @@ public final class CultVelocityPlugin {
             updates.builds(args.length == 3 ? args[2] : null, engine.currentBuild(), worker)
                     .thenAccept(lines -> lines.forEach(line -> source.sendMessage(Component.text(line))));
         } else {
-            source.sendMessage(Component.text(UPDATE_USAGE));
+            source.sendMessage(Component.text("Usage: /" + primaryRoot() + UPDATE_USAGE));
         }
     }
 
