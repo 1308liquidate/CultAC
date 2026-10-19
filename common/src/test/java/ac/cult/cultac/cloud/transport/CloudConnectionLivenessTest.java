@@ -2,15 +2,20 @@ package ac.cult.cultac.cloud.transport;
 
 import static ac.cult.cultac.cloud.transport.ConnectionFixture.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.cultac.cloud.CloudSettings;
 import ac.cult.cultac.cloud.transport.ConnectionFixture.Globals;
 import ac.cult.cultac.cloud.transport.ConnectionFixture.Receiver;
+import ac.cult.cultac.cloud.wire.IntakeWire;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
@@ -110,6 +115,41 @@ class CloudConnectionLivenessTest {
             int pings = receiver.pings.get();
             assertTrue(socket.closeFuture().await(WAIT_MILLIS, TimeUnit.MILLISECONDS), "silent new socket dropped");
             assertTrue(receiver.pings.get() >= pings + 2, "pings on the new socket");
+        }
+    }
+
+    @Test
+    void aLostSocketLetsGoOfItsQueueBeforeTheReconnect() throws Exception {
+        try (Globals globals = new Globals();
+                Receiver receiver = new Receiver(REAL_CLOCK)) {
+            receiver.connections.configure(
+                    ConnectionFixture.settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS));
+            CloudConnection connection = receiver.connections.forServer("login-test");
+            AtomicLong generation = new AtomicLong(-1);
+            connection.register(new UUID(1, 2), new CloudConnection.Stream() {
+                public void connected(long connected) {
+                    generation.set(connected);
+                }
+
+                public void disconnected(long ended) {}
+
+                public void reply(long replied, IntakeWire.Reply reply) {}
+            });
+            receiver.allowConnect();
+            Channel socket = receiver.handshakes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(socket, "socket");
+            await(() -> generation.get() > 0, "connected");
+            socket.config().setAutoRead(false);
+            Random random = new Random(1);
+            byte[] record = new byte[1024 * 1024];
+            random.nextBytes(record);
+            while (connection.send(generation.get(), record, 0)) {}
+            assertTrue(connection.backlogged(), "the stalled socket's queue is backlogged");
+
+            socket.close();
+            await(() -> connection.summary().contains("queued 0.0 of"), "the lost socket's queue is dropped");
+            assertFalse(connection.backlogged());
+            assertNull(receiver.handshakes.poll(200, TimeUnit.MILLISECONDS), "no second socket yet");
         }
     }
 
