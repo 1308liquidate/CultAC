@@ -9,7 +9,8 @@ import java.util.List;
 
 /**
  * VanillaStepProof's collisions within one Java prediction, keyed on the raw bits of every argument that varies inside
- * it. The prediction writes none of the other collision inputs, so a hit returns what the call would compute.
+ * it. A hit is exact only while the unkeyed inputs (carry, step height, sneaking, border, world) stay fixed; the
+ * prediction writes profileCarry before the memo's first entry and none of them after it.
  */
 public final class StepCollisionMemo {
     private static final int KEY_LONGS = 10;
