@@ -99,10 +99,11 @@ public final class PlayerToggleStoreImpl implements PlayerToggleStore {
         this.ownsScheduler = ownsScheduler;
     }
 
-    private static ScheduledExecutorService defaultScheduler() {
+    static ScheduledExecutorService defaultScheduler() {
         return Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "cult-toggle-flush");
             t.setDaemon(true);
+            t.setContextClassLoader(PlayerToggleStoreImpl.class.getClassLoader());
             return t;
         });
     }
