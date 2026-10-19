@@ -678,6 +678,9 @@ public class CompensatedEntities {
         if ((entityType == EntityTypeIds.FISHING_BOBBER)) {
             return new PacketEntityHook(player, entityID, entityType, position.x, position.y, position.z, data);
         }
+        if (PacketEntityHurtingProjectile.isHurtingProjectile(entityType)) {
+            return new PacketEntityHurtingProjectile(player, entityID, entityType, position);
+        }
         return new PacketEntity(player, entityID, entityType, position.x, position.y, position.z);
     }
 

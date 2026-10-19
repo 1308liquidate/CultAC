@@ -12,10 +12,17 @@ import ac.cult.cultac.checks.impl.visibility.InteractEntityVisibility;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
+import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.protocol.ClientVersion;
+import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.ProtocolVersion;
+import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundPing;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
@@ -32,11 +39,13 @@ import io.netty.buffer.ByteBuf;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.Mockito;
 
 class EntityInteractionVisibilityTest {
     static Stream<ProtocolVersion> clients() {
@@ -154,6 +163,102 @@ class EntityInteractionVisibilityTest {
         }
     }
 
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aWindChargeMovesAlongItsSpawnVelocityEachClientTick(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            // The charge is 9.19 from the eye at its server position, 2.43 after four client ticks.
+            setup.spawn(
+                    42,
+                    "minecraft:wind_charge",
+                    new Vec3d(1.8798, 65.5354, 7.768),
+                    new Vec3d(-.10510895, -.0076909, -1.70396142));
+            for (int tick = 0; tick < 4; tick++) {
+                assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+                setup.clientTick();
+            }
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aProjectileStopsAtTheFirstBlockOnItsPath(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 2, state("stone"));
+            // The block spans z 2..3 on 42's path: 42 stops at z 3, out of range; 43 passes it and ends in range.
+            setup.spawn(42, "minecraft:wind_charge", new Vec3d(.5, 64.5, 6), new Vec3d(0, 0, -1.5));
+            setup.spawn(43, "minecraft:wind_charge", new Vec3d(2.5, 64.5, 6), new Vec3d(0, 0, -1.5));
+            for (int tick = 0; tick < 4; tick++) setup.clientTick();
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            assertFalse(setup.route(43, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aFireballAcceleratesByATenthAndKeepsNinetyFivePercentEachClientTick(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            // Launched at 1 block per tick, a fireball covers 3.261 in three client ticks: 42 is in range from 3.2
+            // on, 43 up to 3.35.
+            setup.spawn(42, "minecraft:fireball", new Vec3d(.5, 65.12, 5.2), new Vec3d(0, 0, -1));
+            setup.spawn(43, "minecraft:fireball", new Vec3d(.5, 65.12, -1.35), new Vec3d(0, 0, 1));
+            for (int tick = 0; tick < 3; tick++) {
+                assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+                setup.clientTick();
+            }
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            assertFalse(setup.route(43, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aFireballInWaterKeepsEightyPercentEachClientTick(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            for (int z = 0; z < 6; z++)
+                setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 65, z, state("water"));
+            setup.spawn(42, "minecraft:fireball", new Vec3d(.5, 65.12, 5.2), new Vec3d(0, 0, -1));
+            var fireball = setup.player.compensatedEntities.getEntity(42);
+            // wasTouchingWater starts false, so the first tick keeps 95%; then 80%: 2.774 in three ticks, 3.504 in
+            // four, against 3.261 in three out of water.
+            for (int tick = 0; tick < 4; tick++) {
+                assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+                setup.clientTick();
+                if (tick == 1) assertEquals(3.239, fireball.clientPhysicalPosition.z, 1.0E-6);
+            }
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void setEntityMotionSetsTheVelocityAProjectileTicksAlong(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.spawn(42, "minecraft:wind_charge", new Vec3d(.5, 65.12, 5), Vec3d.ZERO);
+            setup.motion(42, new Vec3d(0, 0, -1.5));
+            for (int tick = 0; tick < 3; tick++) {
+                assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+                setup.clientTick();
+            }
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @Test
+    void clientsBefore1_21_2KeepAProjectileAtItsServerPosition() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V1_21_11)) {
+            setup.spawn(42, "minecraft:wind_charge", new Vec3d(.5, 65.12, 4.5), new Vec3d(0, 0, -1.5));
+            var charge = setup.player.compensatedEntities.getEntity(42);
+            JavaTickFixture.setField(CultPlayer.class, setup.player, "resolvedClientVersion", ClientVersion.V_1_21);
+            for (int tick = 0; tick < 4; tick++) setup.clientTick();
+            assertEquals(4.5, charge.clientPhysicalPosition.z, 1.0E-9);
+            JavaTickFixture.setField(CultPlayer.class, setup.player, "resolvedClientVersion", ClientVersion.V_1_21_2);
+            for (int tick = 0; tick < 4; tick++) setup.clientTick();
+            assertEquals(-1.5, charge.clientPhysicalPosition.z, 1.0E-9);
+        }
+    }
+
     @Test
     void rangeToleranceRemainsOneMillimetreAtThePlayersEye() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V26_3)) {
@@ -218,6 +323,36 @@ class EntityInteractionVisibilityTest {
 
         void entity(int id, int type, double z) {
             player.compensatedEntities.addEntity(id, type, new Vec3(.5, 64, z), 0, 0, 0);
+        }
+
+        void spawn(int id, String type, Vec3d position, Vec3d velocity) {
+            if (fixture.user.getPlayer() == null) fixture.user.bind(Mockito.mock(PlatformPlayer.class));
+            var packet = new ClientboundAddEntity(id, type, position, 0, 0, 0, new UUID(0, id), velocity);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ADD_ENTITY, packet, false);
+            player.packetEntityReplication.onAddEntity(event, player, packet);
+            acknowledge(event);
+        }
+
+        void motion(int id, Vec3d velocity) {
+            var packet = new ClientboundEntityMotion(id, velocity);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_MOTION, packet, false);
+            player.packetEntityReplication.onSetEntityMotion(event, player, packet);
+            acknowledge(event);
+        }
+
+        private void acknowledge(PacketSendEvent<?> event) {
+            event.tasksAfter().forEach(Runnable::run);
+            for (var write : event.writesAfter()) {
+                if (write.packet() instanceof ClientboundPing ping)
+                    assertTrue(player.addTransactionResponse(ping.id()));
+            }
+        }
+
+        void clientTick() {
+            player.packetEntityReplication.onPlayerTickEnd(null);
+            tickEnd();
         }
 
         void wall(String name) {

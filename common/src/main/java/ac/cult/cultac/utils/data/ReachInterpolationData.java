@@ -31,6 +31,7 @@ import ac.cult.cultac.utils.nmsutil.RootVehicleInterpolationCollision;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.UnaryOperator;
 
 // You may not copy the check unless you are licensed under GPL
 public class ReachInterpolationData {
@@ -665,6 +666,13 @@ public class ReachInterpolationData {
 
     private static float lerp(float from, float to, float amount) {
         return from + amount * (to - from);
+    }
+
+    /** Moves the start and the target each by the step {@code stepFrom} gives for its own position. */
+    public void offset(UnaryOperator<Vec3> stepFrom) {
+        boundsValid = false;
+        startingLocation.offset(stepFrom.apply(feet(startingLocation)));
+        targetLocation.offset(stepFrom.apply(feet(targetLocation)));
     }
 
     public void shiftTargetIfCollisionFree(CultPlayer player, Vec3 movement) {

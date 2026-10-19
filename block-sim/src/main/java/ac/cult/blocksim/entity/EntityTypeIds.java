@@ -14,10 +14,12 @@ public final class EntityTypeIds {
     public static final int COW = id("cow");
     public static final int DOLPHIN = id("dolphin");
     public static final int DONKEY = id("donkey");
+    public static final int DRAGON_FIREBALL = id("dragon_fireball");
     public static final int ENDERMITE = id("endermite");
     public static final int END_CRYSTAL = id("end_crystal");
     public static final int EVOKER = id("evoker");
     public static final int FALLING_BLOCK = id("falling_block");
+    public static final int FIREBALL = id("fireball");
     public static final int TNT = id("tnt");
     public static final int FIREWORK_ROCKET = id("firework_rocket");
     public static final int FISHING_BOBBER = id("fishing_bobber");
@@ -46,6 +48,7 @@ public final class EntityTypeIds {
     public static final int SKELETON = id("skeleton");
     public static final int SKELETON_HORSE = id("skeleton_horse");
     public static final int SLIME = id("slime");
+    public static final int SMALL_FIREBALL = id("small_fireball");
     public static final int SPIDER = id("spider");
     public static final int STRIDER = id("strider");
     public static final int TADPOLE = id("tadpole");
