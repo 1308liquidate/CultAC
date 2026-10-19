@@ -203,7 +203,10 @@ public class CultPlayer implements GrimUser {
 
     @Getter
     private long playerClockAtLeast = System.nanoTime();
-    /** The last poll that held pings for a protocol switch; the timeout runs from no earlier than this. */
+    /**
+     * The last poll outside play or during a protocol switch; a server may hold a client in configuration for any
+     * length of time, so the timeout runs from no earlier than this.
+     */
     private long pingsHeldAt = playerClockAtLeast;
 
     public int powderSnowFrozenTicks = 0;
@@ -1094,7 +1097,7 @@ public class CultPlayer implements GrimUser {
             sendTransaction(true); // send on netty thread
         }
         long now = System.nanoTime();
-        if (protocolSwitchPending()) {
+        if (protocolSwitchPending() || !canSendPlayPackets()) {
             pingsHeldAt = now;
         } else if (now - Math.max(getPlayerClockAtLeast(), pingsHeldAt) > maxTransactionTime * 1e9) {
             timedOut();
