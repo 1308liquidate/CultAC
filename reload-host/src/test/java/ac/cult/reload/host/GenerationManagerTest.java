@@ -950,12 +950,32 @@ class GenerationManagerTest {
     }
 
     @Test
+    void failedConnectionCleanupStillReleasesTheSessionAndTheDrainingGenerationRetires() throws Exception {
+        var manager = start();
+        try {
+            manager.attach("failed", null);
+            artifact("new.jar", "2", "new", "paper");
+            await(manager.update("new.jar"));
+            controls.put("disconnect:failed", CompletableFuture.failedFuture(new IllegalStateException("fixture")));
+            assertThrows(ExecutionException.class, () -> await(manager.disconnect("failed")));
+            eventually(() -> manager.status().size() == 1);
+            assertTrue(events.contains("initial:close"));
+            assertTrue(reports.stream().anyMatch(line -> line.contains("session cleanup failed")));
+        } finally {
+            await(manager.stop());
+        }
+    }
+
+    @Test
     void failedConnectionCleanupFailsShutdownWithoutUnsafeUnloadOrHanging() throws Exception {
         var manager = start();
         manager.attach("failed", null);
-        controls.put("disconnect:failed", CompletableFuture.failedFuture(new IllegalStateException("fixture")));
-        assertThrows(ExecutionException.class, () -> await(manager.disconnect("failed")));
-        assertThrows(ExecutionException.class, () -> await(manager.stop()));
+        var pending = new CompletableFuture<Void>();
+        controls.put("disconnect:failed", pending);
+        var stopped = manager.stop();
+        eventually(() -> events.contains("initial:disconnect:failed"));
+        pending.completeExceptionally(new IllegalStateException("fixture"));
+        assertThrows(ExecutionException.class, () -> await(stopped));
         assertTrue(manager.status().getFirst().contains("CLEANUP_FAILED"));
         assertFalse(events.contains("initial:close"));
     }
