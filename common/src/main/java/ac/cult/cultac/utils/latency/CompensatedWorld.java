@@ -35,6 +35,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 public class CompensatedWorld {
     private static final int RECENT_CLIENT_COLLISION_CHANGE_TICKS = 3;
     private static final int RECENT_CLIENT_FLUID_CHANGE_TICKS = 3;
+    private static final int MAX_PENDING_PREDICTIONS = 1024;
     private static final int MAX_REINTERN_CONTENT_COMPARISONS_PER_TICK = 10;
     private static final int MAX_REINTERN_HASH_CALCULATIONS_PER_TICK = 50;
     private static final int MAX_REINTERN_ATTEMPTED_COMPARISONS_PER_TICK = 100;
@@ -87,7 +88,7 @@ public class CompensatedWorld {
     private final ServerBlockView serverBlockView = new ServerBlockView();
     // Blocks the client changed while placing or breaking blocks
     private List<BlockPos> currentlyChangedBlocks = new LinkedList<>();
-    private final Map<Integer, List<BlockPos>> serverIsCurrentlyProcessingThesePredictions = new HashMap<>();
+    private final Map<Integer, List<BlockPos>> serverIsCurrentlyProcessingThesePredictions = new LinkedHashMap<>();
     private int clientPredictionSequence;
     private int level;
     private boolean clientboundUnresolved;
@@ -619,6 +620,13 @@ public class CompensatedWorld {
                 this.currentlyChangedBlocks; // We must now track the client applying the server predicted blocks
         this.currentlyChangedBlocks = new LinkedList<>(); // Reset variable without changing original
 
+        // Only a client whose wire sequence stops advancing reaches this; its oldest prediction reverts to the server.
+        if (serverIsCurrentlyProcessingThesePredictions.size() >= MAX_PENDING_PREDICTIONS) {
+            Iterator<List<BlockPos>> oldest =
+                    serverIsCurrentlyProcessingThesePredictions.values().iterator();
+            applyBlockChanges(oldest.next(), player.lastTransactionSent.get() + 1);
+            oldest.remove();
+        }
         // Vanilla stores predictions under its local monotonic counter, not the untrusted packet sequence.
         serverIsCurrentlyProcessingThesePredictions.put(clientPredictionSequence, toApplyBlocks);
     }
