@@ -40,9 +40,9 @@ spectators:
 # Cât timp au jucătorii până să fie deconectați pentru timeout? Implicit = 60 secunde
 max-transaction-time: 60
 
-# Când CultAC însuși eșuează (nu se poate atașa la un jucător, versiunea clientului nu este suportată sau
-# niciun ping nu primește răspuns în max-transaction-time), jucătorul joacă mai departe neinspectat în loc să
-# fie deconectat. Kick-urile pentru flood de pachete și exploit-uri de crash se aplică în continuare.
+# Când CultAC însuși eșuează (nu se poate atașa la un jucător sau versiunea clientului nu este suportată),
+# jucătorul joacă mai departe neinspectat în loc să fie deconectat. Kick-urile pentru flood de pachete,
+# exploit-uri de crash și ping-uri fără răspuns după max-transaction-time se aplică în continuare.
 launch-safety:
   fail-open: true
 

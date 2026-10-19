@@ -40,9 +40,9 @@ spectators:
 # How long should players have until we kick them for timing out? Default = 60 seconds
 max-transaction-time: 60
 
-# When CultAC itself fails (it cannot attach to a player, the client version is unsupported, or no ping is
-# answered within max-transaction-time), let the player play uninspected instead of disconnecting them.
-# Kicks for packet floods and crash exploits still apply.
+# When CultAC itself fails (it cannot attach to a player or the client version is unsupported), let the player
+# play uninspected instead of disconnecting them. Kicks for packet floods, crash exploits and pings left
+# unanswered past max-transaction-time still apply.
 launch-safety:
   fail-open: true
 

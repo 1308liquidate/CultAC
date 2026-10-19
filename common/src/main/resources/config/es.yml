@@ -41,9 +41,9 @@ spectators:
 # Por defecto, este valor se encuentra en 60 segundos.
 max-transaction-time: 60
 
-# Si CultAC falla (no puede vincularse a un jugador, la versión del cliente no es compatible o ningún ping
-# se responde dentro de max-transaction-time), el jugador sigue jugando sin inspección en lugar de ser
-# desconectado. Las expulsiones por inundación de paquetes y exploits de crasheo siguen aplicándose.
+# Si CultAC falla (no puede vincularse a un jugador o la versión del cliente no es compatible), el jugador
+# sigue jugando sin inspección en lugar de ser desconectado. Las expulsiones por inundación de paquetes,
+# exploits de crasheo y pings sin responder tras max-transaction-time siguen aplicándose.
 launch-safety:
   fail-open: true
 

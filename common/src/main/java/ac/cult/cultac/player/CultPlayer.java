@@ -1047,7 +1047,8 @@ public class CultPlayer implements GrimUser {
     }
 
     public void timedOut() {
-        if (CultAPI.INSTANCE.getConfigManager().failsOpen()) {
+        // Not failsOpen(): the client decides whether to answer a ping, so withholding them must not buy an exemption.
+        if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
             LogUtil.warn(
                     "Not inspecting " + getName() + " any more; no ping answered within " + maxTransactionTime + " s");
             CultAPI.INSTANCE.getPlayerDataManager().exemptUser(user);

@@ -247,7 +247,7 @@ class ObserveOnlyTest {
     }
 
     @Test
-    void anUnansweredPlayerIsLetGo() throws ReflectiveOperationException {
+    void anUnansweredPlayerIsLetGoOnlyWhenObserving() throws ReflectiveOperationException {
         for (boolean observeOnly : new boolean[] {true, false}) {
             for (boolean failOpen : new boolean[] {true, false}) {
                 CultPlayer player = mock(CultPlayer.class);
@@ -257,9 +257,9 @@ class ObserveOnlyTest {
                 try (var ignored = installConfig(observeOnly, failOpen)) {
                     player.timedOut();
                 }
-                boolean letGo = observeOnly || failOpen;
-                verify(player, times(letGo ? 0 : 1)).disconnect(any());
-                assertEquals(letGo, CultAPI.INSTANCE.getPlayerDataManager().clearExemptions(user));
+                // fail-open does not apply: withholding pongs is the client's choice, not a failure of ours
+                verify(player, times(observeOnly ? 0 : 1)).disconnect(any());
+                assertEquals(observeOnly, CultAPI.INSTANCE.getPlayerDataManager().clearExemptions(user));
             }
         }
     }

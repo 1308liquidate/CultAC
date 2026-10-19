@@ -40,9 +40,9 @@ spectators:
 
 max-transaction-time: 60
 
-# Se CultAC stesso fallisce (non riesce ad agganciarsi a un giocatore, la versione del client non è supportata
-# o nessun ping riceve risposta entro max-transaction-time), il giocatore continua senza ispezione invece di
-# essere disconnesso. I kick per flood di pacchetti ed exploit di crash restano attivi.
+# Se CultAC stesso fallisce (non riesce ad agganciarsi a un giocatore o la versione del client non è
+# supportata), il giocatore continua senza ispezione invece di essere disconnesso. I kick per flood di
+# pacchetti, exploit di crash e ping senza risposta oltre max-transaction-time restano attivi.
 launch-safety:
   fail-open: true
 
