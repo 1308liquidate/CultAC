@@ -360,7 +360,10 @@ public class CompensatedEntities {
             }
         }
 
-        if (selfScaleChanged) {
+        // A Java player's own dimensions refresh at LivingEntity#tick's end; the vehicle runner has no such refresh.
+        if (selfScaleChanged
+                && (player.isBedrockMovement()
+                        || player.compensatedEntities.getSelf().inVehicle())) {
             player.refreshPlayerPose();
         }
         if (entityScaleChanged && entityID != player.entityID) {

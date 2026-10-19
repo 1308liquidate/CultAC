@@ -1816,7 +1816,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                         ? new MainSupportingBlockData(null, false)
                         : lastPrediction.getSimulationContext().getWorldData().getMainSupportingBlockPos(),
                 player.pose,
-                player.getScale());
+                player.dimensionScale);
         if (player.usesModernJavaItemUse()) {
             context.setItemUse(ac.cult.cultac.utils.data.ItemUseInventory.prepare(player));
             context.setServerUseTracked(player.itemUseBurst.tracking());

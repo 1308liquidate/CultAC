@@ -253,6 +253,9 @@ public class CultPlayer implements GrimUser {
     public boolean isRiptidePose = false;
     public @NotNull SimpleCollisionBox boundingBox;
     public @NotNull Pose pose = Pose.STANDING;
+    /** The scale of the current bounding box; vanilla resizes the box only in Entity#refreshDimensions. */
+    public float dimensionScale = 1.0F;
+
     public boolean isInBed = false;
     public final ac.cult.cultac.utils.latency.CompensatedOpenWindow openWindow;
     public boolean hasInventoryOpen = false;
@@ -927,15 +930,16 @@ public class CultPlayer implements GrimUser {
     }
 
     public double getEyeHeight() {
-        return pose.eyeHeight * getScale();
+        return pose.eyeHeight * dimensionScale;
     }
 
     public float getBukkitHeight() {
-        return pose.height * getScale();
+        return pose.height * dimensionScale;
     }
 
     public void refreshPlayerPose() {
         pose = determineCurrentPoseLikeVanilla();
+        dimensionScale = getScale();
 
         if (isInBed) {
             if (bedPosition == null) {
@@ -1259,7 +1263,7 @@ public class CultPlayer implements GrimUser {
     }
 
     public List<Double> getPossibleEyeHeights() { // We don't return sleeping eye height
-        double scale = getScale();
+        double scale = dimensionScale;
         return Arrays.asList(0.4 * scale, 1.27 * scale, 1.62 * scale);
     }
 

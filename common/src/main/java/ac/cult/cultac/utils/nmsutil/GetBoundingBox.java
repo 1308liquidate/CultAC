@@ -34,7 +34,7 @@ public class GetBoundingBox {
     // Size while sleeping: 0.2 width 0.2 height
     public static SimpleCollisionBox getPlayerBoundingBox(
             CultPlayer player, double centerX, double minY, double centerZ) {
-        float width = player.pose.width * player.getScale();
+        float width = player.pose.width * player.dimensionScale;
         float height = player.getBukkitHeight();
 
         return getBoundingBoxFromPosAndSize(centerX, minY, centerZ, width, height);
