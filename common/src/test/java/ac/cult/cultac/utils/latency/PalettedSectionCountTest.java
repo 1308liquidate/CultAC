@@ -19,7 +19,7 @@ class PalettedSectionCountTest {
     @Test
     void paletteOrderCountsEqualHashCountsAndMalformedSectionsFailIdentically() {
         var random = new SplittableRandom(0x5EC7L);
-        int succeeded = 0, failed = 0, reordered = 0;
+        int succeeded = 0, failed = 0, reordered = 0, mismatched = 0, mutated = 0;
         for (int round = 0; round < 6000; round++) {
             boolean blocks = random.nextBoolean();
             int size = blocks ? 4096 : 64;
@@ -32,6 +32,9 @@ class PalettedSectionCountTest {
             if (bits <= 4) paletteSize = Math.min(paletteSize, codes == 0 ? 1 : codes);
             boolean malformed = round % 7 == 0;
             int limit = round % 5 == 0 ? REGISTRY / 2 : REGISTRY;
+            var version = round % 3 == 0 ? ProtocolVersion.V1_21_4 : ProtocolVersion.V26_3;
+            int wordCount = bits == 0 ? 0 : (size + 64 / bits - 1) / (64 / bits);
+            boolean wrongLength = version == ProtocolVersion.V1_21_4 && random.nextBoolean();
             var input = Unpooled.buffer();
             try {
                 input.writeByte(wireBits);
@@ -42,15 +45,28 @@ class PalettedSectionCountTest {
                         for (int i = 0; i < paletteSize; i++) Wire.writeVarInt(input, random.nextInt(REGISTRY));
                     }
                 }
-                if (bits > 0) {
+                if (version == ProtocolVersion.V1_21_4) {
+                    int length =
+                            !wrongLength ? wordCount : wordCount + (wordCount == 0 || random.nextBoolean() ? 1 : -1);
+                    Wire.writeVarInt(input, length);
+                    if (wrongLength) {
+                        for (int i = 0; i < length; i++) input.writeLong(random.nextLong());
+                        mismatched++;
+                    }
+                }
+                if (bits > 0 && !wrongLength) {
                     int range =
                             wireBits > maximumLocalBits ? REGISTRY : malformed ? codes : Math.min(paletteSize, codes);
                     int distinct = 1 + random.nextInt(Math.max(1, range));
                     writeWords(input, size, bits, random, range, distinct);
                 }
                 var section = blocks
-                        ? PalettedSection.readBlocks(input, ProtocolVersion.V26_3, REGISTRY)
-                        : PalettedSection.readBiomes(input, ProtocolVersion.V26_3, REGISTRY);
+                        ? PalettedSection.readBlocks(input, version, REGISTRY)
+                        : PalettedSection.readBiomes(input, version, REGISTRY);
+                if (round % 4 == 1) {
+                    mutate(section, size, random);
+                    mutated++;
+                }
                 var expected = outcome(section, -1);
                 var actual = outcome(section, limit);
                 assertEquals(expected.failure, actual.failure, "round " + round);
@@ -70,6 +86,20 @@ class PalettedSectionCountTest {
         assertTrue(succeeded > 4000, "succeeded " + succeeded);
         assertTrue(failed > 100, "failed " + failed);
         assertTrue(reordered > 1000, "reordered " + reordered);
+        assertTrue(mismatched > 500, "mismatched " + mismatched);
+        assertTrue(mutated > 1000, "mutated " + mutated);
+    }
+
+    /** Writes through getAndSet until it rejects a stored code, growing the palette across bit widths. */
+    private static void mutate(PalettedSection section, int size, SplittableRandom random) {
+        int states = 1 + random.nextInt(size == 4096 ? 400 : 12);
+        int base = random.nextInt(REGISTRY - states);
+        int writes = 1 + random.nextInt(size == 4096 ? 2000 : 64);
+        try {
+            for (int i = 0; i < writes; i++) section.getAndSet(random.nextInt(size), base + random.nextInt(states));
+        } catch (RuntimeException rejected) {
+            // A malformed stored code stops the writes; counting still sees the section as left.
+        }
     }
 
     private record Outcome(List<String> calls, String failure) {}
