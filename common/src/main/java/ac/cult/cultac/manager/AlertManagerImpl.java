@@ -13,7 +13,9 @@ import ac.grim.grimac.api.GrimUser;
 import ac.grim.grimac.api.alerts.AlertManager;
 import ac.grim.grimac.api.config.ConfigManager;
 import ac.grim.grimac.api.config.ConfigReloadable;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -75,7 +77,11 @@ public final class AlertManagerImpl implements AlertManager, ConfigReloadable, S
                 Component component, @Nullable Set<@Nullable PlatformPlayer> excluding) {
             HashSet<PlatformPlayer> listeners = new HashSet<>(players);
             if (excluding != null) {
-                listeners.removeAll(excluding);
+                Set<Object> excludedNatives = Collections.newSetFromMap(new IdentityHashMap<>());
+                for (PlatformPlayer excluded : excluding) {
+                    if (excluded != null) excludedNatives.add(excluded.getNative());
+                }
+                listeners.removeIf(listener -> excludedNatives.contains(listener.getNative()));
             }
 
             for (PlatformPlayer platformPlayer : listeners) {
