@@ -560,7 +560,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                 && (player.compensatedEntities.getSelf().inVehicle()
                         || player.compensatedEntities.vehicles
                                 .canCurrentPlayerControlServerVehicleForClientTickMovement()
-                        || player.compensatedEntities.vehicles.hasPlayerPassengerState()
+                        || player.compensatedEntities.vehicles.hasClientPlayerPassengerState()
                         || hasBufferedServerVehiclePassengerRotation(player));
         if (!passengerRotationTickPacket && player.packetStateData.isAwaitingVehicleMoveAfterPassengerRotation()) {
             // LocalPlayer#tick sends the mounted Rot and vehicle move consecutively.

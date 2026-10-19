@@ -28,6 +28,7 @@ import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundExplode;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerPosition;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundAcceptTeleportation;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMoveVehicle;
@@ -41,6 +42,7 @@ import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Set;
 import org.mockito.Mockito;
 
@@ -133,6 +135,21 @@ final class JavaTickFixture implements AutoCloseable {
         assertNotNull(result);
         assertTrue(result != before, "the tick committed no prediction");
         return result;
+    }
+
+    /** A passive passenger tick: LocalPlayer sends Rot even when the root is not locally controlled. */
+    void rideTick() {
+        var rot = new ServerboundMovePlayer(0, 0, 0, player.xRot, player.yRot, player.onGround, false, false, true);
+        listener.onMovePlayer(event(ServerboundPackets.MOVE_PLAYER, rot), player, rot);
+        tickEnd();
+    }
+
+    void setPassengers(int vehicle, List<Integer> passengers) {
+        var packet = new ClientboundSetPassengers(vehicle, passengers);
+        var event = new PacketSendEvent<>(
+                fixture.user, ConnectionPhase.PLAY, ClientboundPackets.SET_PASSENGERS, packet, false);
+        player.packetEntityReplication.onSetPassengers(event, player, packet);
+        event.tasksAfter().forEach(Runnable::run);
     }
 
     void tickEnd() {
