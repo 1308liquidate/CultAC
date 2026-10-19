@@ -15,7 +15,9 @@ public class PacketPingListener {
     public static boolean acceptBedrockResponse(CultPlayer player, int id) {
         if (!player.addTransactionResponse(id)) return false;
         player.checkManager.getCheck(TimerCheck.class).onTransactionResponse();
-        Channels.RECEIVED.fire(RuntimeEnvironment.outwardUser(player), id, true, System.currentTimeMillis());
+        if (!Channels.RECEIVED.isEmpty()) {
+            Channels.RECEIVED.fire(RuntimeEnvironment.outwardUser(player), id, true, System.currentTimeMillis());
+        }
         return true;
     }
 
@@ -32,11 +34,10 @@ public class PacketPingListener {
             boolean shouldCancel = !CultAPI.INSTANCE.getConfigManager().isDisablePongCancelling();
             // Not needed for vanilla as vanilla ignores this packet, needed for packet limiters
             event.setCancelled(shouldCancel);
-            Channels.RECEIVED.fire(
-                    ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(player),
-                    packet.id(),
-                    shouldCancel,
-                    event.getTimestamp());
+            if (!Channels.RECEIVED.isEmpty()) {
+                Channels.RECEIVED.fire(
+                        RuntimeEnvironment.outwardUser(player), packet.id(), shouldCancel, event.getTimestamp());
+            }
         } else {
             player.foreignPongReceived(packet.id());
         }

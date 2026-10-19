@@ -838,8 +838,10 @@ public class CultPlayer implements GrimUser {
         } else {
             transactionsSent.add(new SentTransaction(transaction.transaction(), transaction.id(), System.nanoTime()));
         }
-        TransactionChannels.SEND.fire(
-                ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(this), transaction.id(), timestamp);
+        if (!TransactionChannels.SEND.isEmpty()) {
+            TransactionChannels.SEND.fire(
+                    ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(this), transaction.id(), timestamp);
+        }
         return true;
     }
 
