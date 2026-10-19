@@ -75,8 +75,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     private static final int VIA_INTERPOLATION_STEP_TICKS = 3;
     private static final Vec3 SELF_DISMOUNT_VELOCITY = Vec3.ZERO;
     private static final double VEHICLE_MOVE_RESYNC_SNAP_EPSILON = 2.0E-5D;
-    /** Entries past this many are cleared at a client tick end. */
+    /** Inserting past this many entries drops those from earlier client ticks, once per tick. */
     private static final int MAX_REUSED_TRANSFORMS = 1024;
+    /** Live entries past this many are cleared; only a client that stops ending ticks reaches it. */
+    static final int MAX_TRANSFORMS = 16384;
 
     private final Int2ObjectOpenHashMap<PacketHandlerDeltaMovement> packetHandlerDeltaMovements =
             new Int2ObjectOpenHashMap<>();
@@ -84,6 +86,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             new Int2ObjectOpenHashMap<>();
     private final PacketHandlerEntityTransform transformScratch = new PacketHandlerEntityTransform();
     private long transformTick;
+    private long transformsPrunedTick = -1;
     private int packetHandlerDeltaMovementSequence = 0;
     private boolean useReachBundleDelimiter = true;
     private boolean hasSentPreWavePacket = true;
@@ -362,7 +365,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         player.compensatedEntities.recordRideTickSeat();
         player.compensatedEntities.vehicles.updateServerControlledSafeSetbackPositionOnTickEnd();
         transformTick++;
-        if (packetHandlerEntityTransforms.size() > MAX_REUSED_TRANSFORMS) packetHandlerEntityTransforms.clear();
     }
 
     private void recountPushersAfterPlayer() {
@@ -1888,6 +1890,12 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         float nextXRot = pitch == null ? source.xRot : pitch;
         PacketHandlerEntityTransform entry = packetHandlerEntityTransforms.get(entityId);
         if (entry == null) {
+            if (packetHandlerEntityTransforms.size() >= MAX_REUSED_TRANSFORMS
+                    && transformsPrunedTick != transformTick) {
+                packetHandlerEntityTransforms.values().removeIf(stale -> stale.tick != transformTick);
+                transformsPrunedTick = transformTick;
+            }
+            if (packetHandlerEntityTransforms.size() >= MAX_TRANSFORMS) packetHandlerEntityTransforms.clear();
             entry = new PacketHandlerEntityTransform();
             packetHandlerEntityTransforms.put(entityId, entry);
         }
