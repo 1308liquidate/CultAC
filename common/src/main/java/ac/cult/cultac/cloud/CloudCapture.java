@@ -1242,11 +1242,18 @@ public final class CloudCapture implements PlayerObserver {
                         long now = System.nanoTime();
                         stream.cut(now);
                         actions.expire(now);
-                        if (actions.unmarked()) binder.mark(player, actions.marker());
                         mirror();
                     } catch (Throwable failure) {
                         tapFailed(failure);
                     }
+                    ctx.fireChannelRead(message);
+                    // The marker reaches the server after the tick end, so it never sits inside the client's tick.
+                    try {
+                        if (actions.unmarked()) binder.mark(player, actions.marker());
+                    } catch (Throwable failure) {
+                        tapFailed(failure);
+                    }
+                    return;
                 }
             }
             ctx.fireChannelRead(message);
