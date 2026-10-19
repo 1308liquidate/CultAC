@@ -202,12 +202,12 @@ public class PlayerDataManager {
         }
 
         PlatformPlayer quittingPlayer = user.getPlayer();
+        if (!transferred) {
+            CultAPI.INSTANCE.getAlertManager().handlePlayerQuit(quittingPlayer);
+        }
         boolean currentPlayer = !transferred
                 && quittingPlayer != null
                 && PlatformPlayerCache.getInstance().getPlayer(uuid) == quittingPlayer;
-        if (currentPlayer) {
-            CultAPI.INSTANCE.getAlertManager().handlePlayerQuit(quittingPlayer);
-        }
         if (currentPlayer && CultAPI.INSTANCE.getSpectateManager() != null) {
             CultAPI.INSTANCE.getSpectateManager().onQuit(uuid);
         }

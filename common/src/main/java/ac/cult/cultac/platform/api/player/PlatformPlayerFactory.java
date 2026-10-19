@@ -10,6 +10,9 @@ public interface PlatformPlayerFactory {
 
     PlatformPlayer getFromNativePlayerType(Object playerObject);
 
+    /** Returns the cached wrapper only when it wraps this native; never writes the cache. */
+    PlatformPlayer getUncachedFromNativePlayerType(Object playerObject);
+
     void invalidatePlayer(UUID uuid);
 
     void invalidatePlayer(PlatformPlayer player);
