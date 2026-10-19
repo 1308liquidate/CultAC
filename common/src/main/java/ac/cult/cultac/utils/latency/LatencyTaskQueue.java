@@ -11,7 +11,6 @@ final class LatencyTaskQueue {
     private TaskNode lastTask;
     // Insertion order across the runs and the overflow; a continuation keeps its task's sequence.
     private long nextSequence;
-    private final TaskNode[] readyChains = new TaskNode[RUNS + 1];
     private TaskNode recycledTasks;
     private int recycledTaskCount;
 
@@ -81,50 +80,39 @@ final class LatencyTaskQueue {
     }
 
     synchronized TaskNode drainReady(int transaction) {
-        for (int run = 0; run < RUNS; run++) readyChains[run] = drainRun(run, transaction);
-        readyChains[RUNS] = drainOverflow(transaction);
-        int ready = -1;
-        for (int i = 0; i <= RUNS; i++) {
-            if (readyChains[i] == null) continue;
-            if (ready >= 0) return mergeReadyChains();
-            ready = i;
+        if (runFirst[1] == null && runFirst[2] == null && runFirst[3] == null && firstTask == null) {
+            return drainRun(0, transaction);
         }
-        if (ready < 0) return null;
-        TaskNode only = readyChains[ready];
-        readyChains[ready] = null;
-        return only;
+        TaskNode ready = null;
+        for (int run = 0; run < RUNS; run++) ready = merge(ready, drainRun(run, transaction));
+        return merge(ready, drainOverflow(transaction));
     }
 
-    // Chains never share a sequence: a continuation stays in its task's chain, so their order does not matter here.
-    private TaskNode mergeReadyChains() {
-        int chains = 0;
-        for (int i = 0; i <= RUNS; i++) {
-            if (readyChains[i] != null) readyChains[chains++] = readyChains[i];
+    // Chains never share a sequence: a continuation stays in its task's chain, so merging pairwise keeps the order.
+    private static TaskNode merge(TaskNode a, TaskNode b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        TaskNode first;
+        if (a.sequence < b.sequence) {
+            first = a;
+            a = a.next;
+        } else {
+            first = b;
+            b = b.next;
         }
-        for (int i = chains; i <= RUNS; i++) readyChains[i] = null;
-        TaskNode first = null;
-        TaskNode last = null;
-        while (chains > 1) {
-            int chain = 0;
-            for (int i = 1; i < chains; i++) {
-                if (readyChains[i].sequence < readyChains[chain].sequence) chain = i;
-            }
-            TaskNode task = readyChains[chain];
-            if (task.next == null) {
-                readyChains[chain] = readyChains[--chains];
-                readyChains[chains] = null;
+        TaskNode last = first;
+        while (a != null && b != null) {
+            if (a.sequence < b.sequence) {
+                last.next = a;
+                last = a;
+                a = a.next;
             } else {
-                readyChains[chain] = task.next;
+                last.next = b;
+                last = b;
+                b = b.next;
             }
-            if (first == null) {
-                first = task;
-            } else {
-                last.next = task;
-            }
-            last = task;
         }
-        last.next = readyChains[0];
-        readyChains[0] = null;
+        last.next = a != null ? a : b;
         return first;
     }
 

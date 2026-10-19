@@ -16,19 +16,54 @@ import org.junit.jupiter.api.Test;
  * order, must match after every drain.
  */
 class LatencyTaskQueueOrderTest {
+    private static final Field RUN_FIRST = field(LatencyTaskQueue.class, "runFirst");
+    private static final Field FIRST_TASK = field(LatencyTaskQueue.class, "firstTask");
+    private static final Field TRANSACTION = field(LatencyTaskQueue.TaskNode.class, "transaction");
     private int runsBeyondFirst;
     private int overflowUsed;
+    private int firstRunOnlyDrains;
+    private int threeRunDrains;
 
     @Test
     void tasksRunInTheScanOrder() throws Exception {
         for (long seed = 0; seed < 600; seed++) compare(seed, 2_500);
         assertTrue(runsBeyondFirst > 0, "no task ever needed a second run");
         assertTrue(overflowUsed > 0, "no task ever went to the overflow");
+        assertTrue(firstRunOnlyDrains > 0, "no drain found ready tasks in the first run alone");
+        assertTrue(threeRunDrains > 0, "no drain found ready tasks in three runs");
     }
 
     @Test
     void movementLikeTrafficRunsInTheScanOrder() throws Exception {
         for (long seed = 0; seed < 200; seed++) traffic(seed, 4_000);
+        assertTrue(firstRunOnlyDrains > 0, "no drain found ready tasks in the first run alone");
+    }
+
+    private static Field field(Class<?> owner, String name) {
+        try {
+            Field field = owner.getDeclaredField(name);
+            field.setAccessible(true);
+            return field;
+        } catch (NoSuchFieldException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void observeDrain(LatencyTaskQueue queue, int transaction) {
+        try {
+            Object[] first = (Object[]) RUN_FIRST.get(queue);
+            boolean othersEmpty = FIRST_TASK.get(queue) == null;
+            int readyRuns = 0;
+            for (int run = 0; run < first.length; run++) {
+                if (first[run] == null) continue;
+                if (run > 0) othersEmpty = false;
+                if ((int) TRANSACTION.get(first[run]) <= transaction) readyRuns++;
+            }
+            if (othersEmpty && readyRuns == 1) firstRunOnlyDrains++;
+            if (readyRuns >= 3) threeRunDrains++;
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private void compare(long seed, int steps) throws Exception {
@@ -79,13 +114,9 @@ class LatencyTaskQueueOrderTest {
     }
 
     private void observe(LatencyTaskQueue queue) throws Exception {
-        Field runs = LatencyTaskQueue.class.getDeclaredField("runFirst");
-        runs.setAccessible(true);
-        Object[] first = (Object[]) runs.get(queue);
+        Object[] first = (Object[]) RUN_FIRST.get(queue);
         for (int run = 1; run < first.length; run++) if (first[run] != null) runsBeyondFirst++;
-        Field overflow = LatencyTaskQueue.class.getDeclaredField("firstTask");
-        overflow.setAccessible(true);
-        if (overflow.get(queue) != null) overflowUsed++;
+        if (FIRST_TASK.get(queue) != null) overflowUsed++;
     }
 
     private interface Queue {
@@ -169,7 +200,7 @@ class LatencyTaskQueueOrderTest {
         }
     }
 
-    private static final class CurrentQueue implements Queue {
+    private final class CurrentQueue implements Queue {
         final LatencyTaskQueue queue = new LatencyTaskQueue();
 
         @Override
@@ -184,6 +215,7 @@ class LatencyTaskQueueOrderTest {
 
         @Override
         public void drain(int transaction, Driver driver) {
+            observeDrain(queue, transaction);
             var node = queue.drainReady(transaction);
             LatencyTaskQueue.TaskNode released = null;
             try {
