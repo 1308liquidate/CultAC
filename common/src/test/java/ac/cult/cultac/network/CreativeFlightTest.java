@@ -7,12 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.events.packets.PacketPlayerAbilities;
+import ac.cult.cultac.events.packets.PacketServerRegistries;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
+import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerAbilities;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Relative;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.Set;
@@ -128,10 +131,35 @@ class CreativeFlightTest {
         }
     }
 
+    /**
+     * The LocalPlayer a LOGIN after a reconfiguration creates holds no keys and sends player_input only once they
+     * change, so jump held before the switch adds no impulse after it.
+     */
+    @Test
+    void jumpHeldBeforeABackendSwitchAddsNoImpulseAfterIt() throws Exception {
+        try (var f = flying()) {
+            f.input(JUMP);
+            assertPredicted(f.tick(HOVER.add(0, IMPULSE, 0), false));
+
+            switchBackend(f);
+            f.teleport(HOVER, new RelativeFlag(0));
+            f.pongThrough(f.velocity(new Vec3(0, 2, 0)));
+
+            assertPredicted(f.tick(HOVER.add(0, 2, 0), false));
+            assertEquals(0.0, antiKb(f), "the client took the velocity");
+        }
+    }
+
     /** A player hovering at {@link #HOVER} that the server lets fly and sets flying. */
     private static JavaTickFixture flying() throws Exception {
         JavaTickFixture f = new JavaTickFixture();
         f.place(HOVER, Vec3.ZERO);
+        grantFlight(f);
+        return f;
+    }
+
+    /** A player_abilities letting the player fly and setting it flying, answered through its ping. */
+    private static void grantFlight(JavaTickFixture f) {
         var packet = new ClientboundPlayerAbilities(false, true, true, false, FLYING_SPEED, 0.1F);
         var event = new PacketSendEvent<>(
                 f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.PLAYER_ABILITIES, packet, false);
@@ -139,7 +167,22 @@ class CreativeFlightTest {
         event.getTasksAfterSend().forEach(Runnable::run);
         f.pongThrough(f.player.lastTransactionSent.get());
         assertTrue(f.player.isFlying && f.player.canFly, "the abilities did not apply");
-        return f;
+    }
+
+    /**
+     * A reconfiguration and a LOGIN answered through its ping, then the chunks and the player_abilities the new
+     * backend sends with it.
+     */
+    private static void switchBackend(JavaTickFixture f) {
+        var type = ClientboundPackets.FINISH_CONFIGURATION;
+        var finish = new PacketSendEvent<>(f.player.user, ConnectionPhase.CONFIGURATION, type, new Opaque(type), false);
+        new PacketServerRegistries().onFinishConfiguration(finish, f.player, new Opaque(type));
+        finish.getTasksAfterSend().forEach(Runnable::run);
+        f.pongThrough(ItemUseTestSupport.login(f.player, GameMode.SURVIVAL));
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) f.player.compensatedWorld.ensureValidationChunkLoaded(x, z);
+        }
+        grantFlight(f);
     }
 
     private static double antiKb(JavaTickFixture f) {
