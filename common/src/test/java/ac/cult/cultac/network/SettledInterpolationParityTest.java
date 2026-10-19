@@ -110,12 +110,8 @@ class SettledInterpolationParityTest {
                 // Timer checks pace ticks against the wall clock; both fixtures must stay inside their balance.
                 reference.resetTimerBalances();
                 candidate.resetTimerBalances();
-                skipSettledTicks(false);
-                try {
-                    old.apply(op);
-                } finally {
-                    skipSettledTicks(true);
-                }
+                forgetSettled(old.entities);
+                old.apply(op);
                 observeSettled(current.entities);
                 current.apply(op);
                 assertEquals(
@@ -135,12 +131,8 @@ class SettledInterpolationParityTest {
             Random random = new Random(seed * 31 + version.ordinal());
             for (int step = 0; step < steps; step++) {
                 long op = random.nextLong();
-                skipSettledTicks(false);
-                try {
-                    old.apply(op);
-                } finally {
-                    skipSettledTicks(true);
-                }
+                forgetSettled(old.entities);
+                old.apply(op);
                 observeSettled(current.entities);
                 current.apply(op);
                 assertEquals(
@@ -163,6 +155,7 @@ class SettledInterpolationParityTest {
 
     private void countSkips(CompensatedEntities entities, boolean counts, Runnable tick) {
         if (!counts) {
+            forgetSettled(entities);
             tick.run();
             return;
         }
@@ -613,10 +606,15 @@ class SettledInterpolationParityTest {
         }
     }
 
-    /** Off, PacketEntity#onMovement runs every tick, as before the skip. */
-    private static void skipSettledTicks(boolean skip) throws Exception {
-        Field field = PacketEntity.class.getDeclaredField("skipsSettledTicks");
-        field.setAccessible(true);
-        field.setBoolean(null, skip);
+    /** Clears every entity's settled state, so its next PacketEntity#onMovement runs in full, as before the skip. */
+    private static void forgetSettled(CompensatedEntities entities) {
+        try {
+            Field field = PacketEntity.class.getDeclaredField("settledInterpolation");
+            field.setAccessible(true);
+            for (PacketEntity entity : entities.entityMap.values()) field.set(entity, null);
+            field.set(entities.getSelf(), null);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
     }
 }

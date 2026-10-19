@@ -105,8 +105,6 @@ public class PacketEntity {
     private SimpleCollisionBox carryLocationBox;
     private @Nullable ReachInterpolationData settledInterpolation;
     private @Nullable Vec3 settledPhysicalPosition;
-    // Equivalence tests clear this so a reference fixture runs every settled tick.
-    private static boolean skipsSettledTicks = true;
     // Valid while the position, the world and its chunk epoch are the ones it was computed for.
     private @Nullable Vec3 loadedChunkPosition;
     private @Nullable CompensatedWorld loadedChunkWorld;
@@ -620,8 +618,7 @@ public class PacketEntity {
             // A settled state with the inputs it settled on makes this tick a no-op.
             if (interpolation == settledInterpolation
                     && physicalBefore == settledPhysicalPosition
-                    && interpolation.isSettled()
-                    && skipsSettledTicks) return;
+                    && interpolation.isSettled()) return;
             idleProbe = interpolation.beginIdleProbe();
         }
         carryInterpolationTargetByLocalPhysics(player);
