@@ -262,6 +262,23 @@ class EntityInteractionVisibilityTest {
         }
     }
 
+    @ParameterizedTest
+    @MethodSource("clients")
+    void anInteractionRidingAnAreaEffectCloudOutsideTheOwnTreeIsNeverHidden(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.entity(
+                    41,
+                    EntityTypes.defaults().byKey("minecraft:area_effect_cloud").id(),
+                    1.5);
+            setup.entity(
+                    42, EntityTypes.defaults().byKey("minecraft:interaction").id(), 1.5);
+            setup.wall("stone");
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            setup.player.compensatedEntities.vehicles.applyVehiclePassengers(41, new int[] {42});
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
     @Test
     void aPre263BundledSyncSetsAnEntityWithoutInterpolationOntoItsPosition() throws Exception {
         for (int type : new int[] {EntityTypeIds.FIREBALL, EntityTypeIds.ZOMBIE}) {
