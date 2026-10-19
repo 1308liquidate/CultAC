@@ -24,6 +24,9 @@ import lombok.ToString;
 
 @ToString
 public class PacketModHandler extends Check implements EngineCheck, PostPredictionListener {
+    /** A later velocity replaces the client's delta movement, so only the newest overridden ones stay candidates. */
+    static final int MAX_OVERRIDDEN_VELS = 16;
+
     double offsetToFlag;
     double maxAdvantage, immediate, ceiling, multiplier;
 
@@ -307,6 +310,7 @@ public class PacketModHandler extends Check implements EngineCheck, PostPredicti
         if (secondBread != null
                 && velocity.isVelocity()
                 && shouldCarryPreviousPacketModifier(secondBread, true, velocity.getTransaction())) {
+            if (overriddenVels.size() >= MAX_OVERRIDDEN_VELS) overriddenVels.remove(0);
             overriddenVels.add(secondBread);
         }
         if (!velocity.isVelocity()) {

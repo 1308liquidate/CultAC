@@ -31,7 +31,8 @@ public class CompensatedFireworks extends CultProcessor implements PostPredictio
     }
 
     public void removeFirework(int entityID) {
-        fireworksToRemoveNextTick.add(entityID);
+        if (activeFireworks.contains(entityID) && !fireworksToRemoveNextTick.contains(entityID))
+            fireworksToRemoveNextTick.add(entityID);
     }
 
     public int getMaxFireworksAppliedPossible() {

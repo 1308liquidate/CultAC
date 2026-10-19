@@ -35,6 +35,8 @@ import java.util.List;
 // You may not copy the check unless you are licensed under GPL
 public class ReachInterpolationData {
     private static final double REACH_PACKET_POSITION_UNCERTAINTY = 0.03125D;
+    /** Queue length past which the two oldest steps fold into one. */
+    static final int MAX_QUEUED_STEPS = 128;
 
     private SimpleCollisionBox targetLocation;
     // RC1 SteppedInterpolationHandler state belongs to this interpolation snapshot.
@@ -227,6 +229,12 @@ public class ReachInterpolationData {
     }
 
     private void addStep(Transform transform, int ticks) {
+        if (interpolationQueue.size() >= MAX_QUEUED_STEPS) {
+            // Folding the two oldest steps keeps the queued ticks, so catch-up speed still matches the client.
+            Step oldest = interpolationQueue.removeFirst();
+            Step next = interpolationQueue.removeFirst();
+            interpolationQueue.addFirst(new Step(next.transform(), oldest.ticks() + next.ticks()));
+        }
         interpolationQueue.addLast(new Step(transform, ticks));
         remainingTicks += ticks;
     }
