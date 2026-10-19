@@ -140,6 +140,20 @@ class EntityInteractionVisibilityTest {
         }
     }
 
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aWindChargeIsInRangeByItsBoxBelowItsPosition(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            // The charge's position is 3.048 above the eye, its box 2.898.
+            setup.player.compensatedEntities.addEntity(
+                    42, EntityTypeIds.WIND_CHARGE, new Vec3(.5594, 68.6679, -1.5126), 0, 0, 0);
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            setup.player.compensatedEntities.addEntity(
+                    43, EntityTypeIds.WIND_CHARGE, new Vec3(.5594, 68.6679 + .1511, -1.5126), 0, 0, 0);
+            assertTrue(setup.route(43, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
     @Test
     void rangeToleranceRemainsOneMillimetreAtThePlayersEye() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V26_3)) {

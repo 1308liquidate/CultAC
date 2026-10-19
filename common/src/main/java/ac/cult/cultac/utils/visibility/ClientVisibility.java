@@ -301,8 +301,8 @@ public final class ClientVisibility {
         // ProjectileUtil#getEntityHitResult clips the physical bounding box,
         // inflated only by the native pick radius/item margin. Reach's separate
         // 0.03125 expansion can invent an exposed point across a solid corner.
-        return hiddenForEverySelection(
-                () -> entityHidden(entity.getPossibleMovementCollisionBoxes(), positionError, pickRadius));
+        return hiddenForEverySelection(() -> entityHidden(
+                entity.toBoundingBox(player, entity.getPossibleMovementCollisionBoxes()), positionError, pickRadius));
     }
 
     public boolean entityHidden(SimpleCollisionBox target, double positionError) {
@@ -312,7 +312,7 @@ public final class ClientVisibility {
     public boolean entityInteractionHidden(PacketEntity entity, double positionError) {
         double pickRadius = EntityTypeUtil.modelType(entity.type).has(EntityTypes.PROJECTILE) ? 1.0F : 0;
         return hiddenForEverySelection(() -> {
-            var target = entity.getPossibleMovementCollisionBoxes();
+            var target = entity.toBoundingBox(player, entity.getPossibleMovementCollisionBoxes());
             var self = player.compensatedEntities.getSelf();
             double range = self.getEntityInteractionRange();
             if (!(range > 0)) return true;

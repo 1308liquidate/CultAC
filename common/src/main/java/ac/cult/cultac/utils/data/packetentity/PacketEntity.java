@@ -844,6 +844,19 @@ public class PacketEntity {
                 oldPacketLocation.getPossibleMovementLocationCombined(scratch), out, out);
     }
 
+    /**
+     * Moves {@code box}, one of this entity's position boxes (minY at its position), onto its Java bounding box:
+     * {@code AbstractWindCharge#makeBoundingBox} starts the box 0.15F below the position. Bedrock clients keep the
+     * position box. Readers of the position itself (riding offsets, eye positions) use the position box.
+     */
+    public SimpleCollisionBox toBoundingBox(CultPlayer player, SimpleCollisionBox box) {
+        if (player.isBedrockMovement()) return box;
+        if (type == EntityTypeIds.WIND_CHARGE || type == EntityTypeIds.BREEZE_WIND_CHARGE) {
+            box.offset(0, -0.15F, 0);
+        }
+        return box;
+    }
+
     public List<SimpleCollisionBox> getPossibleMovementCollisionBoxCandidates() {
         if (passengerPhysicalBox != null && riding != null) return List.of(passengerPhysicalBox.copy());
         List<SimpleCollisionBox> candidates = new ArrayList<>();

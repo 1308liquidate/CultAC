@@ -7,6 +7,7 @@ public final class EntityTypeIds {
     public static final int BEE = id("bee");
     public static final int FOX = id("fox");
     public static final int BAT = id("bat");
+    public static final int BREEZE_WIND_CHARGE = id("breeze_wind_charge");
     public static final int CAMEL = id("camel");
     public static final int CHICKEN = id("chicken");
     public static final int COD = id("cod");
@@ -51,6 +52,7 @@ public final class EntityTypeIds {
     public static final int TROPICAL_FISH = id("tropical_fish");
     public static final int TURTLE = id("turtle");
     public static final int VINDICATOR = id("vindicator");
+    public static final int WIND_CHARGE = id("wind_charge");
     public static final int WITCH = id("witch");
     public static final int ZOGLIN = id("zoglin");
     public static final int ZOMBIE = id("zombie");
