@@ -264,7 +264,14 @@ public final class ClientComponentRegistries {
         if (worldRegistries != null) worldRegistries.fallback(dimensions);
     }
 
-    private static boolean clientPayloadIsEmpty(
+    static boolean clientPayloadIsEmpty(
+            String registry, RegistryTags.Payload payload, ProtocolVersion source, ProtocolVersion client) {
+        // Untranslated tags project to a copy with one entry per payload entry.
+        if (source == client && payload != null) return payload.isEmpty();
+        return projectedPayloadIsEmpty(registry, payload, source, client);
+    }
+
+    static boolean projectedPayloadIsEmpty(
             String registry, RegistryTags.Payload payload, ProtocolVersion source, ProtocolVersion client) {
         Map<String, List<String>> named;
         if (registry.equals("minecraft:block")) named = exportTags("minecraft:block", payload);
