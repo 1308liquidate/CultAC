@@ -60,11 +60,11 @@ public class BadPacketsJ extends Check implements DecodedPacketReceiveListener {
         }
 
         if (this.rotations > 0 && !player.packetStateData.lastPacketWasTeleport) {
-            onTickPacket(player);
+            onTickPacket(player.xRot, player.yRot);
         }
     }
 
-    // isTickPacket: tick end counts for 1.21.2+ clients when no movement arrived this client tick
+    // isTickPacket: tick end closes the client tick, also for a movement packet cancelled before this check saw it
     @CultPacketHandler("serverbound.client_tick_end")
     public void onClientTickEnd(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {
         if (!player.cameraEntity.isSelf()) {
@@ -72,13 +72,14 @@ public class BadPacketsJ extends Check implements DecodedPacketReceiveListener {
             return;
         }
 
-        if (this.rotations > 0 && !player.packetStateData.receivedMovementThisClientTick) {
-            onTickPacket(player);
+        if (this.rotations > 0) {
+            // LocalPlayer#sendPosition sends no rotation while the player's equals the last one it sent
+            onTickPacket(player.packetStateData.lastSentTickYaw, player.packetStateData.lastSentTickPitch);
         }
     }
 
-    private void onTickPacket(CultPlayer player) {
-        if (this.yaw != player.xRot || this.pitch != player.yRot) {
+    private void onTickPacket(float tickYaw, float tickPitch) {
+        if (!Float.isNaN(tickYaw) && (this.yaw != tickYaw || this.pitch != tickPitch)) {
             while (this.rotations-- > 0) flag();
         }
         this.rotations = 0;

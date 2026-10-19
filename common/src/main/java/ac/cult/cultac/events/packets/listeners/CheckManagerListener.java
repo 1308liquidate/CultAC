@@ -580,6 +580,10 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             // Only LocalPlayer#tick sends movement, and it requires ClientPacketListener#hasClientLoaded.
             player.packetStateData.playerLoadedIntoLevel = true;
             if (packet.hasPosition()) player.packetStateData.lastSentTickPosition = position;
+            if (packet.hasRotation()) {
+                player.packetStateData.lastSentTickYaw = packet.yaw();
+                player.packetStateData.lastSentTickPitch = packet.pitch();
+            }
             // LocalPlayer#sendPosition sends this tick's START/STOP_SPRINTING before its movement.
             onLocalPlayerSprintTick(player);
         }

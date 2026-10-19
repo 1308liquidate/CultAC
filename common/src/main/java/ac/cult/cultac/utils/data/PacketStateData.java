@@ -52,6 +52,10 @@ public class PacketStateData {
     public Vec3 clientSidePosition = new Vec3(0, 0, 0);
     // LocalPlayer#xLast: the position of the client's last tick movement packet, unknown until one arrives.
     public Vec3 lastSentTickPosition = null;
+    // The rotation of the client's last tick movement packet that carried one, NaN while unknown. A new LocalPlayer
+    // starts LocalPlayer#yRotLast and xRotLast at zero.
+    public float lastSentTickYaw = Float.NaN;
+    public float lastSentTickPitch = Float.NaN;
     // LocalPlayer#tick emits passenger Rot immediately before MoveVehicle; packet-handler echoes send MoveVehicle
     // alone.
     private boolean awaitingVehicleMoveAfterPassengerRotation = false;
