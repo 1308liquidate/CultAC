@@ -171,6 +171,7 @@ public class PlayerDataManager {
         }
         if (tracked == null) {
             clearExemptions(user);
+            if (user.getPlayer() != null) releaseConnection(user, null, transferred);
             return false;
         }
 
@@ -180,13 +181,18 @@ public class PlayerDataManager {
 
     private void cleanupOwnedSession(CultPlayer tracked, boolean transferred) {
         User user = tracked.user;
-        UUID uuid = user.getUUID();
 
         tracked.onRemove();
         clearExemptions(user);
         Channels.QUIT.fire(ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(tracked));
         if (ac.cult.cultac.runtime.RuntimeEnvironment.host() != null)
             ac.cult.cultac.runtime.RuntimeEnvironment.host().unbindUser(user.getChannel());
+        releaseConnection(user, tracked, transferred);
+    }
+
+    /** Releases state owned by the connection rather than by its CultPlayer, which may already be gone. */
+    private void releaseConnection(User user, @Nullable CultPlayer tracked, boolean transferred) {
+        UUID uuid = user.getUUID();
         if (!transferred && CultAPI.INSTANCE.getDataStoreLifecycle() != null) {
             CultAPI.INSTANCE
                     .getDataStoreLifecycle()
