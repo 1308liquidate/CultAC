@@ -42,7 +42,8 @@ final class BaseCollisionProbe {
             SimpleCollisionBox attemptedMovementExtents,
             ProbeDimensions dimensions,
             JavaCollisionState actor,
-            boolean followCandidateVerticalMovement) {
+            boolean followCandidateVerticalMovement,
+            double horizontalInputReach) {
         // Start with player bounding box
         SimpleCollisionBox grabBoxesBB = context.getFromMaximumExtent();
 
@@ -61,10 +62,15 @@ final class BaseCollisionProbe {
             if (target.y > 0) grabBoxesBB.maxY += target.y;
         }
         grabBoxesBB.expand(maxEpsilon(dimensions.epsilon()));
+        SimpleCollisionBox blockQuery = horizontalInputReach > 0.0D
+                ? grabBoxesBB
+                        .copy()
+                        .expand(horizontalInputReach * stuckSpeed.x, 0.0D, horizontalInputReach * stuckSpeed.z)
+                : grabBoxesBB;
 
         List<SimpleCollisionBox> collisions = probeCollisions;
         collisions.clear();
-        Collisions.getCollisionBoxes(player, grabBoxesBB, collisions, false, playerPos.y, actor);
+        Collisions.getCollisionBoxes(player, blockQuery, collisions, false, playerPos.y, actor);
 
         List<SimpleCollisionBox> found = probeUnknown;
         found.clear();
