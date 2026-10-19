@@ -14,7 +14,7 @@ public final class NativePlayerSet extends AbstractSet<PlatformPlayer> {
 
     public Iterator<PlatformPlayer> iterator() {
         return nativePlayers.stream()
-                .map(player -> CultAPI.INSTANCE.getPlatformPlayerFactory().getFromNativePlayerType(player))
+                .map(player -> CultAPI.INSTANCE.getPlatformPlayerFactory().getUncachedFromNativePlayerType(player))
                 .iterator();
     }
 

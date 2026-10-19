@@ -53,6 +53,16 @@ public abstract class AbstractPlatformPlayerFactory<T> implements PlatformPlayer
         return cache.addOrGetPlayer(uuid, platformPlayer);
     }
 
+    @SuppressWarnings("unchecked")
+    @Override
+    public final PlatformPlayer getUncachedFromNativePlayerType(@NotNull Object playerObject) {
+        T nativePlayer = (T) Objects.requireNonNull(playerObject, "playerObject");
+        PlatformPlayer cachedPlayer = cache.getPlayer(getPlayerUUID(nativePlayer));
+        return cachedPlayer != null && cachedPlayer.getNative() == nativePlayer
+                ? cachedPlayer
+                : createPlatformPlayer(nativePlayer);
+    }
+
     @Override
     public final void invalidatePlayer(@NotNull UUID uuid) {
         cache.removePlayer(uuid);
