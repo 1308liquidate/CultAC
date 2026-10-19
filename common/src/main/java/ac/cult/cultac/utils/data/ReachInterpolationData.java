@@ -67,8 +67,6 @@ public class ReachInterpolationData {
     private boolean boundsValid;
     private double boundsMinX, boundsMinY, boundsMinZ, boundsMaxX, boundsMaxY, boundsMaxZ;
     private boolean boundsFullBlock;
-    // Equivalence tests clear this so a reference fixture computes every read.
-    private static boolean keepsBounds = true;
 
     private ReachInterpolationData(ReachInterpolationData other) {
         this.targetLocation = other.targetLocation.copy();
@@ -436,7 +434,7 @@ public class ReachInterpolationData {
     }
 
     public SimpleCollisionBox getPossibleMovementLocationCombined(SimpleCollisionBox out) {
-        if (boundsValid && keepsBounds)
+        if (boundsValid)
             return out.set(boundsMinX, boundsMinY, boundsMinZ, boundsMaxX, boundsMaxY, boundsMaxZ, boundsFullBlock);
         if (interpolationQueue != null) steppedBox(steppedCurrent.position(), out);
         else
