@@ -15,6 +15,7 @@ import ac.cult.cultac.utils.latency.CompensatedWorld;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientBlockProperties;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Set;
@@ -30,6 +31,9 @@ import lombok.Data;
 // matching block-change acknowledgement (ServerGamePacketListenerImpl#handleUseItemOn).
 public class GhostBlockMitigator extends CultProcessor implements PostPredictionListener {
 
+    // The server answers an in-range click within a round trip; only dropped or out-of-range clicks wait for the cap.
+    private static final int MAX_PSEUDO_PLACES = 256;
+
     public GhostBlockMitigator(CultPlayer player) {
         super(player);
     }
@@ -44,7 +48,7 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
     // This should be persistent, except on chunk unloads (prevent slight memory leak)
     // Make it a set to cap the limit of this list, to stop crashes
     private final Set<BlockPos> bucketUseLocations = new HashSet<>();
-    private final Set<GhostBlock> pseudoPlaces = new HashSet<>();
+    private final Map<BlockPos, GhostBlock> pseudoPlaces = new LinkedHashMap<>();
 
     @Override
     public void onPredictionComplete(final PredictionComplete predictionComplete) {
@@ -73,7 +77,7 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
                 }
             }
 
-            for (GhostBlock ghostBlock : pseudoPlaces) {
+            for (GhostBlock ghostBlock : pseudoPlaces.values()) {
                 // ignore end crystals
                 if (ghostBlock.getItemUsed() != null && ghostBlock.getItemUsed().getItem() == ItemTypes.END_CRYSTAL)
                     continue;
@@ -102,9 +106,12 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
                 .removeIf(entry -> player.compensatedWorld.getChunk(
                                 entry.getKey().getX() >> 4, entry.getKey().getZ() >> 4)
                         == null);
-        pseudoPlaces.removeIf(ghost -> player.compensatedWorld.getChunk(
-                        ghost.getPosition().getX() >> 4, ghost.getPosition().getZ() >> 4)
-                == null);
+        pseudoPlaces
+                .values()
+                .removeIf(ghost -> player.compensatedWorld.getChunk(
+                                ghost.getPosition().getX() >> 4,
+                                ghost.getPosition().getZ() >> 4)
+                        == null);
         bucketUseLocations.removeIf(
                 location -> player.compensatedWorld.getChunk(location.getX() >> 4, location.getZ() >> 4) == null);
     }
@@ -139,7 +146,10 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
     }
 
     public void handlePseudoPlace(GhostBlock ghostBlock) {
-        pseudoPlaces.add(ghostBlock);
+        if (pseudoPlaces.size() >= MAX_PSEUDO_PLACES && !pseudoPlaces.containsKey(ghostBlock.getPosition())) {
+            pseudoPlaces.remove(pseudoPlaces.keySet().iterator().next());
+        }
+        pseudoPlaces.put(ghostBlock.getPosition(), ghostBlock);
     }
 
     // This method is called if and only if it isn't placed on a known desync pos
