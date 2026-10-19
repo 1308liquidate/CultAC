@@ -17,6 +17,15 @@ import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 
 public class Sneaking implements UncertaintyHandler {
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        StuckEdgeData lastOnEdge = lastResult == null
+                ? null
+                : lastResult.getSimulationContext().getWorldData().getSneak();
+        return (lastOnEdge == null || !lastOnEdge.isOnEdge())
+                && !context.getWorldData().getSneak().isOnEdge();
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,

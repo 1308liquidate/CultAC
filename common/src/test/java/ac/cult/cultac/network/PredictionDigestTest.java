@@ -27,6 +27,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import sun.misc.Unsafe;
 
@@ -89,8 +90,14 @@ class PredictionDigestTest {
     }
 
     static String dump(long seed, Map<String, Integer> stats) throws Exception {
+        return dump(seed, stats, f -> {});
+    }
+
+    /** {@code prepare} runs on the fixture before the scenario. */
+    static String dump(long seed, Map<String, Integer> stats, Consumer<JavaTickFixture> prepare) throws Exception {
         StringBuilder sb = new StringBuilder();
         try (var f = new JavaTickFixture()) {
+            prepare.accept(f);
             SimulationProcessor processor = f.player.checkManager.getSimulationProcessor();
             RecordingProbe probe = new RecordingProbe(sb);
             Field field = SimulationProcessor.class.getDeclaredField("collisionProbe");

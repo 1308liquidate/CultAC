@@ -12,6 +12,21 @@ import ac.cult.cultac.utils.nmsutil.FluidFallingAdjustedMovement;
 
 public class Ladder implements UncertaintyHandler {
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        boolean previousClimbBoost = lastResult != null
+                && lastResult
+                        .getSimulationContext()
+                        .getWorldData()
+                        .getClimbing()
+                        .determineOptimistically()
+                && !lastResult.getSimulationContext().usesFallFlyingMovement();
+        return !previousClimbBoost
+                && (!context.getWorldData().getClimbingAtStart().determineOptimistically()
+                        || context.usesFallFlyingMovement()
+                        || context.getWorldData().mustBeInLiquid());
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,

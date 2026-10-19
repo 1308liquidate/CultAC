@@ -11,6 +11,12 @@ import ac.cult.cultac.utils.math.Vec3;
 public class Riptide implements UncertaintyHandler {
 
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        return (lastResult == null || lastResult.getSimulationContext().getRiptideLevel() == 0)
+                && context.getRiptideLevel() == 0;
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,

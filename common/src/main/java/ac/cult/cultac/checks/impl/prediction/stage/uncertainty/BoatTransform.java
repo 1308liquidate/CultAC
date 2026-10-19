@@ -18,6 +18,11 @@ import java.util.List;
 
 public class BoatTransform implements UncertaintyHandler {
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        return context.getVehicle() == null || !EntityTypeUtil.isBoat(context.getVehicle().type);
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,

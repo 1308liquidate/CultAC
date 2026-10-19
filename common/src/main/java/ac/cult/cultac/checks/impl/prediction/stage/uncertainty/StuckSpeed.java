@@ -11,6 +11,18 @@ import ac.cult.cultac.utils.math.VectorUtils;
 
 public class StuckSpeed implements UncertaintyHandler {
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        return !player.isBedrockMovement() && JavaMovementEngine.contextUsesExactEffects(context)
+                || lastResult == null
+                || lastResult
+                                .getSimulationContext()
+                                .getWorldData()
+                                .getStuckSpeed()
+                                .getUnknownStuckSpeedMultiplier()
+                        == null;
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,

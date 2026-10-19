@@ -14,6 +14,15 @@ import ac.cult.cultac.utils.nmsutil.ClientBlockProperties;
 
 public class BouncyBlock implements UncertaintyHandler {
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        if (lastResult == null) return true;
+        int onBlock = lastResult.getSimulationContext().getWorldData().getOnBlock();
+        return !BlockIds.is(onBlock, BlockIds.SLIME_BLOCK)
+                && (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_2)
+                        || !ClientBlockProperties.isBed(onBlock));
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,
