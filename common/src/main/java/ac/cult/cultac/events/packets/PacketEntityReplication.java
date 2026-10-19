@@ -1216,6 +1216,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             player.compensatedEntities.vehicles.applyVehiclePassengers(vehicleId, passengers);
             if (mountsLocalPlayer) {
                 player.vehicleData.wasVehicleSwitch = true;
+                // A velocity the client handled before this mount was for the player; Entity#rideTick zeroes it.
+                if (!player.isBedrockMovement()) {
+                    player.checkManager.getKnockbackHandler().clearVelocitiesFromSourceEntity(player.entityID);
+                }
             }
             // ClientPacketListener#handleSetEntityPassengersPacket turns a player newly aboard a boat to its yaw.
             if (firstMount && mounted.isBoat()) {
