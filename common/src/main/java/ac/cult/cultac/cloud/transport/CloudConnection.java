@@ -1242,6 +1242,7 @@ public final class CloudConnection {
         if (socket != gone) return;
         lastLifeNanos = System.nanoTime() - openedNanos;
         socket = null;
+        dropQueued();
         long ended = generation;
         if (why == null) LogUtil.info("Cloud socket closed (server id " + serverId + ")");
         else LogUtil.warn("Cloud socket closed: " + redacted(why) + " (server id " + serverId + ")");
