@@ -185,6 +185,11 @@ public class FairReach extends Check implements CheckListener {
         target.setTarget(x, y, z);
     }
 
+    /** A replacement client level holds none of the old level's players. */
+    public void clearLevel() {
+        targetPlayers.clear();
+    }
+
     public void onPlayerQuit() {
         if (this.tickStartTask != null) this.tickStartTask.cancel(true);
         if (this.tickEndTask != null) this.tickEndTask.cancel(true);

@@ -13,6 +13,7 @@ import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.bedrock.player.BedrockPlayerState;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsG;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsM;
+import ac.cult.cultac.checks.impl.combat.FairReach;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
 import ac.cult.cultac.network.codec.ModelRegistryNamesState;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -21,18 +22,21 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundLogin;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetHealth;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.PlayerSpawnInfo;
+import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.anticheat.update.BlockPlace;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.math.Vec3;
 import io.netty.channel.embedded.EmbeddedChannel;
 import java.lang.reflect.Field;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.Test;
@@ -326,6 +330,54 @@ public final class PacketPlayerRespawnLifecycleTest {
     }
 
     @Test
+    public void loginSendDropsFairReachTargetsOfTheOldLevel() throws Exception {
+        OfflineCultTestBootstrap.installConfig();
+        CultPlayer player = offlineJavaPlayer();
+        try {
+            Map<?, ?> targets = fairReachTargets(player);
+            addFairReachTarget(player, 42);
+            assertEquals(1, targets.size());
+
+            ClientboundLogin login = loginPacket(true);
+            new PacketPlayerRespawn().onLogin(sendEvent(player, ClientboundPackets.LOGIN, login), player, login);
+
+            assertTrue(targets.isEmpty());
+            addFairReachTarget(player, 43);
+            assertEquals("A player spawned after the LOGIN belongs to the new level", 1, targets.size());
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
+    @Test
+    public void worldChangeRespawnSendDropsFairReachTargetsOfTheOldLevel() throws Exception {
+        OfflineCultTestBootstrap.installConfig();
+        CultPlayer player = offlineJavaPlayer();
+        try {
+            var listener = new PacketPlayerRespawn();
+            ClientboundLogin login = loginPacket(true);
+            listener.onLogin(sendEvent(player, ClientboundPackets.LOGIN, login), player, login);
+            Map<?, ?> targets = fairReachTargets(player);
+            addFairReachTarget(player, 42);
+
+            ClientboundRespawn sameDimension = respawnPacket();
+            listener.onRespawn(sendEvent(player, ClientboundPackets.RESPAWN, sameDimension), player, sameDimension);
+            assertEquals("A same-dimension respawn keeps the level", 1, targets.size());
+
+            var nether = new ClientboundRespawn(
+                    new PlayerSpawnInfo(
+                            ModelRegistryNamesState.defaults().id("minecraft:dimension_type", "minecraft:the_nether"),
+                            "minecraft:the_nether",
+                            GameMode.SURVIVAL),
+                    (byte) 0);
+            listener.onRespawn(sendEvent(player, ClientboundPackets.RESPAWN, nether), player, nether);
+            assertTrue(targets.isEmpty());
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
+    @Test
     public void bedrockLoginKeepsActorsUntilTheirNativeRemoval() throws Exception {
         OfflineCultTestBootstrap.installConfig();
         CultPlayer player = offlinePlayer(true);
@@ -431,6 +483,19 @@ public final class PacketPlayerRespawnLifecycleTest {
     private static <R extends ac.cult.cultac.protocol.packet.clientbound.ClientboundPacket>
             PacketSendEvent<R> sendEvent(CultPlayer player, PacketType<R> type, R packet) {
         return new PacketSendEvent<>(player.user, ConnectionPhase.PLAY, type, packet, false);
+    }
+
+    private static Map<?, ?> fairReachTargets(CultPlayer player) throws Exception {
+        Field field = FairReach.class.getDeclaredField("targetPlayers");
+        field.setAccessible(true);
+        return (Map<?, ?>) field.get(player.checkManager.getListener(FairReach.class));
+    }
+
+    private static void addFairReachTarget(CultPlayer player, int entityId) {
+        var spawn = new ClientboundAddEntity(entityId, "minecraft:player", new Vec3d(0, 64, 0), 0, 0, 0);
+        player.checkManager
+                .getListener(FairReach.class)
+                .onAddEntity(sendEvent(player, ClientboundPackets.ADD_ENTITY, spawn), player, spawn);
     }
 
     private static boolean booleanField(Object target, String name) throws Exception {
