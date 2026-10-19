@@ -76,6 +76,7 @@ import ac.grim.grimac.api.handler.ResyncHandler;
 import com.viaversion.viaversion.api.Via;
 import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.protocol.packet.PacketTracker;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -83,9 +84,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.UUID;
@@ -155,8 +154,8 @@ public class CultPlayer implements GrimUser {
     /** The ids in {@link #transactionsSent}, which never holds one id twice. */
     private final IntOpenHashSet transactionIdsSent = new IntOpenHashSet();
 
-    private final @NotNull Map<@NotNull Integer, @NotNull TrackedTransaction> transactionsPendingSend =
-            new HashMap<>(4);
+    private final Int2ObjectOpenHashMap<@NotNull TrackedTransaction> transactionsPendingSend =
+            new Int2ObjectOpenHashMap<>(4);
     /** Ping ids a client cannot predict from the ones it has answered. */
     private final SecureRandom wireIds = wireIdSource();
 
