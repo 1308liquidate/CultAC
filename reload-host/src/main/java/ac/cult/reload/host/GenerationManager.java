@@ -114,7 +114,7 @@ public final class GenerationManager implements AutoCloseable {
         }
     }
 
-    /** Bounds each hot engine load and start, and every stop; a call past it is fenced, never interrupted. */
+    /** Bounds hot load, start, supersede and stop calls; a call past it is fenced, never interrupted. */
     void lifecycleTimeout(java.time.Duration timeout) {
         lifecycleTimeout = Objects.requireNonNull(timeout);
     }
@@ -197,8 +197,8 @@ public final class GenerationManager implements AutoCloseable {
         } catch (Throwable failure) {
             if (initialBundled) throw failure;
             // A boot build or persisted runtime that cannot start gives way to the bundled runtime.
-            report.accept("Starting the bundled CultAC runtime; " + generation.artifact.display()
-                    + " failed to start: " + failure);
+            report.accept("Starting the bundled CultAC runtime; " + generation.artifact.display() + " failed to start: "
+                    + failure);
             synchronized (this) {
                 generation.state = State.DRAINING;
             }
@@ -246,6 +246,11 @@ public final class GenerationManager implements AutoCloseable {
     }
 
     public CompletionStage<String> update(String filename) {
+        return update(filename, () -> "");
+    }
+
+    /** Records the boot selection with publication, even if the operator's request has already timed out. */
+    CompletionStage<String> update(String filename, Supplier<String> recordSelection) {
         return CompletableFuture.supplyAsync(
                 () -> {
                     try {
@@ -274,11 +279,13 @@ public final class GenerationManager implements AutoCloseable {
                                         current.home.resolve("distribution.jar"),
                                         StandardCopyOption.REPLACE_EXISTING);
                             }
+                            String selectionNote;
                             synchronized (this) {
                                 next.state = State.DRAINING;
+                                selectionNote = selectionNote(recordSelection);
                             }
                             retire(next);
-                            return "Already running " + next.artifact.display();
+                            return "Already running " + next.artifact.display() + selectionNote;
                         }
                         try {
                             lifecycle(next, "start", () -> {
@@ -293,11 +300,13 @@ public final class GenerationManager implements AutoCloseable {
                             throw failure;
                         }
                         Generation previous;
+                        String selectionNote;
                         try {
                             try (var settings = new ConfigFiles(directory, next.runtime.configurationFiles())) {
                                 synchronized (this) {
                                     if (closing) throw new IllegalStateException("Host is stopping");
                                     persist(next);
+                                    selectionNote = selectionNote(recordSelection);
                                     previous = current;
                                     current = next;
                                     next.state = State.CURRENT;
@@ -322,12 +331,26 @@ public final class GenerationManager implements AutoCloseable {
                             superseded(previous);
                             retire(previous);
                         }
-                        return "Activated " + next.artifact.display();
+                        return "Activated " + next.artifact.display() + selectionNote;
                     } catch (Throwable failure) {
                         throw new CompletionException(RuntimeFailures.detached(failure));
                     }
                 },
                 management);
+    }
+
+    /** An already-running retry may repair its selection only while that build is still current. */
+    synchronized String recordSelection(String expectedBuild, Supplier<String> recordSelection) {
+        if (closing || current == null || !current.artifact.build().equals(expectedBuild)) return null;
+        return selectionNote(recordSelection);
+    }
+
+    private static String selectionNote(Supplier<String> recordSelection) {
+        try {
+            return recordSelection.get();
+        } catch (RuntimeException failure) {
+            return "; the next boot may start the last installed build instead: " + failure;
+        }
     }
 
     /** @param hot an older generation keeps running, so a hung load is abandoned after the lifecycle timeout */
@@ -525,7 +548,7 @@ public final class GenerationManager implements AutoCloseable {
     /** Tells a generation that has just been replaced; what it throws is reported, and it drains regardless. */
     private void superseded(Generation generation) {
         try {
-            invoke(generation, () -> {
+            lifecycle(generation, "supersede", () -> {
                 generation.runtime.superseded();
                 return null;
             });
