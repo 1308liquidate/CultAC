@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
+import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
@@ -13,14 +14,17 @@ import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.UncertaintyHandler;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.ValidMovements;
 import ac.cult.cultac.manager.player.SetbackTeleportUtil;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.BubbleColumnData;
 import ac.cult.cultac.utils.data.PistonPushes;
 import ac.cult.cultac.utils.data.StuckEdgeData;
 import ac.cult.cultac.utils.data.StuckSpeedData;
+import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientBlockProperties;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -101,6 +105,10 @@ class UncertaintyFilterEquivalenceTest {
             int[] counts = skips.get(handler.getClass().getSimpleName());
             assertTrue(counts != null && counts[0] > 0, handler.getClass().getSimpleName() + " never skipped");
         }
+        for (String name : MUST_ACT) {
+            int[] counts = skips.get(name);
+            assertTrue(counts != null && counts[3] > 0, name + " never moved a trace under a variant");
+        }
         System.out.println("skipped/called " + format(skips));
     }
 
@@ -113,6 +121,8 @@ class UncertaintyFilterEquivalenceTest {
                 .append(counts[1])
                 .append(" acting variants ")
                 .append(counts[2])
+                .append(" moving ")
+                .append(counts[3])
                 .append(' '));
         return sb.toString();
     }
@@ -143,32 +153,61 @@ class UncertaintyFilterEquivalenceTest {
 
     private static final int SLIME_STATE = 14379;
     private static final int BED_STATE = firstBedState();
+    private static final int FIREWORK = 1_000_001;
+
+    /** Handlers whose predicate the scenarios alone never turn false; a variant must make each one move a trace. */
+    private static final Set<String> MUST_ACT = Set.of("BoatTransform", "Fireworks", "Honey", "StuckSpeed");
 
     private static final List<Variant> VARIANTS = List.of(
-            new Variant(Owner.WORLD, "inWater", () -> DesyncStatus.TRUE),
-            new Variant(Owner.WORLD, "inLava", () -> DesyncStatus.TRUE),
-            new Variant(Owner.WORLD, "inFlowingLiquid", () -> DesyncStatus.TRUE),
-            new Variant(Owner.WORLD, "mightBeInBlock", () -> true),
-            new Variant(Owner.WORLD, "climbingAtStart", () -> DesyncStatus.TRUE),
-            new Variant(Owner.WORLD, "fishingRodPulls", UncertaintyFilterEquivalenceTest::box),
-            new Variant(Owner.WORLD, "sneak", () -> new StuckEdgeData(true, false, false, true, false)),
-            new Variant(Owner.WORLD, "pistonPushes", () -> new PistonPushes(box(), Set.of())),
-            new Variant(Owner.LAST_WORLD, "climbing", () -> DesyncStatus.TRUE),
-            new Variant(Owner.LAST_WORLD, "onBlock", () -> SLIME_STATE),
-            new Variant(Owner.LAST_WORLD, "onBlock", () -> BED_STATE),
-            new Variant(Owner.LAST_WORLD, "honeySlide", () -> DesyncStatus.TRUE),
-            new Variant(Owner.LAST_WORLD, "bubbleColumn", () -> new BubbleColumnData(1, 1, 1, 1)),
+            Variant.of(Owner.WORLD, "inWater", () -> DesyncStatus.TRUE),
+            Variant.of(Owner.WORLD, "inLava", () -> DesyncStatus.TRUE),
+            Variant.of(Owner.WORLD, "inFlowingLiquid", () -> DesyncStatus.TRUE),
+            Variant.of(Owner.WORLD, "mightBeInBlock", () -> true),
+            Variant.of(Owner.WORLD, "climbingAtStart", () -> DesyncStatus.TRUE),
+            Variant.of(Owner.WORLD, "fishingRodPulls", UncertaintyFilterEquivalenceTest::box),
+            Variant.of(Owner.WORLD, "sneak", () -> new StuckEdgeData(true, false, false, true, false)),
+            Variant.of(Owner.WORLD, "pistonPushes", () -> new PistonPushes(box(), Set.of())),
+            Variant.of(Owner.LAST_WORLD, "climbing", () -> DesyncStatus.TRUE),
+            Variant.of(Owner.LAST_WORLD, "onBlock", () -> SLIME_STATE),
+            Variant.of(Owner.LAST_WORLD, "onBlock", () -> BED_STATE),
+            Variant.of(Owner.LAST_WORLD, "honeySlide", () -> DesyncStatus.TRUE),
+            Variant.of(Owner.LAST_WORLD, "bubbleColumn", () -> new BubbleColumnData(1, 1, 1, 1)),
+            Variant.of(Owner.LAST_WORLD, "stuckSpeed", UncertaintyFilterEquivalenceTest::cobweb),
+            Variant.of(Owner.LAST_WORLD, "pistonPushes", () -> new PistonPushes(box(), Set.of())),
+            Variant.of(Owner.LAST_WORLD, "sneak", () -> new StuckEdgeData(false, true, true, false, true)),
+            Variant.of(Owner.CONTEXT, "riptideLevel", () -> 3),
+            Variant.of(Owner.CONTEXT, "isTestingPointThree", () -> true),
+            Variant.of(Owner.CONTEXT, "gliding", () -> true),
+            Variant.of(Owner.CONTEXT, "version", () -> ClientVersion.V_1_21_4),
+            Variant.of(Owner.CONTEXT, "vehicle", UncertaintyFilterEquivalenceTest::boat),
+            Variant.of(Owner.LAST_CONTEXT, "riptideLevel", () -> 3),
+            Variant.of(Owner.LAST_CONTEXT, "gliding", () -> true),
+            Variant.of(Owner.FIREWORKS, "activeFireworks", () -> IntArrayList.of(FIREWORK)),
             new Variant(
-                    Owner.LAST_WORLD,
-                    "stuckSpeed",
-                    () -> new StuckSpeedData(new Vec3(0.25, 0.05, 0.25), new Vec3(0.25, 0.05, 0.25))),
-            new Variant(Owner.LAST_WORLD, "pistonPushes", () -> new PistonPushes(box(), Set.of())),
-            new Variant(Owner.LAST_WORLD, "sneak", () -> new StuckEdgeData(false, true, true, false, true)),
-            new Variant(Owner.CONTEXT, "riptideLevel", () -> 3),
-            new Variant(Owner.CONTEXT, "isTestingPointThree", () -> true),
-            new Variant(Owner.CONTEXT, "gliding", () -> true),
-            new Variant(Owner.LAST_CONTEXT, "riptideLevel", () -> 3),
-            new Variant(Owner.LAST_CONTEXT, "gliding", () -> true));
+                    "honey before 1.21.11",
+                    List.of(
+                            new Edit(Owner.CONTEXT, "version", () -> ClientVersion.V_1_21_4),
+                            new Edit(Owner.LAST_WORLD, "honeySlide", () -> DesyncStatus.TRUE))),
+            new Variant(
+                    "stuck speed before 1.21.11",
+                    List.of(
+                            new Edit(Owner.CONTEXT, "version", () -> ClientVersion.V_1_21_4),
+                            new Edit(Owner.LAST_WORLD, "stuckSpeed", UncertaintyFilterEquivalenceTest::cobweb))),
+            new Variant(
+                    "boat ticked by the client",
+                    List.of(
+                            new Edit(Owner.CONTEXT, "vehicle", UncertaintyFilterEquivalenceTest::boat),
+                            new Edit(Owner.PACKET_STATE, "vehicleMovementFromClientTick", () -> true))));
+
+    private static final Edit LAST_ON_GROUND = new Edit(Owner.WORLD, "lastOnGround", () -> null);
+
+    private static StuckSpeedData cobweb() {
+        return new StuckSpeedData(new Vec3(0.25, 0.05, 0.25), new Vec3(0.25, 0.05, 0.25));
+    }
+
+    private static PacketEntity boat() {
+        return new PacketEntity(EntityTypeIds.OAK_BOAT, 1_000_000);
+    }
 
     @Test
     void variantStatesAreWhatTheyClaim() {
@@ -195,24 +234,28 @@ class UncertaintyFilterEquivalenceTest {
         WORLD,
         LAST_WORLD,
         CONTEXT,
-        LAST_CONTEXT
+        LAST_CONTEXT,
+        PACKET_STATE,
+        FIREWORKS
     }
 
-    /** One field of the context, the last context or either's world set to a value the scenarios never reach. */
-    private record Variant(Owner owner, String field, Supplier<Object> supplier) {
-        Object owner(SimulationContext context, PredictionResult lastResult) {
+    /** One field of the player, the context, the last context or either's world. */
+    private record Edit(Owner owner, String field, Supplier<Object> supplier) {
+        Object owner(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
             SimulationContext last = lastResult == null ? null : lastResult.getSimulationContext();
             return switch (owner) {
                 case WORLD -> context.getWorldData();
                 case LAST_WORLD -> last == null ? null : last.getWorldData();
                 case CONTEXT -> context;
                 case LAST_CONTEXT -> last;
+                case PACKET_STATE -> player.packetStateData;
+                case FIREWORKS -> player.compensatedFireworks;
             };
         }
 
         Object set(Object target, Object to) {
             try {
-                Field f = target.getClass().getDeclaredField(field);
+                Field f = field(target.getClass());
                 f.setAccessible(true);
                 Object old = f.get(target);
                 f.set(target, to);
@@ -222,13 +265,42 @@ class UncertaintyFilterEquivalenceTest {
             }
         }
 
-        Object value() {
-            return supplier.get();
+        private Field field(Class<?> type) throws NoSuchFieldException {
+            for (Class<?> c = type; c != null; c = c.getSuperclass()) {
+                try {
+                    return c.getDeclaredField(field);
+                } catch (NoSuchFieldException ignored) {
+                }
+            }
+            throw new NoSuchFieldException(type + "." + field);
+        }
+    }
+
+    /** Fields set together to values the scenarios never reach, restored afterwards. */
+    private record Variant(String label, List<Edit> edits) {
+        static Variant of(Owner owner, String field, Supplier<Object> supplier) {
+            return new Variant(owner + "." + field, List.of(new Edit(owner, field, supplier)));
+        }
+
+        /** Applies every edit and returns the undo, or null if an owner is absent. */
+        Runnable apply(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+            Object[] owners = new Object[edits.size()];
+            for (int i = 0; i < owners.length; i++) {
+                owners[i] = edits.get(i).owner(player, context, lastResult);
+                if (owners[i] == null) return null;
+            }
+            Object[] old = new Object[owners.length];
+            for (int i = 0; i < owners.length; i++) {
+                old[i] = edits.get(i).set(owners[i], edits.get(i).supplier().get());
+            }
+            return () -> {
+                for (int i = owners.length - 1; i >= 0; i--) edits.get(i).set(owners[i], old[i]);
+            };
         }
 
         @Override
         public String toString() {
-            return owner + "." + field;
+            return label;
         }
     }
 
@@ -276,20 +348,21 @@ class UncertaintyFilterEquivalenceTest {
             boolean skip = delegate.skipsContext(player, context, lastResult);
             DesyncStatus ground = context.getWorldData().getLastOnGround();
             MovementTrace out = delegate.handleMovementTrace(player, valid, result, context, lastResult, trace, end);
-            int[] counts = skips.computeIfAbsent(name, k -> new int[3]);
+            int[] counts = skips.computeIfAbsent(name, k -> new int[4]);
             if (counts[1]++ % 5 == 0) {
                 for (Variant variant : VARIANTS) {
-                    Object owner = variant.owner(context, lastResult);
-                    if (owner == null) continue;
-                    Object old = variant.set(owner, variant.value());
+                    Runnable undo = variant.apply(player, context, lastResult);
+                    if (undo == null) continue;
                     try {
                         if (delegate.skipsContext(player, context, lastResult)) {
                             adversarial(player, valid, result, context, lastResult, name + " with " + variant);
                         } else {
                             counts[2]++;
+                            if (MUST_ACT.contains(name) && moves(player, valid, result, context, lastResult))
+                                counts[3]++;
                         }
                     } finally {
-                        variant.set(owner, old);
+                        undo.run();
                     }
                 }
             }
@@ -322,6 +395,33 @@ class UncertaintyFilterEquivalenceTest {
                 }
             }
             if (context.getWorldData().getLastOnGround() != ground) mismatches.add(label + " wrote lastOnGround");
+        }
+
+        /** Whether the handler returns another trace for some adversarial start and end. */
+        private boolean moves(
+                CultPlayer player,
+                ValidMovements valid,
+                PredictionResult result,
+                SimulationContext context,
+                PredictionResult lastResult) {
+            DesyncStatus ground = context.getWorldData().getLastOnGround();
+            try {
+                for (Vec3 start : STARTS) {
+                    PredVector vector = new PredVector(start);
+                    MovementTrace probe = first
+                            ? MovementTrace.start(vector)
+                            : new MovementTrace(vector, Vec3.ZERO, Vec3.ZERO, Vec3.ZERO, Vec3.ZERO);
+                    for (Vec3 to : ENDS) {
+                        if (delegate.handleMovementTrace(player, valid, result, context, lastResult, probe, to)
+                                != probe) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            } finally {
+                LAST_ON_GROUND.set(context.getWorldData(), ground);
+            }
         }
 
         @Override
