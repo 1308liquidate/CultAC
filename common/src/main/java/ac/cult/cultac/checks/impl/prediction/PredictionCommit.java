@@ -10,6 +10,8 @@ public record PredictionCommit(PredictionCarry carry, Set<Vec3> startingVelociti
     public PredictionCommit {
         if (startingVelocities == null || startingVelocities.isEmpty()) {
             startingVelocities = Set.of();
+        } else if (startingVelocities.size() == 1) {
+            startingVelocities = Set.of(startingVelocities.iterator().next());
         } else {
             // Iteration keeps the producer's candidate order; next-tick tie-breaks depend on it.
             var ordered = new LinkedHashSet<Vec3>(startingVelocities.size() * 2);

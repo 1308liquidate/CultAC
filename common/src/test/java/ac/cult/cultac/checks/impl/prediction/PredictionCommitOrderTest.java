@@ -54,6 +54,12 @@ class PredictionCommitOrderTest {
     @Test
     void contractIsUnchanged() {
         assertEquals(Set.of(), new PredictionCommit(null, null).startingVelocities());
+        var single = new PredictionCommit(null, new HashSet<>(List.of(FIRST))).startingVelocities();
+        assertEquals(Set.of(FIRST), single);
+        assertThrows(UnsupportedOperationException.class, () -> single.add(SECOND));
+        assertThrows(
+                NullPointerException.class,
+                () -> new PredictionCommit(null, new HashSet<>(Arrays.asList((Vec3) null))));
         var commit = new PredictionCommit(null, new LinkedHashSet<>(List.of(FIRST, SECOND)));
         assertEquals(Set.of(FIRST, SECOND), commit.startingVelocities());
         assertThrows(UnsupportedOperationException.class, () -> commit.startingVelocities().add(Vec3.ZERO));
