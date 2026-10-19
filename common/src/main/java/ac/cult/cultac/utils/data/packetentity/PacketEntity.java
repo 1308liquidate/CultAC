@@ -27,6 +27,8 @@ import ac.cult.cultac.utils.data.BoatData;
 import ac.cult.cultac.utils.data.ReachInterpolationData;
 import ac.cult.cultac.utils.enums.BoatEntityStatus;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
+import ac.cult.cultac.utils.latency.CompensatedWorld;
+import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
@@ -105,6 +107,11 @@ public class PacketEntity {
     private @Nullable Vec3 settledPhysicalPosition;
     // Equivalence tests clear this so a reference fixture runs every settled tick.
     private static boolean skipsSettledTicks = true;
+    // Valid while the position, the world and its chunk epoch are the ones it was computed for.
+    private @Nullable Vec3 loadedChunkPosition;
+    private @Nullable CompensatedWorld loadedChunkWorld;
+    private long loadedChunkEpoch;
+    private boolean loadedChunk;
 
     public HashMap<MovementEffect, Integer> potionsMap = null;
     public BoatEntityStatus boatStatus = null;
@@ -978,6 +985,18 @@ public class PacketEntity {
 
     public long getClientTickOrder() {
         return clientTickOrder;
+    }
+
+    /** Whether {@code world} holds the chunk column containing {@code position}. */
+    public boolean isInLoadedChunk(CompensatedWorld world, Vec3 position) {
+        long epoch = world.chunkEpoch();
+        if (position != loadedChunkPosition || world != loadedChunkWorld || epoch != loadedChunkEpoch) {
+            loadedChunk = world.isChunkLoaded(CultMath.floor(position.x) >> 4, CultMath.floor(position.z) >> 4);
+            loadedChunkPosition = position;
+            loadedChunkWorld = world;
+            loadedChunkEpoch = epoch;
+        }
+        return loadedChunk;
     }
 
     public void setClientTickOrder(long clientTickOrder) {

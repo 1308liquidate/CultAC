@@ -28,6 +28,8 @@ import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.*;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -46,7 +48,10 @@ public class CompensatedWorld {
     private static final byte RECENT_FLUID_WATER = 1;
     private static final byte RECENT_FLUID_LAVA = 1 << 1;
     public final CultPlayer player;
-    public final Long2ObjectMap<CachedChunk> chunks;
+    private final Long2ObjectMap<CachedChunk> chunks;
+    private final LongSet chunkPositions;
+    // Changes whenever a chunk is added to or removed from chunks; every write to chunks bumps it.
+    private long chunkEpoch;
     private final Long2ObjectOpenHashMap<String> chunkDimensions = new Long2ObjectOpenHashMap<>();
     // Packet locations for blocks
     public Set<ShulkerData> openShulkerBoxes = new HashSet<>();
@@ -127,6 +132,7 @@ public class CompensatedWorld {
         this.clientBlockEntities = new CompensatedBlockEntities(player);
         this.pistons = new CompensatedWorldPistons(player, this);
         chunks = new Long2ObjectOpenHashMap<>(81, 0.5f);
+        chunkPositions = LongSets.unmodifiable(chunks.keySet());
     }
 
     public void terrainListener(TerrainListener listener) {
@@ -683,6 +689,7 @@ public class CompensatedWorld {
         int sectionCount = lastClientboundDimension.sectionCount();
         sectionPoolLeases.retain(visibleDimension, chunkX, chunkZ, sectionCount);
         chunks.put(chunkPosition, new CachedChunk(new CachedSection[sectionCount], player.lastTransactionSent.get()));
+        chunkEpoch++;
         chunkDimensions.put(chunkPosition, visibleDimension);
     }
 
@@ -1357,6 +1364,20 @@ public class CompensatedWorld {
         return chunks.containsKey(chunkPosition);
     }
 
+    public void putChunk(int chunkX, int chunkZ, CachedChunk chunk) {
+        chunks.put(chunkPositionToLong(chunkX, chunkZ), chunk);
+        chunkEpoch++;
+    }
+
+    /** The positions of the received chunks, read-only, in the map's iteration order. */
+    public LongSet chunkPositions() {
+        return chunkPositions;
+    }
+
+    public long chunkEpoch() {
+        return chunkEpoch;
+    }
+
     public ac.cult.blocksim.engine.BlockEntityData getClientBlockEntityData(BlockPos pos) {
         return clientBlockEntities.snapshot(pos, getBlockStateIdAt(pos));
     }
@@ -1523,6 +1544,7 @@ public class CompensatedWorld {
             internChunkSections(chunk, dimension, chunkX, chunkZ);
             removePendingReinternSections(chunkX, chunkZ);
             previous = chunks.put(chunkPosition, chunk);
+            chunkEpoch++;
             previousDimension = chunkDimensions.put(chunkPosition, dimension);
             if (previous != null) {
                 String releaseDimension = previousDimension == null ? dimension : previousDimension;
@@ -1731,6 +1753,7 @@ public class CompensatedWorld {
             }
 
             CachedChunk removed = chunks.remove(chunkPosition);
+            chunkEpoch++;
             chunkDimensions.remove(chunkPosition);
             removePendingReinternSections(chunkX, chunkZ);
             if (removed != null) {
@@ -1866,6 +1889,7 @@ public class CompensatedWorld {
                 clientBlockEntities.forgetChunk(chunkX, chunkZ);
             }
             iterator.remove();
+            chunkEpoch++;
             if (terrainListener != null) terrainListener.columnUnloaded(chunkX, chunkZ);
         }
     }
@@ -1884,6 +1908,7 @@ public class CompensatedWorld {
         }
         sectionPoolLeases.clear();
         chunks.clear();
+        chunkEpoch++;
         chunkDimensions.clear();
         pendingReinternSections.clear();
         geysers.clear();

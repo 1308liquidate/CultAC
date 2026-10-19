@@ -66,8 +66,15 @@ class SettledInterpolationParityTest {
         EntityTypeIds.PIG
     };
     private static final Vec3 PLAYER_AT = new Vec3(0.5, JavaTickFixture.FLOOR_Y, 0.5);
-    private static final Set<String> SKIP_BOOKKEEPING =
-            Set.of("settledInterpolation", "settledPhysicalPosition", "exactAfterClientTickBox", "tracker");
+    private static final Set<String> SKIP_BOOKKEEPING = Set.of(
+            "settledInterpolation",
+            "settledPhysicalPosition",
+            "exactAfterClientTickBox",
+            "tracker",
+            "loadedChunkPosition",
+            "loadedChunkWorld",
+            "loadedChunkEpoch",
+            "loadedChunk");
 
     private int settledStepped;
     private int settledLegacy;
@@ -111,7 +118,9 @@ class SettledInterpolationParityTest {
                 }
                 observeSettled(current.entities);
                 current.apply(op);
-                assertEquals(digest(old.entities, old.failure), digest(current.entities, current.failure),
+                assertEquals(
+                        digest(old.entities, old.failure),
+                        digest(current.entities, current.failure),
                         version + " seed=" + seed + " step=" + step);
             }
             assertTrue(current.failures < steps / 20, "seed " + seed + ": " + current.failures + " operations threw");
@@ -134,7 +143,9 @@ class SettledInterpolationParityTest {
                 }
                 observeSettled(current.entities);
                 current.apply(op);
-                assertEquals(digest(old.entities, old.failure), digest(current.entities, current.failure),
+                assertEquals(
+                        digest(old.entities, old.failure),
+                        digest(current.entities, current.failure),
                         version + " seed=" + seed + " step=" + step);
             }
         }
@@ -163,7 +174,8 @@ class SettledInterpolationParityTest {
         for (PacketEntity entity : settled) before.add(entity.newPacketLocation);
         tick.run();
         for (int i = 0; i < settled.size(); i++) {
-            if (settled.get(i).newPacketLocation == before.get(i) && before.get(i).isSettled()) skippedTicks++;
+            if (settled.get(i).newPacketLocation == before.get(i)
+                    && before.get(i).isSettled()) skippedTicks++;
         }
     }
 
@@ -219,7 +231,8 @@ class SettledInterpolationParityTest {
                     List<EntityDelta.Step> steps = new ArrayList<>();
                     int count = 1 + random.nextInt(3);
                     for (int s = 0; s < count; s++)
-                        steps.add(new EntityDelta.Step(delta(random), delta(random), delta(random), 1 + random.nextInt(3)));
+                        steps.add(new EntityDelta.Step(
+                                delta(random), delta(random), delta(random), 1 + random.nextInt(3)));
                     delta = new EntityDelta.Stepped(steps);
                 } else if (random.nextInt(4) == 0) {
                     delta = new EntityDelta.Linear((short) 0, (short) 0, (short) 0);
@@ -267,7 +280,10 @@ class SettledInterpolationParityTest {
                                 random.nextBoolean()),
                         random);
             } else if (kind < 36) {
-                send(ClientboundPackets.REMOVE_ENTITIES, new ClientboundRemoveEntities(List.of(pick(random, ids))), random);
+                send(
+                        ClientboundPackets.REMOVE_ENTITIES,
+                        new ClientboundRemoveEntities(List.of(pick(random, ids))),
+                        random);
             } else if (kind < 40) {
                 int vehicle = pick(random, ids);
                 List<Integer> passengers = new ArrayList<>();
@@ -444,8 +460,8 @@ class SettledInterpolationParityTest {
         private void mutate(PacketEntity entity, ReachInterpolationData data, Random random) {
             float yaw = random.nextInt(360) - 180;
             float pitch = random.nextInt(60) - 30;
-            Vec3 movement =
-                    new Vec3(random.nextInt(9) / 8.0 - 0.5, random.nextInt(5) / 8.0 - 0.25, random.nextInt(9) / 8.0 - 0.5);
+            Vec3 movement = new Vec3(
+                    random.nextInt(9) / 8.0 - 0.5, random.nextInt(5) / 8.0 - 0.25, random.nextInt(9) / 8.0 - 0.5);
             switch (random.nextInt(10)) {
                 case 0 -> {
                     if (!data.usesSteppedInterpolation()) return;
@@ -502,7 +518,10 @@ class SettledInterpolationParityTest {
         all.sort((a, b) -> Integer.compare(a.getEntityId(), b.getEntityId()));
         all.add(entities.getSelf());
         for (PacketEntity entity : all) {
-            out.append('\n').append(entity.getEntityId()).append(' ').append(entity.getClass().getSimpleName());
+            out.append('\n')
+                    .append(entity.getEntityId())
+                    .append(' ')
+                    .append(entity.getClass().getSimpleName());
             for (Class<?> c = entity.getClass(); c != Object.class; c = c.getSuperclass()) {
                 for (Field field : c.getDeclaredFields()) {
                     if (Modifier.isStatic(field.getModifiers()) || SKIP_BOOKKEEPING.contains(field.getName())) continue;
@@ -540,8 +559,11 @@ class SettledInterpolationParityTest {
             out.append(Long.toHexString(Double.doubleToRawLongBits(d)));
         } else if (value instanceof Float f) {
             out.append(Integer.toHexString(Float.floatToRawIntBits(f)));
-        } else if (value instanceof Number || value instanceof Boolean || value instanceof Character
-                || value instanceof String || value instanceof Enum<?>) {
+        } else if (value instanceof Number
+                || value instanceof Boolean
+                || value instanceof Character
+                || value instanceof String
+                || value instanceof Enum<?>) {
             out.append(value);
         } else if (value.getClass().getName().startsWith("java.")) {
             out.append(value.getClass().getSimpleName());
