@@ -44,6 +44,15 @@ class TransactionEventTest {
             assertTrue(unobserved != observed);
             assertEquals(List.of(observed), sent);
             assertEquals(List.of(observed), received);
+
+            sendChannel.unsubscribe(onSend);
+            receivedChannel.unsubscribe(onReceived);
+            assertTrue(sendChannel.isEmpty());
+            assertTrue(receivedChannel.isEmpty());
+            sendAndAnswer(player, listener);
+
+            assertEquals(List.of(observed), sent);
+            assertEquals(List.of(observed), received);
         } finally {
             sendChannel.unsubscribe(onSend);
             receivedChannel.unsubscribe(onReceived);
