@@ -110,6 +110,27 @@ public class GhostBlockRetentionTest {
         }
     }
 
+    @Test
+    public void endCrystalClickReplacesAnEndCrystalClickAtItsPosition() throws Exception {
+        OfflineCultTestBootstrap.installConfig();
+        var player = OfflineBedrockReplayRunnerTest.offlinePlayer();
+        try {
+            var mitigator = player.getGhostBlockMitigator();
+            var pos = new BlockPos(0, 64, 0);
+            mitigator.handlePseudoPlace(
+                    new GhostBlock(pos, new SimItemStack(ItemTypes.END_CRYSTAL, 1, Components.EMPTY), false));
+            GhostBlock second =
+                    new GhostBlock(pos, new SimItemStack(ItemTypes.END_CRYSTAL, 1, Components.EMPTY), false);
+            mitigator.handlePseudoPlace(second);
+
+            Map<BlockPos, GhostBlock> places = pseudoPlaces(mitigator);
+            assertEquals(1, places.size());
+            assertSame(second, places.get(pos));
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<BlockPos, GhostBlock> pseudoPlaces(GhostBlockMitigator mitigator) throws Exception {
         Field field = GhostBlockMitigator.class.getDeclaredField("pseudoPlaces");

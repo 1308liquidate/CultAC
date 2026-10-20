@@ -4,18 +4,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.network.packet.EntityMetadata;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
 import java.nio.ByteBuffer;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class SlimeSizeMetadataTest {
-    /** From 1.20.5 AbstractCubeMob#getDefaultDimensions scales the type's 0.52 by 0.52 by the size. */
+    /** From 1.20.5 AbstractCubeMob#getDefaultDimensions scales the type's 0.52 × 0.52 by the size. */
     @Test
     void aSizeUpdateGivesTheSlimeTheTypesDimensionsScaledBySize() {
         try (var f = new RecordReceiveFixture(ProtocolVersion.V1_21_11)) {
@@ -26,6 +28,27 @@ class SlimeSizeMetadataTest {
             size(entities, 4344, 3, ProtocolVersion.V1_21_11);
             assertBox(entities.getEntity(4343).getPossibleMovementCollisionBoxes(), 0.5, 64, 0.5, 0.52F * 10);
             assertBox(entities.getEntity(4344).getPossibleMovementCollisionBoxes(), 8.5, 64, 0.5, 0.52F * 3);
+        }
+    }
+
+    /** Before 1.20.5, and on Bedrock, Slime#getDimensions scales 2.04 by 0.255 per size. */
+    @Test
+    void olderAndBedrockClientsScaleTheLegacySlimeDimensions() {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V1_21_11)) {
+            var entities = f.player.compensatedEntities;
+            entities.addEntity(4343, EntityTypeIds.SLIME, new Vec3(0.5, 64, 0.5), 0, 0, 0);
+            entities.addEntity(4344, EntityTypeIds.MAGMA_CUBE, new Vec3(8.5, 64, 0.5), 0, 0, 0);
+            size(entities, 4343, 10, ProtocolVersion.V1_21_11);
+            size(entities, 4344, 3, ProtocolVersion.V1_21_11);
+            for (boolean bedrock : new boolean[] {false, true}) {
+                ClientVersion version = bedrock ? ClientVersion.V_26_3 : ClientVersion.V_1_20_3;
+                for (int id : new int[] {4343, 4344}) {
+                    PacketEntity cube = entities.getEntity(id);
+                    float legacy = 2.04F * (0.255F * (id == 4343 ? 10 : 3));
+                    assertEquals(legacy, BoundingBoxSize.getWidth(cube, version, bedrock));
+                    assertEquals(legacy, BoundingBoxSize.getHeight(cube, version, bedrock));
+                }
+            }
         }
     }
 
