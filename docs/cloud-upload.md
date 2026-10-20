@@ -151,22 +151,24 @@ Every writer sharing one API key needs distinct ids:
 ### Team sync
 
 With `cloud.team-sync: true`, players holding `cult.portal.viewer`, `cult.portal.moderator` or `cult.portal.admin` are
-reported to the intake service (`/api/v1/team/sync` at `cloud.url`, with `cloud.api-key` in the `Authorization`
-header) with the highest role they hold. The service's organization settings decide what a report does: it makes the
+reported to the intake service, over the upload's own sockets, with the highest role they hold. Each socket offers
+team sync at connect; the service answers whether your organization has it on, and says so again whenever that
+changes. The service's organization settings decide what a report does: it makes the
 player's Minecraft account a member of your organization in the portal with that role, or suggests it for an owner's
 approval; an admin role always waits for an owner. The nodes default to false, so operators do not get them
 implicitly, but a LuckPerms `*` grants admin.
 
 - A player still online two minutes after joining who holds a node is reported.
 - With LuckPerms, a permission change for that player reports the new role when it differs, and none once every node
-  is gone; every 6 hours CultAC asks which accounts the service manages and reports the role LuckPerms stores for
-  those not online. Without LuckPerms there is no offline sweep, and the service removes members not reported for 30
-  days.
-- Only version-4 (Mojang) UUIDs are reported, at most 100 players in one call every 30 seconds, never from the main
-  thread or a connection's event loop. When the service answers that sync is off or paused, or refuses the key,
-  CultAC makes no calls for 6 hours.
+  is gone. When the service sends the accounts it manages, CultAC reports the role LuckPerms stores for those not
+  online, at most once an hour. Without LuckPerms these lists are ignored, and the service removes members not
+  reported for 30 days.
+- Only version-4 (Mojang) UUIDs are reported, at most 100 players in one message every 30 seconds, on one socket the
+  service has team sync on for, never from the main thread or a connection's event loop. While no socket has it on,
+  nothing is sent and what was queued is dropped; when one turns it on, every checked player online is reported again.
 - It needs the upload configured: nothing is sent while the upload is off (`url`, `api-key` or a required `proxy-id`
-  missing). Observe-only does not change it.
+  missing), or while no player keeps a socket open. Observe-only does not change it. Turning `cloud.team-sync` on or
+  off and running `/cult reload` reconnects the sockets, as `cloud.perf` does.
 
 On Velocity the online check asks the proxy's permission provider (LuckPerms-Velocity answers it), and the LuckPerms
 change listener and offline sweep run when LuckPerms is installed on the proxy. On Paper they use Paper's permissions

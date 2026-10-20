@@ -79,7 +79,7 @@ public final class ConnectionFixture {
     }
 
     public static CloudSettings settings(String url, String key, List<Integer> protocols) {
-        return new CloudSettings(url, key, CloudSettings.DEFAULT_SERVER_ID, "proxy", protocols, false);
+        return new CloudSettings(url, key, CloudSettings.DEFAULT_SERVER_ID, "proxy", protocols, false, false);
     }
 
     /** One message of a socket's zstd frame, from its bytes and the messages before it on {@code zstd}. */
