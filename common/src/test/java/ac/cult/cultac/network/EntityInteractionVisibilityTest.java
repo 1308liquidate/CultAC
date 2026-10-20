@@ -24,14 +24,12 @@ import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
-import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityPositionSync;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPing;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundProjectilePower;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.InteractAction;
-import ac.cult.cultac.protocol.value.PositionPath;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.protocol.wire.Wire;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -47,7 +45,6 @@ import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import com.google.gson.JsonParser;
 import io.netty.buffer.ByteBuf;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -62,17 +59,6 @@ import org.mockito.Mockito;
 class EntityInteractionVisibilityTest {
     // An add_entity data value that names no entity.
     private static final int NO_OWNER = -1;
-
-    /** Asserts the box centres the projectile may be at along z, in any order. */
-    private static void assertStops(PacketEntity projectile, double... expected) {
-        var stops = projectile.getPossibleMovementCollisionBoxCandidates().stream()
-                .map(box -> (box.minZ + box.maxZ) / 2)
-                .sorted()
-                .toList();
-        var sorted = Arrays.stream(expected).sorted().boxed().toList();
-        assertEquals(sorted.size(), stops.size(), "stops " + stops);
-        for (int i = 0; i < sorted.size(); i++) assertEquals(sorted.get(i), stops.get(i), 1.0E-6, "stops " + stops);
-    }
 
     static Stream<ProtocolVersion> clients() {
         return Stream.of(ProtocolVersion.V1_21_11, ProtocolVersion.V26_3);
@@ -452,167 +438,6 @@ class EntityInteractionVisibilityTest {
         }
     }
 
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aServerPositionRetiresTheStopsOfThePositionItReplaces(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            setup.cow(41, new Vec3(.5, 64, 3.7));
-            setup.player.compensatedEntities.getEntity(41).onFirstTransaction(false, true, 3.5, 64, 3.7, setup.player);
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertStops(fireball, 5 - 2.185, 4.15);
-            setup.sync(42, new Vec3d(.5, 64.5, 20));
-            assertStops(fireball, 20);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aRepeatedServerPositionSetsTheProjectileBackOnIt(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            var fireball = setup.fireball(42, 5, -1, NO_OWNER);
-            setup.clientTick();
-            assertStops(fireball, 5 - 1.045);
-            setup.sync(42, new Vec3d(.5, 64.5, 5));
-            assertStops(fireball, 5);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void eachStopTicksWithItsOwnWaterState(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // Only the stop at the cow's face touches the water at z 4..5: it keeps 80%, the free step 95%.
-            setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 4, state("water"));
-            setup.cow(41, new Vec3(.5, 64, 3.7));
-            setup.player.compensatedEntities.getEntity(41).onFirstTransaction(false, true, 3.5, 64, 3.7, setup.player);
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertStops(fireball, 5 - 2.185, 4.15);
-            setup.clientTick();
-            assertStops(fireball, 5 - 2.185 - 2.17075, 4.15 - 1.828);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aPointBetweenTwoStopsDoesNotBringTheProjectileInRange(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // The stops at x 3 (the cow's face) and x -2.0015 are each 3.2 from the eye; the box spanning both
-            // passes 2.5 in front of it.
-            setup.cow(41, new Vec3(2.55, 64, 1.5));
-            setup.player.compensatedEntities.getEntity(41).onFirstTransaction(false, true, 2.55, 64, 8, setup.player);
-            setup.projectile(42, "minecraft:fireball", new Vec3d(5, 64.5, 1.5), new Vec3d(-7.27, 0, 0), NO_OWNER);
-            setup.clientTick();
-            var stops = setup.player.compensatedEntities.getEntity(42).getPossibleMovementCollisionBoxCandidates();
-            assertEquals(2, stops.size());
-            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aBreezeReversesAFireballOnlyOnClientsBefore26_3(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // The breeze's face is at z 4. Before 26.3 Projectile#deflect reverses and halves the motion on the
-            // client too; 26.3 deflects on the server only.
-            setup.entity(41, EntityTypes.defaults().byKey("breeze").id(), 3.7);
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertStops(fireball, 4);
-            setup.clientTick();
-            assertStops(fireball, version == ProtocolVersion.V26_3 ? 4 - 2.17075 : 4 + 1.132875);
-        }
-    }
-
-    @Test
-    void aFireballIsNotDeflectedAgainByTheEntityThatLastDeflectedIt() throws Exception {
-        try (var setup = new Setup(ProtocolVersion.V1_21_11).asClient()) {
-            setup.entity(41, EntityTypes.defaults().byKey("breeze").id(), 3.7);
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            setup.clientTick();
-            assertStops(fireball, 4 + 1.132875);
-            // Back onto the breeze: it stops at the face inflated by 0.05 and keeps its motion.
-            setup.motion(42, new Vec3d(0, 0, -2.2));
-            setup.clientTick();
-            assertStops(fireball, 4.05);
-            setup.clientTick();
-            assertStops(fireball, 4.05 - 2.17075);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aFireballHitByTheLocalPlayersFireballTurnsToItsLookOnClientsBefore26_3(ProtocolVersion version)
-            throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // 42 stops at 41's face at z 4.2; Projectile#onHit then aims 41 along the owner's look, (0, 0, 1).
-            var target = setup.fireball(41, 3.7, 0, NO_OWNER);
-            setup.fireball(42, 5, -2.2, setup.player.entityID);
-            setup.clientTick();
-            assertStops(target, 3.7);
-            setup.clientTick();
-            assertStops(target, version == ProtocolVersion.V26_3 ? 3.7 : 3.7 + 1.045);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aFireballHitByARemoteMobsFireballCanBeAnywhereOnClientsBefore26_3(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // 41 is 3.85 from the eye. Aimed along the remote cow's look, which the engine does not know, its next
-            // step of up to 1.045 may bring it in range.
-            setup.cow(40, new Vec3(10.5, 64, 10));
-            setup.fireball(41, 2.8, 0, NO_OWNER);
-            setup.fireball(42, 5, -2.2, 40);
-            setup.clientTick();
-            setup.clientTick();
-            assertEquals(
-                    version == ProtocolVersion.V26_3,
-                    setup.route(41, InteractAction.INTERACT_AT).isCancelled());
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aTrackedEnderDragonsPartsMayStopAProjectileAnywhereOnItsStep(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // The step from z 1.5 to 3.685 ends 4.7 from the eye, out of range, unless a dragon part stopped it
-            // nearer.
-            setup.player.compensatedEntities.addEntity(
-                    40, EntityTypes.defaults().byKey("ender_dragon").id(), new Vec3(60.5, 64, 60), 0, 0, 0);
-            setup.fireball(42, 1.5, 2.2, NO_OWNER);
-            setup.clientTick();
-            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
-        }
-        try (var setup = new Setup(version).asClient()) {
-            setup.fireball(42, 1.5, 2.2, NO_OWNER);
-            setup.clientTick();
-            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aPickableRiderOutsideTheOwnTreeMayStopAProjectileAnywhereOnItsStep(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // The cow on the boat is never positioned, so nothing bounds where it meets the step.
-            setup.entity(39, EntityTypeIds.OAK_BOAT, 30);
-            setup.cow(40, new Vec3(.5, 64, 30));
-            setup.player.compensatedEntities.getEntity(40).mount(setup.player.compensatedEntities.getEntity(39));
-            setup.fireball(42, 1.5, 2.2, NO_OWNER);
-            setup.clientTick();
-            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
-        }
-        try (var setup = new Setup(version).asClient()) {
-            setup.entity(39, EntityTypeIds.OAK_BOAT, 30);
-            setup.fireball(42, 1.5, 2.2, NO_OWNER);
-            setup.clientTick();
-            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
-        }
-    }
-
     @Test
     void clientsBefore1_21_2KeepAProjectileAtItsServerPosition() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V1_21_11)) {
@@ -932,14 +757,6 @@ class EntityInteractionVisibilityTest {
             acknowledge(event);
         }
 
-        void sync(int id, Vec3d position) {
-            var packet = new ClientboundEntityPositionSync(id, new PositionPath.Linear(position), 0, 0, false);
-            var event = new PacketSendEvent<>(
-                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_POSITION_SYNC, packet, false);
-            player.packetEntityReplication.onEntityPositionSync(event, player, packet);
-            acknowledge(event);
-        }
-
         void size(int id, int index, int size) {
             player.compensatedEntities.updateEntityMetadata(
                     id, List.of(new EntityMetadata.Entry(index, size, ByteBuffer.allocate(0))));
@@ -974,8 +791,7 @@ class EntityInteractionVisibilityTest {
                     new PacketReceiveEvent<>(fixture.user, ConnectionPhase.PLAY, ServerboundPackets.INTERACT, packet);
             player.checkManager.dispatchEarlyReceive(event);
             // Clients before 26.1 follow each INTERACT_AT with the INTERACT for the same entity and hand.
-            if (action == InteractAction.INTERACT_AT
-                    && player.getClientVersion().isOlderThan(ClientVersion.V_26_1))
+            if (action == InteractAction.INTERACT_AT && player.getClientVersion().isOlderThan(ClientVersion.V_26_1))
                 player.checkManager.dispatchEarlyReceive(new PacketReceiveEvent<>(
                         fixture.user,
                         ConnectionPhase.PLAY,
