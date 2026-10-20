@@ -4,6 +4,7 @@ import ac.cult.cultac.cloud.intake.v3.Outcome;
 import ac.cult.cultac.cloud.transport.CloudConnection;
 import ac.cult.cultac.cloud.wire.IntakeWire;
 import com.google.protobuf.CodedOutputStream;
+import io.netty.buffer.ByteBuf;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -193,6 +194,8 @@ public final class CaptureStream {
         IntakeWire.Engine engine;
         int lostBefore;
         long reserved;
+        /** The arrays its records hold, until it is released. */
+        CapturePacketCopies copies;
 
         Tick(List<Raw> records, long bytes, long nanos, long index, boolean dropped) {
             this.records = records;
@@ -277,6 +280,10 @@ public final class CaptureStream {
     private int lostSending;
 
     private List<Raw> frame = new ArrayList<>();
+    /** The open frame's packet copies; null until it copies one. */
+    private CapturePacketCopies copies;
+    /** Packet copies a released frame left, for the next frame to reuse. */
+    private CapturePacketCopies spareCopies;
     /** Counts captures; an action belongs to the one it was tapped under. */
     private long generation;
     /** The open frame's position of the last serverbound packet the tap saw; -1 when the frame does not hold it. */
@@ -528,6 +535,22 @@ public final class CaptureStream {
         tap(kind, id, bytes, nanos, minY, height, session, 0);
     }
 
+    /**
+     * As {@link #tap(int, int, byte[], long, int, int, Session, int)}, for a packet {@link #wants} keeps: a copy of
+     * {@code source}'s readable bytes, which stay the caller's, lives until the open frame is sent, dropped or reset.
+     */
+    public void tap(int kind, int id, ByteBuf source, long nanos, int minY, int height, Session session, int pingKind) {
+        tap(kind, id, copy(source), nanos, minY, height, session, pingKind);
+    }
+
+    private byte[] copy(ByteBuf source) {
+        if (copies == null) {
+            copies = spareCopies != null ? spareCopies : new CapturePacketCopies();
+            spareCopies = null;
+        }
+        return copies.copy(source);
+    }
+
     /** As {@link #tap(int, int, byte[], long, int, int, Session)}, for a ping of {@code PingKind} {@code pingKind}. */
     public void tap(int kind, int id, byte[] bytes, long nanos, int minY, int height, Session session, int pingKind) {
         if (kind == IntakeWire.CLIENTBOUND) {
@@ -712,6 +735,7 @@ public final class CaptureStream {
         frameWorld = false;
         frame = new ArrayList<>();
         frameBytes = 0;
+        if (copies != null) copies.clear();
         releaseOpen();
         List<TerrainRecord> terrain = framedTerrain;
         framedTerrain = NO_TERRAIN;
@@ -790,6 +814,8 @@ public final class CaptureStream {
         else frame = new ArrayList<>(Math.clamp(records.size(), MIN_FRAME_RECORDS, MAX_PRESIZED_RECORDS));
         Tick tick = new Tick(records, frameBytes, nanos, index, overflow);
         tick.reserved = frameReserved;
+        tick.copies = copies;
+        copies = null;
         tick.terrain = framedTerrain;
         tick.world = frameWorld;
         tick.actions = cutActions;
@@ -860,6 +886,11 @@ public final class CaptureStream {
         if (tick.reserved != 0) sink.release(tick.reserved);
         heldBytes -= tick.reserved;
         tick.reserved = 0;
+        if (tick.copies != null) {
+            tick.copies.clear();
+            if (spareCopies == null) spareCopies = tick.copies;
+            tick.copies = null;
+        }
     }
 
     /** A frame's terrain records are done with: those it did not carry to the service are owed again. */
@@ -1337,6 +1368,7 @@ public final class CaptureStream {
         sinceKeyframe = 0;
         frame = new ArrayList<>();
         frameBytes = 0;
+        if (copies != null) copies.clear();
         overflow = false;
         awaiting.clear();
         if (sink != null && heldBytes != 0) sink.release(heldBytes);
