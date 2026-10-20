@@ -17,7 +17,8 @@ import ac.cult.cultac.utils.nmsutil.NativeBlockCollisionHelper;
  * tick between server positions.
  */
 public final class PacketEntityHurtingProjectile extends PacketEntity {
-    private final double accelerationPower;
+    // AbstractHurtingProjectile#accelerationPower, which only projectile_power changes after spawn.
+    public double accelerationPower;
     private final float inertia;
     private final float liquidInertia;
     // Entity#isInWater: wasTouchingWater, which baseTick refreshes after each move.

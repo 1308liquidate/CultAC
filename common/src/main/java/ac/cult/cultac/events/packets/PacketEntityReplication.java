@@ -34,6 +34,7 @@ import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveMinecart;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveVehicle;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPing;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerPosition;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundProjectilePower;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRemoveEntities;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRemoveMobEffect;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetCamera;
@@ -57,6 +58,7 @@ import ac.cult.cultac.utils.data.VehicleTeleportData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHook;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityHurtingProjectile;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityTrackXRot;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityUtil;
@@ -466,6 +468,12 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     @CultPacketHandler
+    public void onProjectilePower(
+            PacketSendEvent<ClientboundProjectilePower> event, CultPlayer player, ClientboundProjectilePower packet) {
+        handleProjectilePower(event, packet);
+    }
+
+    @CultPacketHandler
     public void onSetEntityData(PacketSendEvent<EntityMetadata> event, CultPlayer player, EntityMetadata packet) {
         handleSetEntityData(event, packet);
     }
@@ -596,6 +604,23 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 }
             }
             clearPacketHandlerDeltaMovement(motion.entityId(), packetHandlerDeltaSequence);
+        });
+    }
+
+    /**
+     * {@code ClientPacketListener#handleProjectilePowerPacket} sets the acceleration power of a hurting projectile.
+     * {@code ServerEntity#sendChanges} bundles it after the motion it accompanies, so it applies at its own trailing
+     * proof, before the client's next tick.
+     */
+    private void handleProjectilePower(
+            PacketSendEvent<ClientboundProjectilePower> event, ClientboundProjectilePower packet) {
+        if (player.isBedrockMovement()) return;
+        CultPlayer.TrackedTransaction proof = appendTrailingProofTransaction(event);
+        int transaction = proof == null ? player.lastTransactionSent.get() : proof.transaction();
+        player.latencyUtils.addRealTimeTask(transaction, () -> {
+            if (player.compensatedEntities.getEntity(packet.entityId())
+                    instanceof PacketEntityHurtingProjectile projectile)
+                projectile.accelerationPower = packet.accelerationPower();
         });
     }
 

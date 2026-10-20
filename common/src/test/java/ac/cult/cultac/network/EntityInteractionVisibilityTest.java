@@ -25,6 +25,7 @@ import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPing;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundProjectilePower;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
@@ -249,6 +250,43 @@ class EntityInteractionVisibilityTest {
                 setup.clientTick();
             }
             assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void projectilePowerSetsTheAccelerationAFireballTicksWith(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.spawn(42, "minecraft:fireball", new Vec3d(.5, 65.12, 5.2), Vec3d.ZERO);
+            var fireball = setup.player.compensatedEntities.getEntity(42);
+            setup.motion(42, new Vec3d(0, 0, -1));
+            setup.power(42, .05);
+            // (1 + 0.05) * 0.95 per tick: 2.985 in three ticks, short of the 3.2 that brings it in range; 3.976 in
+            // four. Acceleration 0.1 covers 3.261 in three.
+            for (int tick = 0; tick < 3; tick++) {
+                assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+                setup.clientTick();
+                if (tick == 0) assertEquals(5.2 - .9975, fireball.clientPhysicalPosition.z, 1.0E-6);
+            }
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+            setup.clientTick();
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aDeflectedFireballTicksWithTheMotionAndPowerOfItsBundle(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.spawn(42, "minecraft:fireball", new Vec3d(.5, 65.12, 5.2), new Vec3d(0, 0, -1));
+            var fireball = setup.player.compensatedEntities.getEntity(42);
+            setup.clientTick();
+            assertEquals(5.2 - 1.045, fireball.clientPhysicalPosition.z, 1.0E-6);
+            // Projectile#deflect reverses the motion and AbstractHurtingProjectile#onDeflection halves the power.
+            setup.motion(42, new Vec3d(0, 0, 1));
+            setup.power(42, .05);
+            setup.clientTick();
+            assertEquals(5.2 - 1.045 + .9975, fireball.clientPhysicalPosition.z, 1.0E-6);
         }
     }
 
@@ -527,6 +565,14 @@ class EntityInteractionVisibilityTest {
             var event = new PacketSendEvent<>(
                     fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_MOTION, packet, false);
             player.packetEntityReplication.onSetEntityMotion(event, player, packet);
+            acknowledge(event);
+        }
+
+        void power(int id, double power) {
+            var packet = new ClientboundProjectilePower(id, power);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.PROJECTILE_POWER, packet, false);
+            player.packetEntityReplication.onProjectilePower(event, player, packet);
             acknowledge(event);
         }
 
