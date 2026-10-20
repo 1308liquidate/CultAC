@@ -109,7 +109,8 @@ public final class ClientEntityQueries {
         var search = query.inflate(1.0E-7);
         for (var entity : player.compensatedEntities.entityMap.values()) {
             if (!present(entity) || spectator(entity) || !collidable(entity)) continue;
-            for (var bounds : entity.getPossibleMovementCollisionBoxCandidates()) {
+            for (var candidate : entity.getPossibleMovementCollisionBoxCandidates()) {
+                var bounds = entity.toBoundingBox(player, candidate);
                 var box = new Box(bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ);
                 if (search.intersects(box) && !result.contains(box)) result.add(box);
             }
@@ -245,7 +246,7 @@ public final class ClientEntityQueries {
     }
 
     /** Null means that the existing packet/tick ordering has not proved one query outcome. */
-    private static Boolean test(PacketEntity entity, Predicate<Box> query) {
+    private Boolean test(PacketEntity entity, Predicate<Box> query) {
         if (entity instanceof PacketEntityHanging hanging) return query.test(hanging.actionBounds());
         Boolean result = null;
         for (var position : entity.getPossibleMovementCollisionBoxCandidates()) {
@@ -258,8 +259,10 @@ public final class ClientEntityQueries {
             } else if (entity instanceof PacketEntityPlayer remote) box = remote.actionBounds(position);
             else if (entity instanceof PacketEntityArmorStand stand) box = stand.actionBounds(position);
             else if (entity instanceof PacketEntityInteraction interaction) box = interaction.actionBounds(position);
-            else
-                box = new Box(position.minX, position.minY, position.minZ, position.maxX, position.maxY, position.maxZ);
+            else {
+                var bounds = entity.toBoundingBox(player, position);
+                box = new Box(bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ);
+            }
             boolean matched = box != null && query.test(box);
             if (result != null && result != matched) return null;
             result = matched;

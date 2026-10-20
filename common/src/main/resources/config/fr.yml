@@ -40,9 +40,9 @@ spectators:
 # Au bout de combien de temps les joueurs doivent-ils être expulsés en cas de perte de connexion ? Défault = 60 secondes
 max-transaction-time: 60
 
-# Si CultAC échoue lui-même (impossible de s'attacher à un joueur, version du client non prise en charge, ou
-# aucun ping répondu dans max-transaction-time), le joueur continue sans inspection au lieu d'être déconnecté.
-# Les expulsions pour flood de paquets et exploits de crash s'appliquent toujours.
+# Si CultAC échoue lui-même (impossible de s'attacher à un joueur ou version du client non prise en charge),
+# le joueur continue sans inspection au lieu d'être déconnecté. Les expulsions pour flood de paquets, exploits
+# de crash et pings sans réponse au-delà de max-transaction-time s'appliquent toujours.
 launch-safety:
   fail-open: true
 

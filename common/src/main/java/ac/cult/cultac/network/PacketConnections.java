@@ -136,6 +136,9 @@ final class PacketConnections {
         if (binding == null || session.disconnected() || session.loginNotified || !binding.isCurrent()) return;
         PlatformPlayer player = binding.player();
         if (!user.getUUID().equals(player.getUniqueId())) throw new IllegalStateException("Connection account changed");
+        // The owner caches the bound player; releaseConnection invalidates it when this connection ends.
+        var players = CultAPI.INSTANCE.getPlatformPlayerFactory();
+        if (players != null) player = players.attach(player);
         user.bind(player);
         if (currentByUuid.get(user.getUUID()) != session) promote(user);
         var cultPlayer = session.player();

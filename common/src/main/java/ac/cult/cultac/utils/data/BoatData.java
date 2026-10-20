@@ -37,6 +37,14 @@ public class BoatData {
     public boolean oldStatusMayBeInAir;
     private int controlledBoatEntityId = Integer.MIN_VALUE;
 
+    /** A new LocalPlayer's keys: Input.EMPTY until its first PLAYER_INPUT. */
+    public void clearInput() {
+        nextVehicleHoriz = vehicleHoriz = 0f;
+        nextVehicleForward = vehicleForward = 0f;
+        nextVehicleJump = vehicleJump = false;
+        nextVehicleKeys = vehicleKeys = KnownInput.DEFAULT;
+    }
+
     public void useNextInputForBoatTick() {
         vehicleHoriz = nextVehicleHoriz;
         vehicleForward = nextVehicleForward;

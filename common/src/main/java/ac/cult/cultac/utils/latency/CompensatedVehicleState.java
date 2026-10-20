@@ -506,6 +506,14 @@ public final class CompensatedVehicleState implements Debuggable {
                 || hasPendingServerDismount();
     }
 
+    /**
+     * Whether the client is mounted or still awaiting its server dismount.
+     * Before the client processes a mount, its movement is ordinary LocalPlayer#tick movement.
+     */
+    public boolean hasClientPlayerPassengerState() {
+        return entities.playerEntity.inVehicle() || hasPendingServerDismount();
+    }
+
     private boolean containsLocalPlayer(@Nullable int[] passengers) {
         if (passengers == null) return false;
         for (int passenger : passengers) {

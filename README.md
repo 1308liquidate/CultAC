@@ -192,7 +192,7 @@ What makes Cult stand out against other anticheats?
 * Vanilla holders keep their bootstrap defaults. Immutable connection snapshots supply tags and item defaults,
   and the isolated placement runtime reads tags from each request without a shared model lock.
 * Older Velocity protocols resolve dynamic registry entries by name against the 26.3 defaults, while preserving
-  received dimension types. Custom dynamic entries unavailable in those defaults are logged once.
+  received dimension types.
 * The anticheat can scale to many hundreds of players, if not more
 * Thread safety is carefully thought out
 * The next core allows for this design

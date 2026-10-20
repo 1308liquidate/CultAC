@@ -3,6 +3,7 @@ package ac.cult.cultac.events.packets.listeners;
 import ac.cult.blocksim.data.HolderSets;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.blocksim.environment.DimensionData;
+import ac.cult.cultac.checks.impl.badpackets.BadPacketsA;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsE;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsF;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsG;
@@ -145,8 +146,12 @@ public class PacketPlayerRespawn {
                 player.compensatedWorld.clearPistonLikeState();
                 player.compensatedEntities.clearClientLevel();
                 player.compensatedWorld.isRaining = false;
+                player.checkManager.getListener(BadPacketsA.class).resetCarriedIndex();
                 if (newJavaLocalPlayer) {
                     player.actionManager.onJavaPlayerReplacement();
+                    // LocalPlayer starts from Input.EMPTY and sends PLAYER_INPUT once its keys differ from it.
+                    player.packetStateData.knownInput = KnownInput.DEFAULT;
+                    player.boatData.clearInput();
                     player.onGround = player.lastOnGround = false;
                     player.isSneaking = false;
                     player.isGliding = false;

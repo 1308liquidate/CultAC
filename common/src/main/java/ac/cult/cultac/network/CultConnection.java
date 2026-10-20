@@ -6,9 +6,11 @@ import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.*;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
+import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import io.netty.channel.*;
 import io.netty.util.concurrent.EventExecutor;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -27,6 +29,7 @@ public final class CultConnection implements CodecState {
     private volatile boolean disconnected;
     /** Preparation reached a final outcome without an inspected user: excluded, refused or failed open. */
     private volatile boolean excluded;
+
     private final PacketDispatcher dispatcher;
     private final ProjectedPackets packets;
     private final Function<Channel, PacketOwner> ownerResolver;
@@ -43,6 +46,11 @@ public final class CultConnection implements CodecState {
     private volatile long levelLostNanos = System.nanoTime();
 
     private volatile boolean levelWarned;
+
+    /** A movement was forwarded since the last forwarded tick end, for a client that ends its ticks. Owner only. */
+    private boolean midClientTick;
+
+    private final List<Runnable> afterClientTick = new ArrayList<>();
 
     private volatile User user;
     private volatile CultPlayer player;
@@ -375,6 +383,36 @@ public final class CultConnection implements CodecState {
         if (type == ClientboundPackets.START_CONFIGURATION && platform != null) {
             var values = platform.modelValues();
             if (values != null) values.beginConfiguration();
+        }
+        if (type == ServerboundPackets.CLIENT_TICK_END || serverbound != ConnectionPhase.PLAY) clientTickEnded();
+        else if (type == ServerboundPackets.MOVE_PLAYER
+                && packets.observed().supports(ServerboundPackets.CLIENT_TICK_END)) midClientTick = true;
+    }
+
+    /**
+     * Whether the server has been forwarded this client's movement and not yet the tick end that follows it: a packet
+     * forwarded now lands inside the client's tick. Never for a client without tick ends. On the channel loop.
+     */
+    public boolean midClientTick() {
+        return midClientTick && owner == channel.eventLoop();
+    }
+
+    /** Runs {@code task} once, right after the next tick end is forwarded or the client leaves play. On the owner. */
+    public void afterClientTick(Runnable task) {
+        afterClientTick.add(Objects.requireNonNull(task));
+    }
+
+    private void clientTickEnded() {
+        midClientTick = false;
+        if (afterClientTick.isEmpty()) return;
+        var tasks = List.copyOf(afterClientTick);
+        afterClientTick.clear();
+        for (Runnable task : tasks) {
+            try {
+                task.run();
+            } catch (Throwable failure) {
+                CultNetworkManager.reportFailure("client tick end task", failure);
+            }
         }
     }
 

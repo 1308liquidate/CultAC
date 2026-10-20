@@ -40,9 +40,9 @@ spectators:
 # Ile czasu powinni mieć gracze, zanim ich wyrzucimy za przekroczenie limitu czasu? Domyślnie = 60 sekund
 max-transaction-time: 60
 
-# Gdy sam CultAC zawiedzie (nie może podłączyć się do gracza, wersja klienta nie jest obsługiwana lub żaden
-# ping nie zostanie odebrany w max-transaction-time), gracz gra dalej bez kontroli zamiast zostać rozłączony.
-# Wyrzucenia za zalew pakietów i exploity crashujące nadal obowiązują.
+# Gdy sam CultAC zawiedzie (nie może podłączyć się do gracza lub wersja klienta nie jest obsługiwana), gracz
+# gra dalej bez kontroli zamiast zostać rozłączony. Wyrzucenia za zalew pakietów, exploity crashujące i pingi
+# bez odpowiedzi w max-transaction-time nadal obowiązują.
 launch-safety:
   fail-open: true
 

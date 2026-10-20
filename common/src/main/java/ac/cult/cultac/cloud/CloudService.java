@@ -205,7 +205,6 @@ public final class CloudService {
      */
     static void superseded(String drainSuffix) {
         UPLINKS.drain(drainSuffix);
-        CONNECTIONS.retireOpen();
         reconfigureCaptures();
     }
 
@@ -249,8 +248,15 @@ public final class CloudService {
             this.connections = connections;
         }
 
+        /**
+         * Server ids end in {@code suffix} from here, and the sockets under the old ids retire. Both happen under the
+         * lock {@link #open} resolves ids in, so an open in flight cannot recreate an old id's socket after it retired.
+         */
         void drain(String suffix) {
-            drainSuffix = suffix;
+            synchronized (users) {
+                drainSuffix = suffix;
+                connections.retireOpen();
+            }
         }
 
         /** The status line's note on a draining generation; empty otherwise. */
@@ -270,12 +276,12 @@ public final class CloudService {
             if (!connections.available()) return null;
             String id = CloudServerIds.resolve(settings.serverIdTemplate(), settings.proxyId(), serverName);
             if (id == null) return null;
-            id = CloudServerIds.withSuffix(id, drainSuffix);
             synchronized (users) {
-                CloudConnection connection = connections.forServer(id);
+                String suffixed = CloudServerIds.withSuffix(id, drainSuffix);
+                CloudConnection connection = connections.forServer(suffixed);
                 if (connection == null) return null;
-                users.merge(id, 1, Integer::sum);
-                return new ConnectionUplink(id, connection);
+                users.merge(suffixed, 1, Integer::sum);
+                return new ConnectionUplink(suffixed, connection);
             }
         }
 

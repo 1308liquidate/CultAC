@@ -13,11 +13,14 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CarriedPush;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.EntityPush;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
+import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
+import java.nio.ByteBuffer;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /** ClientLevel#tickEntities order: an entity ticking before the player pushes this travel, one after it the next. */
@@ -84,6 +87,20 @@ class JavaEntityPushTest {
     void anEntityTickingBeforeThePlayerPushesItOnFirstContact() throws Exception {
         try (var f = falling()) {
             entity(f, 100, TOUCHING).setClientTickOrder(-1L);
+
+            assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
+        }
+    }
+
+    /** AABB spans a negative height below the position, and LivingEntity#pushEntities pushes from that box. */
+    @Test
+    void aSlimeOfNegativeSizePushesFromBelowItsPosition() throws Exception {
+        try (var f = falling()) {
+            // Size -4 spans 2.08 down to 0.5 above the player's feet; above its position it would miss the player.
+            f.player.compensatedEntities.addEntity(100, EntityTypeIds.SLIME, TOUCHING.add(0, 3.5, 0), 0, 0, 0);
+            f.player.compensatedEntities.updateEntityMetadata(
+                    100, List.of(new EntityMetadata.Entry(18, -4, ByteBuffer.allocate(0))));
+            f.player.compensatedEntities.getEntity(100).setClientTickOrder(-1L);
 
             assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
         }

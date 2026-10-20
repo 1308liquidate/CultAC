@@ -178,7 +178,12 @@ public final class CloudConnection {
     /** When each player who left this connection left, oldest first; guarded by itself. */
     private final Map<UUID, Long> departed = new LinkedHashMap<>();
 
+    /**
+     * Any thread adds; only the sender thread takes while it runs, since {@link #nextMessage} peeks before it polls.
+     * Once the sender has {@link #stopped}, whoever adds drops what is left.
+     */
     private final ConcurrentLinkedQueue<Queued> queue = new ConcurrentLinkedQueue<>();
+
     private final QueuedBytes queuedBytes;
     private final AtomicLong refused = new AtomicLong();
     /** EVENT replies: findings the service sends. */
@@ -211,6 +216,8 @@ public final class CloudConnection {
     private final long idleAfterNanos;
 
     private volatile boolean closed;
+    /** The sender thread no longer takes from {@link #queue}: set before its last drop. */
+    private volatile boolean stopped;
     /** Set by {@link #retire}: the socket sends what is queued, closes normally and never reconnects. */
     private volatile boolean retiring;
     /** Set by {@link #freeze}: no socket opens again; an open one stays to send what is queued. */
@@ -540,7 +547,7 @@ public final class CloudConnection {
             return false;
         }
         queue.add(new Queued(generation, record, resolvedExtra));
-        if (closed) dropQueued();
+        if (stopped) dropQueued();
         return true;
     }
 
@@ -553,6 +560,8 @@ public final class CloudConnection {
                         if (closed) break;
                     }
                     if (socket == null) {
+                        // A lost socket's records are never sent: let go of them now, not at the next connect.
+                        dropQueued();
                         if (retiring || frozen) {
                             closed = true;
                             break;
@@ -614,6 +623,7 @@ public final class CloudConnection {
     private void shutDown() {
         WebSocket open = socket;
         if (open != null) lost(open, null);
+        stopped = true;
         dropQueued();
         try {
             pipeline.close();
@@ -1090,6 +1100,7 @@ public final class CloudConnection {
      */
     private void flush() throws Exception {
         WebSocket open = socket;
+        if (open == null) return;
         long current = generation;
         int resolvedLimit = messageLimit();
         int limit = Math.min(resolvedLimit, MAX_WRITE_BYTES);
@@ -1235,14 +1246,13 @@ public final class CloudConnection {
     }
 
     /**
-     * The socket went away: every stream of its generation stops until the next connect. {@code why} is null when this
-     * connection closed it.
+     * The socket went away: every stream of its generation stops until the next connect, and the woken sender drops
+     * the queue. {@code why} is null when this connection closed it. Any thread.
      */
     private synchronized void lost(WebSocket gone, String why) {
         if (socket != gone) return;
         lastLifeNanos = System.nanoTime() - openedNanos;
         socket = null;
-        dropQueued();
         long ended = generation;
         if (why == null) LogUtil.info("Cloud socket closed (server id " + serverId + ")");
         else LogUtil.warn("Cloud socket closed: " + redacted(why) + " (server id " + serverId + ")");

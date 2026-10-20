@@ -7,6 +7,9 @@ import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
 import ac.cult.cultac.manager.config.BaseConfigManager;
 import ac.cult.cultac.network.protocol.player.User;
+import ac.cult.cultac.platform.api.player.FakePlatformPlayers;
+import ac.cult.cultac.platform.api.player.PlatformPlayer;
+import ac.cult.cultac.platform.api.player.PlatformPlayerCache;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketDirection;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -214,7 +217,9 @@ class PacketConnectionsTest {
         var restore = failOpen(false);
         var session = session(UUID.randomUUID());
         when(session.platform().disconnectOutdatedClient()).thenThrow(new IllegalStateException("broken"));
-        doThrow(new IllegalStateException("kick failed")).when(session.platform()).disconnect(any());
+        doThrow(new IllegalStateException("kick failed"))
+                .when(session.platform())
+                .disconnect(any());
         try {
             assertDoesNotThrow(session::prepare);
             assertFalse(session.channel().isOpen());
@@ -276,6 +281,35 @@ class PacketConnectionsTest {
             assertSame(session, connections.get(session.channel()));
         } finally {
             close(session);
+        }
+    }
+
+    @Test
+    void ownedLoginCachesItsPlayerUntilTheConnectionIsReleased() throws Exception {
+        var uuid = UUID.randomUUID();
+        var cache = PlatformPlayerCache.getInstance();
+        try (var players = new FakePlatformPlayers()) {
+            var nativePlayer = new FakePlatformPlayers.Native(uuid);
+            PlatformPlayer bound = players.getFromNativePlayerType(nativePlayer);
+            assertNull(cache.getPlayer(uuid));
+            var session = session(uuid);
+            var binding = mock(PlatformConnection.PlayerBinding.class);
+            when(binding.player()).thenReturn(bound);
+            when(binding.isCurrent()).thenReturn(true);
+            when(binding.matches(nativePlayer)).thenReturn(true);
+            when(session.platform().playerBinding()).thenReturn(binding);
+            try {
+                session.prepare();
+
+                assertSame(bound, session.user().getPlayer());
+                assertSame(bound, cache.getPlayer(uuid));
+            } finally {
+                close(session);
+            }
+
+            assertNull(cache.getPlayer(uuid));
+        } finally {
+            cache.removePlayer(uuid);
         }
     }
 

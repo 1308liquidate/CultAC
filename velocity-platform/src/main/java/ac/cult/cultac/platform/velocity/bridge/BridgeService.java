@@ -6,6 +6,7 @@ import ac.cult.cultac.bridge.protocol.BridgeMessage.ServerStats;
 import ac.cult.cultac.bridge.protocol.BridgeProtocol;
 import ac.cult.cultac.bridge.protocol.BridgeProtocolException;
 import ac.cult.cultac.bridge.protocol.ServerCapability;
+import ac.cult.cultac.network.CultConnection;
 import ac.cult.cultac.network.CultNetworkManager;
 import ac.cult.cultac.network.PacketDispatcher;
 import ac.cult.cultac.network.event.PacketEvent;
@@ -55,6 +56,7 @@ public final class BridgeService implements BridgeSessions, AutoCloseable {
     private final ProxyServer proxy;
     private final Object plugin;
     private final Function<Player, Channel> channels;
+    private final Function<Channel, @Nullable CultConnection> connections;
     private final Logger logger;
     private final long helloRetryMillis;
     private final long readyTimeoutMillis;
@@ -78,11 +80,17 @@ public final class BridgeService implements BridgeSessions, AutoCloseable {
     private volatile boolean closed;
     private volatile boolean registered;
 
-    public BridgeService(ProxyServer proxy, Object plugin, Function<Player, Channel> channels, Logger logger) {
+    public BridgeService(
+            ProxyServer proxy,
+            Object plugin,
+            Function<Player, Channel> channels,
+            Function<Channel, @Nullable CultConnection> connections,
+            Logger logger) {
         this(
                 proxy,
                 plugin,
                 channels,
+                connections,
                 logger,
                 ProxyBridgeSession.HELLO_RETRY_MILLIS,
                 ProxyBridgeSession.READY_TIMEOUT_MILLIS,
@@ -93,6 +101,7 @@ public final class BridgeService implements BridgeSessions, AutoCloseable {
             ProxyServer proxy,
             Object plugin,
             Function<Player, Channel> channels,
+            Function<Channel, @Nullable CultConnection> connections,
             Logger logger,
             long helloRetryMillis,
             long readyTimeoutMillis,
@@ -100,6 +109,7 @@ public final class BridgeService implements BridgeSessions, AutoCloseable {
         this.proxy = proxy;
         this.plugin = plugin;
         this.channels = channels;
+        this.connections = connections;
         this.logger = logger;
         this.helloRetryMillis = helloRetryMillis;
         this.readyTimeoutMillis = readyTimeoutMillis;
@@ -275,7 +285,7 @@ public final class BridgeService implements BridgeSessions, AutoCloseable {
             return;
         }
         reconfiguring.remove(playerId, server);
-        open(playerId, server, new VelocityBackend(server, channel, backendInPlay));
+        open(playerId, server, new VelocityBackend(server, channel, backendInPlay, connections.apply(channel)));
     }
 
     /**
@@ -303,7 +313,10 @@ public final class BridgeService implements BridgeSessions, AutoCloseable {
             if (closed || !channel.isActive()) return;
             ServerConnection server = player.getCurrentServer().orElse(null);
             if (server == null || !backendInPlay.test(server)) return;
-            open(player.getUniqueId(), server, new VelocityBackend(server, channel, backendInPlay));
+            open(
+                    player.getUniqueId(),
+                    server,
+                    new VelocityBackend(server, channel, backendInPlay, connections.apply(channel)));
         });
     }
 

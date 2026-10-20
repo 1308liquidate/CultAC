@@ -895,20 +895,35 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     public void onPlayerAction(
             PacketReceiveEvent<ServerboundPlayerAction> event, CultPlayer player, ServerboundPlayerAction packet) {
         PlayerAction action = packet.action();
-        if (action == PlayerAction.DROP_ITEM || action == PlayerAction.DROP_ALL_ITEMS)
-            dropHeldItem(action == PlayerAction.DROP_ALL_ITEMS);
+        if (action != PlayerAction.DROP_ITEM && action != PlayerAction.DROP_ALL_ITEMS) return;
+        boolean wholeStack = action == PlayerAction.DROP_ALL_ITEMS;
+        if (!event.isCancelled()) {
+            // ServerPlayer#drop(boolean) removes from the selected slot and records the rest with
+            // AbstractContainerMenu#setRemoteSlot, so the server never sends it.
+            int storageSlot = inventory.selected + Inventory.HOTBAR_OFFSET;
+            SimItemStack server = serverView.playerSlot(storageSlot);
+            if (server != null) serverView.playerSlot(storageSlot, afterDrop(server, wholeStack));
+        }
+        dropHeldItem(wholeStack);
     }
 
     public void dropHeldItem(boolean wholeStack) {
         SimItemStack previous = getHeldItem();
-        SimItemStack held = ItemUtil.copy(previous);
-        if (wholeStack || held.isEmpty() || held.getCount() <= 1) {
+        SimItemStack held = afterDrop(previous, wholeStack);
+        if (held.isEmpty()) {
             inventory.setHeldItem(null);
         } else {
-            held.setCount(held.getCount() - 1);
             inventory.setHeldItem(held);
             carryPossibleChange(previous, held);
         }
+    }
+
+    /** Inventory#removeFromSelected: the whole stack, or one item. */
+    private static SimItemStack afterDrop(SimItemStack stack, boolean wholeStack) {
+        if (wholeStack || stack.isEmpty() || stack.getCount() <= 1) return SimItemStack.EMPTY;
+        SimItemStack rest = ItemUtil.copy(stack);
+        rest.setCount(rest.getCount() - 1);
+        return rest;
     }
 
     private void carryPossibleChange(SimItemStack previous, SimItemStack replacement) {

@@ -40,9 +40,9 @@ spectators:
 # Wie lange sollen Spieler Zeit haben, bis wir sie wegen Zeitüberschreitung rauswerfen? Standard = 60 Sekunden
 max-transaction-time: 60
 
-# Wenn CultAC selbst versagt (es kann sich nicht an einen Spieler anhängen, die Client-Version wird nicht
-# unterstützt oder kein Ping wird innerhalb von max-transaction-time beantwortet), spielt der Spieler ungeprüft
-# weiter, statt getrennt zu werden. Kicks wegen Paketfluten und Crash-Exploits gelten weiterhin.
+# Wenn CultAC selbst versagt (es kann sich nicht an einen Spieler anhängen oder die Client-Version wird nicht
+# unterstützt), spielt der Spieler ungeprüft weiter, statt getrennt zu werden. Kicks wegen Paketfluten,
+# Crash-Exploits und Pings, die nicht innerhalb von max-transaction-time beantwortet werden, gelten weiterhin.
 launch-safety:
   fail-open: true
 

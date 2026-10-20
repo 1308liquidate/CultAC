@@ -20,6 +20,7 @@ import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundCustomPayload;
 import ac.cult.cultac.protocol.value.PlayerAction;
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import io.netty.util.ReferenceCountUtil;
@@ -349,6 +350,66 @@ class CloudCaptureTapTest {
             assertEquals(Outcome.Type.TYPE_HELD, outcomes.get(0).getType());
             assertEquals(Outcome.Status.STATUS_APPLIED, outcomes.get(0).getStatus());
             assertTrue(outcomes.get(0).hasActionIndex());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(Host.class)
+    void theMarkerFollowsTheTickEndItWasSentFor(Host host) {
+        List<String> order = new ArrayList<>();
+        SegmentBinder binder = new SegmentBinder() {
+            @Override
+            public void started(CultPlayer player, Consumer<String> bind, boolean playing) {
+                bind.accept("a");
+            }
+
+            @Override
+            public boolean marks(CultPlayer player) {
+                return true;
+            }
+
+            @Override
+            public void mark(CultPlayer player, int marker) {
+                order.add("marker " + marker);
+            }
+        };
+        try (CaptureFixture fixture = joined(host, HELD, binder)) {
+            fixture.channel.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+                @Override
+                public void channelRead(ChannelHandlerContext ctx, Object message) {
+                    if (message instanceof ByteBuf frame) order.add("forwarded " + frame.getByte(frame.readerIndex()));
+                    ctx.fireChannelRead(message);
+                }
+            });
+            byte held = (byte) fixture.id(PacketDirection.SERVERBOUND, "set_carried_item");
+            byte tickEnd = (byte) fixture.id(PacketDirection.SERVERBOUND, "client_tick_end");
+            fixture.serverbound("set_carried_item", (byte) 0, (byte) 3);
+            fixture.tickEnd();
+            assertEquals(List.of("forwarded " + held, "forwarded " + tickEnd, "marker 0"), order);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(Host.class)
+    void theConnectionKnowsWhenTheClientIsInsideItsTick(Host host) {
+        Consumer<PacketRouteBuilder> moves = routes -> {
+            routes.receiveConnection(
+                    ServerboundPackets.MOVE_PLAYER, PacketListenerPriority.NORMAL, (event, packet) -> {});
+            routes.receiveConnection(
+                    ServerboundPackets.CLIENT_TICK_END, PacketListenerPriority.NORMAL, (event, packet) -> {});
+        };
+        try (CaptureFixture fixture = joined(host, moves)) {
+            List<String> ran = new ArrayList<>();
+            assertFalse(fixture.connection.midClientTick());
+            fixture.serverbound("move_player_status_only", (byte) 1);
+            assertTrue(fixture.connection.midClientTick());
+            fixture.connection.afterClientTick(() -> ran.add("after tick end"));
+            assertEquals(List.of(), ran);
+            fixture.tickEnd();
+            assertFalse(fixture.connection.midClientTick());
+            assertEquals(List.of("after tick end"), ran);
+            fixture.tickEnd();
+            assertEquals(List.of("after tick end"), ran);
         }
     }
 

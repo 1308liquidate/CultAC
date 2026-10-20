@@ -10,6 +10,7 @@ import ac.cult.cultac.bridge.protocol.BridgeMessage.Auth;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Challenge;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Close;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Hello;
+import ac.cult.cultac.bridge.protocol.BridgeMessage.Marker;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.PlayerFacts;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.PlayerState;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.PlayerStateResult;
@@ -85,6 +86,7 @@ class BridgeServiceTest {
                 player -> {
                     throw new IllegalStateException("No Velocity channel in unit tests");
                 },
+                channel -> null,
                 Logger.getLogger("BridgeServiceTest"),
                 helloRetryMillis,
                 readyTimeoutMillis,
@@ -97,7 +99,14 @@ class BridgeServiceTest {
     /** A service whose players all use {@code channel}, with backends in PLAY while {@code inPlay} holds. */
     private BridgeService service(Channel channel, AtomicBoolean inPlay, Logger logger) {
         var created = new BridgeService(
-                mock(ProxyServer.class), new Object(), player -> channel, logger, 1000, 1000, System::nanoTime);
+                mock(ProxyServer.class),
+                new Object(),
+                player -> channel,
+                ignored -> null,
+                logger,
+                1000,
+                1000,
+                System::nanoTime);
         created.enable(SECRET, server -> inPlay.get());
         created.addListener(listener);
         return created;
@@ -309,8 +318,8 @@ class BridgeServiceTest {
         var server = backendConnection(player, "lobby", frames);
         var current = new AtomicReference<ServerConnection>(server);
         when(player.getCurrentServer()).thenAnswer(invocation -> Optional.ofNullable(current.get()));
-        var first = loop.submit(
-                        () -> service.open(playerId, server, new VelocityBackend(server, channel, s -> inPlay.get())))
+        var first = loop.submit(() ->
+                        service.open(playerId, server, new VelocityBackend(server, channel, s -> inPlay.get(), null)))
                 .get(5, TimeUnit.SECONDS);
         completeHandshake(frames);
         await(() -> first.isReady() && listener.ready == 1);
@@ -382,8 +391,8 @@ class BridgeServiceTest {
         var server = backendConnection(player, "lobby", frames);
         var current = new AtomicReference<ServerConnection>(server);
         when(player.getCurrentServer()).thenAnswer(invocation -> Optional.ofNullable(current.get()));
-        var first = loop.submit(
-                        () -> service.open(playerId, server, new VelocityBackend(server, channel, s -> inPlay.get())))
+        var first = loop.submit(() ->
+                        service.open(playerId, server, new VelocityBackend(server, channel, s -> inPlay.get(), null)))
                 .get(5, TimeUnit.SECONDS);
         completeHandshake(frames);
         await(() -> first.isReady());
@@ -439,6 +448,54 @@ class BridgeServiceTest {
         assertInstanceOf(BridgeMessage.CloseInventory.class, backend.next());
         session.send(new BridgeMessage.CloseInventory());
         assertInstanceOf(BridgeMessage.CloseInventory.class, backend.next());
+    }
+
+    @Test
+    void framesSentBetweenAMovementAndItsTickEndFollowTheTickEndInOrder() throws Exception {
+        var session = readySession();
+        loop.submit(() -> {
+                    backend.midTick = true;
+                    session.send(new BridgeMessage.CloseInventory());
+                    session.send(new Marker(7));
+                })
+                .get(5, TimeUnit.SECONDS);
+        assertTrue(backend.frames.isEmpty());
+
+        loop.submit(backend::tickEnd).get(5, TimeUnit.SECONDS);
+        assertInstanceOf(BridgeMessage.CloseInventory.class, backend.frames.poll());
+        assertEquals(new Marker(7), backend.frames.poll());
+        assertTrue(backend.frames.isEmpty());
+    }
+
+    @Test
+    void theHandshakeWaitsForTheTickEnd() throws Exception {
+        loop.submit(() -> backend.midTick = true).get(5, TimeUnit.SECONDS);
+        open(new Object(), backend);
+        assertTrue(backend.frames.isEmpty());
+        loop.submit(backend::tickEnd).get(5, TimeUnit.SECONDS);
+        handshake(backend, SECRET, true);
+        await(() ->
+                service.current(playerId) != null && service.current(playerId).isReady());
+    }
+
+    @Test
+    void aHeldFrameGoesOutWithinTheBoundWithoutATickEnd() throws Exception {
+        var session = readySession();
+        long start = System.nanoTime();
+        loop.submit(() -> {
+                    backend.midTick = true;
+                    session.send(new BridgeMessage.CloseInventory());
+                })
+                .get(5, TimeUnit.SECONDS);
+        assertInstanceOf(BridgeMessage.CloseInventory.class, backend.next());
+        assertTrue(System.nanoTime() - start >= TimeUnit.MILLISECONDS.toNanos(ProxyBridgeSession.HOLD_MILLIS));
+    }
+
+    @Test
+    void aClientWithoutTickEndsIsWrittenToAtOnce() throws Exception {
+        var session = readySession();
+        loop.submit(() -> session.send(new Marker(3))).get(5, TimeUnit.SECONDS);
+        assertEquals(new Marker(3), backend.frames.poll());
     }
 
     @Test
@@ -796,6 +853,10 @@ class BridgeServiceTest {
         private final String name;
         volatile boolean disconnected;
         volatile boolean inPlay = true;
+        /** The client sends tick ends and the backend has its movement but not yet the tick end. Loop only. */
+        boolean midTick;
+
+        private final List<Runnable> afterTickEnd = new ArrayList<>();
 
         FakeBackend(String name) {
             this.name = name;
@@ -821,6 +882,24 @@ class BridgeServiceTest {
         public void write(byte[] frame) {
             if (disconnected) throw new IllegalStateException("disconnected");
             frames.add(BridgeCodec.decode(Unpooled.wrappedBuffer(frame)));
+        }
+
+        @Override
+        public boolean midClientTick() {
+            return midTick;
+        }
+
+        @Override
+        public void afterClientTick(Runnable task) {
+            afterTickEnd.add(task);
+        }
+
+        /** The client's tick end is forwarded. Loop only. */
+        void tickEnd() {
+            midTick = false;
+            var tasks = List.copyOf(afterTickEnd);
+            afterTickEnd.clear();
+            tasks.forEach(Runnable::run);
         }
 
         @Override

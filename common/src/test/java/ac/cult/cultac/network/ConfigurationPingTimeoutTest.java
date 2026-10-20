@@ -18,17 +18,22 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
-/** A server may hold a client in configuration for any length of time, so time there does not count toward the timeout. */
+/**
+ * Ping and pong are registered in configuration as in play, so the timeout runs in both. It holds only before
+ * the first ping, which a client attached in configuration does not get until play traffic starts one, and
+ * while a protocol switch is unacknowledged.
+ */
 class ConfigurationPingTimeoutTest {
     private static final Vec3 SAFE = new Vec3(4, 64, 2);
     private static final long PAST_THE_TIMEOUT = TimeUnit.MINUTES.toNanos(5);
 
     @Test
-    void aClientHeldInConfigurationIsStillInspected() throws Exception {
+    void aClientAttachedInConfigurationIsStillInspected() throws Exception {
         withPlayer(player -> {
             CultConnection connection = player.user.getCultConnection();
             connection.phase(PacketDirection.SERVERBOUND, ConnectionPhase.CONFIGURATION);
             connection.phase(PacketDirection.CLIENTBOUND, ConnectionPhase.CONFIGURATION);
+            player.lastTransSent = 0;
             unansweredFor(player, PAST_THE_TIMEOUT);
 
             player.pollData();
@@ -37,22 +42,51 @@ class ConfigurationPingTimeoutTest {
     }
 
     @Test
-    void theTimeoutRunsFromTheReturnToPlay() throws Exception {
+    void theTimeoutRunsFromTheFirstPing() throws Exception {
         withPlayer(player -> {
             CultConnection connection = player.user.getCultConnection();
-            connection.forwarded(ClientboundPackets.START_CONFIGURATION, null);
-            connection.forwarded(ServerboundPackets.CONFIGURATION_ACKNOWLEDGED, null);
+            connection.phase(PacketDirection.SERVERBOUND, ConnectionPhase.CONFIGURATION);
+            connection.phase(PacketDirection.CLIENTBOUND, ConnectionPhase.CONFIGURATION);
+            player.lastTransSent = 0;
             unansweredFor(player, PAST_THE_TIMEOUT);
             player.pollData();
 
             connection.forwarded(ClientboundPackets.FINISH_CONFIGURATION, null);
             connection.forwarded(ServerboundPackets.FINISH_CONFIGURATION, null);
+            player.lastTransSent = System.currentTimeMillis();
             player.pollData();
             assertFalse(exempt(player));
 
             unansweredFor(player, PAST_THE_TIMEOUT);
             player.pollData();
             assertTrue(exempt(player), "an unanswered player in play still times out");
+        });
+    }
+
+    @Test
+    void aClientWithholdingPongsInConfigurationTimesOut() throws Exception {
+        withPlayer(player -> {
+            CultConnection connection = player.user.getCultConnection();
+            player.lastTransSent = System.currentTimeMillis();
+            connection.forwarded(ClientboundPackets.START_CONFIGURATION, null);
+            connection.forwarded(ServerboundPackets.CONFIGURATION_ACKNOWLEDGED, null);
+            unansweredFor(player, PAST_THE_TIMEOUT);
+
+            player.pollData();
+            assertTrue(exempt(player), "configuration does not pause the timeout once pings flow");
+        });
+    }
+
+    @Test
+    void anUnacknowledgedProtocolSwitchHoldsTheTimeout() throws Exception {
+        withPlayer(player -> {
+            CultConnection connection = player.user.getCultConnection();
+            player.lastTransSent = System.currentTimeMillis();
+            connection.forwarded(ClientboundPackets.START_CONFIGURATION, null);
+            unansweredFor(player, PAST_THE_TIMEOUT);
+
+            player.pollData();
+            assertFalse(exempt(player));
         });
     }
 

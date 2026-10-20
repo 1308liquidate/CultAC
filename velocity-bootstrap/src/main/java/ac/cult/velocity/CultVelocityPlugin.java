@@ -5,7 +5,6 @@ import ac.cult.reload.host.BuildUpdates;
 import ac.cult.reload.host.CommandRouting;
 import ac.cult.reload.host.GenerationManager;
 import ac.cult.reload.host.UpdateSettings;
-import ac.cult.reload.host.UpdateState;
 import ac.cult.reload.host.UpdateWebhook;
 import ac.grim.grimac.api.GrimAPIProvider;
 import ac.grim.grimac.api.GrimAbstractAPI;
@@ -36,6 +35,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.slf4j.Logger;
 
 @Plugin(
@@ -56,6 +56,8 @@ public final class CultVelocityPlugin {
     /** The proxy does not listen before initialization ends, so this is all a slow download can delay startup. */
     private static final Duration BOOT_UPDATE_LIMIT = Duration.ofSeconds(10);
 
+    private static final Executor UPDATE_WORKER =
+            task -> Thread.ofPlatform().daemon().name("cult-update").start(task);
     private static final String UPDATE_USAGE = " update <build> | latest [channel] | builds [channel] | <filename.jar>";
 
     private final ProxyServer proxy;
@@ -145,10 +147,8 @@ public final class CultVelocityPlugin {
                                     "Usage: /" + primaryRoot() + (devSwap ? " devswap" : " update <filename.jar>")));
                             return;
                         }
-                        engine.update(devSwap ? "CultAC-velocity.jar" : args[1])
-                                .whenComplete((message, failure) ->
-                                        source.sendMessage(net.kyori.adventure.text.Component.text(
-                                                failure == null ? message : "Update failed: " + failure.getMessage())));
+                        BuildUpdates.installFile(engine, "CultAC-velocity.jar", null, UPDATE_WORKER)
+                                .thenAccept(line -> tell(source, line, updateColor(line)));
                     } else if (args.length > 0 && args[0].equalsIgnoreCase("runtimes")) {
                         if (!source.hasPermission("cult.runtimes")) {
                             source.sendMessage(net.kyori.adventure.text.Component.text("You do not have permission."));
@@ -255,58 +255,79 @@ public final class CultVelocityPlugin {
     }
 
     /**
-     * {@code /cult update <build> | latest [channel] | builds [channel] | <filename.jar>}. A build install ends in one
-     * console line, also posted to the update webhook; the network work runs off the proxy's threads.
+     * {@code /cult update <build> | latest [channel] | builds [channel] | <filename.jar>}. A build install answers the
+     * sender at once and again with its outcome, which is also logged and posted to the update webhook; the network
+     * work runs off the proxy's threads.
      */
     private void update(CommandSource source, String[] args) {
         String target = args.length > 1 ? args[1] : "";
         if (args.length == 2 && target.endsWith(".jar")) {
-            engine.update(target).whenComplete((message, failure) -> {
-                if (failure == null) {
-                    try {
-                        UpdateState.clear(updateSettings().stateFile());
-                    } catch (IOException | RuntimeException cleanup) {
-                        logger.warn("The next boot may start the last installed build instead: " + cleanup);
-                    }
-                }
-                source.sendMessage(
-                        Component.text(failure == null ? message : "Update failed: " + failure.getMessage()));
-            });
+            Path stateFile = null;
+            String unusable = "";
+            try {
+                stateFile = updateSettings().stateFile();
+            } catch (RuntimeException failure) {
+                unusable = "; the next boot may start the last installed build instead: " + failure;
+            }
+            String note = unusable;
+            BuildUpdates.installFile(engine, target, stateFile, UPDATE_WORKER)
+                    .thenApply(line -> line.startsWith("Activated") ? line + note : line)
+                    .thenAccept(line -> tell(source, line, updateColor(line)));
             return;
         }
         UpdateSettings settings;
         try {
             settings = updateSettings();
         } catch (RuntimeException unusable) {
-            logger.warn("update refused: " + unusable);
-            if (!(source instanceof ConsoleCommandSource))
-                source.sendMessage(Component.text("update refused: " + unusable));
+            if (!(source instanceof ConsoleCommandSource)) logger.warn("update refused: " + unusable);
+            tell(source, "update refused: " + unusable, NamedTextColor.RED);
             return;
         }
         var updates = new BuildUpdates(settings, bundledVersion);
-        Executor worker =
-                task -> Thread.ofPlatform().daemon().name("cult-update").start(task);
         if (args.length == 2 && target.matches("[0-9]{1,18}")) {
-            report(source, settings, updates.install(engine, Long.parseLong(target), worker));
+            tell(source, "Updating this proxy to b" + target + ": downloading and verifying...", NamedTextColor.GRAY);
+            report(source, settings, updates.install(engine, Long.parseLong(target), UPDATE_WORKER));
         } else if ((args.length == 2 || args.length == 3) && target.equalsIgnoreCase("latest")) {
+            tell(source, "Updating this proxy to the latest build: downloading and verifying...", NamedTextColor.GRAY);
             report(
                     source,
                     settings,
-                    updates.latest(engine, args.length == 3 ? args[2] : CultBuildVersion.BRANCH, worker));
+                    updates.latest(engine, args.length == 3 ? args[2] : CultBuildVersion.BRANCH, UPDATE_WORKER));
         } else if ((args.length == 2 || args.length == 3) && target.equalsIgnoreCase("builds")) {
-            updates.builds(args.length == 3 ? args[2] : null, engine.currentBuild(), worker)
-                    .thenAccept(lines -> lines.forEach(line -> source.sendMessage(Component.text(line))));
+            updates.builds(args.length == 3 ? args[2] : null, engine.currentBuild(), UPDATE_WORKER)
+                    .thenAccept(lines -> lines.forEach(line -> tell(source, line, NamedTextColor.WHITE)));
         } else {
-            source.sendMessage(Component.text("Usage: /" + primaryRoot() + UPDATE_USAGE));
+            tell(source, "Usage: /" + primaryRoot() + UPDATE_USAGE, NamedTextColor.RED);
         }
     }
 
     private void report(CommandSource source, UpdateSettings settings, CompletionStage<String> result) {
-        result.thenAccept(line -> {
-            logger.info(line);
-            if (!(source instanceof ConsoleCommandSource)) source.sendMessage(Component.text(line));
+        result.exceptionally(failure -> "update refused: " + failure).thenAccept(line -> {
+            if (!(source instanceof ConsoleCommandSource)) logger.info(line);
+            boolean installed = line.contains(" → b");
+            tell(
+                    source,
+                    line,
+                    installed
+                            ? NamedTextColor.GREEN
+                            : line.startsWith("already on") ? NamedTextColor.YELLOW : NamedTextColor.RED);
+            if (installed)
+                tell(
+                        source,
+                        "Players move to the new build as they switch servers; /" + primaryRoot()
+                                + " runtimes shows how many are left.",
+                        NamedTextColor.GRAY);
             webhook.post(settings.webhook(), line, logger::warn);
         });
+    }
+
+    private static NamedTextColor updateColor(String line) {
+        if (line.startsWith("Activated")) return NamedTextColor.GREEN;
+        return line.startsWith("Already running") ? NamedTextColor.YELLOW : NamedTextColor.RED;
+    }
+
+    private static void tell(CommandSource source, String line, NamedTextColor color) {
+        source.sendMessage(Component.text("[CultAC] ", NamedTextColor.DARK_AQUA).append(Component.text(line, color)));
     }
 
     /** {@code /cult runtimes [id [command]]}; commands run as the sender, once per player of that runtime. */

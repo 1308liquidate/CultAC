@@ -19,7 +19,11 @@ import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundOpenScreen;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerAction;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSwing;
+import ac.cult.cultac.protocol.value.BlockPos;
+import ac.cult.cultac.protocol.value.Direction;
+import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.protocol.wire.Wire;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.inventory.InventoryClick;
@@ -29,6 +33,8 @@ import io.netty.buffer.ByteBuf;
 import java.util.ArrayList;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class InventoryWindowChecksTest {
     @Test
@@ -279,6 +285,47 @@ class InventoryWindowChecksTest {
                 assertEquals(1, storage.getItem(36).getCount());
                 acknowledge(f, f.player.lastTransactionSent.get());
                 assertEquals(2, storage.getItem(36).getCount());
+            } finally {
+                ticks.currentTick = start;
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = PlayerAction.class,
+            names = {"DROP_ITEM", "DROP_ALL_ITEMS"})
+    void aHotbarDropIsNeverResentFromTheServerView(PlayerAction action) throws Exception {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+            f.user.bind(mock(PlatformPlayer.class));
+            var inventory = f.player.getInventory();
+            var stone = ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap.item("minecraft:stone");
+            var authoritative = new ArrayList<SimItemStack>();
+            for (int i = 0; i < inventory.menu.getSlots().size(); i++) authoritative.add(SimItemStack.EMPTY);
+            var two = stone.copy();
+            two.setCount(2);
+            authoritative.set(36, two);
+            sendContent(f, new InventoryPackets.Content(0, 7, authoritative, SimItemStack.EMPTY));
+            acknowledge(f, f.player.lastTransactionSent.get());
+
+            // ServerPlayer#drop(boolean) records the slot it emptied with setRemoteSlot and sends nothing.
+            var drop = new ServerboundPlayerAction(action, new BlockPos(0, 0, 0), Direction.DOWN, 0);
+            inventory.onPlayerAction(
+                    new PacketReceiveEvent<>(f.user, ConnectionPhase.PLAY, ServerboundPackets.PLAYER_ACTION, drop),
+                    f.player,
+                    drop);
+            int remaining = action == PlayerAction.DROP_ALL_ITEMS ? 0 : 1;
+            var storage = (ac.cult.cultac.utils.lists.CorrectingPlayerInventoryStorage)
+                    inventory.inventory.getInventoryStorage();
+            var ticks = ac.cult.cultac.CultAPI.INSTANCE.getTickManager();
+            int start = ticks.currentTick;
+            int sent = f.player.lastTransactionSent.get();
+            try {
+                ticks.currentTick = start + 5;
+                storage.tickServerView();
+                assertEquals(sent, f.player.lastTransactionSent.get());
+                assertEquals(remaining, storage.getItem(36).getCount());
+                assertEquals(remaining, inventory.serverViewSlot(36).getCount());
             } finally {
                 ticks.currentTick = start;
             }

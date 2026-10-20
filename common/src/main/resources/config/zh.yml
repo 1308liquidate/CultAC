@@ -43,8 +43,8 @@ spectators:
 # 玩家超时踢出时间（单位：秒）（默认 = 60）
 max-transaction-time: 60
 
-# 当 CultAC 自身出错时（无法附加到玩家、客户端版本不受支持，或在 max-transaction-time 内没有回应任何 ping），
-# 让玩家在不受检查的情况下继续游戏，而不是断开连接。针对数据包洪水和崩溃漏洞的踢出仍然有效。
+# 当 CultAC 自身出错时（无法附加到玩家或客户端版本不受支持），让玩家在不受检查的情况下继续游戏，而不是断开连接。
+# 针对数据包洪水、崩溃漏洞以及在 max-transaction-time 内未回应 ping 的踢出仍然有效。
 launch-safety:
   fail-open: true
 

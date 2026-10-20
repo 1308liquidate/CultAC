@@ -40,9 +40,9 @@ spectators:
 # Hoe lang moeten spelers hebben voordat we ze schoppen voor timing-out? Standaard = 60 seconden
 max-transaction-time: 60
 
-# Als CultAC zelf faalt (het kan zich niet aan een speler koppelen, de clientversie wordt niet ondersteund of
-# er wordt binnen max-transaction-time geen ping beantwoord), speelt de speler ongecontroleerd verder in plaats
-# van verbroken te worden. Kicks voor pakketfloods en crash-exploits blijven gelden.
+# Als CultAC zelf faalt (het kan zich niet aan een speler koppelen of de clientversie wordt niet ondersteund),
+# speelt de speler ongecontroleerd verder in plaats van verbroken te worden. Kicks voor pakketfloods,
+# crash-exploits en pings die niet binnen max-transaction-time worden beantwoord blijven gelden.
 launch-safety:
   fail-open: true
 

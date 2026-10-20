@@ -60,10 +60,7 @@ public final class RegistryTagValues {
         for (var wire : received.tags().entrySet()) {
             String registry = wire.getKey();
             var payload = wire.getValue();
-            if (!names.hasModelRegistry(registry)) {
-                names.unavailable(registry, "<registry>");
-                continue;
-            }
+            if (!names.hasModelRegistry(registry)) continue;
             // These dynamic tag families are not consumed. Via may inject their registry
             // packets outside the host codec; missing those IDs must not abort login.
             if (!names.hasWireRegistry(registry)
@@ -95,7 +92,6 @@ public final class RegistryTagValues {
                             ? names.id(registry, member)
                             : names.modelId(registry, member);
                     if (id >= 0) ids.add(id);
-                    else names.unavailable(registry, member);
                 }
                 projected.put(entry.getKey(), ids);
             }
