@@ -145,8 +145,9 @@ class PassengerPositionParityTest {
             assertInvariant(entities, 0);
             zombie.mount(entities.getEntity(42));
             assertInvariant(entities, 1);
+            // Entity#setRemoved stops the removed rider riding.
             entities.removeEntity(41);
-            assertInvariant(entities, 1);
+            assertInvariant(entities, 0);
             entities.addEntity(42, EntityTypeIds.OAK_BOAT, new Vec3(3, 64, 3), 0, 0, 0);
             assertInvariant(entities, 0);
             entities.vehicles.applyVehiclePassengers(42, new int[] {player.entityID});

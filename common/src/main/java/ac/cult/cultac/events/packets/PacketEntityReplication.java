@@ -1178,6 +1178,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                         || delayedVehicleCanStillBeCurrent
                                 && vehicle != null
                                 && vehicle.passengers.contains(player.compensatedEntities.playerEntity));
+        boolean setsSelfPassengers = packet.vehicleId() == player.entityID;
+        boolean changesSelfPassengers =
+                setsSelfPassengers || player.compensatedEntities.mayChangeSelfPassengers(packet.passengers());
 
         if (removesLocalPlayer) {
             // Entity#stopRiding moves nothing on the client, so the resync keeps the player at its last ride-tick
@@ -1191,6 +1194,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                                     Vec3.ZERO,
                                     player.getSetbackTeleportUtil().nextTeleportId());
             int transaction = transactionForSetPassengers(event, null, dismountResyncState);
+            if (changesSelfPassengers) player.compensatedEntities.markSelfPassengersChange(transaction);
             int vehicleId = packet.vehicleId();
             boolean resyncTeleports = dismountResyncState != null;
             player.compensatedEntities.vehicles.setServerVehicleDismount(vehicleId, transaction);
@@ -1231,6 +1235,11 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         }
 
         int transaction = transactionForSetPassengers(event, mountResyncState, null);
+        if (setsSelfPassengers) {
+            player.compensatedEntities.sentSelfPassengers(packet.passengers(), transaction);
+        } else if (changesSelfPassengers) {
+            player.compensatedEntities.markSelfPassengersChange(transaction);
+        }
         int vehicleId = packet.vehicleId();
         if (mountsLocalPlayer) {
             player.compensatedEntities.vehicles.setServerVehicle(vehicleId, passengers, transaction);
@@ -1448,6 +1457,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                         event, List.of(entityMotion(player.entityID, SELF_DISMOUNT_VELOCITY)), true)
                 : appendTrailingProofTransaction(event);
         int transaction = proof == null ? -1 : proof.transaction();
+        if (player.compensatedEntities.mayChangeSelfPassengers(destroyEntityIds))
+            player.compensatedEntities.markSelfPassengersChange(transaction);
         boolean sentVelocityReset = resetsVelocity && proof != null;
 
         for (int entityID : destroyEntityIds) {

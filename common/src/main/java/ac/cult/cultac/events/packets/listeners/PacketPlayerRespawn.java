@@ -394,6 +394,8 @@ public class PacketPlayerRespawn {
                 player.compensatedWorld.clientBiomeZoomSeed(spawnInfo.biomeZoomSeed());
             }
         };
+        // The respawned LocalPlayer carries no passengers.
+        player.compensatedEntities.markSelfPassengersChange(player.lastTransactionSent.get() + 1);
         player.latencyUtils.addRealTimeTaskNext(applyRespawnState);
     }
 }

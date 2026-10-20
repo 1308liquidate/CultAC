@@ -51,6 +51,9 @@ public class WorldData {
     int numCarriedPushing;
     CarriedPush carriedPush;
 
+    /** Whether Entity#push may move the player: not while it certainly carries a passenger (Entity#isVehicle). */
+    boolean pushable;
+
     // Default model state identifies the supporting block, independent of its properties.
     int onBlock;
     StuckEdgeData sneak;
@@ -101,6 +104,7 @@ public class WorldData {
                 numPushing,
                 numCarriedPushing,
                 carriedPush,
+                pushable,
                 onBlock,
                 sneak,
                 bubbleColumn,

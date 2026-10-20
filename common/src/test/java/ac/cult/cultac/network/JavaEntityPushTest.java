@@ -13,8 +13,12 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CarriedPush;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.EntityPush;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
+import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
+import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.packet.ClientboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundRemoveEntities;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
@@ -375,6 +379,96 @@ class JavaEntityPushTest {
         }
     }
 
+    /** Entity#push moves no entity that isVehicle: a player carrying a passenger takes no pushes. */
+    @Test
+    void aPlayerCarryingAPassengerIsNotPushed() throws Exception {
+        try (var f = falling()) {
+            carry(f, true);
+            entity(f, 102, TOUCHING).setClientTickOrder(-1L);
+
+            PredictionResult contact = f.tick(START.add(0, FIRST_FALL, PUSH), false);
+
+            assertFalse(exact(contact), describe(contact));
+            assertEquals(0, contact.getSimulationContext().getWorldData().getNumPushing());
+        }
+    }
+
+    @Test
+    void aPlayerCarryingAPassengerCarriesNoPushIntoTheNextTick() throws Exception {
+        try (var f = falling()) {
+            carry(f, true);
+            entity(f, 102, TOUCHING);
+
+            PredictionResult contact = f.tick(START.add(0, FIRST_FALL, 0), false);
+            assertExact(contact);
+            assertEquals(0, contact.getSimulationContext().getWorldData().getNumCollidingTickingAfterPlayer());
+            PredictionResult next = f.tick(START.add(0, FIRST_FALL + SECOND_FALL, PUSH), false);
+            assertFalse(exact(next), describe(next));
+        }
+    }
+
+    /** Before its ping is answered the client may not have read the set_passengers: it may still be pushed. */
+    @Test
+    void anUnansweredPassengerKeepsThePush() throws Exception {
+        try (var f = falling()) {
+            carry(f, false);
+            entity(f, 102, TOUCHING).setClientTickOrder(-1L);
+
+            assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
+        }
+    }
+
+    @Test
+    void anUnansweredDismountOfThePassengerKeepsThePush() throws Exception {
+        try (var f = falling()) {
+            carry(f, true);
+            f.setPassengers(f.player.entityID, List.of());
+            assertUnanswered(f);
+            assertFalse(f.player.compensatedEntities.getSelf().passengers.isEmpty());
+            entity(f, 102, TOUCHING).setClientTickOrder(-1L);
+
+            assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
+        }
+    }
+
+    @Test
+    void anUnansweredMountOfThePassengerElsewhereKeepsThePush() throws Exception {
+        try (var f = falling()) {
+            carry(f, true);
+            entity(f, 103, AWAY);
+            f.setPassengers(103, List.of(100));
+            assertUnanswered(f);
+            entity(f, 102, TOUCHING).setClientTickOrder(-1L);
+
+            assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
+        }
+    }
+
+    @Test
+    void anUnansweredRemovalOfThePassengerKeepsThePush() throws Exception {
+        try (var f = falling()) {
+            carry(f, true);
+            removeEntity(f, 100);
+            assertUnanswered(f);
+            assertFalse(f.player.compensatedEntities.getSelf().passengers.isEmpty());
+            entity(f, 102, TOUCHING).setClientTickOrder(-1L);
+
+            assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
+        }
+    }
+
+    /** Entity#setRemoved stops the discarded passenger riding the player. */
+    @Test
+    void aRemovedPassengerLeavesThePlayerPushable() throws Exception {
+        try (var f = falling()) {
+            carry(f, true);
+            f.player.compensatedEntities.removeEntity(100);
+            entity(f, 102, TOUCHING).setClientTickOrder(-1L);
+
+            assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
+        }
+    }
+
     @Test
     void aRiderOutsideTheOwnRidingTreePushesFromItsSeatNotItsLastPosition() throws Exception {
         try (var f = falling()) {
@@ -583,6 +677,30 @@ class JavaEntityPushTest {
     private static void seatSlime(JavaTickFixture f, PacketEntity vehicle) {
         f.player.compensatedEntities.addEntity(RIDER, EntityTypeIds.SLIME, AWAY, 0, 0, 0);
         f.player.compensatedEntities.entityMap.get(RIDER).mount(vehicle);
+    }
+
+    /** A set_passengers putting zombie 100 on the player, its ping answered or not. */
+    private static void carry(JavaTickFixture f, boolean answered) {
+        entity(f, 100, AWAY);
+        f.setPassengers(f.player.entityID, List.of(100));
+        if (answered) {
+            f.pongThrough(f.player.lastTransactionSent.get());
+            assertFalse(f.player.compensatedEntities.getSelf().passengers.isEmpty());
+        } else {
+            assertUnanswered(f);
+        }
+    }
+
+    private static void removeEntity(JavaTickFixture f, int id) {
+        var packet = new ClientboundRemoveEntities(List.of(id));
+        var event = new PacketSendEvent<>(
+                f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.REMOVE_ENTITIES, packet, false);
+        f.player.packetEntityReplication.onRemoveEntities(event, f.player, packet);
+        event.tasksAfter().forEach(Runnable::run);
+    }
+
+    private static void assertUnanswered(JavaTickFixture f) {
+        assertTrue(f.player.lastTransactionSent.get() > f.player.lastTransactionReceived.get());
     }
 
     /** A respawn into the current level, its spawn teleport to {@link #START}, then two falling ticks to {@link #CONTACT}. */

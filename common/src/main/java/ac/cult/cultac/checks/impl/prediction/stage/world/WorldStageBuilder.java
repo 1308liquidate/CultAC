@@ -168,7 +168,9 @@ public class WorldStageBuilder {
         int numColliding = getNumEntitiesCollidingWith(player, simulationContext);
         CarriedPush carriedPush = player.checkManager.getSimulationProcessor().getCarriedPush();
         int numCarriedPushing = pushersFromLastTick(simulationContext, lastPrediction, !carriedPush.isZero());
-        int numPushing = collidingTickingBeforePlayer + numCarriedPushing;
+        boolean pushable =
+                player.isBedrockMovement() || !simulationContext.getEntities().selfCertainlyCarriesPassenger();
+        int numPushing = (pushable ? collidingTickingBeforePlayer : 0) + numCarriedPushing;
         int onBlock = BlockProperties.getOnPos(player, mainSupportingBlockData, to);
 
         SimpleCollisionBox minExtent = simulationContext.getFromMinimumExtent();
@@ -256,11 +258,12 @@ public class WorldStageBuilder {
                 climbingAtStart,
                 climbing,
                 numColliding,
-                numColliding - collidingTickingBeforePlayer,
-                ridersTickingAfterPlayer,
+                pushable ? numColliding - collidingTickingBeforePlayer : 0,
+                pushable ? ridersTickingAfterPlayer : 0,
                 numPushing,
                 numCarriedPushing,
                 carriedPush,
+                pushable,
                 onBlock,
                 stuckEdgeData,
                 bubble,
@@ -567,7 +570,9 @@ public class WorldStageBuilder {
      */
     public static void recountCollidingTickingAfterPlayer(CultPlayer player, PredictionResult prediction) {
         SimulationContext context = prediction.getSimulationContext();
-        if (context == null || context.getVehicle() != null) return;
+        if (context == null
+                || context.getVehicle() != null
+                || !context.getWorldData().isPushable()) return;
         SimpleCollisionBox playerBox = pusherContactBox(context);
         SimpleCollisionBox entityBounds = new SimpleCollisionBox();
         SimpleCollisionBox entityScratch = new SimpleCollisionBox();
@@ -591,7 +596,8 @@ public class WorldStageBuilder {
      * every other entity's pushEntities.
      */
     public void addPushesOnStandingPlayer(CultPlayer player, double x, double y, double z, SimpleCollisionBox pushes) {
-        if (player.compensatedEntities.getSelf().inVehicle()) return;
+        if (player.compensatedEntities.getSelf().inVehicle()
+                || !player.isBedrockMovement() && player.compensatedEntities.selfCertainlyCarriesPassenger()) return;
         SimpleCollisionBox playerBox = GetBoundingBox.getBoundingBoxFromPosAndSize(x, y, z, 0.6f, 1.8f);
         SimpleCollisionBox entityBounds = new SimpleCollisionBox();
         SimpleCollisionBox entityScratch = new SimpleCollisionBox();

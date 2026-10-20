@@ -60,6 +60,10 @@ public class CompensatedEntities {
     public TrackerData selfTrackedEntity;
     public PacketEntitySelf playerEntity;
     private Vec3 rideTickSeat;
+    // The client holds every sent change to the local player's passengers once it answers this transaction.
+    private int selfPassengersSettleTransaction = Integer.MIN_VALUE;
+    // The passengers the last set_passengers for the local player named.
+    private List<Integer> sentSelfPassengers = List.of();
 
     public CompensatedEntities(CultPlayer player) {
         this.player = player;
@@ -267,6 +271,37 @@ public class CompensatedEntities {
         return GetBoundingBox.getPacketEntityBoundingBox(player, seat.x, seat.y, seat.z, rider);
     }
 
+    /**
+     * Whether a set_passengers or remove_entities naming {@code entityIds} may change the local player's passengers:
+     * one of them rides it, or the last set_passengers for it named one.
+     */
+    public boolean mayChangeSelfPassengers(List<Integer> entityIds) {
+        for (int id : entityIds) {
+            if (sentSelfPassengers.contains(id)) return true;
+            for (PacketEntity passenger : playerEntity.passengers) {
+                if (passenger.getEntityId() == id) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Records a set_passengers for the local player, which the client applies on answering {@code transaction}. */
+    public void sentSelfPassengers(List<Integer> passengers, int transaction) {
+        sentSelfPassengers = List.copyOf(passengers);
+        markSelfPassengersChange(transaction);
+    }
+
+    /** Records a sent change to the local player's passengers, which the client holds on answering {@code transaction}. */
+    public void markSelfPassengersChange(int transaction) {
+        selfPassengersSettleTransaction = Math.max(selfPassengersSettleTransaction, transaction);
+    }
+
+    /** Entity#isVehicle for the local player, true only while no sent change to its passengers is unanswered. */
+    public boolean selfCertainlyCarriesPassenger() {
+        return !playerEntity.passengers.isEmpty()
+                && player.lastTransactionReceived.get() >= selfPassengersSettleTransaction;
+    }
+
     public void removeEntity(int entityID) {
         PacketEntity previousRoot = playerEntity.getRiding();
         PacketEntity removing = entityMap.get(entityID);
@@ -289,6 +324,8 @@ public class CompensatedEntities {
             passenger.eject();
         }
         if (dismountSeat != null) commitDismountSeat(dismountSeat);
+        // Entity#setRemoved stops a discarded entity riding.
+        entity.eject();
         if (player.isBedrockMovement()) {
             vehicles.seedStartingVelocityIfRootChanged(previousRoot);
             if (previousRoot == null) player.getSetbackTeleportUtil().transferBedrockVehicleSetback(entityID);
