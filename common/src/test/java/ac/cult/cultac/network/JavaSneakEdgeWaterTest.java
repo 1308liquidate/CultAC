@@ -29,6 +29,8 @@ class JavaSneakEdgeWaterTest {
             new ServerboundPlayerInput(true, false, true, false, true, false, true);
     private static final ServerboundPlayerInput SNEAK_IN_WATER =
             new ServerboundPlayerInput(true, false, true, false, false, true, false);
+    private static final ServerboundPlayerInput WADE =
+            new ServerboundPlayerInput(true, false, true, false, false, false, false);
     private static final ServerboundPlayerInput FORWARD_JUMP =
             new ServerboundPlayerInput(true, false, false, false, true, false, true);
 
@@ -59,10 +61,18 @@ class JavaSneakEdgeWaterTest {
 
     /**
      * The same pool edge with the sprint flag never set, so Entity#updateSwimming cannot swim the player and
-     * LocalPlayer#aiStep crouches it: an un-crouched input that only the full scale reproduces carries nothing.
+     * LocalPlayer#aiStep crouches it: an un-crouched input that only the full scale reproduces carries nothing, and
+     * releasing shift after it moves on the crouched carry.
      */
     @Test
     void aCrouchingPlayerThatCannotSwimCarriesNoUncrouchedInput() throws Exception {
+        assertTrue(exact(releaseAfterEdge(0.3F)));
+        PredictionResult forbidden = releaseAfterEdge(1.0F);
+        assertFalse(forbidden.getFlags().isEmpty(), "moved on the un-crouched carry: " + describe(forbidden));
+    }
+
+    /** Three ticks against the edge at {@code scale} once crouched, then the release moving on their carry. */
+    private static PredictionResult releaseAfterEdge(float scale) throws Exception {
         try (var f = new JavaTickFixture()) {
             pool(f);
             float yaw = -132.16786193847656F;
@@ -72,19 +82,16 @@ class JavaSneakEdgeWaterTest {
             f.place(position, velocity);
             f.input(SNEAK_IN_WATER);
             for (int tick = 0; tick < 3; tick++) {
-                // travelInWater's moveRelative(0.02F) at the full scale; the edge leaves only the move along it.
-                Vec3 delta = velocity.add(ClientMoveInput.of(f, SNEAK_IN_WATER, 1.0F, 0.02F, yaw));
+                // travelInWater's moveRelative(0.02F); shift is new on the first tick, so the crouch starts after it.
+                Vec3 delta = velocity.add(ClientMoveInput.of(f, SNEAK_IN_WATER, tick == 0 ? 1.0F : scale, 0.02F, yaw));
                 position = position.add(delta.x, 0.0, 0.0);
-                PredictionResult result = f.tick(position, true);
-                double carriedZ = delta.z * 0.8F;
-                if (tick > 0) {
-                    assertFalse(
-                            f.player.checkManager.getSimulationProcessor().getValidPlayerStartingVels().stream()
-                                    .anyMatch(next -> Math.abs(next.z - carriedZ) < 1.0E-7),
-                            "carried the un-crouched input: " + describe(result));
-                }
-                velocity = new Vec3(delta.x * 0.8F, 0.0, carriedZ);
+                f.tick(position, true);
+                velocity = new Vec3(delta.x * 0.8F, 0.0, delta.z * 0.8F);
             }
+            // Still crouched from the held shift; the floor stops getFluidFallingAdjustedMovement's -0.005.
+            f.input(WADE);
+            Vec3 delta = velocity.add(ClientMoveInput.of(f, WADE, 0.3F, 0.02F, yaw));
+            return f.tick(position.add(delta.x, 0.0, delta.z), true);
         }
     }
 
