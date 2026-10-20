@@ -30,6 +30,15 @@ class ReachInterpolationInPlaceTest {
         assertBoxEquals(expected, two);
     }
 
+    /** Entity#refreshDimensions resizes each position a pending second transaction leaves possible around its feet. */
+    @Test
+    void resizeKeepsEveryPossibleStartingPosition() {
+        ReachInterpolationData data = new ReachInterpolationData(START);
+        data.updatePossibleStartingLocation(new SimpleCollisionBox(2, 0, 0, 3, 1, 1));
+        data.resize(3.0F, 2.0F);
+        assertBoxEquals(new SimpleCollisionBox(-1, 0, -1, 4, 2, 2), data.getPossibleMovementLocationCombined());
+    }
+
     @Test
     void combinedLocationIntoBox() throws Exception {
         ReachInterpolationData data = data(3, 1, 2);

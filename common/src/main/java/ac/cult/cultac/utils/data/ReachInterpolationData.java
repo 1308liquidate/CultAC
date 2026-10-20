@@ -678,7 +678,16 @@ public class ReachInterpolationData {
     /** {@code Entity#reapplyPosition}: every box keeps its position and takes the new dimensions. */
     public void resize(float width, float height) {
         boundsValid = false;
-        startingLocation = resized(startingLocation, width, height);
+        // A pending second transaction leaves the start a union of boxes the target's size; each keeps its feet.
+        double widthChange = width - (targetLocation.maxX - targetLocation.minX);
+        double heightChange = height - (targetLocation.maxY - targetLocation.minY);
+        startingLocation = new SimpleCollisionBox(
+                startingLocation.minX - widthChange / 2.0D,
+                startingLocation.minY,
+                startingLocation.minZ - widthChange / 2.0D,
+                startingLocation.maxX + widthChange / 2.0D,
+                startingLocation.maxY + heightChange,
+                startingLocation.maxZ + widthChange / 2.0D);
         targetLocation = resized(targetLocation, width, height);
     }
 
