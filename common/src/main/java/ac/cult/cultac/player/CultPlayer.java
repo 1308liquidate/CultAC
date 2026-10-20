@@ -998,6 +998,11 @@ public class CultPlayer implements GrimUser {
     }
 
     private boolean canPlayerFitWithinBlocksAndEntitiesWhen(Pose newPose) {
+        return canPlayerFitWithinBlocksAndEntitiesWhen(newPose, x, y, z);
+    }
+
+    /** Player#canPlayerFitWithinBlocksAndEntitiesWhen with the player at {@code (x, y, z)}. */
+    public boolean canPlayerFitWithinBlocksAndEntitiesWhen(Pose newPose, double x, double y, double z) {
         SimpleCollisionBox box = GetBoundingBox.getBoundingBoxFromPosAndSize(
                         x, y, z, newPose.width * getScale(), newPose.height * getScale())
                 .expand(-1.0E-7D);

@@ -2,6 +2,7 @@ package ac.cult.cultac.checks.impl.prediction.checks;
 
 import ac.cult.cultac.bedrock.prediction.BedrockPredictionResult;
 import ac.cult.cultac.checks.Check;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoSneakSlow;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.OmniSprint;
@@ -13,6 +14,7 @@ import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.data.StuckEdgeData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.OptifineFastMath;
 import ac.cult.cultac.utils.math.VanillaMath;
@@ -94,11 +96,19 @@ public class HorizontalAnalyzer implements EngineCheck {
             isSlowed = false;
         }
         if (player.inVehicle()) isSlowed = false;
-
+        // LocalPlayer#aiStep crouches a player in water only when Entity#updateSwimming, which needs the sprint flag,
+        // left it not swimming and the crouching pose fits; Entity#isVisuallyCrawling never slows it in water.
         if (isSlowed
-                && !player.isFlying
-                && !result.getSimulationContext().getWorldData().maybeInLiquid()
-                && player.usesModernJavaItemUse()) {
+                && result.getSimulationContext().getWorldData().getInWater() != DesyncStatus.FALSE
+                && (player.sprintState.flagBeforeAiStep()
+                        || !player.canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING, from.x, from.y, from.z))) {
+            isSlowed = false;
+        }
+        // FluidPush grants the on-foot current as a radius around the prediction, which does not keep the residual
+        // inside the sneaking input square.
+        if (result.getSimulationContext().getWorldData().getInFlowingLiquid() != DesyncStatus.FALSE) isSlowed = false;
+
+        if (isSlowed && !player.isFlying && player.usesModernJavaItemUse()) {
             result.setSneakingInputMultiplier(
                     (float) player.compensatedEntities.getSelf().sneakingSpeed.value());
         }
@@ -118,7 +128,7 @@ public class HorizontalAnalyzer implements EngineCheck {
                             target));
             speedFlagAmount = requiredAxis - maxDirLength;
 
-            if (!result.getSimulationContext().getWorldData().maybeInLiquid() && speedFlagAmount > 0.001) {
+            if (speedFlagAmount > 0.001) {
                 result.addFlag(
                         player.checkManager.getListener(NoSneakSlow.class),
                         () -> NumFormatter.formatNumberStandard(minimumInputRequired.x) + " "
