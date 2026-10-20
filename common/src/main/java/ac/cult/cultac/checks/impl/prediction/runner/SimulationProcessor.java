@@ -71,6 +71,7 @@ import ac.cult.cultac.utils.data.SetbackPosWithVector;
 import ac.cult.cultac.utils.data.StuckSpeedData;
 import ac.cult.cultac.utils.data.TeleportAcceptData;
 import ac.cult.cultac.utils.data.TeleportData;
+import ac.cult.cultac.utils.data.TransactionVel;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHappyGhast;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
@@ -87,7 +88,6 @@ import ac.cult.cultac.utils.nmsutil.NextTickVelocityDeriver;
 import ac.cult.cultac.utils.nmsutil.ReusableVelocitySet;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -1438,12 +1438,16 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                     this.couldPotentiallyTickSkip);
             List<PredVector> validInitialVelocities = engine.startingVelocities(
                     new VelocityTransformer(curSimulationContext), player, contextPacketStart, curSimulationContext);
-            SimulationContext sortContext = curSimulationContext;
+            Vec3 sortTarget = curSimulationContext.getTarget();
+            boolean java = !player.isBedrockMovement();
+            TransactionVel receivedVelocity =
+                    java ? unread(player.checkManager.getKnockbackHandler().secondBread) : null;
+            TransactionVel receivedExplosion =
+                    java ? unread(player.checkManager.getExplosionHandler().secondBread) : null;
             // Empty or single-candidate lists need no ordering and may be immutable.
             if (validInitialVelocities.size() > 1)
-                validInitialVelocities.sort(Comparator.comparingInt(PredVector::tickSkippingComparator)
-                        .thenComparingInt(PredVector::packetModifiersLength)
-                        .thenComparingDouble(predVector -> predVector.distanceToSqr(sortContext.getTarget())));
+                validInitialVelocities.sort((first, second) ->
+                        compareStartingVelocities(first, second, sortTarget, receivedVelocity, receivedExplosion));
 
             for (int i = 0, size = validInitialVelocities.size(); i < size; i++) {
                 PredVector initialStartingVel = validInitialVelocities.get(i);
@@ -1559,6 +1563,27 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         assert bestResult != null;
         movementProfile.evaluatePredictionResult(player, bestResult);
         return bestResult;
+    }
+
+    private static int compareStartingVelocities(
+            PredVector first, PredVector second, Vec3 target, TransactionVel velocity, TransactionVel explosion) {
+        int order = Integer.compare(first.tickSkippingComparator(), second.tickSkippingComparator());
+        if (order != 0) return order;
+        order = Integer.compare(missing(first, velocity, explosion), missing(second, velocity, explosion));
+        if (order != 0) return order;
+        order = Integer.compare(first.packetModifiersLength(), second.packetModifiersLength());
+        if (order != 0) return order;
+        return Double.compare(first.distanceToSqr(target), second.distanceToSqr(target));
+    }
+
+    /** The bundled proof transaction precedes the next client tick, so that tick starts from the confirmed motion. */
+    private static TransactionVel unread(TransactionVel confirmed) {
+        return confirmed == null || confirmed.isConsumed() ? null : confirmed;
+    }
+
+    private static int missing(PredVector vector, TransactionVel velocity, TransactionVel explosion) {
+        return (velocity != null && !vector.hasPacketModifier(velocity) ? 1 : 0)
+                + (explosion != null && !vector.hasPacketModifier(explosion) ? 1 : 0);
     }
 
     /**

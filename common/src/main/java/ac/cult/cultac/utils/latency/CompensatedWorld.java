@@ -5,6 +5,8 @@ import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.FluidTags;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.network.packet.WorldPackets.SectionBlocksUpdate;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
@@ -90,6 +92,9 @@ public class CompensatedWorld {
     private List<BlockPos> currentlyChangedBlocks = new LinkedList<>();
     private final Map<Integer, List<BlockPos>> serverIsCurrentlyProcessingThesePredictions = new LinkedHashMap<>();
     private int clientPredictionSequence;
+    /** BlockStatePredictionHandler#lastTeleportSequence: the prediction sequence when the client last took a teleport. */
+    private int lastTeleportPredictionSequence = -1;
+
     private int level;
     private boolean clientboundUnresolved;
     private boolean levelUnresolved;
@@ -462,10 +467,22 @@ public class CompensatedWorld {
         clientPredictionSequence++;
     }
 
+    /** ClientPacketListener#handleMovePlayer -> BlockStatePredictionHandler#onTeleport. */
+    public void onClientTeleport() {
+        if (!tracksTeleportSequence()) return;
+        lastTeleportPredictionSequence = clientPredictionSequence;
+    }
+
+    /** BlockStatePredictionHandler#lastTeleportSequence exists from 26.1; older clients always snap back. */
+    private boolean tracksTeleportSequence() {
+        return !player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_1);
+    }
+
     public void resetClientPredictions() {
         player.blockActionReconciler.reset();
         endSelectionSnapshot();
         clientPredictionSequence = 0;
+        lastTeleportPredictionSequence = -1;
         isCurrentlyPredicting = false;
         currentlyChangedBlocks.clear();
         originalServerBlocks.clear();
@@ -483,7 +500,7 @@ public class CompensatedWorld {
                 it.hasNext(); ) {
             Map.Entry<Integer, List<BlockPos>> iter = it.next();
             if (iter.getKey() <= prediction) {
-                applyBlockChanges(iter.getValue(), transaction);
+                applyBlockChanges(iter.getValue(), transaction, prediction);
                 it.remove();
             }
         }
@@ -495,7 +512,7 @@ public class CompensatedWorld {
                 it.hasNext(); ) {
             Map.Entry<Integer, List<BlockPos>> iter = it.next();
             if (iter.getKey() <= prediction) {
-                applyBlockChanges(iter.getValue(), transaction);
+                applyBlockChanges(iter.getValue(), transaction, prediction);
                 it.remove();
             }
         }
@@ -514,6 +531,21 @@ public class CompensatedWorld {
         player.latencyUtils.addRealTimeTask(transaction, () -> {
             if (queuedLevel == level) handleServerBlockUpdate(x, y, z, state, transaction);
             serverBlockView.applied(position, id);
+        });
+    }
+
+    public void queueServerBlockUpdates(SectionBlocksUpdate update, int transaction) {
+        long[] ids = new long[update.size()];
+        int[] sent = {0};
+        update.runUpdates((x, y, z, state) -> ids[sent[0]++] = serverBlockView.sent(
+                BlockPos.asLong(x, y, z), ViaClientBlockShapeMappings.clientBlockStateId(player, stateIdOrAir(state))));
+        int queuedLevel = level;
+        player.latencyUtils.addRealTimeTask(transaction, () -> {
+            int[] applied = {0};
+            update.runUpdates((x, y, z, state) -> {
+                if (queuedLevel == level) handleServerBlockUpdate(x, y, z, state, transaction);
+                serverBlockView.applied(BlockPos.asLong(x, y, z), ids[applied[0]++]);
+            });
         });
     }
 
@@ -546,43 +578,36 @@ public class CompensatedWorld {
         updateBlock(x, y, z, state);
     }
 
-    private void applyBlockChanges(List<BlockPos> toApplyBlocks, int transaction) {
+    private void applyBlockChanges(List<BlockPos> toApplyBlocks, int transaction, int sequence) {
         // The transaction is sent after the block-ack packet in the same clientbound bundle.
         // Vanilla processes bundle sub-packets in order on the client thread, then replies to
         // the ping, so this marker means the ack and any bundled block updates are applied.
-        player.latencyUtils.addRealTimeTask(
-                transaction,
-                () -> toApplyBlocks.forEach(vector3i -> {
-                    BlockPrediction predictionData = originalServerBlocks.get(vector3i.asLong());
+        player.latencyUtils.addRealTimeTask(transaction, () -> {
+            // BlockStatePredictionHandler#endPredictionsUpTo: no snap back after a teleport since the prediction.
+            boolean snapsBack = !tracksTeleportSequence() || lastTeleportPredictionSequence < sequence;
+            toApplyBlocks.forEach(vector3i -> {
+                BlockPrediction predictionData = originalServerBlocks.get(vector3i.asLong());
 
-                    // We are the last to care about this prediction, remove it to stop memory leak
-                    // Block changes are allowed to execute out of order, because it actually doesn't matter
-                    if (predictionData != null && predictionData.getForBlockUpdate() == toApplyBlocks) {
-                        originalServerBlocks.remove(vector3i.asLong());
-                        handleAck(vector3i, predictionData.getOriginalBlockId(), predictionData.getPlayerPosition());
-                    }
-                }));
+                // We are the last to care about this prediction, remove it to stop memory leak
+                // Block changes are allowed to execute out of order, because it actually doesn't matter
+                if (predictionData != null && predictionData.getForBlockUpdate() == toApplyBlocks) {
+                    originalServerBlocks.remove(vector3i.asLong());
+                    handleAck(
+                            vector3i,
+                            predictionData.getOriginalBlockId(),
+                            predictionData.getPlayerPosition(),
+                            snapsBack);
+                }
+            });
+        });
     }
 
-    private void applyBlockChanges(List<BlockPos> toApplyBlocks, CultPlayer.TrackedTransaction transaction) {
-        // The transaction is sent after the block-ack packet in the same clientbound bundle.
-        // Vanilla processes bundle sub-packets in order on the client thread, then replies to
-        // the ping, so the tracked transaction is the marker for applying the ack here.
-        player.latencyUtils.addRealTimeTask(
-                transaction.transaction(),
-                () -> toApplyBlocks.forEach(vector3i -> {
-                    BlockPrediction predictionData = originalServerBlocks.get(vector3i.asLong());
-
-                    // We are the last to care about this prediction, remove it to stop memory leak
-                    // Block changes are allowed to execute out of order, because it actually doesn't matter
-                    if (predictionData != null && predictionData.getForBlockUpdate() == toApplyBlocks) {
-                        originalServerBlocks.remove(vector3i.asLong());
-                        handleAck(vector3i, predictionData.getOriginalBlockId(), predictionData.getPlayerPosition());
-                    }
-                }));
+    private void applyBlockChanges(
+            List<BlockPos> toApplyBlocks, CultPlayer.TrackedTransaction transaction, int sequence) {
+        applyBlockChanges(toApplyBlocks, transaction.transaction(), sequence);
     }
 
-    private void handleAck(BlockPos vector3i, int originalBlockId, Vec3 playerPosition) {
+    private void handleAck(BlockPos vector3i, int originalBlockId, Vec3 playerPosition, boolean snapsBack) {
         // make sure that this "delayed" block update is always known to the ghost block mitigator
         final GhostBlockMitigator mitigator = player.getGhostBlockMitigator();
         mitigator.handleNewBlock(vector3i);
@@ -597,8 +622,9 @@ public class CompensatedWorld {
                 // your illegal teleport.
                 final ac.cult.cultac.manager.player.SetbackTeleportUtil setbackUtil = player.getSetbackTeleportUtil();
                 setbackUtil.executeForceResync("block ack");
-            } else if (ClientBlockShapes.movement(player, state, vector3i.getX(), vector3i.getY(), vector3i.getZ())
-                    .isIntersected(player.boundingBox)) {
+            } else if (snapsBack
+                    && ClientBlockShapes.movement(player, state, vector3i.getX(), vector3i.getY(), vector3i.getZ())
+                            .isIntersected(player.boundingBox)) {
                 // The player will teleport themselves if they get stuck in the reverted block
                 player.lastX = player.x;
                 player.lastY = player.y;
@@ -622,9 +648,10 @@ public class CompensatedWorld {
 
         // Only a client whose wire sequence stops advancing reaches this; its oldest prediction reverts to the server.
         if (serverIsCurrentlyProcessingThesePredictions.size() >= MAX_PENDING_PREDICTIONS) {
-            Iterator<List<BlockPos>> oldest =
-                    serverIsCurrentlyProcessingThesePredictions.values().iterator();
-            applyBlockChanges(oldest.next(), player.lastTransactionSent.get() + 1);
+            Iterator<Map.Entry<Integer, List<BlockPos>>> oldest =
+                    serverIsCurrentlyProcessingThesePredictions.entrySet().iterator();
+            Map.Entry<Integer, List<BlockPos>> entry = oldest.next();
+            applyBlockChanges(entry.getValue(), player.lastTransactionSent.get() + 1, entry.getKey());
             oldest.remove();
         }
         // Vanilla stores predictions under its local monotonic counter, not the untrusted packet sequence.
