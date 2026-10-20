@@ -490,6 +490,30 @@ class CreativeFlightTest {
         }
     }
 
+    /** The simulation's exemption after flight leaves updateAutoJump's geometry as it is. */
+    @Test
+    void aTakeoffRenewedByAnAutoJumpOnFlatGroundAfterFlightFlags() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            assertFalse(unarmedAfterAWalkingPressAfterFlight(f, JUMP_POWER), "an auto-jump on flat ground was kept");
+
+            pressInTheAirThenTakeOff(f);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** A step up with headroom ahead lets updateAutoJump fire on the exempt ticks after flight. */
+    @Test
+    void aPressWhereAnAutoJumpCanFireAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            assertTrue(unarmedAfterAWalkingPressAfterFlight(f, JUMP_POWER), "the auto-jump history was dropped");
+
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
     /** LocalPlayer#updateAutoJump needs a rise above 0.5, so a half slab ahead doesn't fire it. */
     @Test
     void aTakeoffRenewedByAnAutoJumpOntoAHalfSlabFlags() throws Exception {
@@ -694,6 +718,24 @@ class CreativeFlightTest {
         assertPredicted(f.tick(GROUND.add(0, 0, WALK_STEP), true));
         f.input(JUMP);
         assertPredicted(f.tick(GROUND.add(0, rise, WALK_STEP + WALK_STEP * (0.6F * 0.91F)), false));
+        return (f.player.packetStateData.jumpTriggerTimes & 1) != 0;
+    }
+
+    /**
+     * As {@link #unarmedAfterAWalkingPress}, on the ticks after the server ends the player's flight, where the
+     * simulation exempts the walk.
+     */
+    private static boolean unarmedAfterAWalkingPressAfterFlight(JavaTickFixture f, double rise) {
+        f.place(GROUND.add(0, 0.3, 0), Vec3.ZERO);
+        grantFlight(f, true);
+        f.input(NONE);
+        assertTrue(f.tick(GROUND.add(0, 0.3, 0), false).isExempt(), "the flight was judged");
+        grantFlight(f, false);
+        f.tick(GROUND, true);
+        f.input(FORWARD);
+        assertTrue(f.tick(GROUND.add(0, 0, WALK_STEP), true).isExempt(), "the walk was judged");
+        f.input(JUMP);
+        f.tick(GROUND.add(0, rise, WALK_STEP + WALK_STEP * (0.6F * 0.91F)), false);
         return (f.player.packetStateData.jumpTriggerTimes & 1) != 0;
     }
 

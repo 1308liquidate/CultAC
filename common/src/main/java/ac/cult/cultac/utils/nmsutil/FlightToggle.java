@@ -4,7 +4,6 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.GameMode;
-import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.PacketStateData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
@@ -100,22 +99,9 @@ public final class FlightToggle {
                         > 0;
     }
 
-    // LocalPlayer#move runs updateAutoJump after the move. A judged move gives its outcome, with the client option
-    // open. Any other tick's move is unproven, so an auto-jump stays possible wherever canAutoJump's prerequisites
-    // can hold: the player on the ground, the shift key up, no vehicle and movement keys that don't cancel out.
+    // LocalPlayer#move runs updateAutoJump after the move, with the client option open.
     private static boolean autoJumpCanFire(CultPlayer player) {
-        return player.checkManager
-                .getListener(JavaAutoJump.class)
-                .scheduledIn(player.packetStateData.acceptedClientTick)
-                .orElseGet(() -> autoJumpPrerequisitesCanHold(player));
-    }
-
-    private static boolean autoJumpPrerequisitesCanHold(CultPlayer player) {
-        KnownInput input = player.packetStateData.knownInput;
-        return player.checkManager.getSimulationProcessor().getLastOnGround().getStates().contains(true)
-                && !input.shift()
-                && !player.inVehicle()
-                && (input.forwardImpulse() != 0 || input.strafeImpulse() != 0);
+        return player.checkManager.getListener(JavaAutoJump.class).canFireIn(player.packetStateData.acceptedClientTick);
     }
 
     // LocalPlayer#aiStep toggles in a vehicle only through jumpableVehicle(): a horse or nautilus the player controls

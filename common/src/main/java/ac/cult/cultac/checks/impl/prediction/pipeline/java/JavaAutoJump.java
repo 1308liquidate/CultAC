@@ -6,15 +6,18 @@ import ac.cult.cultac.checks.type.PostPredictionListener;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.MainSupportingBlockData;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
-import java.util.Optional;
+import ac.cult.cultac.utils.nmsutil.Collisions;
+import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 
 /** Source-proven automatic input: LocalPlayer#move/updateAutoJump, then next tick's aiStep/makeJump. */
 public final class JavaAutoJump extends CultProcessor implements PostPredictionListener {
     private boolean queued;
     private boolean jumpedThisTick;
-    private int judgedClientTick = -1;
+    private boolean possible;
+    private int movedClientTick = -1;
 
     public JavaAutoJump(CultPlayer player) {
         super(player);
@@ -29,11 +32,22 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
     }
 
     /**
-     * Whether LocalPlayer#updateAutoJump can have set autoJumpTime in the client tick {@code clientTick}; empty when no
-     * judged move of that tick decided it.
+     * Whether LocalPlayer#updateAutoJump can have set autoJumpTime in the client tick {@code clientTick}. A judged
+     * move gives its outcome; an unjudged one runs the geometry on its reported movement from wherever the player
+     * can be on the ground; a tick that sent no position runs it on the input from the last position.
      */
-    public Optional<Boolean> scheduledIn(int clientTick) {
-        return judgedClientTick == clientTick ? Optional.of(queued) : Optional.empty();
+    public boolean canFireIn(int clientTick) {
+        if (movedClientTick == clientTick) return possible;
+        PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
+        // LocalPlayer#sendPosition withholds only a position within the threshold of the last one it sent, and
+        // sends StatusOnly when onGround changes.
+        return canStandOnGround(player.getMovementThreshold())
+                && canFire(
+                        Vec3.ZERO,
+                        player.compensatedEntities.getJumpAmplifier(),
+                        last == null
+                                ? new MainSupportingBlockData(null, false)
+                                : last.getSimulationContext().getWorldData().getMainSupportingBlockPos());
     }
 
     public boolean hasManualMovementInput() {
@@ -46,21 +60,44 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         if (player.isBedrockMovement() || complete.isTeleport()) return;
         jumpedThisTick = queued;
         boolean judged = !complete.isExempt() && !complete.getPredictionResult().hasEffectiveFlags();
-        judgedClientTick = judged ? player.packetStateData.acceptedClientTick : -1;
         queued = judged && schedulesJump(complete.getPredictionResult());
+        movedClientTick = player.packetStateData.acceptedClientTick;
+        // An unjudged move's candidate collisions are unproven; a clipped descent leaves the player resting on a
+        // surface, and the attempted vertical movement is what the engine doesn't know.
+        PredictionResult result = complete.getPredictionResult();
+        possible = judged
+                ? queued
+                : canStandOnGround(1.0E-7)
+                        && canFire(
+                                result.getTarget(),
+                                result.getSimulationContext().getJumpAmplifier(),
+                                result.getSimulationContext().getWorldData().getMainSupportingBlockPos());
     }
 
     boolean schedulesJump(PredictionResult result) {
-        if (!JavaFallDistance.landsOnClip(
+        return JavaFallDistance.landsOnClip(
                         result.getCollideAxisData().getYNeg(),
                         result.getTarget().y,
                         result.getSimulationContext().getLastStuckSpeed().y)
-                || player.isSneaking
+                && canFire(
+                        result.getTarget(),
+                        result.getSimulationContext().getJumpAmplifier(),
+                        result.getSimulationContext().getWorldData().getMainSupportingBlockPos());
+    }
+
+    // A surface within depth below the player's box.
+    private boolean canStandOnGround(double depth) {
+        SimpleCollisionBox box = GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z);
+        return Collisions.collide(player, box, 0, -depth, 0).y != -depth;
+    }
+
+    // LocalPlayer#canAutoJump's remaining prerequisites and updateAutoJump's geometry for a move of {@code move}
+    // ending at the player's position.
+    private boolean canFire(Vec3 move, Integer amplifier, MainSupportingBlockData support) {
+        if (player.isSneaking
                 || player.inVehicle()
-                || BlockProperties.onHoneyBlock(
-                        player,
-                        result.getSimulationContext().getWorldData().getMainSupportingBlockPos(),
-                        new Vec3(player.x, player.y, player.z))) return false;
+                || BlockProperties.onHoneyBlock(player, support, new Vec3(player.x, player.y, player.z)))
+            return false;
         var keys = player.packetStateData.knownInput;
         Vec3 input = new Vec3(
                 (keys.left() ? 1 : 0) - (keys.right() ? 1 : 0),
@@ -72,7 +109,7 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         float speed = (float) (player.compensatedEntities.getPlayerMovementSpeed()
                 * (player.sprintState.modifier() ? 1.0D + (double) 0.3F : 1.0D));
         Vec3 begin = new Vec3(player.x, player.y, player.z);
-        float dx = (float) result.getTarget().x, dz = (float) result.getTarget().z;
+        float dx = (float) move.x, dz = (float) move.z;
         Vec3 end = begin.add(dx, 0, dz), diff = new Vec3(dx, 0, dz);
         float distanceSq = (float) diff.lengthSqr();
         if (distanceSq <= 0.001F) {
@@ -96,7 +133,6 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
                 || !JavaAutoJumpGeometry.block(player, ceilingX, ++ceilingY, ceilingZ)
                         .isEmpty()) return false;
         float jumpHeight = 1.2F;
-        Integer amplifier = result.getSimulationContext().getJumpAmplifier();
         if (amplifier != null) jumpHeight += (amplifier + 1) * 0.75F;
         float lookAhead = Math.max(speed * 7.0F, 1.0F / inverse);
         float width = player.pose.width * player.getScale(), height = player.getBukkitHeight();
