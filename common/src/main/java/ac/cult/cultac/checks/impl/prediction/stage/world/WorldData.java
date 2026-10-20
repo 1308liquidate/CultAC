@@ -68,7 +68,7 @@ public class WorldData {
     /** The previous client tick's ground state, before this tick's pushes or riptide mark it unknown. */
     DesyncStatus carriedOnGround;
 
-    /** Entity#isEyeInFluid(WATER) after this tick's Entity#baseTick; true if either possible pose's eye is. */
+    /** Entity#isEyeInFluid(WATER) after this tick's Entity#baseTick. */
     boolean eyeInWater;
 
     /** LocalPlayer#isUnderWater during this tick: the previous tick's {@link #eyeInWater}. */

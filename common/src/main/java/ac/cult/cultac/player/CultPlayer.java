@@ -253,7 +253,6 @@ public class CultPlayer implements GrimUser {
     public boolean canFly;
     public boolean canInstabuild;
     public boolean isInvulnerable;
-    public boolean isSwimming;
     public boolean isGliding;
     public boolean isRiptidePose = false;
     public @NotNull SimpleCollisionBox boundingBox;
@@ -1002,7 +1001,8 @@ public class CultPlayer implements GrimUser {
         if (isInBed) {
             return Pose.SLEEPING;
         }
-        if (isSwimming) {
+        // Player#isSwimming
+        if (swimState.swimming() && !isFlying && gamemode != GameMode.SPECTATOR) {
             return Pose.SWIMMING;
         }
         if (isGliding) {

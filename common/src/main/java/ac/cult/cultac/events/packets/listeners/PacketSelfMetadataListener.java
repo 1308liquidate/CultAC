@@ -85,7 +85,6 @@ public class PacketSelfMetadataListener {
                     boolean isSprinting = (field & 0x8) == 0x8;
 
                     final Runnable applySharedFlags = () -> {
-                        player.isSwimming = isSwimming;
                         player.swimState.onServerFlag(isSwimming);
                         player.sprintState.onServerFlag(isSprinting);
                         if (!isSprinting) {

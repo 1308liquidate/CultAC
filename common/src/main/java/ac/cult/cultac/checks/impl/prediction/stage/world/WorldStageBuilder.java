@@ -182,13 +182,14 @@ public class WorldStageBuilder {
         StuckSpeedData stuckSpeedData = calculateStuckSpeed(player, simulationContext, push);
 
         // Entity#baseTick samples the eye at the movement start, at the pose Player#updatePlayerPose left last tick.
-        boolean eyeInWater = eyeInWater(player, simulationContext, player.pose)
-                || player.swimState.swimmingPose() && eyeInWater(player, simulationContext, Pose.SWIMMING);
+        boolean eyeInWater = eyeInWater(player, simulationContext, player.pose);
         // LocalPlayer#isUnderWater is the eye Player#updateIsUnderwater read before this tick's Entity#baseTick.
         boolean underwater = lastPrediction != null
                 && lastPrediction.getSimulationContext().getWorldData().isEyeInWater();
-        // Entity#updateSwimming runs in Entity#baseTick, before LocalPlayer#aiStep updates the sprint flag.
+        // Entity#updateSwimming runs in Entity#baseTick, before LocalPlayer#aiStep updates the sprint and flying
+        // flags; Player#updateSwimming clears it while flying, which only a flight kept since last tick proves.
         boolean swimming = simulationContext.getVehicle() == null
+                && !(player.isFlying && player.swimState.flewLastTick())
                 && player.sprintState.flagBeforeAiStep()
                 && (player.swimState.swimming()
                         ? isInWater.determineOptimistically()
