@@ -27,6 +27,10 @@ public class PacketStateData {
     public boolean lastTickJump = false;
     // Bit t: Player#jumpTriggerTime can be t at the next LocalPlayer#aiStep flight toggle check.
     public int jumpTriggerTimes = 1;
+    // Entity#isSwimming can be true from the last client tick's baseTick on; the server's entity data overwrites it.
+    public boolean swimmingPossible = false;
+    // Entity#wasEyeInWater at the next client tick's baseTick: the eye fluid at the last client tick's start.
+    public boolean eyeInWaterBeforeTick = false;
     // Geyser forwards each auth frame before its movement. A horse move
     // precedes the rider's rotation; tick-end closes frames without movement.
     public final BedrockTranslatedMovementGate bedrockTranslatedMovement = new BedrockTranslatedMovementGate();

@@ -164,7 +164,9 @@ public class PacketPlayerRespawn {
                     player.actionManager.onJavaPlayerReplacement();
                     // LocalPlayer starts from Input.EMPTY and sends PLAYER_INPUT once its keys differ from it.
                     player.packetStateData.knownInput = KnownInput.DEFAULT;
-                    FlightToggle.reset(player.packetStateData);
+                    FlightToggle.reset(player.packetStateData, false);
+                    // A new LocalPlayer's Abilities start at the default flying speed.
+                    player.flySpeed = 0.05F;
                     player.boatData.clearInput();
                     player.onGround = player.lastOnGround = false;
                     player.isSneaking = false;
@@ -272,7 +274,7 @@ public class PacketPlayerRespawn {
             // ClientPacketListener#handleRespawn starts the new LocalPlayer from Input.EMPTY unless KEEP_ENTITY_DATA.
             if (!keepEntityData) player.packetStateData.knownInput = KnownInput.DEFAULT;
             // ClientPacketListener#handleRespawn gives every new LocalPlayer a fresh KeyboardInput.
-            FlightToggle.reset(player.packetStateData);
+            FlightToggle.reset(player.packetStateData, keepEntityData);
             final BadPacketsF badPacketsF = player.checkManager.getListener(BadPacketsF.class);
             badPacketsF.exemptNext = true;
             player.lastOnGround = false;
@@ -372,6 +374,8 @@ public class PacketPlayerRespawn {
             // ClientPacketListener#handleRespawn runs MultiPlayerGameMode#setLocalMode on its new LocalPlayer.
             if (!player.isBedrockMovement()) {
                 PacketChangeGameState.applyGameModeAbilities(player, player.gamemode, true);
+                // A new LocalPlayer's Abilities start at the default flying speed.
+                player.flySpeed = 0.05F;
             }
             respawnedSelf.onRespawn(
                     keepAttributeModifiers, player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE);

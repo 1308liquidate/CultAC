@@ -3,30 +3,41 @@ package ac.cult.cultac.network;
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
+import ac.cult.blocksim.data.DataTables;
+import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.events.packets.PacketChangeGameState;
 import ac.cult.cultac.events.packets.PacketPlayerAbilities;
 import ac.cult.cultac.events.packets.PacketServerRegistries;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
+import ac.cult.cultac.events.packets.listeners.PacketServerTeleport;
 import ac.cult.cultac.network.codec.ModelRegistryNamesState;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.Opaque;
+import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundGameEvent;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerAbilities;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundAcceptTeleportation;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.GameEventType;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.PlayerSpawnInfo;
 import ac.cult.cultac.protocol.value.Relative;
+import ac.cult.cultac.protocol.value.Vec3d;
+import ac.cult.cultac.utils.data.TeleportData;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.math.Vec3;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -43,6 +54,8 @@ class CreativeFlightTest {
             new ServerboundPlayerInput(false, false, false, false, false, true, false);
     private static final ServerboundPlayerInput JUMP_SHIFT =
             new ServerboundPlayerInput(false, false, false, false, true, true, false);
+    private static final ServerboundPlayerInput FORWARD =
+            new ServerboundPlayerInput(true, false, false, false, false, false, false);
     private static final float FLYING_SPEED = 0.05F;
     private static final double IMPULSE = FLYING_SPEED * 3.0F;
     private static final Vec3 HOVER = new Vec3(0.5, FLOOR_Y + 3, 0.5);
@@ -50,6 +63,17 @@ class CreativeFlightTest {
     private static final double JUMP_POWER = 0.42F;
     private static final Vec3 KNOCKBACK = new Vec3(0.21113349203442588, -0.0783739241897089, -0.3397424159189404);
     private static final Set<Relative> ALL_DELTAS = Set.of(Relative.DELTA_X, Relative.DELTA_Y, Relative.DELTA_Z);
+    /** Clear floor away from the blocks a test places around {@link #GROUND}. */
+    private static final Vec3 TAKEOFF = new Vec3(-2.5, FLOOR_Y, 0.5);
+    /** A water source at the feet, the eyes above it. */
+    private static final Vec3 POOL = new Vec3(4.5, FLOOR_Y, 0.5);
+    private static final int HORSE = 100;
+    /** LivingEntity#travel's gravity and drag on a fall of 0.2. */
+    private static final double FALL = (-0.2 - 0.08) * 0.98F;
+    /** The Y velocity a player standing on the floor starts each tick with. */
+    private static final double STANDING_Y = (0 - 0.08) * 0.98F;
+    /** LivingEntity#getFrictionInfluencedSpeed on stone at 0.1 movement speed, times the 0.98 forward input. */
+    private static final double WALK_STEP = (double) 0.98F * (double) (0.1F * (0.21600002F / (0.6F * 0.6F * 0.6F)));
 
     @Test
     void aVelocityTakenInFlightWithJumpHeldRisesByTheFlightImpulse() throws Exception {
@@ -386,6 +410,119 @@ class CreativeFlightTest {
         }
     }
 
+    /** A new LocalPlayer's Abilities fly at 0.05 until the server's player_abilities says otherwise. */
+    @Test
+    void aCreativeRespawnFliesAtTheDefaultSpeedBeforeItsAbilities() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            grantFlight(f, false, 0.1F);
+            respawn(f, GameMode.CREATIVE);
+            f.player.packetStateData.playerLoadedIntoLevel = true;
+            f.teleport(GROUND.add(0, 0.3, 0), new RelativeFlag(0));
+
+            assertArmedTakeoffUnderAKnockback(f, false);
+        }
+    }
+
+    /** ClientPacketListener#handleLogin builds a new LocalPlayer after a reconfiguration, at the default fly speed. */
+    @Test
+    void aCreativeLoginFliesAtTheDefaultSpeedBeforeItsAbilities() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            grantFlight(f, false, 0.1F);
+            login(f, GameMode.CREATIVE);
+            relayTheFloor(f);
+            f.player.packetStateData.playerLoadedIntoLevel = true;
+            f.teleport(GROUND.add(0, 0.3, 0), new RelativeFlag(0));
+
+            assertArmedTakeoffUnderAKnockback(f, false);
+        }
+    }
+
+    /** A step up ahead lets LocalPlayer#updateAutoJump fire, so the press may not reach the toggle. */
+    @Test
+    void aPressWhereAnAutoJumpCanFireMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            assertTrue(unarmedAfterAWalkingPress(f, JUMP_POWER), "the auto-jump history was dropped");
+
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /** LocalPlayer#updateAutoJump needs an obstacle ahead, so a press on flat ground arms the toggle. */
+    @Test
+    void aTakeoffRenewedByAnAutoJumpOnFlatGroundFlags() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            assertFalse(unarmedAfterAWalkingPress(f, JUMP_POWER), "an auto-jump on flat ground was kept");
+
+            pressInTheAirThenTakeOff(f);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** LocalPlayer#updateAutoJump needs a rise above 0.5, so a half slab ahead doesn't fire it. */
+    @Test
+    void aTakeoffRenewedByAnAutoJumpOntoAHalfSlabFlags() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 0, FLOOR_Y, 1, DataTables.defaults().registry().block("minecraft:stone_slab").defaultState());
+            assertFalse(unarmedAfterAWalkingPress(f, JUMP_POWER), "an auto-jump onto a half slab was kept");
+
+            pressInTheAirThenTakeOff(f);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** LocalPlayer#updateAutoJump needs headroom above the player, so a ceiling stops it. */
+    @Test
+    void aTakeoffRenewedByAnAutoJumpUnderACeilingFlags() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            block(f, 0, FLOOR_Y + 2, 0, BlockIds.STONE.defaultState());
+            assertFalse(unarmedAfterAWalkingPress(f, 2 - (double) 1.8F), "an auto-jump under a ceiling was kept");
+
+            pressInTheAirThenTakeOff(f);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** Entity#updateSwimming needs the sprint flag, so a wader that never sprinted toggles on an armed press. */
+    @Test
+    void aTakeoffKeptByAWadingPressFlags() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 4, FLOOR_Y, 0, BlockIds.WATER.defaultState());
+            armInTheAir(f);
+            f.place(POOL, Vec3.ZERO);
+            f.input(JUMP);
+            // LivingEntity#jumpInLiquid.
+            assertPredicted(f.tick(POOL.add(0, 0.04F, 0), false));
+            assertTrue((f.player.packetStateData.jumpTriggerTimes & ~1) == 0, "a blocked toggle was kept");
+
+            landThenTakeOff(f);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** LocalPlayer#aiStep toggles on a saddled horse the player controls, which jumpableVehicle() returns. */
+    @Test
+    void aTakeoffKeptByAPressOnAJumpableHorseFlags() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            armInTheAir(f);
+            f.player.compensatedEntities.addEntity(HORSE, EntityTypeIds.HORSE, TAKEOFF, 0, 0, 0);
+            ((PacketEntityHorse) f.player.compensatedEntities.getEntity(HORSE)).hasSaddle = true;
+            f.setPassengers(HORSE, List.of(f.player.entityID));
+            f.pongThrough(f.player.lastTransactionSent.get());
+            f.input(JUMP);
+            f.rideTick();
+            assertTrue((f.player.packetStateData.jumpTriggerTimes & ~1) == 0, "a blocked toggle was kept");
+
+            f.input(NONE);
+            dismount(f);
+            landThenTakeOff(f);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
     /** A player hovering at {@link #HOVER} that the server lets fly and sets flying. */
     private static JavaTickFixture flying() throws Exception {
         return flying(HOVER, true);
@@ -430,7 +567,11 @@ class CreativeFlightTest {
     }
 
     private static void grantFlight(JavaTickFixture f, boolean flying) {
-        var packet = new ClientboundPlayerAbilities(false, flying, true, false, FLYING_SPEED, 0.1F);
+        grantFlight(f, flying, FLYING_SPEED);
+    }
+
+    private static void grantFlight(JavaTickFixture f, boolean flying, float flyingSpeed) {
+        var packet = new ClientboundPlayerAbilities(false, flying, true, false, flyingSpeed, 0.1F);
         var event = new PacketSendEvent<>(
                 f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.PLAYER_ABILITIES, packet, false);
         f.player.checkManager.getListener(PacketPlayerAbilities.class).onPlayerAbilities(event, f.player, packet);
@@ -489,18 +630,105 @@ class CreativeFlightTest {
      * letting the player fly, and a grounded double-tap under a knockback that takes the takeoff jump.
      */
     private static void assertArmedTakeoffUnderAKnockback(JavaTickFixture f) {
+        assertArmedTakeoffUnderAKnockback(f, true);
+    }
+
+    /** As above, with or without the server's player_abilities after the landing. */
+    private static void assertArmedTakeoffUnderAKnockback(JavaTickFixture f, boolean serverAbilities) {
         f.place(GROUND.add(0, 0.3, 0), new Vec3(0, -0.2, 0));
         f.input(JUMP);
         assertPredicted(f.tick(GROUND.add(0, 0.1, 0), false));
         f.input(NONE);
         assertPredicted(f.tick(GROUND, true));
-        grantFlight(f, false);
+        if (serverAbilities) grantFlight(f, false);
 
         f.pongThrough(f.velocity(KNOCKBACK));
         f.abilities(true);
         f.input(JUMP);
         assertPredicted(f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false));
         assertEquals(0.0, antiKb(f), "the client took the knockback");
+    }
+
+    private static void block(JavaTickFixture f, int x, int y, int z, int state) {
+        f.player.compensatedWorld.updateBlock(new BlockPos(x, y, z), state);
+        for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
+    }
+
+    /**
+     * A player the server lets fly walks forward from rest on the floor for a tick, then presses jump with forward
+     * released and rises by {@code rise}; whether Player#jumpTriggerTime can still be unarmed after the press.
+     */
+    private static boolean unarmedAfterAWalkingPress(JavaTickFixture f, double rise) {
+        f.place(GROUND, new Vec3(0, STANDING_Y, 0));
+        grantFlight(f, false);
+        f.input(FORWARD);
+        assertPredicted(f.tick(GROUND.add(0, 0, WALK_STEP), true));
+        f.input(JUMP);
+        assertPredicted(f.tick(GROUND.add(0, rise, WALK_STEP + WALK_STEP * (0.6F * 0.91F)), false));
+        return (f.player.packetStateData.jumpTriggerTimes & 1) != 0;
+    }
+
+    /**
+     * A release and a press in the air without player_abilities, the landing, and a grounded double-tap under a
+     * knockback that takes the takeoff jump; the takeoff's prediction.
+     */
+    private static PredictionResult pressInTheAirThenTakeOff(JavaTickFixture f) {
+        f.place(TAKEOFF.add(0, 0.6, 0), new Vec3(0, -0.2, 0));
+        f.input(NONE);
+        assertPredicted(f.tick(TAKEOFF.add(0, 0.4, 0), false));
+        f.input(JUMP);
+        assertPredicted(f.tick(TAKEOFF.add(0, 0.4 + FALL, 0), false));
+        f.input(NONE);
+        assertPredicted(f.tick(TAKEOFF, true));
+        return takeOffUnderAKnockback(f);
+    }
+
+    /** A player the server lets fly arms the toggle with a press in the air, then releases it. */
+    private static void armInTheAir(JavaTickFixture f) {
+        f.place(TAKEOFF.add(0, 0.6, 0), new Vec3(0, -0.2, 0));
+        grantFlight(f, false);
+        f.input(JUMP);
+        assertPredicted(f.tick(TAKEOFF.add(0, 0.4, 0), false));
+        f.input(NONE);
+        assertPredicted(f.tick(TAKEOFF.add(0, 0.4 + FALL, 0), false));
+    }
+
+    /** A landing with no keys held, then a grounded double-tap under a knockback with the takeoff jump. */
+    private static PredictionResult landThenTakeOff(JavaTickFixture f) {
+        f.place(TAKEOFF.add(0, 0.3, 0), new Vec3(0, -0.2, 0));
+        f.input(NONE);
+        assertPredicted(f.tick(TAKEOFF.add(0, 0.1, 0), false));
+        assertPredicted(f.tick(TAKEOFF, true));
+        return takeOffUnderAKnockback(f);
+    }
+
+    private static PredictionResult takeOffUnderAKnockback(JavaTickFixture f) {
+        f.pongThrough(f.velocity(KNOCKBACK));
+        f.abilities(true);
+        f.input(JUMP);
+        return f.tick(TAKEOFF.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false);
+    }
+
+    /** set_passengers empties the horse; the client accepts the dismount teleports it is sent. */
+    private static void dismount(JavaTickFixture f) {
+        List<Integer> before = new ArrayList<>();
+        for (TeleportData teleport : f.player.getSetbackTeleportUtil().pendingTeleports) {
+            before.add(teleport.getTeleportId());
+        }
+        f.setPassengers(HORSE, List.of());
+        f.pongThrough(f.player.lastTransactionSent.get());
+        for (TeleportData teleport : f.player.getSetbackTeleportUtil().pendingTeleports) {
+            if (before.contains(teleport.getTeleportId())) continue;
+            Vec3 target = teleport.getLocation();
+            var packet = new ServerboundAcceptTeleportation(
+                    teleport.getTeleportId(),
+                    new Vec3d(target.x, target.y, target.z),
+                    teleport.getFinalYaw(),
+                    teleport.getFinalPitch());
+            var event = f.event(ServerboundPackets.ACCEPT_TELEPORTATION, packet);
+            new PacketServerTeleport().onAcceptTeleportation(event, f.player, packet);
+        }
+        assertFalse(f.player.inVehicle(), "the dismount did not apply");
     }
 
     private static double antiKb(JavaTickFixture f) {

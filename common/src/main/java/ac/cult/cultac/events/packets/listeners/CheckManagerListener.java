@@ -1149,8 +1149,9 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             onLocalPlayerAttackTick(player);
             dispatchPrePredictionReceive(event, player);
             dispatchReceiveHandlers(event, player);
-            player.sprintState.onClientTickEnd();
+            // FlightToggle reads this tick's ClientSprintState#flagBeforeAiStep, which onClientTickEnd releases.
             if (localPlayerTicked(player)) FlightToggle.onClientTick(player);
+            player.sprintState.onClientTickEnd();
 
             player.packetStateData.acceptedClientTick++;
             player.packetStateData.lastClientTickEndTransaction = player.lastTransactionReceived.get();

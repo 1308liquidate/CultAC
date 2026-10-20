@@ -1,10 +1,16 @@
 package ac.cult.cultac.utils.nmsutil;
 
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.PacketStateData;
+import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityNautilus;
+import ac.cult.cultac.utils.math.Vec3;
 
 /**
  * LocalPlayer#aiStep's double-tap flight toggle: a jump key going down while Player#jumpTriggerTime is armed by a
@@ -31,6 +37,7 @@ public final class FlightToggle {
     /** Runs the toggle's timer update and Player#aiStep's decrement for a client tick LocalPlayer#aiStep ran. */
     public static void onClientTick(CultPlayer player) {
         PacketStateData data = player.packetStateData;
+        data.swimmingPossible = swimmingPossible(player);
         int times = data.jumpTriggerTimes;
         if (pressReachesToggle(player)) {
             times = afterPress(player, times);
@@ -38,13 +45,19 @@ public final class FlightToggle {
         data.jumpTriggerTimes = (times >>> 1) | (times & UNARMED);
         data.lastTickJump = data.knownInput.jump();
         data.autoJumpPossible = autoJumpCanFire(player);
+        data.eyeInWaterBeforeTick = player.wasEyeInWater;
     }
 
-    /** A new LocalPlayer starts unarmed, without an auto-jump, with its input at Input.EMPTY. */
-    public static void reset(PacketStateData data) {
+    /**
+     * A new LocalPlayer starts unarmed, without an auto-jump, with its input at Input.EMPTY and no fluid on its eyes.
+     * It can be swimming only when it copies the old player's entity data.
+     */
+    public static void reset(PacketStateData data, boolean keepEntityData) {
         data.jumpTriggerTimes = UNARMED;
         data.lastTickJump = false;
         data.autoJumpPossible = false;
+        data.eyeInWaterBeforeTick = false;
+        if (!keepEntityData) data.swimmingPossible = false;
     }
 
     private static int afterPress(CultPlayer player, int times) {
@@ -53,7 +66,7 @@ public final class FlightToggle {
         // Only the toggle sends a flight start on a press, and it needs an armed timer.
         if (armed && data.flyingStartBeforeTravel) return UNARMED;
 
-        boolean blocked = data.autoJumpPossible || swimmingPossible(player) || player.inVehicle();
+        boolean blocked = data.autoJumpPossible || data.swimmingPossible || vehicleCanBlock(player);
         int next = 0;
         if ((times & UNARMED) != 0) {
             next |= PRESSED;
@@ -68,25 +81,53 @@ public final class FlightToggle {
         return next == 0 ? UNARMED : next;
     }
 
-    // Entity#baseTick updates swimming before aiStep, from the fluids at the tick's start; Player#updateSwimming
-    // clears it in flight, and Entity#updateSwimming needs water.
+    // Entity#baseTick runs updateSwimming before aiStep, at the tick's start. A swimmer keeps swimming while it
+    // sprints in water; anyone else starts only sprinting with its eyes under water (wasEyeInWater is the previous
+    // baseTick's eye fluid) and water at its feet. Player#updateSwimming stops it in flight, and a passenger never
+    // swims. ClientPacketListener#handleSetEntityData can overwrite the previous state with the server's.
     private static boolean swimmingPossible(CultPlayer player) {
         PacketStateData data = player.packetStateData;
-        boolean flyingAtToggle = data.flightStopThisClientTick || player.isFlying && !data.flyingStartBeforeTravel;
-        if (flyingAtToggle) return false;
+        boolean flying = data.flightStopThisClientTick || player.isFlying && !data.flyingStartBeforeTravel;
+        if (flying || player.inVehicle() || !player.sprintState.flagBeforeAiStep()) return false;
         PredictionResult prediction = player.checkManager.getSimulationProcessor().getLastPrediction();
-        return prediction == null
-                || prediction.getSimulationContext().getWorldData().getInWater().getStates().contains(true);
+        if (prediction == null) return true;
+        if (!prediction.getSimulationContext().getWorldData().getInWater().getStates().contains(true)) return false;
+        if (data.swimmingPossible) return true;
+        Vec3 start = prediction.getSimulationContext().getStart();
+        return data.eyeInWaterBeforeTick
+                && player.compensatedWorld.getWaterFluidLevelAt(
+                                (int) Math.floor(start.x), (int) Math.floor(start.y), (int) Math.floor(start.z))
+                        > 0;
     }
 
-    // LocalPlayer#move runs updateAutoJump after the move; canAutoJump needs the player on the ground, the shift
-    // key up, no vehicle and movement keys that don't cancel out. The client option and the step ahead stay open.
+    // LocalPlayer#move runs updateAutoJump after the move. A judged move gives its outcome, with the client option
+    // open. Any other tick's move is unproven, so an auto-jump stays possible wherever canAutoJump's prerequisites
+    // can hold: the player on the ground, the shift key up, no vehicle and movement keys that don't cancel out.
     private static boolean autoJumpCanFire(CultPlayer player) {
+        return player.checkManager
+                .getListener(JavaAutoJump.class)
+                .scheduledIn(player.packetStateData.acceptedClientTick)
+                .orElseGet(() -> autoJumpPrerequisitesCanHold(player));
+    }
+
+    private static boolean autoJumpPrerequisitesCanHold(CultPlayer player) {
         KnownInput input = player.packetStateData.knownInput;
         return player.checkManager.getSimulationProcessor().getLastOnGround().getStates().contains(true)
                 && !input.shift()
                 && !player.inVehicle()
                 && (input.forwardImpulse() != 0 || input.strafeImpulse() != 0);
+    }
+
+    // LocalPlayer#aiStep toggles in a vehicle only through jumpableVehicle(): a horse or nautilus the player controls
+    // (saddled, first passenger) that canJump. A camel also needs !refuseToMove(), and the engine doesn't track its
+    // sitting pose.
+    private static boolean vehicleCanBlock(CultPlayer player) {
+        PacketEntity vehicle = player.compensatedEntities.getSelf().getRiding();
+        if (vehicle == null) return false;
+        boolean controlled = vehicle.passengers.indexOf(player.compensatedEntities.getSelf()) == 0;
+        boolean saddled = vehicle instanceof PacketEntityHorse horse && horse.hasSaddle
+                || vehicle instanceof PacketEntityNautilus nautilus && nautilus.hasSaddle;
+        return !controlled || !saddled || vehicle instanceof PacketEntityCamel;
     }
 
     // LocalPlayer#aiStep checks the jump press only with Abilities#mayfly and outside spectator.

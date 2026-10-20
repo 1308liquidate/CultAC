@@ -8,11 +8,13 @@ import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
+import java.util.Optional;
 
 /** Source-proven automatic input: LocalPlayer#move/updateAutoJump, then next tick's aiStep/makeJump. */
 public final class JavaAutoJump extends CultProcessor implements PostPredictionListener {
     private boolean queued;
     private boolean jumpedThisTick;
+    private int judgedClientTick = -1;
 
     public JavaAutoJump(CultPlayer player) {
         super(player);
@@ -26,6 +28,14 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         return jumpedThisTick;
     }
 
+    /**
+     * Whether LocalPlayer#updateAutoJump can have set autoJumpTime in the client tick {@code clientTick}; empty when no
+     * judged move of that tick decided it.
+     */
+    public Optional<Boolean> scheduledIn(int clientTick) {
+        return judgedClientTick == clientTick ? Optional.of(queued) : Optional.empty();
+    }
+
     public boolean hasManualMovementInput() {
         var input = player.packetStateData.knownInput;
         return input.movingNoJump() || input.jump() && !jumpedThisTick;
@@ -35,9 +45,9 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
     public void onPredictionComplete(PredictionComplete complete) {
         if (player.isBedrockMovement() || complete.isTeleport()) return;
         jumpedThisTick = queued;
-        queued = !complete.isExempt()
-                && !complete.getPredictionResult().hasEffectiveFlags()
-                && schedulesJump(complete.getPredictionResult());
+        boolean judged = !complete.isExempt() && !complete.getPredictionResult().hasEffectiveFlags();
+        judgedClientTick = judged ? player.packetStateData.acceptedClientTick : -1;
+        queued = judged && schedulesJump(complete.getPredictionResult());
     }
 
     boolean schedulesJump(PredictionResult result) {
