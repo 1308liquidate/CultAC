@@ -296,6 +296,18 @@ class EntityInteractionVisibilityTest {
 
     @ParameterizedTest
     @MethodSource("clients")
+    void aProjectileIsAtOneOfItsServerPositionsNeverBetweenThem(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version).asClient()) {
+            // Both positions are 4.3 from the eye; the box spanning them passes 2.5 in front of it.
+            var fireball = setup.projectile(42, "minecraft:fireball", new Vec3d(-3.5, 64.5, 1.5), Vec3d.ZERO, NO_OWNER);
+            fireball.onFirstTransaction(false, true, 4.5, 64.5, 1.5, setup.player);
+            setup.clientTick();
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
     void aFireballStopsAtAMobInFrontOfAWall(ProtocolVersion version) throws Exception {
         try (var setup = new Setup(version).asClient()) {
             setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 2, state("stone"));

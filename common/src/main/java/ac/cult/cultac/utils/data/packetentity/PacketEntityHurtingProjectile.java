@@ -211,6 +211,16 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
         return entity;
     }
 
+    /**
+     * The client's projectile moves only when it ticks or a packet places it, so it is at one of its candidate
+     * positions, never between two of them.
+     */
+    @Override
+    public List<SimpleCollisionBox> getPossibleMovementCollisionBoxGroups() {
+        if (getRiding() != null) return super.getPossibleMovementCollisionBoxGroups();
+        return getPossibleMovementCollisionBoxCandidates();
+    }
+
     private SimpleCollisionBox positionBox(Vec3 position) {
         return GetBoundingBox.getPacketEntityBoundingBox(player, position.x, position.y, position.z, this);
     }
