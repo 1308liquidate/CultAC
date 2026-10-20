@@ -491,6 +491,7 @@ public class CheckManager {
         return listenerMap(List.<PostPredictionListener>of(
                 new InvalidStep(player),
                 new NoSneakSlow(player),
+                new InputKeys(player),
                 new OmniSprint(player),
                 new NoFallPseudo(player),
                 new VerticalOffset(player),
