@@ -165,6 +165,28 @@ class JavaSprintModifierGroundTest {
     }
 
     /**
+     * A move off the corner at vanilla's speed that no candidate reproduces exactly: prediction carries on with the
+     * committed candidate's movement, so it carries on with that candidate's modifier too.
+     */
+    @Test
+    void aRejectedMoveCommitsTheModifierOfTheCandidateItCarriesOn() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 corner = cornerTie(f);
+            f.player.xRot = AWAY;
+            Vec3 delta = ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, AWAY);
+            position = corner.add(delta.x + 0.0008, 0.0, delta.z + 0.0008);
+            PredictionResult result = f.tick(position, true);
+            assertFalse(result.getFlags().isEmpty(), describe(result));
+            assertSame(CompensatedEntities.SPRINTING_SPEED_MODIFIER, f.player.sprintState.heldModifier());
+            assertFalse(f.player.sprintState.outcomeOpen());
+            Vec3 velocity = new Vec3(delta.x * FRICTION, 0.0, delta.z * FRICTION);
+            delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, QUADRUPLED, AWAY));
+            result = f.tick(position.add(delta.x, 0.0, delta.z), true);
+            assertFalse(result.getFlags().isEmpty(), describe(result));
+        }
+    }
+
+    /**
      * A sprint diagonally into a corner: Entity#collide ends the attack tick's move there at either outcome, and
      * LocalPlayer#isHorizontalCollisionMinor keeps the sprint, as the attempted move follows the input. The next move,
      * pressed into the corner, ends there at either speed too, so both modifiers stay possible.
