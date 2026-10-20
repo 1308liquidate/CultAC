@@ -130,9 +130,63 @@ class ClientSprintStateTest {
         assertTrue(state.resetOutcomePending());
         assertFalse(state.canonicalPossible());
         // Set back without a committed candidate, the reset stays undecided.
-        state.onMoveSetBack();
+        state.settleReset();
         assertTrue(state.canonicalPossible());
         assertFalse(state.resetOutcomePending());
+    }
+
+    @Test
+    void aPossibleResetNoCommitDecidedStaysPossibleAfterItsTravel() {
+        ClientSprintState state = sprinting();
+        var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+        state.onServerModifier(server);
+        state.onClientMove();
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        assertTrue(state.resetOutcomePending());
+        // The move is discarded unsimulated; the next tick's movement follows its travel.
+        state.onClientMove();
+        assertFalse(state.resetOutcomePending());
+        assertSame(server, state.heldModifier());
+        assertTrue(state.canonicalPossible());
+
+        // A tick without a movement packet travels at its end, before the tick end settles it.
+        state.onServerModifier(server);
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        state.onOutcomesAccepted(false, true);
+        state.onClientTickEnd();
+        assertSame(server, state.heldModifier());
+        assertFalse(state.canonicalPossible());
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        state.onClientTickEnd();
+        assertFalse(state.resetOutcomePending());
+        assertTrue(state.canonicalPossible());
+    }
+
+    @Test
+    void restoringAnAnchorOlderThanACertainEventReturnsToThatEvent() {
+        ClientSprintState state = sprinting();
+        var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+        state.onServerModifier(server);
+        ClientSprintState.Outcomes anchor = state.outcomes();
+        state.onServerModifier(server);
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        state.onOutcomesAccepted(false, true);
+        assertFalse(state.canonicalPossible());
+        state.restore(anchor);
+        assertSame(server, state.heldModifier());
+        assertTrue(state.canonicalPossible());
+
+        // The certain event itself stays.
+        anchor = state.outcomes();
+        var other = new AttributeModifier("minecraft:sprinting", 1.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+        state.onServerModifier(other);
+        state.restore(anchor);
+        assertSame(other, state.heldModifier());
+        assertFalse(state.canonicalPossible());
     }
 
     @Test

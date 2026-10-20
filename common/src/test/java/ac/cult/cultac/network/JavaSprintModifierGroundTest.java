@@ -12,11 +12,13 @@ import ac.cult.blocksim.data.BlockIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.events.packets.listeners.PacketEntityAction;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerAttack;
+import ac.cult.cultac.events.packets.listeners.PacketServerTeleport;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundUpdateAttributes;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundAcceptTeleportation;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
@@ -26,6 +28,7 @@ import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
+import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
@@ -223,6 +226,48 @@ class JavaSprintModifierGroundTest {
             f.place(anchorPosition, anchorVelocity);
             delta = anchorVelocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, YAW));
             result = f.tick(anchorPosition.add(delta.x, 0.0, delta.z), true);
+            assertTrue(exact(result), describe(result));
+        }
+    }
+
+    /**
+     * A possible attack reset on a move that is set back before it is simulated: the client travelled that tick with
+     * whichever modifier Player#causeExtraKnockback and LocalPlayer#aiStep left, and the teleport keeps it
+     * (ClientPacketListener#handleMovePlayer), so the first move after the correction may carry on at vanilla's speed.
+     */
+    @Test
+    void aResetOnAMoveSetBackUnsimulatedKeepsVanillasModifierPossible() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            position = startSprint(f, YAW, CHARGE_TICKS);
+            Vec3 velocity = carried(f, CANONICAL);
+            holdQuadrupledModifier(f);
+            for (int tick = 0; tick < 3; tick++) {
+                Vec3 delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, QUADRUPLED, YAW));
+                position = position.add(delta.x, 0.0, delta.z);
+                PredictionResult result = f.tick(position, true);
+                assertTrue(exact(result), "tick " + tick + ": " + describe(result));
+                velocity = new Vec3(delta.x * FRICTION, 0.0, delta.z * FRICTION);
+            }
+
+            attack(f);
+            f.move(position.add(21.0, 0.0, 0.0), true);
+            f.tickEnd();
+            f.fixture.channel.runPendingTasks();
+            var setbacks = f.player.getSetbackTeleportUtil();
+            assertTrue(setbacks.isPendingSetback(), setbacks.getDebugStrings());
+
+            var correction = setbacks.getRequiredSetBack();
+            Vec3 target = correction.getTeleportData().getLocation();
+            f.pongThrough(f.player.lastTransactionSent.get());
+            var accept = new ServerboundAcceptTeleportation(
+                    correction.getTeleportData().getTeleportId(), new Vec3d(target.x, target.y, target.z), YAW, 0.0F);
+            var event = f.event(ServerboundPackets.ACCEPT_TELEPORTATION, accept);
+            new PacketServerTeleport().onAcceptTeleportation(event, f.player, accept);
+            assertFalse(event.isCancelled());
+            assertTrue(correction.isComplete());
+
+            Vec3 delta = correction.getVelocity().add(ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, YAW));
+            PredictionResult result = f.tick(target.add(delta.x, 0.0, delta.z), true);
             assertTrue(exact(result), describe(result));
         }
     }
