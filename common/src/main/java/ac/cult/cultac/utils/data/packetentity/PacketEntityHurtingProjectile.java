@@ -34,9 +34,7 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     // Projectile#recreateFromPacket sets the owner only when the add_entity data names an entity the client has.
     private final boolean hasOwner;
     private final int ownerId;
-    // Projectile#leftOwner across the projectile's possible positions: whether some has left the owner, and whether
-    // some may still be on it.
-    private boolean mayHaveLeftOwner;
+    // Projectile#leftOwner across the projectile's possible positions: whether some may still be on the owner.
     private boolean mayBeOnOwner = true;
     // Entity#tickCount, which ClientLevel#tickNonPassenger increments before each tick.
     private int tickCount;
@@ -202,7 +200,6 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
         if (!mayBeOnOwner) return;
         PacketEntity ownerRoot = ownerRoot();
         if (ownerRoot == null) {
-            mayHaveLeftOwner = true;
             mayBeOnOwner = false;
             return;
         }
@@ -218,23 +215,13 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
         for (PacketEntity entity : player.compensatedEntities.entityMap.values())
             mayTouch |= root(entity) == ownerRoot && player.compensatedEntities.isUntrackedRider(entity);
         for (PickCandidates entity : tree) mayTouch |= entity.entity().hasLossyPosition();
-        boolean touchingEverywhere = true;
         for (Box area : areas) {
-            boolean touching = false;
             for (PickCandidates entity : tree) {
                 if (entity.entity().hasLossyPosition()) continue;
-                boolean every = !entity.boxes().isEmpty();
-                for (Box box : entity.boxes()) {
-                    boolean touches = box != null && area.intersects(box);
-                    mayTouch |= touches;
-                    every &= touches;
-                }
-                touching |= every;
+                for (Box box : entity.boxes()) mayTouch |= box != null && area.intersects(box);
             }
-            touchingEverywhere &= touching;
         }
         if (!mayTouch) mayBeOnOwner = false;
-        if (!touchingEverywhere) mayHaveLeftOwner = true;
     }
 
     private PacketEntity ownerRoot() {
