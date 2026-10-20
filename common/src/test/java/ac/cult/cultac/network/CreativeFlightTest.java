@@ -5,10 +5,13 @@ import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.blocksim.data.BlockIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.events.packets.PacketChangeGameState;
 import ac.cult.cultac.events.packets.PacketPlayerAbilities;
 import ac.cult.cultac.events.packets.PacketServerRegistries;
+import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
+import ac.cult.cultac.network.codec.ModelRegistryNamesState;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
 import ac.cult.cultac.protocol.ConnectionPhase;
@@ -16,9 +19,12 @@ import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundGameEvent;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerAbilities;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.GameEventType;
 import ac.cult.cultac.protocol.value.GameMode;
+import ac.cult.cultac.protocol.value.PlayerSpawnInfo;
 import ac.cult.cultac.protocol.value.Relative;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.Set;
@@ -274,6 +280,31 @@ class CreativeFlightTest {
         }
     }
 
+    /** ClientPacketListener#handleLogin runs MultiPlayerGameMode#setLocalMode, letting a creative player fly. */
+    @Test
+    void aPressAfterACreativeLoginArmsTheToggleBeforeItsAbilities() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            login(f, GameMode.CREATIVE);
+            relayTheFloor(f);
+            f.player.packetStateData.playerLoadedIntoLevel = true;
+            f.teleport(GROUND.add(0, 0.3, 0), new RelativeFlag(0));
+
+            assertArmedTakeoffUnderAKnockback(f);
+        }
+    }
+
+    /** ClientPacketListener#handleRespawn runs MultiPlayerGameMode#setLocalMode on its new LocalPlayer. */
+    @Test
+    void aPressAfterACreativeRespawnArmsTheToggleBeforeItsAbilities() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            respawn(f, GameMode.CREATIVE);
+            f.player.packetStateData.playerLoadedIntoLevel = true;
+            f.teleport(GROUND.add(0, 0.3, 0), new RelativeFlag(0));
+
+            assertArmedTakeoffUnderAKnockback(f);
+        }
+    }
+
     /** The first press only arms Player#jumpTriggerTime, so flight turned on with it has no takeoff jump. */
     @Test
     void aTakeoffJumpOnAnUnarmedFirstPressFlags() throws Exception {
@@ -413,15 +444,63 @@ class CreativeFlightTest {
      * backend sends with it.
      */
     private static void switchBackend(JavaTickFixture f) {
+        login(f, GameMode.SURVIVAL);
+        grantFlight(f);
+    }
+
+    /** A reconfiguration and a LOGIN into {@code mode} answered through its ping, then the chunks around spawn. */
+    private static void login(JavaTickFixture f, GameMode mode) {
         var type = ClientboundPackets.FINISH_CONFIGURATION;
         var finish = new PacketSendEvent<>(f.player.user, ConnectionPhase.CONFIGURATION, type, new Opaque(type), false);
         new PacketServerRegistries().onFinishConfiguration(finish, f.player, new Opaque(type));
         finish.getTasksAfterSend().forEach(Runnable::run);
-        f.pongThrough(ItemUseTestSupport.login(f.player, GameMode.SURVIVAL));
+        f.pongThrough(ItemUseTestSupport.login(f.player, mode));
         for (int x = -1; x <= 1; x++) {
             for (int z = -1; z <= 1; z++) f.player.compensatedWorld.ensureValidationChunkLoaded(x, z);
         }
-        grantFlight(f);
+    }
+
+    /** The fixture's floor in the new level a LOGIN starts. */
+    private static void relayTheFloor(JavaTickFixture f) {
+        for (int x = -8; x <= 8; x++) {
+            for (int z = -8; z <= 8; z++) {
+                f.player.compensatedWorld.updateBlock(new BlockPos(x, FLOOR_Y - 1, z), BlockIds.STONE.defaultState());
+            }
+        }
+        for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
+    }
+
+    /** A RESPAWN into {@code mode} in the same level, answered through its pings. */
+    private static void respawn(JavaTickFixture f, GameMode mode) {
+        var spawnInfo = new PlayerSpawnInfo(
+                ModelRegistryNamesState.defaults().id("minecraft:dimension_type", "minecraft:the_end"),
+                f.player.compensatedWorld.getLastClientboundDimension().dimension(),
+                mode);
+        var packet = new ClientboundRespawn(spawnInfo, (byte) 0);
+        var event =
+                new PacketSendEvent<>(f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.RESPAWN, packet, false);
+        new PacketPlayerRespawn().onRespawn(event, f.player, packet);
+        event.getTasksAfterSend().forEach(Runnable::run);
+        f.pongThrough(f.player.lastTransactionSent.get());
+    }
+
+    /**
+     * From just above the ground: a press in the air arming the toggle, the landing, the server's player_abilities
+     * letting the player fly, and a grounded double-tap under a knockback that takes the takeoff jump.
+     */
+    private static void assertArmedTakeoffUnderAKnockback(JavaTickFixture f) {
+        f.place(GROUND.add(0, 0.3, 0), new Vec3(0, -0.2, 0));
+        f.input(JUMP);
+        assertPredicted(f.tick(GROUND.add(0, 0.1, 0), false));
+        f.input(NONE);
+        assertPredicted(f.tick(GROUND, true));
+        grantFlight(f, false);
+
+        f.pongThrough(f.velocity(KNOCKBACK));
+        f.abilities(true);
+        f.input(JUMP);
+        assertPredicted(f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false));
+        assertEquals(0.0, antiKb(f), "the client took the knockback");
     }
 
     private static double antiKb(JavaTickFixture f) {

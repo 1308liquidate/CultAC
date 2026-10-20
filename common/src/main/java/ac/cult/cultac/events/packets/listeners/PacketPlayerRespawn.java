@@ -14,6 +14,7 @@ import ac.cult.cultac.checks.impl.breaking.FastBreak;
 import ac.cult.cultac.checks.impl.combat.FairReach;
 import ac.cult.cultac.checks.impl.elytra.ElytraC;
 import ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor;
+import ac.cult.cultac.events.packets.PacketChangeGameState;
 import ac.cult.cultac.events.packets.RegistryGenerationAlerts;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -99,6 +100,7 @@ public class PacketPlayerRespawn {
         player.canInstabuild = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE;
         player.isInvulnerable = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE
                 || player.gamemode == ac.cult.cultac.protocol.value.GameMode.SPECTATOR;
+        final GameMode loginMode = player.gamemode;
         // ClientPacketListener.handleLogin sets the local player's ID from this packet.
         // A proxy may rewrite it independently of the backend's native entity ID.
         player.entityID = packet.playerId();
@@ -153,6 +155,8 @@ public class PacketPlayerRespawn {
                 player.checkManager.getListener(BadPacketsA.class).resetCarriedIndex();
                 player.checkManager.getListener(AirLiquidBreak.class).resetPending();
                 player.checkManager.getListener(FastBreak.class).resetDestroyDelay();
+                // ClientPacketListener#handleLogin runs MultiPlayerGameMode#setLocalMode on the local player.
+                PacketChangeGameState.applyGameModeAbilities(player, loginMode, newJavaLocalPlayer);
                 if (newJavaLocalPlayer) {
                     player.actionManager.onJavaPlayerReplacement();
                     // LocalPlayer starts from Input.EMPTY and sends PLAYER_INPUT once its keys differ from it.
@@ -362,6 +366,10 @@ public class PacketPlayerRespawn {
             player.canInstabuild = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE;
             player.isInvulnerable = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE
                     || player.gamemode == ac.cult.cultac.protocol.value.GameMode.SPECTATOR;
+            // ClientPacketListener#handleRespawn runs MultiPlayerGameMode#setLocalMode on its new LocalPlayer.
+            if (!player.isBedrockMovement()) {
+                PacketChangeGameState.applyGameModeAbilities(player, player.gamemode, true);
+            }
             respawnedSelf.onRespawn(
                     keepAttributeModifiers, player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE);
             if (dimensionType != null) player.compensatedWorld.setDimension(worldName, dimensionType);
