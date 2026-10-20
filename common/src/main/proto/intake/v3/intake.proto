@@ -40,6 +40,8 @@ message ConnectRequest {
   optional uint32 diag = 4;
   // The perf version the server offers (1); absent when it takes no perf profiles.
   optional uint32 perf = 5;
+  // The team sync version the server offers (1); absent when it reports no portal roles.
+  optional uint32 team = 6;
 }
 
 message Agent {
@@ -63,6 +65,8 @@ message ConnectResponse {
   DiagLimits diag = 4;
   // Present when the service takes the perf profiles the request offered: its current limits.
   PerfLimits perf = 5;
+  // Present when the service takes the team sync the request offered: the organization's current state.
+  TeamState team = 6;
 }
 
 // A message from the server.
@@ -81,6 +85,8 @@ message IntakeMessage {
     DiagPart diag = 5;
     // Perf: one part of a profile the service started (PerfStart).
     PerfPart perf = 6;
+    // Team sync: portal roles, only while the socket's last TeamState is enabled.
+    TeamRoles team = 7;
   }
 }
 
@@ -648,6 +654,9 @@ message Reply {
     // Perf, only to a socket whose connect offered perf.
     PerfLimits perf_limits = 7;
     PerfStart perf_start = 8;
+    // Team sync, only to a socket whose connect offered team.
+    TeamState team_state = 9;
+    TeamSweep team_sweep = 10;
   }
 }
 
@@ -844,4 +853,40 @@ message PerfAllocCalibration {
   uint32 thread_group = 1;   // index into thread_groups
   uint64 sampled_bytes = 2;  // sampled weights after dropping each thread's first sample, before scaling
   uint64 exact_bytes = 3;    // ThreadMXBean; 0 when unknown
+}
+
+// Team sync: whether the organization takes portal roles, at connect and whenever it changes; each replaces the last.
+// Turning enabled reports every online player already checked again.
+message TeamState {
+  bool enabled = 1;
+}
+
+// Team sync: the accounts the service manages that the server looks up while they are offline. A server without an
+// offline store ignores it; one with a store answers TeamRoles with offline set for each account not online.
+message TeamSweep {
+  repeated bytes players = 1;
+}
+
+// Team sync: at most 100 players.
+message TeamRoles {
+  repeated TeamRole players = 1;
+}
+
+message TeamRole {
+  bytes player = 1;
+  // Minecraft's shape; absent only on an offline report.
+  optional string name = 2;
+  // PORTAL_ROLE_UNSPECIFIED, or a value the reader does not know, drops the entry.
+  PortalRole role = 3;
+  // Read from the permission plugin's store for a player not online: it only lowers or removes a role.
+  bool offline = 4;
+}
+
+// The highest portal node a player holds.
+enum PortalRole {
+  PORTAL_ROLE_UNSPECIFIED = 0;
+  PORTAL_ROLE_NONE = 1;
+  PORTAL_ROLE_VIEWER = 2;
+  PORTAL_ROLE_MODERATOR = 3;
+  PORTAL_ROLE_ADMIN = 4;
 }
