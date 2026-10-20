@@ -102,8 +102,26 @@ public class VelocityTransformer {
             for (PredVector velocity : velocities) {
                 outputs.addAll(applyPossibleJumpStates(player, velocity));
             }
+            // LivingEntity#jumpFromGround leaves the velocity unchanged at or below 1.0E-5F.
+            if (!onGroundStates.contains(false) && jumpFromGroundCanDoNothing(player)) outputs.addAll(velocities);
         }
         return outputs;
+    }
+
+    private boolean jumpFromGroundCanDoNothing(CultPlayer player) {
+        for (boolean onHoney :
+                simulationContext.getWorldData().getOnHoneyBlock().getStates()) {
+            if (jumpPower(player, onHoney) <= 1.0E-5F) return true;
+        }
+        return false;
+    }
+
+    private float jumpPower(CultPlayer player, boolean onHoney) {
+        float jumpPower = (float) player.compensatedEntities.getSelf().jumpStrength * (onHoney ? 0.5f : 1.0f);
+        if (simulationContext.getJumpAmplifier() != null) {
+            jumpPower += 0.1f * (simulationContext.getJumpAmplifier() + 1);
+        }
+        return jumpPower;
     }
 
     /**
@@ -705,11 +723,7 @@ public class VelocityTransformer {
                 }
                 PredVector modified;
 
-                float jumpPower = (float) player.compensatedEntities.getSelf().jumpStrength * (onHoney ? 0.5f : 1.0f);
-
-                if (simulationContext.getJumpAmplifier() != null) {
-                    jumpPower += 0.1f * (simulationContext.getJumpAmplifier() + 1);
-                }
+                float jumpPower = jumpPower(player, onHoney);
 
                 // LivingEntity#jumpFromGround does nothing at or below 1.0E-5F.
                 if (jumpPower <= 1.0E-5F) continue;

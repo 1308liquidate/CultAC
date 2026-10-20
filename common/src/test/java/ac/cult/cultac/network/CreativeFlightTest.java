@@ -214,6 +214,20 @@ class CreativeFlightTest {
         }
     }
 
+    /** LivingEntity#jumpFromGround does nothing without jump strength, so the toggle keeps the knockback. */
+    @Test
+    void aGroundedFlightToggleWithoutJumpStrengthKeepsTheKnockback() throws Exception {
+        try (var f = flying(GROUND, false)) {
+            f.player.compensatedEntities.getSelf().jumpStrength = 0;
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            f.input(JUMP);
+
+            assertPredicted(f.tick(GROUND.add(KNOCKBACK.x, KNOCKBACK.y + IMPULSE, KNOCKBACK.z), false));
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
     /** Player#isAffectedByFluids is false in flight, so a player already flying on the ground has no jump. */
     @Test
     void aPlayerAlreadyFlyingOnTheGroundCannotJumpUnderAKnockback() throws Exception {
