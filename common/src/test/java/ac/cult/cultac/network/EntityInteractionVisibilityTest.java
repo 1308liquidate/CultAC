@@ -541,6 +541,56 @@ class EntityInteractionVisibilityTest {
         }
     }
 
+    @Test
+    void aSeparationInsideAFoldedStepPassesTheOwnerAsAnUnstoppedProjectile() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
+            setup.cow(41, new Vec3(.5, 64, 3.7));
+            var cow = setup.player.compensatedEntities.getEntity(41);
+            cow.onPositionPath(
+                    EntityPositionPath.linear(new Vec3(-11.5, 64, 3.7)), true, null, null, setup.player, true);
+            cow.onPositionPath(EntityPositionPath.linear(new Vec3(.5, 64, 3.7)), true, null, null, setup.player, true);
+            for (int step = 2; step < 129; step++) {
+                var position = EntityPositionPath.linear(new Vec3(.5, 64, 3.7));
+                cow.onPositionPath(position, false, step % 2 == 0 ? 90.0F : 0.0F, 0.0F, setup.player, true);
+            }
+            var fireball =
+                    setup.projectile(42, "minecraft:fireball", new Vec3d(2.6, 64.5, 3.7), new Vec3d(0, 0, 0), 41);
+            // The client samples the cow at x -3.5, clear of the fireball, and leaves its owner; the fold hides that.
+            setup.clientTick();
+            assertTrue(cow.hasLossyPosition());
+            setup.motion(42, new Vec3d(-1, 0, 0));
+            setup.clientTick();
+            assertEquals(2.6 - 1.1 * .95, fireball.clientPhysicalPosition.x, 1.0E-6);
+            setup.motion(42, new Vec3d(0, 0, 0));
+            for (int tick = 0; tick < 8; tick++) setup.clientTick();
+            setup.motion(42, new Vec3d(-1, 0, 0));
+            setup.clientTick();
+            // The client stops at the cow's box grown by the 0.3 margin, x 1.25; the projectile passes as on dev.
+            assertEquals(2.6 - 2.2 * .95, fireball.clientPhysicalPosition.x, 1.0E-6);
+        }
+    }
+
+    @Test
+    void aStationaryMobPastAFoldedRotationStepStaysHidden() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
+            setup.cow(41, new Vec3(.5, 64, 1.5));
+            var cow = setup.player.compensatedEntities.getEntity(41);
+            for (int step = 0; step < 129; step++) {
+                var position = EntityPositionPath.linear(new Vec3(.5, 64, 1.5));
+                cow.onPositionPath(position, false, step % 2 == 0 ? 90.0F : 0.0F, 0.0F, setup.player, true);
+            }
+            setup.wall("stone");
+            var visibility = new ClientVisibility(setup.player);
+            for (int tick = 0; tick < 3; tick++) {
+                setup.clientTick();
+                if (tick == 0) assertTrue(cow.hasLossyPosition());
+                assertTrue(visibility.entityHidden(cow, 0));
+                assertTrue(visibility.entityInteractionHidden(cow, 0));
+                assertTrue(setup.route(41, InteractAction.INTERACT_AT).isCancelled());
+            }
+        }
+    }
+
     @ParameterizedTest
     @MethodSource("clients")
     void aFireballStopsAtTheLocalPlayer(ProtocolVersion version) throws Exception {
