@@ -29,6 +29,8 @@ public final class ClientSprintState {
     private boolean resetOutcomePending;
     // Counts the events that set the modifier with certainty; an older Outcomes snapshot cannot undo them.
     private int certainEvents;
+    // The state the latest certain event left, which a restore of an older snapshot returns to.
+    private Outcomes certainOutcomes = new Outcomes(null, false, 0, 0);
     // Counts possible attack resets; a restore keeps vanilla's modifier possible after any since its snapshot.
     private int possibleResets;
     private boolean sprintResetThisTick;
@@ -67,9 +69,7 @@ public final class ClientSprintState {
     /** The minecraft:sprinting modifier of the server's movement_speed snapshot, applied by its bundled proof. */
     public void onServerModifier(@Nullable AttributeModifier sprinting) {
         modifier = sprinting;
-        canonicalPossible = false;
-        resetOutcomePending = false;
-        certainEvents++;
+        onCertainEvent();
     }
 
     /**
@@ -82,12 +82,17 @@ public final class ClientSprintState {
         if (reset == AttackReset.CERTAIN) {
             flag = false;
             modifier = null;
-            canonicalPossible = false;
-            resetOutcomePending = false;
-            certainEvents++;
+            onCertainEvent();
         } else {
             flagUncertain = true;
         }
+    }
+
+    private void onCertainEvent() {
+        canonicalPossible = false;
+        resetOutcomePending = false;
+        certainEvents++;
+        certainOutcomes = outcomes();
     }
 
     /** Whether flag() is exact here: no attack earlier in this tick may have reset it unprovably. */
@@ -109,9 +114,7 @@ public final class ClientSprintState {
         // An attack reset that aiStep re-sprinted re-added the modifier.
         if (flag != wasSprinting) {
             modifier = wasSprinting ? CompensatedEntities.SPRINTING_SPEED_MODIFIER : null;
-            canonicalPossible = false;
-            resetOutcomePending = false;
-            certainEvents++;
+            onCertainEvent();
         } else if (sprintResetThisTick && wasSprinting) {
             // Only a possible reset leaves the flag: Player#attack resets only after damage and positive knockback.
             resetOutcomePending = !CompensatedEntities.SPRINTING_SPEED_MODIFIER.equals(modifier);
@@ -153,12 +156,14 @@ public final class ClientSprintState {
     }
 
     /**
-     * Returns to {@code outcomes}, discarding what moves committed since then implied, unless an event that sets the
-     * modifier with certainty happened in between. A possible attack reset since then is a client event a teleport does
-     * not undo, so vanilla's modifier stays possible after it; this tick's still decides its candidates by their damping.
+     * Returns to {@code outcomes}, or to the state the latest event that set the modifier with certainty left when that
+     * came later, discarding what moves committed since then implied. A possible attack reset since then is a client
+     * event a teleport does not undo, so vanilla's modifier stays possible after it; this tick's still decides its
+     * candidates by their damping.
      */
-    public void restore(@Nullable Outcomes outcomes) {
-        if (outcomes == null || outcomes.certainEvents() != certainEvents) return;
+    public void restore(@Nullable Outcomes anchor) {
+        if (anchor == null) return;
+        Outcomes outcomes = anchor.certainEvents() == certainEvents ? anchor : certainOutcomes;
         int earlierResets = possibleResets - outcomes.possibleResets() - (resetOutcomePending ? 1 : 0);
         modifier = outcomes.modifier();
         canonicalPossible = outcomes.canonicalPossible()
@@ -167,10 +172,10 @@ public final class ClientSprintState {
     }
 
     /**
-     * The tick's move is set back without a committed candidate: a possible reset still undecided leaves vanilla's
-     * modifier possible beside the held one.
+     * The tick's travel ended without a committed candidate deciding its possible reset: vanilla's modifier stays
+     * possible beside the held one.
      */
-    public void onMoveSetBack() {
+    public void settleReset() {
         if (resetOutcomePending) canonicalPossible = true;
         resetOutcomePending = false;
     }
@@ -179,13 +184,18 @@ public final class ClientSprintState {
     public record Outcomes(
             @Nullable AttributeModifier modifier, boolean canonicalPossible, int certainEvents, int possibleResets) {}
 
-    /** A LocalPlayer#tick movement packet opens its tick; the next {@link #onClientTick} reconciles its aiStep. */
+    /**
+     * A LocalPlayer#tick movement packet opens its tick, after every earlier tick's travel; the next
+     * {@link #onClientTick} reconciles its aiStep.
+     */
     public void onClientMove() {
+        settleReset();
         aiStepReconciled = false;
     }
 
-    /** The client's tick ended; the next {@link #onClientTick} reconciles the next tick's aiStep. */
+    /** The client's tick ended after its travel; the next {@link #onClientTick} reconciles the next tick's aiStep. */
     public void onClientTickEnd() {
+        settleReset();
         aiStepReconciled = false;
     }
 
@@ -207,9 +217,7 @@ public final class ClientSprintState {
         }
         if (!keepAttributeModifiers) {
             modifier = null;
-            canonicalPossible = false;
-            resetOutcomePending = false;
-            certainEvents++;
+            onCertainEvent();
         }
     }
 
@@ -217,9 +225,7 @@ public final class ClientSprintState {
     public void reset() {
         flag = false;
         modifier = null;
-        canonicalPossible = false;
-        resetOutcomePending = false;
-        certainEvents++;
+        onCertainEvent();
         flagBeforeAiStep = false;
         aiStepReconciled = false;
         sprintResetThisTick = false;

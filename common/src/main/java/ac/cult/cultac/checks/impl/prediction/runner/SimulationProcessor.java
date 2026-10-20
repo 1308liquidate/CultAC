@@ -1087,7 +1087,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         SetbackTeleportUtil setbacks = this.player.getSetbackTeleportUtil();
         if (setbacks.isPendingSetback() && setbacks.lastKnownGoodPosition != null) {
             state.restore(setbacks.lastKnownGoodPosition.getSprintOutcomes());
-            state.onMoveSetBack();
+            state.settleReset();
             return;
         }
         if (!state.outcomeOpen()) return;
