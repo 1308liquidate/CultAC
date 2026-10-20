@@ -3,6 +3,10 @@ package ac.cult.cultac.network;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.engine.SimItemStack;
@@ -33,17 +37,20 @@ import ac.cult.cultac.utils.inventory.Inventory;
 import ac.cult.cultac.utils.inventory.ItemUtil;
 import ac.cult.cultac.utils.latency.BlockActionReconciler;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.grim.grimac.api.config.ConfigManager;
 import java.lang.reflect.Field;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
  * An entity query the compensated candidates leave open declines the block action without writes, and the packet's
- * handler, checks and bookkeeping still complete.
+ * handler, checks and bookkeeping still complete, whether a flagging check rejects the action or forwards it.
  */
 class EntityQueryUncertaintyTest {
     private static final Vec3 STANDING = new Vec3(0.5, JavaTickFixture.FLOOR_Y, 0.5);
@@ -105,17 +112,49 @@ class EntityQueryUncertaintyTest {
     }
 
     @Test
-    void aPlaceBesideACowFromBeyondReachIsStillFarPlace() throws Exception {
+    void aCancellingFarPlaceRejectsTheClickAndQueuesItsCorrection() throws Exception {
         straddlingCow(FAR);
-        var farPlace = player.checkManager.getCheck(FarPlace.class);
+        var farPlace = farPlaceWithCancelVL(0);
+        double before = farPlace.getViolations();
+        // A prior forwarded action the backend has not acknowledged holds the correction in the queue.
+        player.blockActionReconciler.forwarded(0);
+
+        var event = dispatch(ServerboundPackets.USE_ITEM_ON, westClick());
+
+        assertTrue(event.isCancelled(), "the flagged click is rejected");
+        assertTrue(farPlace.getViolations() > before, "reach does not depend on the entity query");
+        assertEquals(0, lastForwarded(), "the rejected sequence is not forwarded");
+        assertEquals(1, pendingCorrections(), "the rejection queues its correction");
+        Object correction = ((ArrayDeque<?>) reconcilerField("pending")).getFirst();
+        assertEquals(1, correctionField(correction, "sequence"));
+        assertEquals(Set.of(CLICKED, PLACED), correctionField(correction, "positions"));
+        assertEquals(Set.of(Inventory.HOTBAR_OFFSET), correctionField(correction, "slots"));
+        assertNotSimulated();
+    }
+
+    @Test
+    void aNonCancellingFarPlaceForwardsTheClick() throws Exception {
+        straddlingCow(FAR);
+        var farPlace = farPlaceWithCancelVL(-1);
         double before = farPlace.getViolations();
 
         var event = dispatch(ServerboundPackets.USE_ITEM_ON, westClick());
 
+        assertFalse(event.isCancelled(), "the flagged click is forwarded");
         assertTrue(farPlace.getViolations() > before, "reach does not depend on the entity query");
-        if (event.isCancelled()) assertEquals(1, pendingCorrections(), "the rejection queues its correction");
-        else assertEquals(1, lastForwarded(), "the reconciler records the forwarded sequence");
+        assertEquals(1, lastForwarded(), "the reconciler records the forwarded sequence");
+        assertEquals(0, pendingCorrections(), "a forwarded click queues no correction");
         assertNotSimulated();
+    }
+
+    private FarPlace farPlaceWithCancelVL(int cancelVL) {
+        var farPlace = player.checkManager.getCheck(FarPlace.class);
+        var config = mock(ConfigManager.class);
+        when(config.getIntElse(anyString(), anyInt())).thenAnswer(invocation -> invocation.getArgument(1));
+        when(config.getIntElse(farPlace.getConfigName() + ".cancelVL", 5)).thenReturn(cancelVL);
+        farPlace.onReload(config);
+        farPlace.setEnabled(true);
+        return farPlace;
     }
 
     private void assertNotSimulated() {
@@ -195,10 +234,18 @@ class EntityQueryUncertaintyTest {
     }
 
     private Object reconcilerField(String name) {
+        return field(BlockActionReconciler.class, player.blockActionReconciler, name);
+    }
+
+    private static Object correctionField(Object correction, String name) {
+        return field(correction.getClass(), correction, name);
+    }
+
+    private static Object field(Class<?> owner, Object target, String name) {
         try {
-            Field field = BlockActionReconciler.class.getDeclaredField(name);
+            Field field = owner.getDeclaredField(name);
             field.setAccessible(true);
-            return field.get(player.blockActionReconciler);
+            return field.get(target);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError(e);
         }
