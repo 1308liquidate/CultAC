@@ -155,7 +155,18 @@ class JavaSneakEdgeSprintTest {
             }
             f.input(SPRINT);
             delta = velocity.add(ClientMoveInput.of(f, SPRINT, 0.3F, quadrupledSpeed, yaw));
-            assertExact(f.tick(position.add(delta.x, -0.0784000015258789, delta.z), false));
+            position = position.add(delta.x, -0.0784000015258789, delta.z);
+            assertExact(f.tick(position, false));
+            velocity = new Vec3(delta.x * friction, 0.0, delta.z * friction);
+            // LivingEntity#travelInAir off the edge: Player#getFlyingSpeed from the sprint flag, 0.91F, gravity, 0.98F.
+            double fall = (-0.0784000015258789 - 0.08D) * (double) 0.98F;
+            for (int tick = 0; tick < 3; tick++) {
+                delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, 0.025999999F, yaw));
+                position = position.add(delta.x, fall, delta.z);
+                assertExact(f.tick(position, false));
+                velocity = new Vec3(delta.x * (double) 0.91F, 0.0, delta.z * (double) 0.91F);
+                fall = (fall - 0.08D) * (double) 0.98F;
+            }
 
             command(f, PlayerCommandAction.STOP_SPRINTING);
             f.move(position, false);
@@ -163,7 +174,7 @@ class JavaSneakEdgeSprintTest {
             command(f, PlayerCommandAction.START_SPRINTING);
             f.move(position, false);
             f.tickEnd();
-            assertEquals(sprintSpeed, (float) f.player.compensatedEntities.getSprintingPlayerMovementSpeed());
+            assertEquals(sprintSpeed, (float) f.player.compensatedEntities.getMaxPlayerMovementSpeed(false));
         }
     }
 

@@ -65,6 +65,10 @@ final class SneakEdgeBackoff {
         return crouching == null || crouching.equals(full) ? full : null;
     }
 
+    /**
+     * The carry for {@code movingSlowlyFactor} at the speed LivingEntity#getSpeed gives on the ground or in water,
+     * kept when one getSpeed() the client's sprint modifier allows alone reproduces the move.
+     */
     private static Vec3 deltaMovementFrom(
             CultPlayer player,
             PredictionResult result,
@@ -72,8 +76,31 @@ final class SneakEdgeBackoff {
             Vec3 accepted,
             float movingSlowlyFactor) {
         boolean water = context.getWorldData().getInWater() == DesyncStatus.TRUE;
+        if (water) {
+            float speed = context.getMoveRelativeSpeed(player, true, true, false);
+            return deltaMovementFrom(player, result, context, accepted, movingSlowlyFactor, speed);
+        }
+        Vec3 found = null;
+        for (float speed : context.getGroundMoveRelativeSpeeds(player)) {
+            Vec3 carry = deltaMovementFrom(player, result, context, accepted, movingSlowlyFactor, speed);
+            if (carry == null) continue;
+            if (found != null && !found.equals(carry)) return null;
+            found = carry;
+        }
+        return found;
+    }
+
+    private static Vec3 deltaMovementFrom(
+            CultPlayer player,
+            PredictionResult result,
+            SimulationContext context,
+            Vec3 accepted,
+            float movingSlowlyFactor,
+            float speed) {
+        boolean water = context.getWorldData().getInWater() == DesyncStatus.TRUE;
         PredVector start = result.getInitialStartingVel();
-        Vec3 input = ClientKeyInput.travelInput(player, context, player.packetStateData.knownInput, movingSlowlyFactor);
+        Vec3 input = ClientKeyInput.travelInput(
+                player, context, player.packetStateData.knownInput, 1.0F, movingSlowlyFactor, speed);
         if (input == null) return null;
         // LocalPlayer#aiStep's goDownInWater adds -0.04F while shift is held in water, before travel.
         double deltaY = water ? start.y + (double) -0.04F : start.y;

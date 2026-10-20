@@ -39,7 +39,7 @@ public class Sneaking implements UncertaintyHandler {
             DesyncStatus lastOnGround = result.getSimulationContext().getLastOnGround();
             result.getSimulationContext().getWorldData().setLastOnGround(DesyncStatus.UNKNOWN);
             // Get the speed when the player is on the ground
-            double maxSpeed = context.getMaxSpeed(player) * 1.3;
+            double maxSpeed = context.getHorizontalInputAllowance(player);
             result.getSimulationContext().getWorldData().setLastOnGround(lastOnGround);
 
             Vec3 from = result.getSimulationContext().getStart();

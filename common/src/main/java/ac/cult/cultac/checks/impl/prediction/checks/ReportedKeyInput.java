@@ -49,9 +49,12 @@ final class ReportedKeyInput {
         float walk = context.getMoveRelativeSpeed(player, true, false, false);
         // LivingEntity#getFrictionInfluencedSpeed reads getSpeed(), which carries minecraft:sprinting while applied.
         // ClientSprintState can still hold the modifier after one aiStep started and stopped a wall sprint.
-        float sprint = context.isSprintModifier() ? (float) (walk * 1.3D) : walk;
+        float[] sprint = context.isSprintModifier() ? context.getGroundMoveRelativeSpeeds(player) : new float[0];
+        float[] speeds = new float[sprint.length + 1];
+        speeds[0] = walk;
+        System.arraycopy(sprint, 0, speeds, 1, sprint.length);
         double best = Double.MAX_VALUE;
-        for (float speed : new float[] {walk, sprint}) {
+        for (float speed : speeds) {
             // LocalPlayer#modifyInput's item multiplier is the legal one, or the required one of a use the client owes.
             for (float itemUse : new float[] {use.legalMultiplier(), use.requiredMultiplier()}) {
                 Vec3 input = ClientKeyInput.travelInput(player, context, keys, itemUse, slow, speed);

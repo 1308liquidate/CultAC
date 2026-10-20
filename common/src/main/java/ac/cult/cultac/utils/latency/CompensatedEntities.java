@@ -311,14 +311,27 @@ public class CompensatedEntities {
     }
 
     /**
-     * {@link #getPlayerMovementSpeed} with the minecraft:sprinting modifier the client holds, or with the one
-     * LivingEntity#setSprinting adds when it holds none.
+     * LivingEntity#getSpeed for each minecraft:sprinting modifier the client may hold: the held one or none, and
+     * vanilla's after a possible attack reset or, with {@code canonical}, for a sprint the client may start.
      */
-    public double getSprintingPlayerMovementSpeed() {
+    public double[] getPossiblePlayerMovementSpeeds(boolean canonical) {
         AttributeModifier held = player.sprintState.heldModifier();
-        double speed = player.compensatedEntities
-                .getSelf()
-                .playerSpeedWith(held == null ? SPRINTING_SPEED_MODIFIER : held);
+        double current = held == null ? getPlayerMovementSpeed() : sprintingSpeed(held);
+        if (!(canonical || player.sprintState.canonicalPossible()) || SPRINTING_SPEED_MODIFIER.equals(held)) {
+            return new double[] {current};
+        }
+        return new double[] {current, sprintingSpeed(SPRINTING_SPEED_MODIFIER)};
+    }
+
+    /** The largest of {@link #getPossiblePlayerMovementSpeeds}. */
+    public double getMaxPlayerMovementSpeed(boolean canonical) {
+        double max = 0.0D;
+        for (double speed : getPossiblePlayerMovementSpeeds(canonical)) max = Math.max(max, speed);
+        return max;
+    }
+
+    private double sprintingSpeed(AttributeModifier sprinting) {
+        double speed = player.compensatedEntities.getSelf().playerSpeedWith(sprinting);
         return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
     }
 

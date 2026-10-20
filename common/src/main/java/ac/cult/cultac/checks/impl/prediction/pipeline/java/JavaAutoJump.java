@@ -59,9 +59,7 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         if (input.horizontalDistanceSqr() == 0) return false;
         float yaw = player.xRot * ((float) Math.PI / 180.0F);
         float sin = player.trigHandler.sin(yaw), cos = player.trigHandler.cos(yaw);
-        float speed = (float) (player.sprintState.modifier()
-                ? player.compensatedEntities.getSprintingPlayerMovementSpeed()
-                : player.compensatedEntities.getPlayerMovementSpeed());
+        float speed = (float) player.compensatedEntities.getMaxPlayerMovementSpeed(false);
         Vec3 begin = new Vec3(player.x, player.y, player.z);
         float dx = (float) result.getTarget().x, dz = (float) result.getTarget().z;
         Vec3 end = begin.add(dx, 0, dz), diff = new Vec3(dx, 0, dz);

@@ -81,6 +81,7 @@ public class SimulationContext {
     // Whether movement_speed may carry minecraft:sprinting during travel
     @Setter
     boolean sprintModifier = true;
+    private float[] groundMoveRelativeSpeeds;
     // The movement_efficiency attribute during travel; LivingEntity#getBlockSpeedFactor lerps the block's factor to 1
     @Setter
     float movementEfficiency;
@@ -344,8 +345,31 @@ public class SimulationContext {
 
     /** Radius of the circular horizontal input allowance around the input-free movement. */
     public double getHorizontalInputRadius(CultPlayer player) {
-        float speed = getMaxSpeed(player);
-        return getVehicle() == null ? speed * 1.3D : speed;
+        return getVehicle() == null ? getHorizontalInputAllowance(player) : getMaxSpeed(player);
+    }
+
+    /**
+     * The 1.3x allowance on each state's input speed, widened on the ground to every getSpeed() the client's sprint
+     * modifier allows there.
+     */
+    public double getHorizontalInputAllowance(CultPlayer player) {
+        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        double allowance = 0;
+        for (boolean onGround : worldData.getLastOnGround().getStates()) {
+            for (boolean water : worldData.getInWater().getStates()) {
+                for (boolean lava : worldData.getInLava().getStates()) {
+                    allowance = Math.max(
+                            allowance,
+                            getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava) * 1.3D);
+                    if (groundSprintSpeed(player, onGround, water || lava)) {
+                        for (float speed : getGroundMoveRelativeSpeeds(player)) {
+                            allowance = Math.max(allowance, speed);
+                        }
+                    }
+                }
+            }
+        }
+        return allowance;
     }
 
     /**
@@ -359,17 +383,14 @@ public class SimulationContext {
         for (boolean onGround : worldData.getLastOnGround().getStates()) {
             for (boolean water : worldData.getInWater().getStates()) {
                 for (boolean lava : worldData.getInLava().getStates()) {
-                    float speed = groundSprintSpeed(player, onGround, water || lava)
-                            ? getFrictionInfluencedSpeed(
-                                    blockUnderPlayer,
-                                    player,
-                                    entities.getSprintingPlayerMovementSpeed(),
-                                    true,
-                                    false,
-                                    false)
-                            : getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava)
-                                    * (float) sprintSpeedMultiplier(player, onGround, water || lava);
-                    maxSpeed = Math.max(maxSpeed, speed);
+                    if (groundSprintSpeed(player, onGround, water || lava)) {
+                        for (float speed : getGroundMoveRelativeSpeeds(player)) maxSpeed = Math.max(maxSpeed, speed);
+                    } else {
+                        maxSpeed = Math.max(
+                                maxSpeed,
+                                getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava)
+                                        * (float) sprintSpeedMultiplier(player, onGround, water || lava));
+                    }
                 }
             }
         }
@@ -379,6 +400,25 @@ public class SimulationContext {
     /** LivingEntity#getSpeed on the ground carries the minecraft:sprinting modifier the client holds. */
     private boolean groundSprintSpeed(CultPlayer player, boolean onGround, boolean fluid) {
         return onGround && !fluid && vehicle == null && !player.isFlying && sprintModifier;
+    }
+
+    /**
+     * LivingEntity#getFrictionInfluencedSpeed on the ground for each getSpeed() the client's sprint modifier allows,
+     * with vanilla's modifier also allowed for a riptide spin's sprint.
+     */
+    public float[] getGroundMoveRelativeSpeeds(CultPlayer player) {
+        if (groundMoveRelativeSpeeds == null) {
+            float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+            double[] speeds = vehicle == null
+                    ? entities.getPossiblePlayerMovementSpeeds(sprintModifier && !player.sprintState.modifier())
+                    : new double[] {getPlayerMovementSpeed(player)};
+            float[] moveRelative = new float[speeds.length];
+            for (int i = 0; i < speeds.length; i++) {
+                moveRelative[i] = getFrictionInfluencedSpeed(blockUnderPlayer, player, speeds[i], true, false, false);
+            }
+            groundMoveRelativeSpeeds = moveRelative;
+        }
+        return groundMoveRelativeSpeeds;
     }
 
     private double sprintSpeedMultiplier(CultPlayer player, boolean onGround, boolean fluid) {
@@ -425,16 +465,6 @@ public class SimulationContext {
         return maxSpeed;
     }
 
-    /**
-     * LivingEntity#getFrictionInfluencedSpeed on the ground for the local player while its movement_speed carries
-     * minecraft:sprinting.
-     */
-    public float getSprintingGroundMoveRelativeSpeed(CultPlayer player) {
-        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
-        return getFrictionInfluencedSpeed(
-                blockUnderPlayer, player, entities.getSprintingPlayerMovementSpeed(), true, false, false);
-    }
-
     private float getFrictionInfluencedSpeed(
             float friction, CultPlayer player, boolean isOnGround, boolean water, boolean lava) {
         return getFrictionInfluencedSpeed(friction, player, getPlayerMovementSpeed(player), isOnGround, water, lava);
@@ -457,7 +487,9 @@ public class SimulationContext {
             if (waterMovementEfficiency > 0) {
                 // A player's getSpeed carries minecraft:sprinting only while applied; a vehicle's is getRiddenSpeed
                 float livingSpeed = (float)
-                        (vehicle == null && sprintModifier ? entities.getSprintingPlayerMovementSpeed() : normalSpeed);
+                        (vehicle == null && sprintModifier
+                                ? entities.getMaxPlayerMovementSpeed(!player.sprintState.modifier())
+                                : normalSpeed);
                 speed += (livingSpeed - speed) * waterMovementEfficiency;
             }
             return speed;
