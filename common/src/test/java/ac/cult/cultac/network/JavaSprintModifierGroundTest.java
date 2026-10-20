@@ -4,6 +4,7 @@ import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -183,6 +184,46 @@ class JavaSprintModifierGroundTest {
             delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, QUADRUPLED, AWAY));
             result = f.tick(position.add(delta.x, 0.0, delta.z), true);
             assertFalse(result.getFlags().isEmpty(), describe(result));
+        }
+    }
+
+    /**
+     * A setback to a position from before a possible attack reset: the teleport moves the client back but leaves the
+     * modifier the attack and aiStep's re-sprint gave it (Player#causeExtraKnockback, LocalPlayer#aiStep,
+     * ClientPacketListener#handlePlayerPosition), so the move after it may carry on at vanilla's speed.
+     */
+    @Test
+    void aSetbackPastAPossibleAttackResetKeepsVanillasModifierPossible() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            position = startSprint(f, YAW, CHARGE_TICKS);
+            Vec3 velocity = carried(f, CANONICAL);
+            holdQuadrupledModifier(f);
+            for (int tick = 0; tick < 3; tick++) {
+                Vec3 delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, QUADRUPLED, YAW));
+                position = position.add(delta.x, 0.0, delta.z);
+                PredictionResult result = f.tick(position, true);
+                assertTrue(exact(result), "tick " + tick + ": " + describe(result));
+                velocity = new Vec3(delta.x * FRICTION, 0.0, delta.z * FRICTION);
+            }
+            var anchor = f.player.getSetbackTeleportUtil().lastKnownGoodPosition;
+            assertNotNull(anchor);
+            assertNotNull(anchor.getSprintOutcomes());
+            Vec3 anchorPosition = position;
+            Vec3 anchorVelocity = velocity;
+
+            attack(f);
+            Vec3 damped = new Vec3(velocity.x * 0.6, 0.0, velocity.z * 0.6);
+            Vec3 delta = damped.add(ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, YAW));
+            PredictionResult result = f.tick(position.add(delta.x + 0.0008, 0.0, delta.z + 0.0008), true);
+            assertFalse(result.getFlags().isEmpty(), describe(result));
+
+            // SetbackTeleportUtil#blockMovementsUntilResync returns to the anchor's modifier state.
+            f.player.sprintState.restore(anchor.getSprintOutcomes());
+            assertTrue(f.player.sprintState.canonicalPossible());
+            f.place(anchorPosition, anchorVelocity);
+            delta = anchorVelocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, YAW));
+            result = f.tick(anchorPosition.add(delta.x, 0.0, delta.z), true);
+            assertTrue(exact(result), describe(result));
         }
     }
 
