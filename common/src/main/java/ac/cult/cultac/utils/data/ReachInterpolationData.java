@@ -31,6 +31,7 @@ import ac.cult.cultac.utils.nmsutil.RootVehicleInterpolationCollision;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 
 // You may not copy the check unless you are licensed under GPL
@@ -704,6 +705,12 @@ public class ReachInterpolationData {
         boundsValid = false;
         startingLocation.offset(stepFrom.apply(feet(startingLocation)));
         targetLocation.offset(stepFrom.apply(feet(targetLocation)));
+    }
+
+    /** The positions {@link #offset} steps from. */
+    public void forEachStepOrigin(Consumer<Vec3> origin) {
+        origin.accept(feet(startingLocation));
+        origin.accept(feet(targetLocation));
     }
 
     /** {@code Entity#reapplyPosition}: every box keeps its position and takes the new dimensions. */

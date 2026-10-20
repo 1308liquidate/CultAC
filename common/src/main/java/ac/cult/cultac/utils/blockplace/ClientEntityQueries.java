@@ -143,13 +143,17 @@ public final class ClientEntityQueries {
         return false;
     }
 
-    /** An entity and its box at each of its candidate positions; a null box selects nothing at that position. */
+    /**
+     * An entity and its box at each of its candidate positions; a null box selects nothing at that position, and no box
+     * means the engine doesn't place the entity.
+     */
     public record PickCandidates(PacketEntity entity, List<Box> boxes) {}
 
     /**
      * The entities {@code ProjectileUtil#getEntityHitResult} can select for {@code source} before its owner rule:
      * {@code Entity#canBeHitByProjectile} (alive and pickable) without {@code noPhysics}, the local player first. A
-     * wind charge also skips wind charges and end crystals ({@code AbstractWindCharge#canHitEntity}).
+     * wind charge also skips wind charges and end crystals ({@code AbstractWindCharge#canHitEntity}). A rider outside
+     * the local player's riding tree comes without boxes.
      */
     public List<PickCandidates> projectileTargets(PacketEntity source) {
         var result = new ArrayList<PickCandidates>();
@@ -159,12 +163,13 @@ public final class ClientEntityQueries {
         boolean windCharge = isWindCharge(source.type);
         for (var entity : player.compensatedEntities.entityMap.values()) {
             if (entity == source
-                    || !present(entity)
+                    || entity instanceof PacketEntityPlayer remote && !remote.actionPresent
                     || !pickable(entity)
                     || entity.isLivingEntity() && !entity.actionAlive
                     || noPhysics(entity)
                     || windCharge && (isWindCharge(entity.type) || entity.type == EntityTypeIds.END_CRYSTAL)) continue;
-            result.add(new PickCandidates(entity, candidateBoxes(entity)));
+            boolean placed = !player.compensatedEntities.isUntrackedRider(entity);
+            result.add(new PickCandidates(entity, placed ? candidateBoxes(entity) : List.of()));
         }
         return result;
     }
@@ -202,6 +207,13 @@ public final class ClientEntityQueries {
     private static boolean noPhysics(PacketEntity entity) {
         String key = modelType(entity).key();
         return key.equals("minecraft:interaction") || key.equals("minecraft:shulker_bullet");
+    }
+
+    /** Whether {@code Level#getEntities} may return ender dragon parts, which the engine doesn't place. */
+    public boolean mayHaveDragonParts() {
+        for (var entity : player.compensatedEntities.entityMap.values())
+            if (modelType(entity).key().equals("minecraft:ender_dragon")) return true;
+        return false;
     }
 
     private void requireDragonParts() {

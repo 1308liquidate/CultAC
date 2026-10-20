@@ -36,6 +36,18 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     private final int ownerId;
     // Projectile#leftOwner across the projectile's possible positions: whether some may still be on the owner.
     private boolean mayBeOnOwner = true;
+    // Projectile#leftOwner is certainly still false.
+    private boolean certainlyOnOwner = true;
+    // The client may be off every candidate: the model passed an entity the projectile may have hit, or the client
+    // moved it in a way the model can't follow. It makes no entity stops until a server position re-anchors it.
+    private boolean diverged;
+    // A server position applied since the last client tick, which re-anchors once no older candidate remains.
+    private boolean anchoring;
+    // The engine's codec base matches the client's. The engine moves its base to each teleport, which the client's
+    // doesn't follow.
+    private boolean codecBaseKnown = true;
+    // The delta movement follows the model: no deflection it couldn't aim.
+    private boolean motionKnown = true;
     // Entity#tickCount, which ClientLevel#tickNonPassenger increments before each tick.
     private int tickCount;
 
@@ -65,11 +77,13 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     /**
      * {@code AbstractHurtingProjectile#tick} on 1.21.2+ clients: {@code applyInertia}, then {@code setPos} to the hit
      * of {@code ProjectileUtil#getHitResultOnMoveVector} or one delta movement on, then {@code checkLeftOwner}. Each
-     * possible location moves from its own position, and stops only at an entity it certainly hits.
+     * possible location moves from its own position, and stops only at an entity it certainly hits. A step that may
+     * enter an entity before every one it certainly hits diverges the projectile.
      */
     @Override
     public void onMovement(CultPlayer player, boolean tickingReliably) {
         tickCount++;
+        anchoring = false;
         super.onMovement(player, tickingReliably);
         if (!modelled()) return;
         Vec3 movement = deltaMovement;
@@ -77,14 +91,66 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
                 movement.add(movement.normalize().scale(accelerationPower)).scale(inWater ? liquidInertia : inertia);
         ClientEntityQueries queries = new ClientEntityQueries(player);
         if (deltaMovement.lengthSqr() != 0.0D) {
-            List<Box> targets = certainTargets(queries);
+            Targets candidates = targets(queries);
+            if (!diverged && mayPassAHit(player, candidates)) diverge();
+            List<Box> targets = diverged ? List.of() : candidates.certain();
             newPacketLocation.offset(from -> stop(player, targets, from).subtract(from));
             if (oldPacketLocation != null)
                 oldPacketLocation.offset(from -> stop(player, targets, from).subtract(from));
             if (clientPhysicalPosition != null) clientPhysicalPosition = stop(player, targets, clientPhysicalPosition);
         }
         inWater = clientPhysicalPosition != null && touchesWater(player, clientPhysicalPosition);
-        checkLeftOwner(queries);
+        if (!diverged) checkLeftOwner(queries);
+    }
+
+    private void diverge() {
+        diverged = true;
+        anchoring = false;
+        certainlyOnOwner = false;
+    }
+
+    /**
+     * {@code ClientPacketListener#handleEntityPositionSync}, which sets the position and the codec base. A hurting
+     * projectile has {@code InterpolationHandler.NO_OP}, so each server position the client applies is set directly.
+     */
+    public void onPositionSync() {
+        codecBaseKnown = true;
+        placeExactly();
+    }
+
+    /** {@code ClientPacketListener#handleMoveEntity} with a position, decoded against the codec base. */
+    public void onMoveEntity() {
+        if (codecBaseKnown) placeExactly();
+        else diverge();
+    }
+
+    /**
+     * {@code ClientPacketListener#handleTeleportEntity}, which leaves the codec base. A position relative to the
+     * client's own carries any difference along.
+     */
+    public void onTeleport(boolean absolute) {
+        codecBaseKnown = false;
+        if (absolute) placeExactly();
+        else diverge();
+    }
+
+    private void placeExactly() {
+        anchoring = diverged;
+        anchor();
+    }
+
+    @Override
+    public void onSecondTransaction() {
+        super.onSecondTransaction();
+        anchor();
+    }
+
+    // Entity#isInWater is the client's last baseTick state, which setPos leaves alone, so a position re-anchors only
+    // a projectile whose inertia doesn't depend on it.
+    private void anchor() {
+        if (!anchoring || oldPacketLocation != null) return;
+        anchoring = false;
+        if (motionKnown && inertia == liquidInertia) diverged = false;
     }
 
     // Bedrock clients see Geyser's per-tick absolute moves, which the Geyser bridge already applies. 1.21.1 tests the
@@ -99,15 +165,19 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
      * {@code Player#attack} before 26.3: {@code deflectProjectile} aims a {@code #redirectable_projectile} along the
      * attacker's look ({@code ProjectileDeflection#AIM_DEFLECT}) on the client too. {@code WindCharge#deflect} refuses
      * until the projectile has ticked five times. Mounted, the vehicle can turn the player between the attack and the
-     * rotation the client sends, so the look is not known. The deflection lands in the attack's client tick, whether
-     * or not the projectile ticks in it.
+     * rotation the client sends, so the look is not known and the projectile diverges. The deflection lands in the
+     * attack's client tick, whether or not the projectile ticks in it.
      */
     public void onLocalAttack(ClientEntityQueries queries) {
         if (!modelled()
                 || !player.getClientVersion().isOlderThan(ClientVersion.V_26_3)
-                || player.compensatedEntities.getSelf().inVehicle()
                 || !queries.redirectable(this)
                 || type == EntityTypeIds.WIND_CHARGE && tickCount < 5) return;
+        if (player.compensatedEntities.getSelf().inVehicle()) {
+            motionKnown = false;
+            diverge();
+            return;
+        }
         player.compensatedEntities.deflectAlongLookAtTickEnd(this);
     }
 
@@ -129,23 +199,56 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     }
 
     /**
-     * The boxes of the entities {@code Projectile#canHitEntity} certainly accepts at one known position: a target
-     * whose candidate positions disagree, that may be off its one candidate ({@link PacketEntity#hasLossyPosition}),
-     * or whose owner rule depends on a {@code leftOwner} the engine does not know, is left out. Before 26.3 the client deflects the projectile off a {@code deflects_projectiles} target, so those
-     * are left out too.
+     * The entities {@code Projectile#canHitEntity} may accept. {@code certain} holds the boxes of those it certainly
+     * accepts at one known position; {@code possible} the boxes of those whose candidate positions disagree, that the
+     * client deflects the projectile off before 26.3, or that the owner rule may still skip; {@code anywhere} is set
+     * when one has no position the engine knows: a rider it doesn't place, one that may be off its candidates
+     * ({@link PacketEntity#hasLossyPosition}), or an ender dragon part.
      */
-    private List<Box> certainTargets(ClientEntityQueries queries) {
+    private record Targets(List<Box> certain, List<Box> possible, boolean anywhere) {}
+
+    private Targets targets(ClientEntityQueries queries) {
         PacketEntity ownerRoot = ownerRoot();
         boolean deflectsOnClient = player.getClientVersion().isOlderThan(ClientVersion.V_26_3);
-        List<Box> targets = new ArrayList<>();
+        List<Box> certain = new ArrayList<>();
+        List<Box> possible = new ArrayList<>();
+        boolean anywhere = queries.mayHaveDragonParts();
         for (PickCandidates target : queries.projectileTargets(this)) {
-            if (target.boxes().size() != 1 || target.boxes().getFirst() == null) continue;
-            if (target.entity().hasLossyPosition()) continue;
-            if (ownerRoot != null && mayBeOnOwner && root(target.entity()) == ownerRoot) continue;
-            if (deflectsOnClient && queries.deflects(target.entity(), this)) continue;
-            targets.add(target.boxes().getFirst());
+            boolean owned = ownerRoot != null && mayBeOnOwner && root(target.entity()) == ownerRoot;
+            if (owned && certainlyOnOwner) continue;
+            if (target.boxes().isEmpty() || target.entity().hasLossyPosition()) {
+                anywhere = true;
+                continue;
+            }
+            if (!owned
+                    && target.boxes().size() == 1
+                    && target.boxes().getFirst() != null
+                    && !(deflectsOnClient && queries.deflects(target.entity(), this))) {
+                certain.add(target.boxes().getFirst());
+                continue;
+            }
+            for (Box box : target.boxes()) if (box != null) possible.add(box);
         }
-        return targets;
+        return new Targets(certain, possible, anywhere);
+    }
+
+    /** Whether the step from some possible position may enter a possible target no farther than every certain one. */
+    private boolean mayPassAHit(CultPlayer player, Targets targets) {
+        if (targets.anywhere()) return true;
+        if (targets.possible().isEmpty()) return false;
+        List<Vec3> origins = new ArrayList<>();
+        newPacketLocation.forEachStepOrigin(origins::add);
+        if (oldPacketLocation != null) oldPacketLocation.forEachStepOrigin(origins::add);
+        if (clientPhysicalPosition != null) origins.add(clientPhysicalPosition);
+        for (Vec3 from : origins) {
+            Vec3 to = from.add(blockStep(player, from));
+            Box area = searchArea(toBoundingBox(player, positionBox(from)));
+            Vec3 possible = nearestHit(targets.possible(), area, from, to);
+            if (possible == null) continue;
+            Vec3 certain = nearestHit(targets.certain(), area, from, to);
+            if (certain == null || from.distanceToSqr(possible) <= from.distanceToSqr(certain)) return true;
+        }
+        return false;
     }
 
     /**
@@ -154,11 +257,16 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
      */
     private Vec3 stop(CultPlayer player, List<Box> targets, Vec3 from) {
         Vec3 to = from.add(blockStep(player, from));
-        Box area = searchArea(toBoundingBox(player, positionBox(from)));
+        Vec3 hit = nearestHit(targets, searchArea(toBoundingBox(player, positionBox(from))), from, to);
+        return hit == null ? to : hit;
+    }
+
+    /** {@code ProjectileUtil#getEntityHitResult}: the nearest entry into a box in {@code area}, or null. */
+    private Vec3 nearestHit(List<Box> boxes, Box area, Vec3 from, Vec3 to) {
         double margin = Math.max(0.0F, Math.min(0.3F, (tickCount - 2) / 20.0F));
-        Vec3 nearest = to;
+        Vec3 nearest = null;
         double nearestDistance = Double.POSITIVE_INFINITY;
-        for (Box box : targets) {
+        for (Box box : boxes) {
             if (!area.intersects(box)) continue;
             Optional<Vec3> hit = SimpleCollisionBox.clip(
                     box.minX() - margin,
@@ -215,13 +323,23 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
         for (PacketEntity entity : player.compensatedEntities.entityMap.values())
             mayTouch |= root(entity) == ownerRoot && player.compensatedEntities.isUntrackedRider(entity);
         for (PickCandidates entity : tree) mayTouch |= entity.entity().hasLossyPosition();
+        boolean mustTouch = true;
         for (Box area : areas) {
+            boolean touched = false;
             for (PickCandidates entity : tree) {
                 if (entity.entity().hasLossyPosition()) continue;
-                for (Box box : entity.boxes()) mayTouch |= box != null && area.intersects(box);
+                boolean everywhere = !entity.boxes().isEmpty();
+                for (Box box : entity.boxes()) {
+                    boolean touches = box != null && area.intersects(box);
+                    mayTouch |= touches;
+                    everywhere &= touches;
+                }
+                touched |= everywhere;
             }
+            mustTouch &= touched;
         }
         if (!mayTouch) mayBeOnOwner = false;
+        if (!mustTouch) certainlyOnOwner = false;
     }
 
     private PacketEntity ownerRoot() {
