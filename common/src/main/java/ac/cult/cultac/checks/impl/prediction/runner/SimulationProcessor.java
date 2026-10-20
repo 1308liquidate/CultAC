@@ -114,6 +114,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     boolean couldPotentiallyTickSkip = false;
     Set<Vec3> validPlayerStartingVels = new HashSet<>();
     PredictionResult lastPrediction = null;
+    boolean lastWorldEyeInWater = false;
     PredCheckRunner flagger = new PredCheckRunner(this.player);
     DesyncStatus lastOnGround = DesyncStatus.FALSE;
     LastInstance lastFlying = new LastInstance(this.player);
@@ -2030,6 +2031,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             MovementEngine engine = MovementEngines.requireForProfile(movementProfile);
             context.setWorldData(
                     engine.buildWorld(this.worldStageBuilder, player, context, lastPrediction, contextLastOnGround));
+            this.lastWorldEyeInWater = context.getWorldData().isEyeInWater();
         } else {
             world.attachTo(context);
         }
@@ -2197,6 +2199,11 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     @Generated
     public PredictionResult getLastPrediction() {
         return this.lastPrediction;
+    }
+
+    /** The eye fluid of the last simulated movement start, whether or not its prediction was committed. */
+    public boolean isLastWorldEyeInWater() {
+        return this.lastWorldEyeInWater;
     }
 
     public CarriedPush getCarriedPush() {
