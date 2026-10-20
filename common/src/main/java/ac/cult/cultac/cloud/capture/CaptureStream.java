@@ -6,6 +6,7 @@ import ac.cult.cultac.cloud.wire.IntakeWire;
 import ac.cult.cultac.network.FrameCopies;
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -264,9 +265,9 @@ public final class CaptureStream {
     /** The serverbound pong's packet id, -1 while unknown. */
     private int pongPacket = -1;
     /** On protocol 5: the wire ids of the pings sent as markers and not yet answered, oldest first. */
-    private ArrayDeque<Integer> pendingPings = new ArrayDeque<>();
+    private IntArrayList pendingPings = new IntArrayList();
     /** The pending pings a frame being written would leave, swapped with {@link #pendingPings} once it is taken. */
-    private ArrayDeque<Integer> spare = new ArrayDeque<>();
+    private IntArrayList spare = new IntArrayList();
     /** Pings the service has been sent since the JOIN; the last {@link #PING_HISTORY} wire ids, by ordinal. */
     private long pings;
 
@@ -930,7 +931,7 @@ public final class CaptureStream {
         long before = lastNanos;
         int lost = tick.lostBefore + lostSending;
         builder.clear();
-        ArrayDeque<Integer> unanswered = null;
+        IntArrayList unanswered = null;
         long seq = tick.index - origin - 1;
         List<byte[]> carried = outcomes();
         int framePingCount = pings(tick);
@@ -969,7 +970,7 @@ public final class CaptureStream {
             byte[] payload = raw.bytes();
             byte[] meta = null;
             int limit;
-            Integer probe = null;
+            long probe = NO_WIRE_ID;
             boolean ping = framePingCount > 0 && kind == IntakeWire.CLIENTBOUND && raw.id() == pingPacket;
             if (ping) pingAt++;
             if (kind == IntakeWire.META) {
@@ -981,7 +982,7 @@ public final class CaptureStream {
             } else if (kind == IntakeWire.SERVERBOUND) {
                 if (!Policy.has(policy.serverbound(), raw.id())) continue;
                 limit = MAX_SERVERBOUND_BYTES;
-                if (raw.id() == pongPacket) probe = IntakeWire.bareId(payload, pongPacket);
+                if (raw.id() == pongPacket) probe = IntakeWire.bareId(payload, pongPacket, NO_WIRE_ID);
             } else if (Policy.has(policy.dimension(), raw.id())) {
                 Session session = raw.session();
                 meta = IntakeWire.meta(session.entityId(), session.gameMode(), session.dimension());
@@ -996,8 +997,8 @@ public final class CaptureStream {
             } else if (Policy.has(policy.clientbound(), raw.id())) {
                 limit = MAX_CLIENTBOUND_BYTES;
                 if (raw.id() == pingPacket) {
-                    probe = IntakeWire.bareId(payload, pingPacket);
-                    if (probe != null) {
+                    probe = IntakeWire.bareId(payload, pingPacket, NO_WIRE_ID);
+                    if (probe != NO_WIRE_ID) {
                         kind = IntakeWire.PING_MARKER;
                         payload = NO_BODY;
                     }
@@ -1024,18 +1025,18 @@ public final class CaptureStream {
                 emitted[emittedPings++] = framePings[pingAt];
             }
             int skipped = 0;
-            if (probe != null) {
+            if (probe != NO_WIRE_ID) {
                 if (unanswered == null) {
                     unanswered = spare;
                     unanswered.clear();
                     unanswered.addAll(pendingPings);
                 }
                 if (kind == IntakeWire.PING_MARKER) {
-                    if (unanswered.size() == IntakeWire.MAX_PENDING_PINGS) unanswered.poll();
-                    unanswered.add(probe);
+                    if (unanswered.size() == IntakeWire.MAX_PENDING_PINGS) unanswered.removeInt(0);
+                    unanswered.add((int) probe);
                 } else {
-                    int answered = indexOf(unanswered, probe);
-                    for (int i = 0; i <= answered; i++) unanswered.poll();
+                    int answered = unanswered.indexOf((int) probe);
+                    unanswered.removeElements(0, answered + 1);
                     if (answered == 0) {
                         kind = IntakeWire.PONG_MARKER;
                         payload = NO_BODY;
@@ -1209,16 +1210,6 @@ public final class CaptureStream {
             framePings[count++] = IntakeWire.pingId(raw.bytes(), pingPacket, NO_WIRE_ID);
         }
         return count;
-    }
-
-    /** Where {@code id} stands among the pending pings, oldest first; -1 when none has it. */
-    private static int indexOf(ArrayDeque<Integer> pending, int id) {
-        int at = 0;
-        for (int pendingId : pending) {
-            if (pendingId == id) return at;
-            at++;
-        }
-        return -1;
     }
 
     /** The ordinal the service gives the ping {@code id}; -1 when it has not been, or will not be, sent. */
