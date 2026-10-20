@@ -364,6 +364,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         tickEntityInterpolationAtClientTickEnd();
         recountPushersAfterPlayer();
         player.compensatedEntities.vehicles.onClientTickEnd();
+        player.checkManager.getSimulationProcessor().recordRideTick();
         player.compensatedEntities.recordRideTickSeat();
         player.compensatedEntities.vehicles.updateServerControlledSafeSetbackPositionOnTickEnd();
         transformTick++;
@@ -1217,6 +1218,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     // Player#tick clears a passenger's ground state every ride tick.
                     player.onGround = false;
                     player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.FALSE);
+                    if (!player.compensatedEntities.getSelf().inVehicle()) {
+                        player.checkManager.getSimulationProcessor().endRide();
+                    }
                 }
                 player.compensatedEntities.vehicles.clearServerVehicle(vehicleId, transaction);
                 // Vehicle-switch state changes at the passenger transaction boundary.
@@ -1490,6 +1494,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 player.compensatedEntities.playerEntity.deltaMovement = velocity;
                 player.checkManager.getSimulationProcessor().seedStartingVelocity(velocity);
             }
+            if (wasPassenger && !player.compensatedEntities.getSelf().inVehicle() && !player.isBedrockMovement()) {
+                player.checkManager.getSimulationProcessor().endRide();
+            }
             if (wasPassenger
                     && !player.compensatedEntities.getSelf().inVehicle()
                     && !player.isBedrockMovement()
@@ -1758,6 +1765,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             } else {
                 applyBundledMovement(entity, movement);
             }
+            markUncertainPosition(entity, movement);
             applyDeltaMovementUpdate(entity, movement.deltaMovement());
             clearPacketHandlerDeltaMovement(movement);
             player.compensatedEntities.updatePassengerPositions();
@@ -1777,6 +1785,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     }
                     applyEntityRotationAndGround(entity, movement.yaw(), movement.onGround());
                     applyBundleFirstMovement(entity, movement);
+                    markUncertainPosition(entity, movement);
                     applyDeltaMovementUpdate(entity, movement.deltaMovement());
                     clearPacketHandlerDeltaMovement(movement);
                     player.compensatedEntities.updatePassengerPositions();
@@ -1785,22 +1794,48 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private void scheduleTransactionBoundMovement(EntityMovement movement, int firstTransaction) {
-        int entityId = movement.entityId();
-        MovementKind kind = movement.kind();
-        int deltaMovementSequence = movement.deltaMovement().packetHandlerSequence();
-        player.latencyUtils.addRealTimeTask(firstTransaction, () -> {
+        player.latencyUtils.addRealTimeTask(firstTransaction, new TransactionBoundMovement(movement, firstTransaction));
+    }
+
+    /**
+     * A movement applied at its transaction and settled at the next one. The same task is queued again for the second
+     * transaction, so {@code second} says which half runs.
+     */
+    private final class TransactionBoundMovement implements Runnable {
+        private final EntityMovement movement;
+        private final int firstTransaction;
+        private final int entityId;
+        private final MovementKind kind;
+        private final int deltaMovementSequence;
+        private boolean second;
+
+        private TransactionBoundMovement(EntityMovement movement, int firstTransaction) {
+            this.movement = movement;
+            this.firstTransaction = firstTransaction;
+            this.entityId = movement.entityId();
+            this.kind = movement.kind();
+            this.deltaMovementSequence = movement.deltaMovement().packetHandlerSequence();
+        }
+
+        @Override
+        public void run() {
+            if (second) {
+                applySecondMovement(entityId, kind, deltaMovementSequence, false);
+                return;
+            }
             PacketEntity entity = applicableMovementEntity(movement);
             if (entity == null) {
                 return;
             }
             applyEntityRotationAndGround(entity, movement.yaw(), movement.onGround());
             applyFirstMovement(entity, movement);
+            markUncertainPosition(entity, movement);
             applyDeltaMovementUpdate(entity, movement.deltaMovement());
             clearPacketHandlerDeltaMovement(movement);
             player.compensatedEntities.updatePassengerPositions();
-            player.latencyUtils.addRealTimeTask(
-                    firstTransaction + 1, () -> applySecondMovement(entityId, kind, deltaMovementSequence, false));
-        });
+            second = true;
+            player.latencyUtils.addRealTimeTask(firstTransaction + 1, this);
+        }
     }
 
     private boolean applyClientPath(PacketEntity entity, EntityMovement movement, boolean bundled) {
@@ -1819,10 +1854,21 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     movement.yaw(),
                     movement.pitch());
             entity.onSecondTransaction();
+            // A sync can be near in another feasible client position.
+            entity.markPositionInexact();
             return true;
         }
         entity.onPositionPath(path, position.hasPosition(), movement.yaw(), movement.pitch(), player, bundled);
         return true;
+    }
+
+    // The model interpolates every teleport and legacy position sync, which a client may snap to instead.
+    private void markUncertainPosition(PacketEntity entity, EntityMovement movement) {
+        if (movement.kind() == MovementKind.TELEPORT_ENTITY
+                || (movement.kind() == MovementKind.POSITION_SYNC
+                        && player.getClientVersion().isOlderThan(ClientVersion.V_26_3))) {
+            entity.markPositionInexact();
+        }
     }
 
     private void applyFirstMovement(PacketEntity entity, EntityMovement movement) {

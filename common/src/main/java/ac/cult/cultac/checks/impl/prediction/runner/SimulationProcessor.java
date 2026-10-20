@@ -127,6 +127,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     /** The carry a stuck-speed block changed on along its move, re-resolved once the world holds the change. */
     @Nullable
     private JavaPredictionCarry carryWithChangedStuckBlock;
+    /** Whether the last client tick ended with the local player a passenger. */
+    private boolean rideTicked;
+    /** Whether a dismount after a passenger tick precedes the next prediction. */
+    private boolean rideTicksSinceLastPrediction;
 
     private boolean bedrockSleepingStateObserved;
     private TeleportData bedrockTeleport;
@@ -1049,6 +1053,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             }
             this.lastPrediction = result;
             this.carriedPush = CarriedPush.IDENTITY;
+            this.rideTicksSinceLastPrediction = false;
             this.pushesWhileLoadingLevel = null;
             this.ticksWhileLoadingLevel = 0;
             this.lastXRot = xRot;
@@ -1095,6 +1100,32 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
 
     public void seedStartingVelocities(Collection<Vec3> velocities) {
         this.validPlayerStartingVels = new HashSet<>(velocities);
+    }
+
+    /** Records whether this client tick ran the local player's Entity#rideTick. */
+    public void recordRideTick() {
+        this.rideTicked =
+                !this.player.isBedrockMovement() && this.player.compensatedEntities.playerEntity.getRiding() != null;
+    }
+
+    /** Carries what the last ride tick can have left once the player leaves its vehicle; with none, the on-foot carry stays. */
+    public void endRide() {
+        if (!this.rideTicked) return;
+        this.rideTicked = false;
+        this.rideTicksSinceLastPrediction = true;
+        if (this.profileCarry instanceof JavaPredictionCarry carry) {
+            // LivingEntity#rideTick resets the fall distance after every passenger tick.
+            List<JavaPredictionCarry.State> states = new ArrayList<>();
+            if (!carry.states().isEmpty()) {
+                for (Vec3 velocity : this.validPlayerStartingVels) {
+                    states.add(new JavaPredictionCarry.State(velocity, 0.0D, null));
+                    for (Vec3 stuckSpeed : Collisions.PLAYER_STUCK_SPEEDS)
+                        states.add(new JavaPredictionCarry.State(velocity, 0.0D, stuckSpeed));
+                }
+            }
+            this.profileCarry = new JavaPredictionCarry(this.player.compensatedEntities.getSelf(), 0.0D, states);
+            this.carryWithChangedStuckBlock = null;
+        }
     }
 
     public static int nextDebugIdentifier() {
@@ -1502,7 +1533,11 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 }
                 engine.evaluateCandidate(player, thisResult);
                 this.flagger.handleResult(thisResult, lastPrediction);
-                bestResult = engine.isBetterCandidate(thisResult, bestResult) ? thisResult : bestResult;
+                // A multiplier the first move after a dismount can take is chosen only when it explains the move.
+                boolean selectable = !this.rideTicksSinceLastPrediction
+                        || thisResult.getFlagSeverity() == 0.0
+                        || thisResult.getSimulationContext().getRequiredCurrentMoveStuckSpeed() == null;
+                bestResult = selectable && engine.isBetterCandidate(thisResult, bestResult) ? thisResult : bestResult;
                 if (thisResult.getFlagSeverity() == 0.0) {
                     alternativeRealities.add(thisResult);
                 }
@@ -1742,11 +1777,40 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 authoredMovementFrame,
                 movementProfile,
                 carryLastRequiredStuckSpeed);
-        return List.of(primary);
+        if (!this.rideTicksSinceLastPrediction || !movementProfile.usesJavaEntityMoveStuckSpeed(player))
+            return List.of(primary);
+        // The first move after a dismount consumes no multiplier or any one a block gives.
+        List<SimulationContext> contexts = new ArrayList<>(1 + Collisions.PLAYER_STUCK_SPEEDS.size());
+        contexts.add(primary);
+        CarryWorld world = CarryWorld.of(primary);
+        for (Vec3 stuckSpeed : Collisions.PLAYER_STUCK_SPEEDS) {
+            SimulationContext context = this.createSimulationContext(
+                    player,
+                    lastPrediction,
+                    target,
+                    start,
+                    end,
+                    lastTickSkip,
+                    testing,
+                    xRot,
+                    yRot,
+                    authoredMovementFrame,
+                    movementProfile,
+                    false,
+                    this.currentPredictionVehicle(),
+                    world);
+            Vec3 stuck = player.boatData.adjustStuckSpeedMultiplierForCurrentTick(player, context, stuckSpeed);
+            context.setRequiredCurrentMoveStuckSpeed(stuck);
+            context.handleLastRequiredStuckSpeed(stuck);
+            contexts.add(context);
+        }
+        return contexts;
     }
 
     private boolean shouldCarryLastRequiredStuckSpeed(PredictionResult lastPrediction) {
-        if (lastPrediction != null && lastPrediction.getSimulationContext() != null) {
+        if (this.rideTicksSinceLastPrediction) {
+            return false;
+        } else if (lastPrediction != null && lastPrediction.getSimulationContext() != null) {
             PacketEntity lastVehicle = lastPrediction.getSimulationContext().getVehicle();
             PacketEntity currentVehicle = this.currentPredictionVehicle();
             return lastVehicle != null && currentVehicle != null

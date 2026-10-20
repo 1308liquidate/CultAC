@@ -109,16 +109,21 @@ class LabelClientTest {
     }
 
     @Test
-    void aKeyThatMayNotLabelIsToldSoOnceAndNeverRetried() throws Exception {
+    void anUntrustedOrganizationIsToldSoOnceAndNeverRetried() throws Exception {
         status = 403;
         answer = "{\"type\":\"about:blank\",\"title\":\"Forbidden\",\"status\":403,"
-                + "\"detail\":\"this key may not label\"}";
+                + "\"detail\":\"labels are for trusted organizations\"}";
         JsonObject body = LabelRequest.cheat("other", "high", "24h", "n").body(PLAYER, 500_000_000, "Mod", MOD);
 
         LabelClient.Reply reply = client().post(body).get(10, TimeUnit.SECONDS);
 
         assertFalse(reply.ok());
         assertEquals(LabelClient.NOT_ALLOWED, LabelClient.failure(reply));
+        assertEquals(
+                "This organization can't label yet: labels are for trusted organizations.", LabelClient.NOT_ALLOWED);
+        assertEquals(
+                LabelClient.NOT_ALLOWED,
+                LabelClient.failure(new LabelClient.Reply(403, "{\"detail\":\"this key may not label\"}")));
         Thread.sleep(200);
         assertEquals(1, seen.size());
         assertEquals(

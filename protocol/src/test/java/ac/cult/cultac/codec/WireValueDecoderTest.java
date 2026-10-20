@@ -610,7 +610,7 @@ class WireValueDecoderTest {
                     assertEquals(0, decoded.get(3).value());
                     var output = Unpooled.buffer();
                     try {
-                        decoded.forEach(entry -> output.writeBytes(entry.bytes()));
+                        decoded.forEach(entry -> output.writeBytes(input, entry.offset(), entry.length()));
                         output.writeByte(255);
                         assertArrayEquals(original, ByteBufUtil.getBytes(output));
                     } finally {

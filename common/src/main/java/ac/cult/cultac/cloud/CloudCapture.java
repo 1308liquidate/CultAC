@@ -18,7 +18,6 @@ import ac.cult.cultac.cloud.diag.PredictionDiagnostics;
 import ac.cult.cultac.cloud.intake.v3.Outcome;
 import ac.cult.cultac.cloud.transport.CloudConnection;
 import ac.cult.cultac.cloud.wire.IntakeWire;
-import ac.cult.cultac.network.FrameCopies;
 import ac.cult.cultac.network.codec.ClientPacketCodecs;
 import ac.cult.cultac.platform.api.ServerFacts;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
@@ -595,6 +594,7 @@ public final class CloudCapture implements PlayerObserver {
         closed = null;
         channel = null;
         capturing = false;
+        if (stream != null) stream.reset();
         stream = null;
         engine = null;
         leave();
@@ -1238,7 +1238,7 @@ public final class CloudCapture implements PlayerObserver {
                             && player.user.getConnectionState() == ConnectionPhase.PLAY
                             && buf.readableBytes() <= CaptureStream.MAX_SERVERBOUND_BYTES
                             && stream.wants(IntakeWire.SERVERBOUND, id)) {
-                        stream.tap(IntakeWire.SERVERBOUND, id, FrameCopies.bytes(buf), System.nanoTime(), 0, 0, null);
+                        stream.tap(IntakeWire.SERVERBOUND, id, buf, System.nanoTime(), 0, 0, null, 0);
                     } else {
                         stream.skipped();
                     }
@@ -1309,7 +1309,7 @@ public final class CloudCapture implements PlayerObserver {
         if (!stream.capturing()) return;
         int pingKind = id == pingPacket && id >= 0 ? pingKind(buf, id) : 0;
         if (!stream.wants(IntakeWire.CLIENTBOUND, id)) return;
-        stream.tap(IntakeWire.CLIENTBOUND, id, FrameCopies.bytes(buf), now, minY, height, sent, pingKind);
+        stream.tap(IntakeWire.CLIENTBOUND, id, buf, now, minY, height, sent, pingKind);
     }
 
     /** A tapped ping's {@code PingKind}; an end-of-tick ping's server tick goes to the stream first. */

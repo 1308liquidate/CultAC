@@ -333,6 +333,32 @@ class PerfRecorderTest {
         assertTrue(bytes.get().containsKey(sibling.threadId()), bytes.get().toString());
     }
 
+    @Test
+    void jvmFlagsKeepOnlySwitchesAndNumbers() {
+        List<String> arguments = List.of(
+                "-XX:+UseG1GC",
+                "-XX:OnOutOfMemoryError=kill -9 %p",
+                "-XX:MaxGCPauseMillis=200",
+                "-XX:OnError=/bin/x",
+                "-XX:G1HeapRegionSize=16M",
+                "-XX:HeapDumpPath=/data/dumps",
+                "-Xmx8G",
+                "-XX:ErrorFile=/tmp/e.log",
+                "-Xss1m",
+                "-Dsecret=1",
+                "-XX:-UseBiasedLocking");
+
+        assertEquals(
+                List.of(
+                        "-XX:+UseG1GC",
+                        "-XX:MaxGCPauseMillis=200",
+                        "-XX:G1HeapRegionSize=16M",
+                        "-Xmx8G",
+                        "-Xss1m",
+                        "-XX:-UseBiasedLocking"),
+                PerfRecorder.jvmFlags(arguments));
+    }
+
     private static PerfSettings settings(int seconds) {
         return new PerfSettings(seconds, 10, 20, 300, 1 << 20, true, 45_000);
     }

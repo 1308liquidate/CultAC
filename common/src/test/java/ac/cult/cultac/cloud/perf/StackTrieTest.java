@@ -64,8 +64,46 @@ class StackTrieTest {
         assertFalse(profile.getWholeJvm());
         assertEquals(12, profile.getCpuSamplesTotal());
         assertEquals(1, profile.getStacksCount());
-        assertEquals(List.of("a.A.run", "ac.cult.cultac.X.check"), names(profile, profile.getStacks(0)));
+        assertEquals(List.of("(other)", "ac.cult.cultac.X.check"), names(profile, profile.getStacks(0)));
         assertFalse(profile.getFramesList().contains("partner.Plugin.tick"));
+    }
+
+    @Test
+    void partnerModeNamesPartnerFramesOther() {
+        List<String> frames = List.of(
+                "java.lang.Thread.run",
+                "io.netty.channel.Loop.run",
+                "partner.Listener.onMove",
+                "org.bukkit.plugin.EventExecutor.execute",
+                "com.velocitypowered.proxy.Handler.handle",
+                "ac.cult.cultac.X.check",
+                "partner.Api.lookup",
+                "partner.Api.lookupInner");
+        StackTrie trie = new StackTrie();
+        trie.add(stack(frames.toArray(String[]::new)), OTHER, 3, 0, 0);
+
+        PerfProfile partner = trie.encode(false, 1 << 20).build();
+        PerfProfile whole = trie.encode(true, 1 << 20).build();
+
+        assertEquals(1, partner.getStacksCount());
+        assertEquals(
+                List.of(
+                        "java.lang.Thread.run",
+                        "io.netty.channel.Loop.run",
+                        "(other)",
+                        "org.bukkit.plugin.EventExecutor.execute",
+                        "com.velocitypowered.proxy.Handler.handle",
+                        "ac.cult.cultac.X.check",
+                        "(other)",
+                        "(other)"),
+                names(partner, partner.getStacks(0)));
+        assertEquals(3, partner.getStacks(0).getCpuSamples());
+        assertEquals(
+                1, partner.getFramesList().stream().filter("(other)"::equals).count());
+        assertTrue(partner.getFramesList().stream().noneMatch(frame -> frame.startsWith("partner.")));
+        assertEquals(1, whole.getStacksCount());
+        assertEquals(frames, names(whole, whole.getStacks(0)));
+        assertEquals(3, whole.getStacks(0).getCpuSamples());
     }
 
     @Test
@@ -160,9 +198,8 @@ class StackTrieTest {
 
         PerfProfile partner = trie.encode(false, Long.MAX_VALUE).build();
         assertEquals(
-                2_000,
-                cpuOf(partner, List.of("x.Root.run", "x.Mid.run", Attribution.PACKAGES.getFirst() + "(truncated)")));
-        assertEquals(0, cpuOf(partner, List.of("x.Root.run", "x.Mid.run", StackTrie.TRUNCATED)));
+                2_000, cpuOf(partner, List.of("(other)", "(other)", Attribution.PACKAGES.getFirst() + "(truncated)")));
+        assertEquals(0, cpuOf(partner, List.of("(other)", "(other)", StackTrie.TRUNCATED)));
         assertEquals(1, partner.getStacksCount());
     }
 
