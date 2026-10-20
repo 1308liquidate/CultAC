@@ -234,9 +234,12 @@ class ScaledPlayerCollisionTest {
                 world.applyBlockChangeRawDANGER(blockX, 61, blockZ, BlockIds.STONE.defaultState());
             }
         }
+        // onAttributeSnapshot refreshes every cached scalar, scale included, so it precedes the scale override.
+        player.compensatedEntities
+                .getSelf()
+                .onAttributeSnapshot(new AttributeSnapshot("minecraft:movement_speed", movementSpeed, List.of()));
         player.compensatedEntities.getSelf().scale = scale;
         player.dimensionScale = scale;
-        player.compensatedEntities.getSelf().playerSpeed = movementSpeed;
         player.isSprinting = sprinting;
         player.sprintState.onClientTick(sprinting);
         return player;
@@ -306,9 +309,12 @@ class ScaledPlayerCollisionTest {
                     block[1],
                     DataTables.defaults().registry().block("minecraft:dirt").defaultState());
         }
+        // onAttributeSnapshot refreshes every cached scalar, scale included, so it precedes the scale override.
+        player.compensatedEntities
+                .getSelf()
+                .onAttributeSnapshot(new AttributeSnapshot("minecraft:movement_speed", movementSpeed, List.of()));
         player.compensatedEntities.getSelf().scale = scale;
         player.dimensionScale = scale;
-        player.compensatedEntities.getSelf().playerSpeed = movementSpeed;
         player.isSprinting = true;
         player.sprintState.onClientTick(true);
         player.x = player.lastX = 19004.433598022035;

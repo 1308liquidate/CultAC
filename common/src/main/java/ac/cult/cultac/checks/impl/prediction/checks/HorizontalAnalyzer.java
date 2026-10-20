@@ -46,7 +46,7 @@ public class HorizontalAnalyzer implements EngineCheck {
         float playerSpeed = result.getSimulationContext().getMaxSpeed(player);
         // ClientSprintState decides whether the sprint speed is available for this tick's travel branches
         double sprintMultiplier =
-                playerSpeed > 0 ? result.getSimulationContext().getMaxSprintInputSpeed(player) / playerSpeed : 1.3D;
+                playerSpeed > 0 ? result.getSimulationContext().getMaxSprintInputSpeed(player, result.getInitialStartingVel()) / playerSpeed : 1.3D;
 
         Vec3 target = result.getTarget();
 

@@ -102,7 +102,7 @@ public final class JavaMovementEngine implements MovementEngine {
                                 SimpleCollisionBox.AxisEpsilon.JAVA),
                 JavaFallDistance.beforeMove(player, context, initialStartingVelocity),
                 !canStep,
-                context.getHorizontalInputRadius(player));
+                context.getHorizontalInputRadius(player, initialStartingVelocity));
     }
 
     @Override

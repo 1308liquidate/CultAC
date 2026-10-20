@@ -103,7 +103,7 @@ public class ClientHorizontalCollisionTest {
     public static PredictionResult result(float yaw, Vec3 attemptedMomentum, Vec3 target, CollideAxisData collide) {
         SimulationContext context = mock(SimulationContext.class);
         doReturn(yaw).when(context).getXRot();
-        doReturn(SPRINT_SPEED * 1.3D).when(context).getHorizontalInputRadius(any());
+        doReturn(SPRINT_SPEED * 1.3D).when(context).getHorizontalInputRadius(any(), any());
         ValidMovements valid = mock(ValidMovements.class);
         PredVector position = new PredVector(attemptedMomentum);
         doReturn(new MovementTrace(position, Vec3.ZERO, Vec3.ZERO, attemptedMomentum, attemptedMomentum))
