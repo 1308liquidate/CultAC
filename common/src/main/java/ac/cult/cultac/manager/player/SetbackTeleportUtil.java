@@ -102,6 +102,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
 
     // Sync to netty
     public final ConcurrentLinkedDeque<TeleportData> pendingTeleports = new ConcurrentLinkedDeque<>();
+    /** The teleport whose ID a pre-26.3 client sent last, until the PosRot that must follow it. */
+    private TeleportData awaitingPosRot;
     private final ConcurrentLinkedQueue<VehicleTeleport> vehicleTeleports = new ConcurrentLinkedQueue<>();
     private BedrockCoordinateFrame activeBedrockCoordinateFrame = BedrockCoordinateFrame.IDENTITY;
 
@@ -322,6 +324,15 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         blockOffsets = false;
         // Latency is measured from the next movement of the placed player, not the last one before it died.
         player.checkManager.getSimulationProcessor().getLastMovementTime().clear();
+    }
+
+    /**
+     * A Java client accepts each teleport before it acknowledges the configuration that precedes a LOGIN, so a
+     * teleport still pending at LOGIN send was withheld. It can no longer be accepted, and the new backend reuses its
+     * ID.
+     */
+    public void loginSent() {
+        pendingTeleports.removeIf(SetbackTeleportUtil::isJavaIdTeleport);
     }
 
     public boolean executeTooHighLatencySetback(String cause) {
@@ -1653,6 +1664,50 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             this.lastKnownGoodPosition =
                     new SetbackPosWithVector(safePosition, Vec3.ZERO, player.totalFlyingPacketsSent);
         }
+    }
+
+    /**
+     * ClientPacketListener#handleMovePlayer answers a teleport with its ID, carrying the position from 26.3 on and
+     * followed by a PosRot before.
+     */
+    public void teleportAnswered(int teleportId, boolean carriesPosition) {
+        awaitingPosRot = null;
+        for (TeleportData pending : pendingTeleports) {
+            if (isJavaIdTeleport(pending) && !pending.isAnswered() && pending.getTeleportId() == teleportId) {
+                if (carriesPosition) {
+                    pending.setAnswered(true);
+                } else {
+                    awaitingPosRot = pending;
+                }
+                return;
+            }
+        }
+    }
+
+    /** A PosRot from a client whose teleport answers carry no position. */
+    public void posRotReceived() {
+        if (awaitingPosRot != null) {
+            awaitingPosRot.setAnswered(true);
+            awaitingPosRot = null;
+        }
+    }
+
+    /**
+     * Whether the client handled a ping sent after a player_position teleport without answering it.
+     * ClientPacketListener#handleMovePlayer sends its answer before the client handles the next ping, so a vanilla
+     * client never does.
+     */
+    public boolean hasWithheldJavaTeleport() {
+        int received = player.lastTransactionReceived.get();
+        for (TeleportData pending : pendingTeleports) {
+            if (isJavaIdTeleport(pending) && !pending.isAnswered() && received > pending.getTransaction()) return true;
+        }
+        return false;
+    }
+
+    /** A player_position teleport, which the Java client accepts by ID. */
+    private static boolean isJavaIdTeleport(TeleportData pending) {
+        return !pending.isRotationOnly() && !pending.isPositionOnly() && pending.getBedrockTransportRevision() < 0L;
     }
 
     public void addImmediatePlayerTeleport(
