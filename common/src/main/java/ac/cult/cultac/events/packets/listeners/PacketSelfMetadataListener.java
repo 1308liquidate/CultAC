@@ -86,6 +86,7 @@ public class PacketSelfMetadataListener {
 
                     final Runnable applySharedFlags = () -> {
                         player.isSwimming = isSwimming;
+                        player.swimState.onServerFlag(isSwimming);
                         player.sprintState.onServerFlag(isSprinting);
                         if (!isSprinting) {
                             // The local client can retain its Camel sprint input for

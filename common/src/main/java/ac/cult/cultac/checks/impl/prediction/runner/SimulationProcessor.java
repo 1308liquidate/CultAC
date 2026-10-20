@@ -1083,6 +1083,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.player.riptideSpinAttackTicks = Math.max(0, this.player.riptideSpinAttackTicks - 1);
             this.couldPotentiallyTickSkip = false;
             this.player.compensatedEntities.fishingRodPulls.clear();
+            this.player.swimState.onClientTick(
+                    result.getSimulationContext().getWorldData().isSwimming());
             this.player.refreshPlayerPose();
         } else {
             this.applyProfileCommit(preparedCommit);

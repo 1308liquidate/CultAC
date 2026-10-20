@@ -181,8 +181,18 @@ public class WorldStageBuilder {
         // boundary, including idle ticks; prediction must not advance them again.
         StuckSpeedData stuckSpeedData = calculateStuckSpeed(player, simulationContext, push);
 
-        // Eye-fluid state is sampled at the movement start position.
-        player.wasEyeInWater = eyeInWater(player, simulationContext, player.pose);
+        // Entity#baseTick samples the eye at the movement start, at the pose Player#updatePlayerPose left last tick.
+        boolean eyeInWater = eyeInWater(player, simulationContext, player.pose)
+                || player.swimState.swimmingPose() && eyeInWater(player, simulationContext, Pose.SWIMMING);
+        // LocalPlayer#isUnderWater is the eye Player#updateIsUnderwater read before this tick's Entity#baseTick.
+        boolean underwater = lastPrediction != null
+                && lastPrediction.getSimulationContext().getWorldData().isEyeInWater();
+        // Entity#updateSwimming runs in Entity#baseTick, before LocalPlayer#aiStep updates the sprint flag.
+        boolean swimming = simulationContext.getVehicle() == null
+                && player.sprintState.flagBeforeAiStep()
+                && (player.swimState.swimming()
+                        ? isInWater.determineOptimistically()
+                        : underwater && player.compensatedWorld.getWaterFluidLevelAt(from.x, from.y, from.z) > 0);
         // Portal contact uses the swept inside-block volume.
         player.intersectedWithNetherPortal = Collisions.hasState(
                 player,
@@ -257,7 +267,10 @@ public class WorldStageBuilder {
                 mainSupportingBlockData,
                 fishingRodPulls,
                 pushesWhileLoadingLevel(player, simulationContext),
-                lastOnGround);
+                lastOnGround,
+                eyeInWater,
+                underwater,
+                swimming);
     }
 
     // EntityFluidInteraction#update finds the eye only among the fluids inside Entity#getFluidInteractionBox.
