@@ -135,7 +135,7 @@ class CaptureStreamTest {
                 assertTrue(stream.pooledBytes() <= CapturePacketCopies.PLAYER_BYTES, stream.pooledBytes() + "");
             }
             long quiet = stream.pooledBytes();
-            assertTrue(quiet <= 2 * CapturePacketCopies.POOL_BYTES + 64, quiet + " after a peak of " + peak);
+            assertTrue(quiet <= 2 * CapturePacketCopies.POOL_BYTES + 128, quiet + " after a peak of " + peak);
 
             for (int tick = 101; tick <= 200; tick++) {
                 nanos += 50_000_000L;

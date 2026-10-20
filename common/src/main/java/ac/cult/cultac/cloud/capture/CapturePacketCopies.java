@@ -1,7 +1,9 @@
 package ac.cult.cultac.cloud.capture;
 
 import ac.cult.cultac.network.FrameCopies;
+import com.sun.management.HotSpotDiagnosticMXBean;
 import io.netty.buffer.ByteBuf;
+import java.lang.management.ManagementFactory;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -22,13 +24,12 @@ final class CapturePacketCopies {
     static final long PROCESS_BYTES = 64L * 1024 * 1024;
     /** A size unused this long gives its capacity back when its frame is released. */
     static final long IDLE_NANOS = TimeUnit.SECONDS.toNanos(30);
-    /** Object layout the accounting assumes: compressed headers and references, the default below a 32 GiB heap. */
-    private static final int HEADER_BYTES = 12;
-
-    private static final int REFERENCE_BYTES = 4;
-    /** A pool's own bookkeeping: its fields and its three per-size index arrays. */
-    static final int POOL_BYTES = align(HEADER_BYTES + 4 * REFERENCE_BYTES + 2 * Integer.BYTES + Long.BYTES + 1)
-            + 3 * referencesBytes(MAX_PACKET_BYTES + 1);
+    /** The running JVM's object layout, or the widest HotSpot layout when it cannot be read. */
+    private static final Layout LAYOUT = Layout.current();
+    /** A pool's own bookkeeping: its fields, its per-size bucket index and its two per-size int arrays. */
+    static final int POOL_BYTES = LAYOUT.objectBytes(4 * LAYOUT.referenceBytes + 2 * Integer.BYTES + Long.BYTES + 1)
+            + referencesBytes(MAX_PACKET_BYTES + 1)
+            + 2 * LAYOUT.arrayBytes(Integer.BYTES * (MAX_PACKET_BYTES + 1));
 
     /** A size's last use is kept in units of 2^20 ns, which wrap only after about 25 days. */
     private static final int STAMP_SHIFT = 20;
@@ -143,15 +144,53 @@ final class CapturePacketCopies {
     }
 
     private static int arrayBytes(int length) {
-        return align(16 + length);
+        return LAYOUT.arrayBytes(length);
     }
 
     private static int referencesBytes(int count) {
-        return align(16 + 4 * count);
+        return LAYOUT.align(LAYOUT.referenceArrayBase + LAYOUT.referenceBytes * count);
     }
 
-    private static int align(int bytes) {
-        return (bytes + 7) & ~7;
+    /** Header, reference and alignment sizes of HotSpot's object layouts. */
+    private record Layout(int objectHeader, int arrayBase, int referenceBytes, int referenceArrayBase, int alignment) {
+        private static final Layout WIDEST = new Layout(16, 20, 8, 24, 8);
+
+        static Layout current() {
+            try {
+                HotSpotDiagnosticMXBean vm = ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class);
+                boolean compact = flag(vm, "UseCompactObjectHeaders");
+                boolean classPointers = compact || flag(vm, "UseCompressedClassPointers");
+                int references = flag(vm, "UseCompressedOops") ? 4 : 8;
+                int alignment = Integer.parseInt(
+                        vm.getVMOption("ObjectAlignmentInBytes").getValue());
+                int header = compact ? 8 : classPointers ? 12 : 16;
+                int length = header + Integer.BYTES;
+                return new Layout(
+                        header, length, references, (length + references - 1) / references * references, alignment);
+            } catch (RuntimeException | LinkageError unknown) {
+                return WIDEST;
+            }
+        }
+
+        private static boolean flag(HotSpotDiagnosticMXBean vm, String name) {
+            try {
+                return Boolean.parseBoolean(vm.getVMOption(name).getValue());
+            } catch (IllegalArgumentException absent) {
+                return false;
+            }
+        }
+
+        int objectBytes(int fields) {
+            return align(objectHeader + fields);
+        }
+
+        int arrayBytes(int bytes) {
+            return align(arrayBase + bytes);
+        }
+
+        int align(int bytes) {
+            return (bytes + alignment - 1) / alignment * alignment;
+        }
     }
 
     /** One player's share of the reusable capacity; used only on its stream's event loop. */
