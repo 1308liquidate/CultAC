@@ -438,6 +438,19 @@ public final class CompensatedVehicleState implements Debuggable {
                                 .getPath());
     }
 
+    /**
+     * Whether the client must send ServerboundMoveVehiclePacket each tick. LocalPlayer#sendChanges sends it when the
+     * root vehicle is Entity#isLocalInstanceAuthoritative, which needs a controlling passenger that is the local
+     * player; otherwise the passenger only sends its Rot. A pig or strider is controlled only while its rider holds the
+     * stick, which the client chooses, so neither is ever required to.
+     */
+    public boolean mustEchoMoveVehicle(@Nullable PacketEntity root) {
+        return root != null
+                && passengerIndex(root) == 0
+                && !isItemControlledVehicleType(root)
+                && canLocalClientAuthoritativelyMove(root);
+    }
+
     private boolean canPossiblySwitchToItemControlThisClientTick(@Nullable PacketEntity vehicle) {
         if (vehicle == null || passengerIndex(vehicle) != 0 || !hasSaddle(vehicle)) {
             return false;
