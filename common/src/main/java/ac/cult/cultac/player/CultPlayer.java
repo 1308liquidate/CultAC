@@ -1126,8 +1126,8 @@ public class CultPlayer implements GrimUser {
             packetTracker = connection != null ? connection.getPacketTracker() : null;
         }
 
-        if (this.platformPlayer == null) {
-            this.platformPlayer = CultAPI.INSTANCE.getPlatformPlayerFactory().getFromUUID(playerUUID);
+        if (this.platformPlayer == null && user.getPlayer() != null) {
+            this.platformPlayer = user.getPlayer();
             updatePermissions();
         }
 

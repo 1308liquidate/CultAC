@@ -21,7 +21,7 @@ class NativePlayerSetTest {
         try (var players = new FakePlatformPlayers()) {
             var live = new FakePlatformPlayers.Native(uuid);
             var stale = new FakePlatformPlayers.Native(uuid);
-            PlatformPlayer wrapper = players.getFromNativePlayerType(live);
+            PlatformPlayer wrapper = players.attach(players.getFromNativePlayerType(live));
             Set<Object> natives = new HashSet<>();
             natives.add(stale);
             natives.add(live);

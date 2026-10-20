@@ -30,13 +30,14 @@ class PlayerDataManagerAlertQuitTest {
         PlatformPlayer bound = null;
         try (var players = new FakePlatformPlayers()) {
             manager.addUser(user);
-            bound = players.getFromNativePlayerType(new FakePlatformPlayers.Native(uuid));
+            bound = players.attach(players.getFromNativePlayerType(new FakePlatformPlayers.Native(uuid)));
             user.bind(bound);
             alerts.setAlertsEnabled(bound, true, true);
             alerts.setVerboseEnabled(bound, true, true);
             alerts.setBrandsEnabled(bound, true, true);
             assertEquals(List.of("NORMAL", "VERBOSE", "BRAND"), AlertSets.subscribed(bound));
-            PlatformPlayer stale = players.getFromNativePlayerType(new FakePlatformPlayers.Native(uuid));
+            PlatformPlayer stale =
+                    players.attach(players.getFromNativePlayerType(new FakePlatformPlayers.Native(uuid)));
             assertSame(stale, PlatformPlayerCache.getInstance().getPlayer(uuid));
             assertNotSame(bound, stale);
 

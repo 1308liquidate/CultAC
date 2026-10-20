@@ -74,7 +74,7 @@ class PlayerDataManagerConnectionCleanupTest {
 
         user = TestUsers.create(new User.Profile(uuid, "staff"), new EmbeddedChannel());
         manager.addUser(user);
-        bound = players.getFromNativePlayerType(new FakePlatformPlayers.Native(uuid));
+        bound = players.attach(players.getFromNativePlayerType(new FakePlatformPlayers.Native(uuid)));
         user.bind(bound);
         alerts.setAlertsEnabled(bound, true, true);
         alerts.setVerboseEnabled(bound, true, true);
