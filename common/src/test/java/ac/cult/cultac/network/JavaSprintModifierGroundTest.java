@@ -4,22 +4,31 @@ import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.blocksim.data.BlockIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.events.packets.listeners.PacketEntityAction;
+import ac.cult.cultac.events.packets.listeners.PacketPlayerAttack;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundUpdateAttributes;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
+import ac.cult.cultac.protocol.value.BlockPos;
+import ac.cult.cultac.protocol.value.Hand;
+import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
+import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -34,6 +43,10 @@ class JavaSprintModifierGroundTest {
     private static final float YAW = 30.0F;
     private static final float CANONICAL = (float) ((double) 0.1F * (1.0D + (double) 0.3F));
     private static final float QUADRUPLED = (float) ((double) 0.1F * 4.0D);
+    // Player#getAttackStrengthScale passes 0.9 after five ticks at the default attack speed of 4.
+    private static final int CHARGE_TICKS = 5;
+    private static final AttributeModifier QUADRUPLED_MODIFIER =
+            new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
 
     @Test
     void aSprintAtTheServersModifierSpeedIsExact() throws Exception {
@@ -63,15 +76,114 @@ class JavaSprintModifierGroundTest {
         }
     }
 
+    /**
+     * Player#causeExtraKnockback damps deltaMovement by 0.6 and calls setSprinting(false) together, and aiStep's
+     * re-sprint puts vanilla's modifier back. A move only the damped velocity at vanilla's speed reproduces proves the
+     * reset happened, so the next tick cannot travel at the server's modifier's speed.
+     */
+    @Test
+    void aMoveThatProvesAPossibleAttackResetDropsTheServersModifier() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 velocity = provenReset(f);
+            Vec3 delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, QUADRUPLED, YAW));
+            PredictionResult result = f.tick(position.add(delta.x, 0.0, delta.z), true);
+            assertFalse(result.getFlags().isEmpty(), describe(result));
+        }
+    }
+
+    @Test
+    void aMoveThatProvesAPossibleAttackResetSprintsOnAtVanillasSpeed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 velocity = provenReset(f);
+            Vec3 delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, YAW));
+            PredictionResult result = f.tick(position.add(delta.x, 0.0, delta.z), true);
+            assertTrue(exact(result), describe(result));
+        }
+    }
+
+    /**
+     * A sprint into a wall that the attack tick's move reaches with or without the damping, at either speed:
+     * Entity#collide ends both on the wall, so the move cannot tell the outcomes apart and both modifiers stay possible.
+     */
+    @Test
+    void aWallThatHidesAPossibleAttackResetKeepsBothModifiers() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            for (int x = -2; x <= 2; x++) {
+                for (int y = FLOOR_Y; y <= FLOOR_Y + 1; y++) {
+                    f.player.compensatedWorld.updateBlock(new BlockPos(x, y, 1), BlockIds.STONE.defaultState());
+                }
+            }
+            for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
+            position = startSprint(f, 0.0F, CHARGE_TICKS);
+            holdQuadrupledModifier(f);
+            attack(f);
+            Vec3 atWall = new Vec3(position.x, FLOOR_Y, 1.0 - 0.6F / 2.0F);
+            PredictionResult result = f.tick(atWall, true);
+            assertTrue(exact(result), describe(result));
+            assertSame(QUADRUPLED_MODIFIER, f.player.sprintState.heldModifier());
+            assertTrue(f.player.sprintState.canonicalPossible());
+
+            // LocalPlayer#shouldStopRunSprinting: the head-on collision stops the sprint before the next travel.
+            var stop = new ServerboundPlayerCommand(f.player.entityID, PlayerCommandAction.STOP_SPRINTING, 0);
+            new PacketEntityAction().onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, stop), f.player, stop);
+            result = f.tick(atWall, true);
+            assertTrue(exact(result), describe(result));
+        }
+    }
+
+    private Vec3 position;
+
+    /**
+     * Three ticks at the server's quadrupled speed, then an attack whose reset is only possible and a move with the
+     * damped velocity at vanilla's speed; the velocity carried into the next tick.
+     */
+    private Vec3 provenReset(JavaTickFixture f) {
+        position = startSprint(f, YAW, CHARGE_TICKS);
+        Vec3 velocity = carried(f, CANONICAL);
+        holdQuadrupledModifier(f);
+        for (int tick = 0; tick < 3; tick++) {
+            Vec3 delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, QUADRUPLED, YAW));
+            position = position.add(delta.x, 0.0, delta.z);
+            PredictionResult result = f.tick(position, true);
+            assertTrue(exact(result), "tick " + tick + ": " + describe(result));
+            velocity = new Vec3(delta.x * FRICTION, 0.0, delta.z * FRICTION);
+        }
+        attack(f);
+        Vec3 damped = new Vec3(velocity.x * 0.6, 0.0, velocity.z * 0.6);
+        Vec3 delta = damped.add(ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, YAW));
+        position = position.add(delta.x, 0.0, delta.z);
+        PredictionResult result = f.tick(position, true);
+        assertTrue(exact(result), describe(result));
+        assertSame(CompensatedEntities.SPRINTING_SPEED_MODIFIER, f.player.sprintState.heldModifier());
+        assertFalse(f.player.sprintState.canonicalPossible());
+        return new Vec3(delta.x * FRICTION, 0.0, delta.z * FRICTION);
+    }
+
+    /** MultiPlayerGameMode#attack on an entity the server never sent: the reset is only possible. */
+    private static void attack(JavaTickFixture f) {
+        var attack = new ServerboundInteract(99, InteractAction.ATTACK, Hand.MAIN_HAND, Optional.empty(), false);
+        new PacketPlayerAttack().onInteract(f.event(ServerboundPackets.INTERACT, attack), f.player, attack);
+    }
+
     /** A first sprinting tick from rest at vanilla's sprint speed; the position it reached. */
     private static Vec3 startSprint(JavaTickFixture f) {
-        f.player.xRot = YAW;
+        return startSprint(f, YAW, 0);
+    }
+
+    /** {@link #startSprint(JavaTickFixture)} facing {@code yaw}, after {@code restTicks} ticks standing still. */
+    private static Vec3 startSprint(JavaTickFixture f, float yaw, int restTicks) {
+        f.player.xRot = yaw;
         f.player.yRot = 0.0F;
-        f.place(new Vec3(0.5, FLOOR_Y, 0.5), Vec3.ZERO);
+        Vec3 start = new Vec3(0.5, FLOOR_Y, 0.5);
+        f.place(start, Vec3.ZERO);
+        for (int tick = 0; tick < restTicks; tick++) {
+            PredictionResult result = f.tick(start, true);
+            assertTrue(exact(result), describe(result));
+        }
         var sprint = new ServerboundPlayerCommand(f.player.entityID, PlayerCommandAction.START_SPRINTING, 0);
         new PacketEntityAction().onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, sprint), f.player, sprint);
         f.input(SPRINT);
-        Vec3 delta = ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, YAW);
+        Vec3 delta = ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, yaw);
         Vec3 position = new Vec3(0.5 + delta.x, FLOOR_Y, 0.5 + delta.z);
         PredictionResult result = f.tick(position, true);
         assertTrue(exact(result), describe(result));
@@ -85,11 +197,9 @@ class JavaSprintModifierGroundTest {
     }
 
     private static void holdQuadrupledModifier(JavaTickFixture f) {
-        var quadrupled =
-                new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
         var attributes = new ClientboundUpdateAttributes(
                 f.player.entityID,
-                List.of(new AttributeSnapshot("minecraft:movement_speed", 0.1F, List.of(quadrupled))));
+                List.of(new AttributeSnapshot("minecraft:movement_speed", 0.1F, List.of(QUADRUPLED_MODIFIER))));
         var event = new PacketSendEvent<>(
                 f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.UPDATE_ATTRIBUTES, attributes, false);
         f.player.packetEntityReplication.onUpdateAttributes(event, f.player, attributes);
