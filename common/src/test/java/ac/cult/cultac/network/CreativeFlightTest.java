@@ -607,16 +607,19 @@ class CreativeFlightTest {
         }
     }
 
-    /** A full block beside the half slab stops the step's Z, so a step up through the corner keeps no auto-jump. */
+    /**
+     * The position on the half slab's top, with the slab above the full block ahead, lets updateAutoJump fire, and the
+     * engine judges no move after flight that rules out a step there, so a step through the corner keeps the history.
+     */
     @Test
-    void aTakeoffRenewedByAnAutoJumpThroughACornerAfterFlightFlags() throws Exception {
+    void aStepThroughACornerAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
         try (var f = new JavaTickFixture()) {
             int slab = DataTables.defaults().registry().block("minecraft:stone_slab").defaultState();
             block(f, 1, FLOOR_Y, 0, slab);
             block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
             block(f, 1, FLOOR_Y, 1, BlockIds.STONE.defaultState());
             block(f, 1, FLOOR_Y + 1, 1, slab);
-            assertFalse(
+            assertTrue(
                     unarmedAfterAWalkAfterFlight(
                             f,
                             GROUND,
@@ -624,10 +627,11 @@ class CreativeFlightTest {
                             null,
                             new Vec3(0.25, 0.5, 0.25),
                             new Vec3(0, JUMP_POWER, 0.25 * GROUND_FRICTION)),
-                    "a step through the corner was kept");
+                    "the auto-jump history was dropped");
 
-            pressInTheAirThenTakeOff(f);
-            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
         }
     }
 
@@ -660,15 +664,34 @@ class CreativeFlightTest {
         }
     }
 
-    /** A collided movement beyond 1.0E-7 squared moves the player, so a landing that far above the floor flags. */
+    /**
+     * A collided movement beyond 1.0E-7 squared moves the player, and a withheld position lies within the threshold of
+     * the last one sent, so a StatusOnly landing beyond both above the floor flags.
+     */
     @Test
     void aTakeoffRenewedByAnAutoJumpOverAGapAboveTheFloorAfterFlightFlags() throws Exception {
         try (var f = new JavaTickFixture()) {
             block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
-            assertFalse(unarmedAfterAClippedLandingAfterFlight(f, 0.0004, false), "a landing above the gap was kept");
+            assertFalse(unarmedAfterAClippedLandingAfterFlight(f, 0.001, false), "a landing above the gap was kept");
 
             pressInTheAirThenTakeOff(f);
             assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /**
+     * A withheld position lies within the threshold of the last one sent, so a StatusOnly landing 0.0004 above the
+     * floor can be a client within sqrt(1.0E-7) of it, which Entity#move kept in place and grounded.
+     */
+    @Test
+    void aClippedLandingWithinTheThresholdOfAGapAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            assertTrue(unarmedAfterAClippedLandingAfterFlight(f, 0.0004, false), "the clipped landing was dropped");
+
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
         }
     }
 
@@ -694,6 +717,55 @@ class CreativeFlightTest {
 
             pressInTheAirThenTakeOff(f);
             assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** Entity#collide's step up onto a half slab ends on the ground, so a judged step can fire updateAutoJump. */
+    @Test
+    void aJudgedStepUpWhereAnAutoJumpCanFireMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            halfSlabStepAhead(f);
+            f.place(GROUND, new Vec3(0, STANDING_Y, 0));
+            grantFlight(f, false);
+            f.input(FORWARD);
+            f.pongThrough(f.velocity(new Vec3(0, -0.1, 0.48)));
+            double z = 0.48 + WALK_STEP;
+            Vec3 step = GROUND.add(0, 0.5, z);
+            PredictionResult walk = f.tick(step, true);
+            assertPredicted(walk);
+            assertFalse(walk.isExempt(), "the step was exempt");
+            f.input(JUMP);
+            f.tick(step.add(0, JUMP_POWER, z * GROUND_FRICTION), false);
+            assertTrue((f.player.packetStateData.jumpTriggerTimes & 1) != 0, "the auto-jump history was dropped");
+
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /** A flag on the exempt walk after flight proves nothing about updateAutoJump, so the step up ahead keeps it. */
+    @Test
+    void aFlaggedWalkWhereAnAutoJumpCanFireAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            f.place(GROUND.add(0, IMPULSE, 0), Vec3.ZERO);
+            grantFlight(f, true);
+            f.input(SHIFT);
+            assertTrue(f.tick(GROUND, true).isExempt(), "the flight was judged");
+            grantFlight(f, false);
+            f.input(NONE);
+            f.tickEnd();
+            f.input(FORWARD);
+            Vec3 walk = GROUND.add(0, 0, 2 * WALK_STEP);
+            PredictionResult moved = f.tick(walk, true);
+            assertTrue(moved.isExempt() && !moved.getFlags().isEmpty(), "the walk was not a flagged exemption");
+            f.input(JUMP);
+            f.tick(walk.add(0, JUMP_POWER, 2 * WALK_STEP * GROUND_FRICTION), false);
+            assertTrue((f.player.packetStateData.jumpTriggerTimes & 1) != 0, "the auto-jump history was dropped");
+
+            pressInTheAirThenTakeOff(f);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
         }
     }
 

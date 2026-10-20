@@ -12,13 +12,14 @@ import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.data.MainSupportingBlockData;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
-import ac.cult.cultac.utils.nmsutil.Collisions;
+import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /** Source-proven automatic input: LocalPlayer#move/updateAutoJump, then next tick's aiStep/makeJump. */
 public final class JavaAutoJump extends CultProcessor implements PostPredictionListener {
+    private static final double KEPT_IN_PLACE = Math.sqrt(1.0E-7);
+
     private boolean queued;
     private boolean jumpedThisTick;
     private boolean possible;
@@ -37,11 +38,12 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
     }
 
     /**
-     * Whether LocalPlayer#updateAutoJump can have set autoJumpTime in the client tick {@code clientTick}: the outcome
-     * of the move the simulation ran for that tick, or false when it ran none.
+     * Whether LocalPlayer#updateAutoJump can have set autoJumpTime in the client tick {@code clientTick}. It is false
+     * only where the engine proves updateAutoJump returned early for every position and input it allows: from the
+     * move the simulation ran for that tick, or from canAutoJump's known prerequisites when it ran none.
      */
     public boolean canFireIn(int clientTick) {
-        return movedClientTick == clientTick && possible;
+        return movedClientTick == clientTick ? possible : !keysCannotFire();
     }
 
     public boolean hasManualMovementInput() {
@@ -53,19 +55,17 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
     public void onPredictionComplete(PredictionComplete complete) {
         if (player.isBedrockMovement() || complete.isTeleport()) return;
         jumpedThisTick = queued;
-        boolean judged = !complete.isExempt() && !complete.getPredictionResult().hasEffectiveFlags();
-        queued = judged && schedulesJump(complete.getPredictionResult());
-        movedClientTick = player.packetStateData.acceptedClientTick;
         PredictionResult result = complete.getPredictionResult();
-        possible = judged ? queued : canFireAfter(result, 1.0E-7);
+        queued = !complete.isExempt() && !result.hasEffectiveFlags() && schedulesJump(result);
+        movedClientTick = player.packetStateData.acceptedClientTick;
+        possible = !provablyCannotFire(result);
     }
 
     /** A client tick that sent no position, simulated from the player's position under the movement exemption. */
     public void onExemptNoPositionTick(PredictionResult result) {
         if (player.isBedrockMovement()) return;
         movedClientTick = player.packetStateData.acceptedClientTick;
-        // LocalPlayer#sendPosition withholds a position within the threshold of the last one it sent.
-        possible = canFireAfter(result, player.getMovementThreshold());
+        possible = !provablyCannotFire(result);
     }
 
     boolean schedulesJump(PredictionResult result) {
@@ -80,63 +80,129 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
                         result.getSimulationContext().getWorldData().getMainSupportingBlockPos());
     }
 
-    private boolean canFireAfter(PredictionResult result, double tolerance) {
-        Vec3 moved = groundedMove(result, tolerance);
-        return moved != null
-                && canFire(
-                        moved,
-                        sprintOutcome(result),
-                        result.getSimulationContext().getJumpAmplifier(),
-                        result.getSimulationContext().getWorldData().getMainSupportingBlockPos());
+    /**
+     * Whether updateAutoJump returns early for every client position within {@link #positionMargin} of the player's
+     * and every attempted movement the move's candidates allow: canAutoJump's prerequisites fail, the move cannot
+     * have ended on the ground, the ceiling check stops it, or no collision box crosses its look-ahead rays' height.
+     * An unloaded chunk, or an entity's collision box, leaves it unproven.
+     */
+    private boolean provablyCannotFire(PredictionResult result) {
+        if (keysCannotFire()) return true;
+        SimulationContext context = result.getSimulationContext();
+        if (context == null) return false;
+        if (BlockProperties.onHoneyBlock(
+                player,
+                context.getWorldData().getMainSupportingBlockPos(),
+                new Vec3(player.x, player.y, player.z))) return true;
+        double margin = positionMargin();
+        SimpleCollisionBox end = GetBoundingBox.getCollisionBoxForPlayer(player, player.x, player.y, player.z);
+        return cannotHaveLanded(result, end, margin) || ceilingBlocks(end, margin) || nothingAhead(context, margin);
+    }
+
+    // LocalPlayer#sendPosition withholds a position within the movement threshold of the last one it sent, and the
+    // simulation places a withheld position within the threshold of that one.
+    private double positionMargin() {
+        return 2 * player.getMovementThreshold() + 1.0E-6;
+    }
+
+    // LocalPlayer#canAutoJump needs movement input without shift, outside a vehicle.
+    private boolean keysCannotFire() {
+        if (player.isSneaking || player.inVehicle()) return true;
+        var keys = player.packetStateData.knownInput;
+        return keys.left() == keys.right() && keys.forward() == keys.backward();
     }
 
     /**
-     * The position change of an unjudged move that can have ended on the ground, or null. The attempted movement is
-     * one the move's simulation explains: a candidate's collision-ignored extents, at their bounds and at the
-     * reported movement on X and Z, and at their lowest on Y. Entity#collide runs on it from the start box, with
-     * every ground state the engine allows for the step; Entity#move grounds a downward attempt that collided
-     * vertically, and its setPos guard keeps a collided movement within 1.0E-7 squared in place when the collision
-     * removed at least that much. The position change is within {@code tolerance} of the reported movement.
+     * Entity#move grounds a move that ends on a collider: the final box's minY at a collider's Y coordinate after a
+     * landing or one of Entity#collide's steps, its maxY at one after a step a ceiling clipped, or the box kept in
+     * place within sqrt(1.0E-7) above one by the setPos guard. The colliders lie within the reach of the attempted
+     * horizontal movement from the start box: the largest of the candidates' extents, plus a block.
      */
-    private Vec3 groundedMove(PredictionResult result, double tolerance) {
-        if (!result.getFlags().isEmpty()) return null;
-        Vec3 target = result.getTarget();
+    private boolean cannotHaveLanded(PredictionResult result, SimpleCollisionBox end, double margin) {
         List<PredictionResult> candidates = new ArrayList<>();
         candidates.add(result);
-        for (PredictionResult reality : result.getRealities()) {
-            if (reality.getFlagSeverity() == 0) candidates.add(reality);
-        }
+        candidates.addAll(result.getRealities());
+        double reach = -1;
         for (PredictionResult candidate : candidates) {
             if (candidate.getValidMovements() == null) continue;
             SimpleCollisionBox extents = candidate.getValidMovements().getCollisionIgnoredMaxStartingVelExtents();
             if (extents == null) continue;
-            SimulationContext context = candidate.getSimulationContext();
-            Vec3 stuck = candidate.getInitialStartingVel().collisionStuckSpeedMultiplier(context);
-            if (stuck == null) stuck = new Vec3(1, 1, 1);
-            double y = Math.min(candidate.getInitialStartingVel().y, extents.minY) * stuck.y;
-            if (!(y < 0)) continue;
-            SimpleCollisionBox from = context.getFromActualPose();
-            var lastOnGround = context.getLastOnGround();
-            for (double x : new double[] {target.x, extents.minX * stuck.x, extents.maxX * stuck.x}) {
-                for (double z : new double[] {target.z, extents.minZ * stuck.z, extents.maxZ * stuck.z}) {
-                    List<Collisions.Axis> order = Math.abs(x) < Math.abs(z)
-                            ? List.of(Collisions.Axis.Y, Collisions.Axis.Z, Collisions.Axis.X)
-                            : List.of(Collisions.Axis.Y, Collisions.Axis.X, Collisions.Axis.Z);
-                    for (boolean onGround : new boolean[] {true, false}) {
-                        if (onGround ? !lastOnGround.determineOptimistically() : lastOnGround.determinePessimistically())
-                            continue;
-                        Vec3 collided = Collisions.collideWithAdditionalCollisionBoxes(
-                                player, from, x, y, z, order, true, Collections.emptyList(), onGround);
-                        if (collided.y == y) continue;
-                        double collidedSqr = collided.lengthSqr();
-                        boolean kept = collidedSqr <= 1.0E-7 && x * x + y * y + z * z - collidedSqr >= 1.0E-7;
-                        Vec3 moved = kept ? Vec3.ZERO : collided;
-                        if (moved.distanceTo(target) <= tolerance) return moved;
-                    }
+            reach = Math.max(
+                    reach,
+                    Math.max(
+                            Math.max(Math.abs(extents.minX), Math.abs(extents.maxX)),
+                            Math.max(Math.abs(extents.minZ), Math.abs(extents.maxZ))));
+        }
+        SimpleCollisionBox from = result.getSimulationContext().getFromActualPose();
+        if (reach < 0 || from == null) return false;
+        reach += 1.0;
+        double low = end.minY - KEPT_IN_PLACE - margin, high = end.minY + margin;
+        var region = new SimpleCollisionBox(
+                Math.min(from.minX, end.minX) - reach,
+                low - 1.0E-3,
+                Math.min(from.minZ, end.minZ) - reach,
+                Math.max(from.maxX, end.maxX) + reach,
+                end.maxY + margin + 1.0E-3,
+                Math.max(from.maxZ, end.maxZ) + reach);
+        if (!JavaAutoJumpGeometry.loaded(player, region) || JavaAutoJumpGeometry.hasEntityCollision(player, region))
+            return false;
+        for (SimpleCollisionBox box : JavaAutoJumpGeometry.blockCollisions(player, region)) {
+            for (double y : new double[] {box.minY, box.maxY}) {
+                if (y >= low && y <= high || Math.abs(y - end.maxY) <= margin) return false;
+            }
+        }
+        return true;
+    }
+
+    // updateAutoJump returns when the block at the box's top, or the one above it, has a collision shape.
+    private boolean ceilingBlocks(SimpleCollisionBox end, double margin) {
+        for (double dx : new double[] {-margin, margin}) {
+            for (double dy : new double[] {-margin, margin}) {
+                for (double dz : new double[] {-margin, margin}) {
+                    int x = (int) Math.floor(player.x + dx),
+                            y = (int) Math.floor(end.maxY + dy),
+                            z = (int) Math.floor(player.z + dz);
+                    if (player.compensatedWorld.getChunk(x >> 4, z >> 4) == null) return false;
+                    if (JavaAutoJumpGeometry.block(player, x, y, z).isEmpty()
+                            && JavaAutoJumpGeometry.block(player, x, y + 1, z).isEmpty()) return false;
                 }
             }
         }
-        return null;
+        return true;
+    }
+
+    /**
+     * updateAutoJump's rays run at the position's Y plus 0.51F, offset by half the width, to max(getSpeed() * 7, the
+     * move's length) past the move; only a box that crosses that height can stop them.
+     */
+    private boolean nothingAhead(SimulationContext context, double margin) {
+        double speed = 0;
+        for (boolean canonical : new boolean[] {true, false}) {
+            speed = Math.max(
+                    speed,
+                    player.compensatedEntities.getMaxPlayerMovementSpeed(canonical, ClientSprintState.Outcome.ANY));
+        }
+        Vec3 start = context.getStart();
+        double moved = Math.hypot(player.x - start.x, player.z - start.z) + 2 * margin;
+        double reach = moved
+                + Math.max(7 * speed, Math.max(moved, speed))
+                + player.pose.width * player.getScale() / 2
+                + margin
+                + 1.0E-3;
+        double height = player.y + 0.51F;
+        var region = new SimpleCollisionBox(
+                player.x - reach,
+                height - margin - 1.0E-3,
+                player.z - reach,
+                player.x + reach,
+                height + margin + 1.0E-3,
+                player.z + reach);
+        if (!JavaAutoJumpGeometry.loaded(player, region)
+                || JavaAutoJumpGeometry.hasEntityCollision(player, region.copy().expand(0, 1, 0))) return false;
+        for (SimpleCollisionBox box : JavaAutoJumpGeometry.blockCollisions(player, region)) {
+            if (box.minY < height + margin && box.maxY > height - margin) return false;
+        }
+        return true;
     }
 
     private static ClientSprintState.Outcome sprintOutcome(PredictionResult result) {
