@@ -1,11 +1,13 @@
 package ac.cult.cultac.checks.impl.prediction.pipeline.java;
 
 import ac.cult.cultac.checks.CultProcessor;
+import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.type.PostPredictionListener;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
 
@@ -59,9 +61,9 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         if (input.horizontalDistanceSqr() == 0) return false;
         float yaw = player.xRot * ((float) Math.PI / 180.0F);
         float sin = player.trigHandler.sin(yaw), cos = player.trigHandler.cos(yaw);
-        var context = result.getSimulationContext();
+        PredVector start = result.getInitialStartingVel();
         float speed = (float) player.compensatedEntities.getMaxPlayerMovementSpeed(
-                false, context.getSprintOutcome(player, result.getInitialStartingVel()));
+                false, start == null ? ClientSprintState.Outcome.ANY : start.getSprintOutcome());
         Vec3 begin = new Vec3(player.x, player.y, player.z);
         float dx = (float) result.getTarget().x, dz = (float) result.getTarget().z;
         Vec3 end = begin.add(dx, 0, dz), diff = new Vec3(dx, 0, dz);
