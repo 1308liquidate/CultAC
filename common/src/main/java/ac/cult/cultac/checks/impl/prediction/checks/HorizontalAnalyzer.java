@@ -4,6 +4,7 @@ import ac.cult.cultac.bedrock.prediction.BedrockPredictionResult;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoSneakSlow;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.OmniSprint;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.Speed;
@@ -13,6 +14,7 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.NumFormatter;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
+import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.StuckEdgeData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.enums.Pose;
@@ -83,6 +85,15 @@ public class HorizontalAnalyzer implements EngineCheck {
                     () -> NumFormatter.formatNumberStandard(minimumInputRequired.x) + " "
                             + NumFormatter.formatNumberStandard(minimumInputRequired.z),
                     speedFlagAmount);
+        }
+
+        double keysOffset = ReportedKeyInput.offset(player, result, lastResult);
+        if (keysOffset > HORIZONTAL_INPUT_UNCERTAINTY) {
+            KnownInput keys = player.packetStateData.knownInput;
+            result.addFlag(
+                    player.checkManager.getListener(InputKeys.class),
+                    () -> NumFormatter.formatNumberStandard(keysOffset) + " " + keys,
+                    keysOffset);
         }
 
         // TODO: If we want to, require sent a sneaking packet in the last tick to allow tick skip exempt

@@ -69,6 +69,7 @@ import ac.cult.cultac.utils.blockplace.ClientBlockActions;
 import ac.cult.cultac.utils.blockplace.GhostBlock;
 import ac.cult.cultac.utils.data.BedrockTranslatedMovementGate;
 import ac.cult.cultac.utils.data.HeadRotation;
+import ac.cult.cultac.utils.data.PacketStateData;
 import ac.cult.cultac.utils.data.TeleportAcceptData;
 import ac.cult.cultac.utils.data.VehicleTeleportData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
@@ -580,6 +581,14 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             // Only LocalPlayer#tick sends movement, and it requires ClientPacketListener#hasClientLoaded.
             player.packetStateData.playerLoadedIntoLevel = true;
             if (packet.hasPosition()) player.packetStateData.lastSentTickPosition = position;
+            if (packet.hasRotation()) {
+                player.packetStateData.lastSentTickYaw = packet.yaw();
+                player.packetStateData.lastSentTickPitch = packet.pitch();
+                if (!passengerRotationTickPacket) {
+                    player.packetStateData.lastSendPositionYaw = packet.yaw();
+                    player.packetStateData.lastSendPositionPitch = packet.pitch();
+                }
+            }
             player.sprintState.onClientMove();
             // LocalPlayer#sendPosition sends this tick's START/STOP_SPRINTING before its movement.
             onLocalPlayerSprintTick(player);
@@ -601,15 +610,16 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
 
         if (!shouldIgnoreTranslatedBedrockMovement(player, passengerRotationTickPacket)) {
+            boolean lastSentLook = !packet.hasRotation() && keepsLastSentRotation(player);
             handleFlying(
                     player,
                     movementPosition.x,
                     movementPosition.y,
                     movementPosition.z,
-                    packet.yawOr(player.yRot),
-                    packet.pitchOr(player.xRot),
+                    lastSentLook ? player.packetStateData.lastSendPositionYaw : packet.yawOr(player.xRot),
+                    lastSentLook ? player.packetStateData.lastSendPositionPitch : packet.pitchOr(player.yRot),
                     packet.hasPosition(),
-                    packet.hasRotation(),
+                    packet.hasRotation() || lastSentLook,
                     packet.onGround(),
                     teleportData);
         }
@@ -627,6 +637,16 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         dispatchReceiveHandlers(event, player);
         player.checkManager.getSetbackBlocker().onJavaMovePlayerAfterChecks(event);
         clearTransientPacketState(player);
+    }
+
+    // LocalPlayer#sendPosition sends no rotation while the player's equals the last one it sent; a teleport
+    // acceptance or a cancelled move can leave the simulated rotation elsewhere. An equal one is no rotation update.
+    private static boolean keepsLastSentRotation(CultPlayer player) {
+        PacketStateData state = player.packetStateData;
+        return !player.isBedrockMovement()
+                && !state.lastPacketWasTeleport
+                && !Float.isNaN(state.lastSendPositionYaw)
+                && (state.lastSendPositionYaw != player.xRot || state.lastSendPositionPitch != player.yRot);
     }
 
     private boolean hasBufferedServerVehiclePassengerRotation(CultPlayer player) {
