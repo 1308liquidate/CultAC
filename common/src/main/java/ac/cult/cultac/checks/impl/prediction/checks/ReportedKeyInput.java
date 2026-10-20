@@ -12,6 +12,7 @@ import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ClientItemUseState;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.StuckEdgeData;
+import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientKeyInput;
@@ -42,8 +43,13 @@ final class ReportedKeyInput {
 
         KnownInput keys = player.packetStateData.knownInput;
         ClientItemUseState.Snapshot use = context.getItemUse();
-        // LocalPlayer#isMovingSlowly crouches exactly when the previous keys held shift.
+        // LocalPlayer#isMovingSlowly: crouching, exactly when the previous keys held shift, or
+        // Entity#isVisuallyCrawling, which out of water is a SWIMMING pose or, through
+        // LivingEntity#isVisuallySwimming, a FALL_FLYING pose without fall flying. Player#updatePlayerPose sets the
+        // pose only after LocalPlayer#aiStep.
         float slow = context.isLastSneaking()
+                        || context.getPose() == Pose.SWIMMING
+                        || context.getPose() == Pose.FALL_FLYING
                 ? (float) player.compensatedEntities.getSelf().sneakingSpeed.value()
                 : 1.0F;
         float walk = context.getMoveRelativeSpeed(player, true, false, false);

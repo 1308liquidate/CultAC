@@ -15,6 +15,7 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.utils.data.ClientItemUseState;
+import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.inventory.Inventory;
 import ac.cult.cultac.utils.inventory.ItemUtil;
 import ac.cult.cultac.utils.math.Vec3;
@@ -222,6 +223,26 @@ class InputKeysTest {
                 velocity = (velocity - slowed) * FRICTION;
             }
 
+            assertNoFlags(f);
+        }
+    }
+
+    @Test
+    void walkingOnTheTickAfterAGlideEndsIsSlowedLikeCrawling() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.place(new Vec3(0.5, FLOOR_Y, 4.5), GROUNDED);
+            f.input(BACK);
+            assertExact(f.tick(new Vec3(0.5, FLOOR_Y, 4.5 - WALK), true));
+            double velocity = -WALK * FRICTION;
+
+            // Player#updatePlayerPose runs after LocalPlayer#aiStep, so the tick after the glide ends still starts in
+            // the FALL_FLYING pose. LivingEntity#isVisuallySwimming counts that pose without fall flying, which makes
+            // LocalPlayer#isMovingSlowly scale the keys by the sneaking speed.
+            f.player.pose = Pose.FALL_FLYING;
+            double slowed = (double) (0.98F * 0.3F) * (double) 0.1F;
+            PredictionResult result = f.tick(new Vec3(0.5, FLOOR_Y, 4.5 - WALK + velocity - slowed), true);
+
+            assertExact(result);
             assertNoFlags(f);
         }
     }
