@@ -911,6 +911,16 @@ public class PacketEntity {
         return locations.size() == 1 ? locations.getFirst() : null;
     }
 
+    /** The movement boxes of the client states this entity can be in, each bounding one state's positions. */
+    public List<SimpleCollisionBox> getPossibleMovementCollisionBoxGroups() {
+        return List.of(getPossibleMovementCollisionBoxes());
+    }
+
+    /** Whether some client state of this entity has a position the engine does not bound. */
+    public boolean hasUnboundedPosition() {
+        return false;
+    }
+
     public long getClientTickOrder() {
         return clientTickOrder;
     }
