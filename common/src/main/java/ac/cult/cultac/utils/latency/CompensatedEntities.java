@@ -210,7 +210,7 @@ public class CompensatedEntities {
      * yet; its riders are simulated too, so a vehicle switch reads a positioned vehicle.
      */
     @Nullable
-    private PacketEntity serverVehicleRoot() {
+    public PacketEntity serverVehicleRoot() {
         Integer vehicleId = vehicles.serverPlayerVehicle;
         if (vehicleId == null) return null;
         PacketEntity vehicle = entityMap.get(vehicleId.intValue());
@@ -231,6 +231,17 @@ public class CompensatedEntities {
         if (entity.getRiding() == null) return false;
         PacketEntity root = rootOf(entity);
         return root == null || root != selfRidingRoot() && root != serverVehicleRoot();
+    }
+
+    /**
+     * {@link #isUntrackedRider(PacketEntity)} given {@link #selfRidingRoot()} and {@link #serverVehicleRoot()} read
+     * since the last riding, server vehicle or entityMap change.
+     */
+    public boolean isUntrackedRider(
+            PacketEntity entity, @Nullable PacketEntity selfRidingRoot, @Nullable PacketEntity serverVehicleRoot) {
+        if (entity.getRiding() == null) return false;
+        PacketEntity root = rootOf(entity);
+        return root == null || root != selfRidingRoot && root != serverVehicleRoot;
     }
 
     /**
@@ -444,10 +455,19 @@ public class CompensatedEntities {
         return root == null ? entity.getClientTickOrder() : root.getClientTickOrder();
     }
 
-    /** Entity#isPassengerOfSameVehicle against the local player, which makes Entity#push skip the pair. */
-    public boolean sharesRootVehicleWithSelf(PacketEntity entity) {
+    /** The root of the local player's riding chain, the player itself while it rides nothing; null in a cycle. */
+    @Nullable
+    public PacketEntity rootOfSelf() {
+        return rootOf(playerEntity);
+    }
+
+    /**
+     * Entity#isPassengerOfSameVehicle against the local player, which makes Entity#push skip the pair, given
+     * {@link #rootOfSelf()} read since the last riding change.
+     */
+    public boolean sharesRootVehicleWithSelf(PacketEntity entity, @Nullable PacketEntity rootOfSelf) {
         PacketEntity root = rootOf(entity);
-        return root != null && root == rootOf(playerEntity);
+        return root != null && root == rootOfSelf;
     }
 
     // Null inside a riding cycle (a server mounting a vehicle on its own passenger), which has no root.

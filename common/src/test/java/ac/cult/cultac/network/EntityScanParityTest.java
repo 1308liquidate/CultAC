@@ -109,6 +109,9 @@ class EntityScanParityTest {
                 CultPlayer.class,
                 CompensatedEntities.class,
                 PacketEntity.class,
+                PacketEntity.class,
+                PacketEntity.class,
+                PacketEntity.class,
                 SimpleCollisionBox.class,
                 SimpleCollisionBox.class,
                 SimpleCollisionBox.class);
@@ -143,6 +146,9 @@ class EntityScanParityTest {
                                 f.player,
                                 entities,
                                 entity,
+                                entities.rootOfSelf(),
+                                entities.selfRidingRoot(),
+                                entities.serverVehicleRoot(),
                                 playerBox,
                                 new SimpleCollisionBox(),
                                 new SimpleCollisionBox())

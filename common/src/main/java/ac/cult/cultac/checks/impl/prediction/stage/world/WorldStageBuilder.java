@@ -525,15 +525,27 @@ public class WorldStageBuilder {
             SimpleCollisionBox entityBounds = new SimpleCollisionBox();
             SimpleCollisionBox entityScratch = new SimpleCollisionBox();
             CompensatedEntities entities = context.getEntities();
+            PacketEntity rootOfSelf = entities.rootOfSelf();
+            PacketEntity selfRidingRoot = entities.selfRidingRoot();
+            PacketEntity serverVehicleRoot = entities.serverVehicleRoot();
             long playerTickOrder = entities.getSelf().getClientTickOrder();
 
             for (PacketEntity entity : entities.pushOrCollideCandidates()) {
-                SimpleCollisionBox entityBox =
-                        collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch);
+                SimpleCollisionBox entityBox = collidingPusherBox(
+                        player,
+                        entities,
+                        entity,
+                        rootOfSelf,
+                        selfRidingRoot,
+                        serverVehicleRoot,
+                        playerBox,
+                        entityBounds,
+                        entityScratch);
                 if (entityBox == null) continue;
                 numColliding++;
                 if (entities.clientTickOrder(entity) < playerTickOrder) collidingTickingBeforePlayer++;
-                else if (entities.isUntrackedRider(entity)) ridersTickingAfterPlayer++;
+                else if (entities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot))
+                    ridersTickingAfterPlayer++;
                 boolean boatLike = entity.isBoat();
                 boolean minecartLike = entity.isMinecart();
                 if (boatLike || minecartLike || isBedrockHardCollidingEntity(entity)) {
@@ -577,14 +589,26 @@ public class WorldStageBuilder {
         SimpleCollisionBox entityBounds = new SimpleCollisionBox();
         SimpleCollisionBox entityScratch = new SimpleCollisionBox();
         CompensatedEntities entities = context.getEntities();
+        PacketEntity rootOfSelf = entities.rootOfSelf();
+        PacketEntity selfRidingRoot = entities.selfRidingRoot();
+        PacketEntity serverVehicleRoot = entities.serverVehicleRoot();
         long playerTickOrder = entities.getSelf().getClientTickOrder();
         int tickingAfterPlayer = 0;
         for (PacketEntity entity : entities.pushOrCollideCandidates()) {
             if (!entity.mayPushOrCollide() || entities.clientTickOrder(entity) < playerTickOrder) continue;
             // A rider pushes from the seat its vehicle gave it before this tick: the movement's own count holds it.
-            if (entities.isUntrackedRider(entity)) continue;
-            if (collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch) != null)
-                tickingAfterPlayer++;
+            if (entities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot)) continue;
+            if (collidingPusherBox(
+                            player,
+                            entities,
+                            entity,
+                            rootOfSelf,
+                            selfRidingRoot,
+                            serverVehicleRoot,
+                            playerBox,
+                            entityBounds,
+                            entityScratch)
+                    != null) tickingAfterPlayer++;
         }
         WorldData world = context.getWorldData();
         world.setNumCollidingTickingAfterPlayer(tickingAfterPlayer + world.getNumRidersTickingAfterPlayer());
@@ -602,9 +626,20 @@ public class WorldStageBuilder {
         SimpleCollisionBox entityBounds = new SimpleCollisionBox();
         SimpleCollisionBox entityScratch = new SimpleCollisionBox();
         CompensatedEntities entities = player.compensatedEntities;
+        PacketEntity rootOfSelf = entities.rootOfSelf();
+        PacketEntity selfRidingRoot = entities.selfRidingRoot();
+        PacketEntity serverVehicleRoot = entities.serverVehicleRoot();
         for (PacketEntity entity : entities.pushOrCollideCandidates()) {
-            SimpleCollisionBox box =
-                    collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch);
+            SimpleCollisionBox box = collidingPusherBox(
+                    player,
+                    entities,
+                    entity,
+                    rootOfSelf,
+                    selfRidingRoot,
+                    serverVehicleRoot,
+                    playerBox,
+                    entityBounds,
+                    entityScratch);
             if (box == null) continue;
             double width = BoundingBoxSize.getWidth(player, entity);
             // The box holds every box the entity may have this tick; its centre spans the box less one size.
@@ -621,14 +656,17 @@ public class WorldStageBuilder {
             CultPlayer player,
             CompensatedEntities entities,
             PacketEntity entity,
+            PacketEntity rootOfSelf,
+            PacketEntity selfRidingRoot,
+            PacketEntity serverVehicleRoot,
             SimpleCollisionBox playerBox,
             SimpleCollisionBox entityBounds,
             SimpleCollisionBox entityScratch) {
         if (!entity.mayPushOrCollide()) return null;
-        if (entities.sharesRootVehicleWithSelf(entity)) return null;
+        if (entities.sharesRootVehicleWithSelf(entity, rootOfSelf)) return null;
 
         SimpleCollisionBox entityBox;
-        if (entities.isUntrackedRider(entity)) {
+        if (entities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot)) {
             if (!mayPushAsUntrackedRider(player, entity)
                     || !entities.untrackedRiderMayReach(entity, playerBox, entityBounds, entityScratch)) return null;
             entityBox = entities.untrackedRiderPushBox(entity);
