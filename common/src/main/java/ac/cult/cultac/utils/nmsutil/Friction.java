@@ -78,15 +78,8 @@ public final class Friction {
         float frictionUnderPlayer =
                 getPlayerFriction(player, from, context.getLastTickMainSupportingBlockData(), onGround);
         double x = playerVelocity.x * frictionUnderPlayer;
-        double y = playerVelocity.y;
+        double y = applyAirGravity(player, playerVelocity.y, gravity);
         double z = playerVelocity.z * frictionUnderPlayer;
-
-        if (player.compensatedEntities.getLevitationAmplifier() != null) {
-            // This supports both positive and negative levitation
-            y += (0.05 * (player.compensatedEntities.getLevitationAmplifier() + 1) - y) * 0.2;
-        } else {
-            y += -gravity;
-        }
 
         // MCP-Reborn 26.2 LivingEntity#travelInAir applies the vertical air drag
         // through the air_drag_modifier attribute instead of the raw 0.98 constant.
@@ -95,6 +88,13 @@ public final class Friction {
                         0.98F, (float) player.compensatedEntities.getEntityInControl().airDragModifier)
                 : 0.98F;
         out.add(new Vec3(x, y * verticalDrag, z));
+    }
+
+    /** LivingEntity#travelInAir: the moved vertical velocity before vertical drag; levitation replaces gravity. */
+    public static double applyAirGravity(CultPlayer player, double y, double gravity) {
+        Integer levitation = player.compensatedEntities.getLevitationAmplifier();
+        // This supports both positive and negative levitation
+        return levitation != null ? y + (0.05 * (levitation + 1) - y) * 0.2 : y - gravity;
     }
 
     // MCP-Reborn 26.2 LivingEntity#computeModifiedFriction

@@ -51,6 +51,7 @@ import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.VectorUtils;
 import ac.cult.cultac.utils.nmsutil.Collisions;
+import ac.cult.cultac.utils.nmsutil.Friction;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.IsUsingItem;
 import ac.grim.grimac.api.event.events.GrimPlayerSetbackEvent;
@@ -589,7 +590,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             simulated = input.multiply(0.99F, 0.98F, 0.99F);
         } else { // Gliding doesn't have friction, we handle it differently
             final double horizFriction = wasOnGround ? 0.91F * 0.6F : 0.91F;
-            simulated = input.subtract(0.0D, gravity, 0.0D).multiply(horizFriction, 0.98f, horizFriction);
+            simulated = new Vec3(input.x, Friction.applyAirGravity(player, input.y, gravity), input.z)
+                    .multiply(horizFriction, 0.98f, horizFriction);
         }
 
         // stop 1.8 players from stepping onto 1.25 high blocks, because why not?
