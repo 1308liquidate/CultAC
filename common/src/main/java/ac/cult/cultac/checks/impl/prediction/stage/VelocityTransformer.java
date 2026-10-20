@@ -5,6 +5,7 @@ import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
@@ -74,10 +75,35 @@ public class VelocityTransformer {
         // the carried delta from the accepted packet movement after the move.
 
         boolean abilityFlying = simulationContext.getVehicle() == null && player.isFlying;
-        if (abilityFlying) input = applyFlightInput(player, input);
+        if (abilityFlying) {
+            input = applyFlightTakeoff(player, input);
+            input = applyFlightInput(player, input);
+        }
         input = applyMovementThreshold(input, simulationContext.getVersion(), simulationContext.getVehicle() == null);
         // Player#isAffectedByFluids is false in flight, so LivingEntity#aiStep runs neither jump.
         return abilityFlying ? input : applyJumps(player, input);
+    }
+
+    /**
+     * LocalPlayer#aiStep runs jumpFromGround when a jump press turns flight on while on the ground, ahead of the
+     * flight input; the spectator start presses nothing. The player_abilities of that start precedes this tick's
+     * player_input and move.
+     */
+    private List<PredVector> applyFlightTakeoff(CultPlayer player, List<PredVector> velocities) {
+        if (!player.packetStateData.flyingStartBeforeTravel
+                || !player.packetStateData.knownInput.jump()
+                || player.gamemode == GameMode.SPECTATOR) {
+            return velocities;
+        }
+        List<Boolean> onGroundStates = simulationContext.getLastOnGround().getStates();
+        List<PredVector> outputs = new ArrayList<>();
+        if (onGroundStates.contains(false)) outputs.addAll(velocities);
+        if (onGroundStates.contains(true)) {
+            for (PredVector velocity : velocities) {
+                outputs.addAll(applyPossibleJumpStates(player, velocity));
+            }
+        }
+        return outputs;
     }
 
     /**

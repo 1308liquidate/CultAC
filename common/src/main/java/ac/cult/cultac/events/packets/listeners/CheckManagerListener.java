@@ -1132,6 +1132,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             player.packetStateData.carriedItemChangedThisClientTick = false;
         }
         player.packetStateData.receivedMovementThisClientTick = false;
+        player.packetStateData.flyingStartBeforeTravel = false;
         player.packetStateData.bedrockTranslatedMovement.clear();
         player.packetStateData.clientMovementInputUpdatedThisClientTick = false;
         player.packetStateData.vehicleMovePacketsThisClientTick = 0;

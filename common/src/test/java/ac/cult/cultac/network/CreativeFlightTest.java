@@ -32,9 +32,13 @@ class CreativeFlightTest {
             new ServerboundPlayerInput(false, false, false, false, true, false, false);
     private static final ServerboundPlayerInput SHIFT =
             new ServerboundPlayerInput(false, false, false, false, false, true, false);
+    private static final ServerboundPlayerInput JUMP_SHIFT =
+            new ServerboundPlayerInput(false, false, false, false, true, true, false);
     private static final float FLYING_SPEED = 0.05F;
     private static final double IMPULSE = FLYING_SPEED * 3.0F;
     private static final Vec3 HOVER = new Vec3(0.5, FLOOR_Y + 3, 0.5);
+    private static final Vec3 GROUND = new Vec3(0.5, FLOOR_Y, 0.5);
+    private static final double JUMP_POWER = 0.42F;
     private static final Vec3 KNOCKBACK = new Vec3(0.21113349203442588, -0.0783739241897089, -0.3397424159189404);
     private static final Set<Relative> ALL_DELTAS = Set.of(Relative.DELTA_X, Relative.DELTA_Y, Relative.DELTA_Z);
 
@@ -180,23 +184,87 @@ class CreativeFlightTest {
         }
     }
 
+    /**
+     * LocalPlayer#aiStep runs jumpFromGround when a jump press turns flight on while on the ground, before the
+     * flight input, so a knockback taken on that tick rises by the jump and the impulse.
+     */
+    @Test
+    void aKnockbackOnAGroundedFlightToggleTakesTheTakeoffJumpAndTheImpulse() throws Exception {
+        try (var f = flying(GROUND, false)) {
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            assertTrue(f.player.isFlying, "the toggle did not apply");
+            f.input(JUMP);
+
+            assertPredicted(f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false));
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /** With shift held too the impulses cancel, and the takeoff jump alone lifts the knockback. */
+    @Test
+    void aKnockbackOnAGroundedFlightToggleWithShiftHeldTakesTheTakeoffJump() throws Exception {
+        try (var f = flying(GROUND, false)) {
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            f.input(JUMP_SHIFT);
+
+            assertPredicted(f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER, KNOCKBACK.z), false));
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /** Player#isAffectedByFluids is false in flight, so a player already flying on the ground has no jump. */
+    @Test
+    void aPlayerAlreadyFlyingOnTheGroundCannotJumpUnderAKnockback() throws Exception {
+        try (var f = flying(GROUND, true)) {
+            f.input(JUMP_SHIFT);
+            f.pongThrough(f.velocity(KNOCKBACK));
+
+            f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER, KNOCKBACK.z), false);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** A survival toggle needs the jump press; flight turned on without it takes no takeoff jump. */
+    @Test
+    void aFlightToggleWithoutAJumpPressTakesNoTakeoffJump() throws Exception {
+        try (var f = flying(GROUND, false)) {
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            f.input(SHIFT);
+
+            f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER - IMPULSE, KNOCKBACK.z), false);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
     /** A player hovering at {@link #HOVER} that the server lets fly and sets flying. */
     private static JavaTickFixture flying() throws Exception {
+        return flying(HOVER, true);
+    }
+
+    /** A player at {@code position} that the server lets fly, set flying with {@code flying}. */
+    private static JavaTickFixture flying(Vec3 position, boolean flying) throws Exception {
         JavaTickFixture f = new JavaTickFixture();
-        f.place(HOVER, Vec3.ZERO);
-        grantFlight(f);
+        f.place(position, Vec3.ZERO);
+        grantFlight(f, flying);
         return f;
     }
 
     /** A player_abilities letting the player fly and setting it flying, answered through its ping. */
     private static void grantFlight(JavaTickFixture f) {
-        var packet = new ClientboundPlayerAbilities(false, true, true, false, FLYING_SPEED, 0.1F);
+        grantFlight(f, true);
+    }
+
+    private static void grantFlight(JavaTickFixture f, boolean flying) {
+        var packet = new ClientboundPlayerAbilities(false, flying, true, false, FLYING_SPEED, 0.1F);
         var event = new PacketSendEvent<>(
                 f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.PLAYER_ABILITIES, packet, false);
         f.player.checkManager.getListener(PacketPlayerAbilities.class).onPlayerAbilities(event, f.player, packet);
         event.getTasksAfterSend().forEach(Runnable::run);
         f.pongThrough(f.player.lastTransactionSent.get());
-        assertTrue(f.player.isFlying && f.player.canFly, "the abilities did not apply");
+        assertTrue(f.player.isFlying == flying && f.player.canFly, "the abilities did not apply");
     }
 
     /**
