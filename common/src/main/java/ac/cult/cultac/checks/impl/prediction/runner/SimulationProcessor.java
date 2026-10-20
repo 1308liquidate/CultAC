@@ -1200,11 +1200,15 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                         result.getSimulationContext().getLastOnGround().determinePessimistically()
                                 ? blockFriction * 0.91
                                 : 0.91;
-                if (result.getSimulationContext().getWorldData().getInLava().determinePessimistically()) {
+                // Player#isAffectedByFluids is false in flight, so LivingEntity#travel takes travelInAir in any fluid.
+                boolean abilityFlying = result.getSimulationContext().getVehicle() == null && this.player.isFlying;
+                if (!abilityFlying
+                        && result.getSimulationContext().getWorldData().getInLava().determinePessimistically()) {
                     trueFriction = 0.5;
                 }
 
-                if (result.getSimulationContext().getWorldData().getInWater().determineOptimistically()) {
+                if (!abilityFlying
+                        && result.getSimulationContext().getWorldData().getInWater().determineOptimistically()) {
                     trueFriction = 0.96;
                 }
 

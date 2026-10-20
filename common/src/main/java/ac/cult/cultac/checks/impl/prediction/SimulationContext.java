@@ -35,6 +35,7 @@ import lombok.ToString;
 @ToString
 public class SimulationContext {
     private static final Vec3 NO_STUCK_SPEED = new Vec3(1, 1, 1);
+    private static final List<Boolean> NOT_IN_FLUID = List.of(false);
 
     @Setter
     ClientItemUseState.Snapshot itemUse = ClientItemUseState.Snapshot.NONE;
@@ -359,8 +360,8 @@ public class SimulationContext {
         float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
         double allowance = 0;
         for (boolean onGround : worldData.getLastOnGround().getStates()) {
-            for (boolean water : worldData.getInWater().getStates()) {
-                for (boolean lava : worldData.getInLava().getStates()) {
+            for (boolean water : travelFluidStates(player, worldData.getInWater())) {
+                for (boolean lava : travelFluidStates(player, worldData.getInLava())) {
                     allowance = Math.max(
                             allowance,
                             getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava, outcome)
@@ -391,8 +392,8 @@ public class SimulationContext {
         float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
         double maxSpeed = 0;
         for (boolean onGround : worldData.getLastOnGround().getStates()) {
-            for (boolean water : worldData.getInWater().getStates()) {
-                for (boolean lava : worldData.getInLava().getStates()) {
+            for (boolean water : travelFluidStates(player, worldData.getInWater())) {
+                for (boolean lava : travelFluidStates(player, worldData.getInLava())) {
                     if (groundSprintSpeed(player, onGround, water || lava)) {
                         for (float speed : getGroundMoveRelativeSpeeds(player, outcome)) {
                             maxSpeed = Math.max(maxSpeed, speed);
@@ -407,6 +408,11 @@ public class SimulationContext {
             }
         }
         return maxSpeed;
+    }
+
+    // Player#isAffectedByFluids is false in flight, so LivingEntity#travel takes travelInAir in any fluid.
+    private List<Boolean> travelFluidStates(CultPlayer player, DesyncStatus fluid) {
+        return vehicle == null && player.isFlying ? NOT_IN_FLUID : fluid.getStates();
     }
 
     /** LivingEntity#getSpeed on the ground carries the minecraft:sprinting modifier the client holds. */
@@ -474,8 +480,8 @@ public class SimulationContext {
     private float getFrictionInfluencedSpeed(float friction, CultPlayer player) {
         float maxSpeed = 0;
         for (boolean onGround : worldData.getLastOnGround().getStates()) {
-            for (boolean water : worldData.getInWater().getStates()) {
-                for (boolean lava : worldData.getInLava().getStates()) {
+            for (boolean water : travelFluidStates(player, worldData.getInWater())) {
+                for (boolean lava : travelFluidStates(player, worldData.getInLava())) {
                     maxSpeed = Math.max(maxSpeed, getFrictionInfluencedSpeed(friction, player, onGround, water, lava));
                 }
             }

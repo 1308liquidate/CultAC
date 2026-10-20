@@ -697,6 +697,35 @@ class CreativeFlightTest {
         }
     }
 
+    /**
+     * Player#isAffectedByFluids is false in flight, so LivingEntity#travel moves a flight landing in shallow water by
+     * Player#getFlyingSpeed, and the landing can fire updateAutoJump at the step up ahead.
+     */
+    @Test
+    void aFlightLandingInShallowWaterWhereAnAutoJumpCanFireMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            int water = DataTables.defaults().registry().with(BlockIds.WATER.defaultState(), "level", "7");
+            for (int x = -2; x <= 2; x++) {
+                for (int z = -2; z <= 2; z++) block(f, x, FLOOR_Y, z, water);
+            }
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            f.place(GROUND.add(0, 0.05, 0), new Vec3(0, -0.2, 0));
+            grantFlight(f, true);
+            f.input(FORWARD);
+            f.abilities(false);
+            double fly = (double) 0.98F * (double) FLYING_SPEED;
+            Vec3 landing = GROUND.add(0, 0, fly);
+            PredictionResult moved = f.tick(landing, true);
+            assertTrue(moved.getFlags().isEmpty(), "the landing flagged " + moved.getFlags());
+            f.input(JUMP);
+            f.tick(landing.add(0, JUMP_POWER, fly * 0.91F), false);
+            assertTrue((f.player.packetStateData.jumpTriggerTimes & 1) != 0, "the auto-jump history was dropped");
+
+            pressInTheAirThenTakeOff(f);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
     /** Entity#updateSwimming needs the sprint flag, so a wader that never sprinted toggles on an armed press. */
     @Test
     void aTakeoffKeptByAWadingPressFlags() throws Exception {
