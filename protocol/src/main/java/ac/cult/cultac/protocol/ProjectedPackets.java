@@ -42,6 +42,10 @@ public final class ProjectedPackets implements AutoCloseable {
         return observed;
     }
 
+    public boolean closed() {
+        return closed;
+    }
+
     public boolean translated() {
         return observed.data().version() != model.data().version();
     }

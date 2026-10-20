@@ -116,6 +116,19 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 return;
             }
         }
+        if (emission == null
+                && !connection.isPreparingWrites()
+                && message instanceof ByteBuf frame
+                && unroutedTranslated(frame)) {
+            if (removed || !ctx.channel().isActive()) {
+                new Pending(frame, promise).discard(new ClosedChannelException());
+            } else {
+                connection.observePacket(
+                        PacketDirection.CLIENTBOUND, connection.phase(PacketDirection.CLIENTBOUND), frame);
+                ctx.write(frame, promise);
+            }
+            return;
+        }
         boolean[] consumed = {false};
         try {
             connection.runInModel(() -> {
@@ -215,6 +228,19 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             } else pending.promise.tryFailure(failure);
         } finally {
             if (fallback != null) fallback.release();
+        }
+    }
+
+    /** A translated frame whose type has no route, which the expansion would emit alone and unchanged. */
+    private boolean unroutedTranslated(ByteBuf frame) {
+        try {
+            var packets = connection.packets();
+            if (!packets.translated() || packets.closed()) return false;
+            var type = packets.type(
+                    connection.phase(PacketDirection.CLIENTBOUND), PacketDirection.CLIENTBOUND, Wire.peekVarInt(frame));
+            return type == null || connection.dispatcher().get(type) == null;
+        } catch (Throwable failure) {
+            return false;
         }
     }
 
