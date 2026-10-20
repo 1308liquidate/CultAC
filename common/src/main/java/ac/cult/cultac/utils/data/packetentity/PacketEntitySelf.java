@@ -3,6 +3,7 @@ package ac.cult.cultac.utils.data.packetentity;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.sprint.SprintD;
 import ac.cult.cultac.network.packet.EntityPositionPath;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
@@ -10,8 +11,10 @@ import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ClientAttributeInstance;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import lombok.Getter;
 import lombok.Setter;
 import org.jetbrains.annotations.Nullable;
@@ -46,9 +49,9 @@ public class PacketEntitySelf extends PacketEntity {
     private final ClientAttributeInstance scaleAttribute = new ClientAttributeInstance(1.0D, 0.0625D, 16.0D);
     private final ClientAttributeInstance gravityAttribute = new ClientAttributeInstance(0.08D, -1.0D, 1.0D);
     private final ClientAttributeInstance stepHeight = new ClientAttributeInstance(0.6D, 0.0D, 10.0D);
-    // playerSpeed leaves out the sprinting and powder snow modifiers, which are modelled apart.
-    private final ClientAttributeInstance movementSpeedAttribute =
-            new ClientAttributeInstance(0.1F, 0.0D, 1024.0D, CompensatedEntities.EXCLUDED_MODIFIER_IDS);
+    // playerSpeed leaves out the sprinting modifier, which is modelled apart.
+    private final ClientAttributeInstance movementSpeedAttribute = new ClientAttributeInstance(
+            0.1F, 0.0D, 1024.0D, Set.of(CompensatedEntities.SPRINTING_SPEED_MODIFIER.id()));
     private final ClientAttributeInstance bouncinessAttribute = new ClientAttributeInstance(0.0D, 0.0D, 1.0D);
     private final ClientAttributeInstance frictionModifierAttribute = new ClientAttributeInstance(1.0D, 0.0D, 2048.0D);
     private final ClientAttributeInstance airDragModifierAttribute = new ClientAttributeInstance(1.0D, 0.0D, 2048.0D);
@@ -113,8 +116,20 @@ public class PacketEntitySelf extends PacketEntity {
             default -> null;
         };
         if (instance == null) return;
-        instance.onServerSnapshot(snapshot);
+        instance.onServerSnapshot(
+                instance == movementSpeedAttribute ? withoutClientFrost(snapshot) : snapshot);
         refreshAttributeValues();
+    }
+
+    /**
+     * LivingEntity#aiStep runs removeFrost and tryAddFrost only on the server since 1.21.5, so the client moves with
+     * the server's minecraft:powder_snow modifier. Older clients replace it every tick with their own.
+     */
+    private AttributeSnapshot withoutClientFrost(AttributeSnapshot snapshot) {
+        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_5)) return snapshot;
+        List<AttributeModifier> kept = new ArrayList<>(snapshot.modifiers());
+        kept.removeIf(modifier -> modifier.id().equals(CompensatedEntities.SNOW_MODIFIER_ID));
+        return new AttributeSnapshot(snapshot.attribute(), snapshot.base(), kept);
     }
 
     /** movement_speed with {@code sprinting} as its minecraft:sprinting modifier; {@link #playerSpeed} has none. */
