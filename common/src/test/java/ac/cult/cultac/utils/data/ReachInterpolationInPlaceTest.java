@@ -39,6 +39,23 @@ class ReachInterpolationInPlaceTest {
         assertBoxEquals(new SimpleCollisionBox(-1, 0, -1, 4, 2, 2), data.getPossibleMovementLocationCombined());
     }
 
+    /** A baby start under the adult target it grew into, then a scale drop: the start never shrinks below the size. */
+    @Test
+    void aShrinkPastAStartSmallerThanTheTargetKeepsTheStartAtTheNewSize() throws Exception {
+        ReachInterpolationData data = new ReachInterpolationData(new SimpleCollisionBox(-0.3, 0, -0.3, 0.3, 1.95, 0.3));
+        set(data, "startingLocation", new SimpleCollisionBox(1.85, 0, -0.15, 2.15, 0.975, 0.15));
+        data.resize(0.06F, 0.195F);
+        var field = ReachInterpolationData.class.getDeclaredField("startingLocation");
+        field.setAccessible(true);
+        SimpleCollisionBox start = (SimpleCollisionBox) field.get(data);
+        assertEquals(2.0, (start.minX + start.maxX) / 2.0, 1e-9);
+        assertEquals(0.0, (start.minZ + start.maxZ) / 2.0, 1e-9);
+        assertEquals(0.0, start.minY);
+        assertTrue(start.maxX - start.minX >= 0.06F - 1e-9, "start X " + start.minX + ".." + start.maxX);
+        assertTrue(start.maxZ - start.minZ >= 0.06F - 1e-9, "start Z " + start.minZ + ".." + start.maxZ);
+        assertTrue(start.maxY - start.minY >= 0.195F - 1e-9, "start Y " + start.minY + ".." + start.maxY);
+    }
+
     @Test
     void combinedLocationIntoBox() throws Exception {
         ReachInterpolationData data = data(3, 1, 2);

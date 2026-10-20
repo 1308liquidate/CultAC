@@ -36,6 +36,8 @@ import java.util.function.UnaryOperator;
 // You may not copy the check unless you are licensed under GPL
 public class ReachInterpolationData {
     private static final double REACH_PACKET_POSITION_UNCERTAINTY = 0.03125D;
+    /** A start extent within this of the new size is that size; the size change rounds by less. */
+    private static final double SIZE_EPSILON = 1.0E-7D;
     /** Queue length past which the two oldest steps fold into one. */
     static final int MAX_QUEUED_STEPS = 128;
 
@@ -681,13 +683,26 @@ public class ReachInterpolationData {
         // A pending second transaction leaves the start a union of boxes the target's size; each keeps its feet.
         double widthChange = width - (targetLocation.maxX - targetLocation.minX);
         double heightChange = height - (targetLocation.maxY - targetLocation.minY);
-        startingLocation = new SimpleCollisionBox(
+        SimpleCollisionBox start = new SimpleCollisionBox(
                 startingLocation.minX - widthChange / 2.0D,
                 startingLocation.minY,
                 startingLocation.minZ - widthChange / 2.0D,
                 startingLocation.maxX + widthChange / 2.0D,
                 startingLocation.maxY + heightChange,
                 startingLocation.maxZ + widthChange / 2.0D);
+        // A start smaller than the target never shrinks below the new size; the 7-argument box does not sort.
+        if (start.maxX - start.minX < width - SIZE_EPSILON) {
+            double centerX = (startingLocation.minX + startingLocation.maxX) / 2.0D;
+            start.minX = centerX - width / 2.0D;
+            start.maxX = centerX + width / 2.0D;
+        }
+        if (start.maxZ - start.minZ < width - SIZE_EPSILON) {
+            double centerZ = (startingLocation.minZ + startingLocation.maxZ) / 2.0D;
+            start.minZ = centerZ - width / 2.0D;
+            start.maxZ = centerZ + width / 2.0D;
+        }
+        if (start.maxY - start.minY < height - SIZE_EPSILON) start.maxY = start.minY + height;
+        startingLocation = start;
         targetLocation = resized(targetLocation, width, height);
     }
 
