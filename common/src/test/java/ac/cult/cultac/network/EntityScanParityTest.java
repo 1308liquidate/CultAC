@@ -151,10 +151,14 @@ class EntityScanParityTest {
                         != null;
                 if (collides) colliding++;
                 if (entities.clientTickOrder(entity) < playerTickOrder) continue;
+                // The recount keeps the movement's own count of riders outside the player's riding trees.
+                if (entities.isUntrackedRider(entity)) continue;
                 if (collides) expected++;
             }
             WorldStageBuilder.recountCollidingTickingAfterPlayer(f.player, prediction);
-            assertEquals(expected, context.getWorldData().getNumCollidingTickingAfterPlayer());
+            assertEquals(
+                    expected + context.getWorldData().getNumRidersTickingAfterPlayer(),
+                    context.getWorldData().getNumCollidingTickingAfterPlayer());
             assertTrue(expected > 0 && expected < colliding, "expected=" + expected + " colliding=" + colliding);
         }
     }

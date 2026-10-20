@@ -36,6 +36,10 @@ class JavaEntityPushTest {
     private static final double SECOND_FALL = fall(FIRST_FALL);
     private static final Vec3 CONTACT = START.add(0, FIRST_FALL, 0);
     private static final Vec3 AWAY = new Vec3(4.5, FLOOR_Y, 4.5);
+    /** A zombie whose top stays below the player's contact box while a slime seated on it reaches into it. */
+    private static final Vec3 BELOW_TOUCHING = TOUCHING.add(0, -1.5, 0);
+
+    private static final int RIDER = 101;
     /** Out of reach of the player's contact box until its first interpolation step lands it on {@link #TOUCHING}. */
     private static final Vec3 STEPPING_FROM = TOUCHING.add(0, 0, 0.4);
     /** Three interpolation steps of -0.4 each. */
@@ -372,7 +376,7 @@ class JavaEntityPushTest {
     }
 
     @Test
-    void aRiderOutsideTheOwnRidingTreeDoesNotPush() throws Exception {
+    void aRiderOutsideTheOwnRidingTreePushesFromItsSeatNotItsLastPosition() throws Exception {
         try (var f = falling()) {
             PacketEntity vehicle = entity(f, 100, new Vec3(4.5, FLOOR_Y, 4.5));
             vehicle.setClientTickOrder(-1L);
@@ -382,6 +386,60 @@ class JavaEntityPushTest {
 
             assertEquals(0, contact.getSimulationContext().getWorldData().getNumPushing());
             assertExact(contact);
+        }
+    }
+
+    /** Entity#rideTick runs LivingEntity#tick, whose aiStep pushes from the seat positionRider gave the rider. */
+    @Test
+    void aLivingRiderOfAnotherEntityPushesFromItsSeat() throws Exception {
+        try (var f = falling()) {
+            seatSlime(f, entity(f, 100, BELOW_TOUCHING));
+
+            PredictionResult contact = f.tick(START.add(0, FIRST_FALL, 0), false);
+            assertExact(contact);
+            WorldData world = contact.getSimulationContext().getWorldData();
+            assertEquals(1, world.getNumColliding());
+            assertEquals(1, world.getNumCollidingTickingAfterPlayer());
+            assertExact(f.tick(START.add(0, FIRST_FALL + SECOND_FALL, PUSH), false));
+        }
+    }
+
+    /** ClientLevel#tickNonPassenger ticks a passenger right after its vehicle, in the vehicle's tick-list place. */
+    @Test
+    void aLivingRiderTicksInItsVehiclesPlace() throws Exception {
+        try (var f = falling()) {
+            PacketEntity vehicle = entity(f, 100, BELOW_TOUCHING);
+            vehicle.setClientTickOrder(-1L);
+            seatSlime(f, vehicle);
+
+            assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
+        }
+    }
+
+    @Test
+    void aLivingRiderAndItsVehiclePushTheirOwnPushes() throws Exception {
+        try (var f = falling()) {
+            seatSlime(f, entity(f, 100, TOUCHING));
+
+            PredictionResult contact = f.tick(START.add(0, FIRST_FALL, 0), false);
+            assertEquals(2, contact.getSimulationContext().getWorldData().getNumCollidingTickingAfterPlayer());
+            PredictionResult next = f.tick(START.add(0, FIRST_FALL + SECOND_FALL, 2 * PUSH), false);
+            assertEquals(2, next.getSimulationContext().getWorldData().getNumPushing());
+            assertExact(next);
+        }
+    }
+
+    /** A vehicle that may be anywhere along its pending move may seat its rider anywhere along it too. */
+    @Test
+    void aLivingRiderOfAVehicleWithAnUncertainPositionMayPushFromAnySeat() throws Exception {
+        try (var f = falling()) {
+            PacketEntity vehicle = entity(f, 100, BELOW_TOUCHING);
+            vehicle.onFirstTransaction(true, true, 0, 0, 2.0, f.player);
+            seatSlime(f, vehicle);
+
+            PredictionResult contact = f.tick(START.add(0, FIRST_FALL, 0), false);
+            assertExact(contact);
+            assertEquals(1, contact.getSimulationContext().getWorldData().getNumCollidingTickingAfterPlayer());
         }
     }
 
@@ -519,6 +577,12 @@ class JavaEntityPushTest {
     private static PacketEntity entity(JavaTickFixture f, int id, Vec3 position) {
         f.player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, position, 0, 0, 0);
         return f.player.compensatedEntities.entityMap.get(id);
+    }
+
+    /** Seats a slime, a living rider like a hat mob on a player, on {@code vehicle}; it spawns far from the player. */
+    private static void seatSlime(JavaTickFixture f, PacketEntity vehicle) {
+        f.player.compensatedEntities.addEntity(RIDER, EntityTypeIds.SLIME, AWAY, 0, 0, 0);
+        f.player.compensatedEntities.entityMap.get(RIDER).mount(vehicle);
     }
 
     /** A respawn into the current level, its spawn teleport to {@link #START}, then two falling ticks to {@link #CONTACT}. */

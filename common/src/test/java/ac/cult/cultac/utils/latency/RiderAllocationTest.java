@@ -1,15 +1,19 @@
 package ac.cult.cultac.utils.latency;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
+import ac.cult.cultac.checks.impl.prediction.stage.world.WorldStageBuilder;
 import ac.cult.cultac.network.TestUsers;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
 import com.sun.management.ThreadMXBean;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -21,14 +25,16 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mockito;
 
 /**
- * Cosmetic riders on other players cost nothing per passenger sweep or client tick while the local player rides
- * nothing: 40 ridden players, each with a two-deep stack of riders, beside 40 unridden mobs.
+ * Cosmetic riders on other players cost nothing per passenger sweep, client tick or entity-push collection while the
+ * local player rides nothing: 40 ridden players, each with a two-deep stack of riders and a living hat, beside 40
+ * unridden mobs.
  */
 class RiderAllocationTest {
     private static final int PLAYERS = 40;
     private static final int VEHICLE = 2000;
     private static final int RIDER = 3000;
     private static final int TOP_RIDER = 4000;
+    private static final int HAT = 5000;
     private static final int MOB = 1000;
     private static final int WARMUP = 20_000;
     private static final int MEASURED = 5_000;
@@ -61,6 +67,28 @@ class RiderAllocationTest {
             // Every entity movement task runs this sweep.
             double sweep = perOperation(bean, entities::updatePassengerPositions);
             double tickEnd = perOperation(bean, entities.vehicles::onClientTickEnd);
+            // Entity-push collection with riders minus without; reported only, as JIT noise moves it.
+            WorldStageBuilder pushes = new WorldStageBuilder();
+            SimpleCollisionBox riddenRange = new SimpleCollisionBox();
+            SimpleCollisionBox bareRange = new SimpleCollisionBox();
+            Runnable riddenPushes = () -> pushes.addPushesOnStandingPlayer(ridden, 0, 64, 0, riddenRange);
+            Runnable barePushes = () -> pushes.addPushesOnStandingPlayer(bare, 0, 64, 0, bareRange);
+            perOperation(bean, riddenPushes);
+            perOperation(bean, barePushes);
+            double riderPushes = perOperation(bean, riddenPushes) - perOperation(bean, barePushes);
+            // The far hats themselves, ruled out before their seats are computed.
+            PacketEntity[] hats = new PacketEntity[PLAYERS];
+            for (int i = 0; i < PLAYERS; i++) hats[i] = entities.getEntity(HAT + i);
+            SimpleCollisionBox near = new SimpleCollisionBox(-0.5, 63.8, -0.5, 0.5, 66.0, 0.5);
+            SimpleCollisionBox rootBox = new SimpleCollisionBox();
+            SimpleCollisionBox scratch = new SimpleCollisionBox();
+            for (PacketEntity hat : hats) {
+                assertTrue(entities.isUntrackedRider(hat));
+                assertFalse(entities.untrackedRiderMayReach(hat, near, rootBox, scratch));
+            }
+            double farHats = perOperation(bean, () -> {
+                for (PacketEntity hat : hats) entities.untrackedRiderMayReach(hat, near, rootBox, scratch);
+            });
             // The whole client-tick-end entity pass, with riders minus without: the rider share of a client tick.
             Runnable riddenPass = () -> ridden.packetEntityReplication.onPlayerTickEnd(null);
             Runnable barePass = () -> bare.packetEntityReplication.onPlayerTickEnd(null);
@@ -72,13 +100,15 @@ class RiderAllocationTest {
             double riderTick = riddenTick - bareTick;
 
             String report = String.format(
-                    "%s: sweep=%.1f B, vehicleTickEnd=%.1f B, clientTickEnd ridden=%.1f B bare=%.1f B riderShare=%.1f B",
-                    client, sweep, tickEnd, riddenTick, bareTick, riderTick);
+                    "%s: sweep=%.1f B, vehicleTickEnd=%.1f B, farHats=%.1f B, riderPushes=%.1f B,"
+                            + " clientTickEnd ridden=%.1f B bare=%.1f B riderShare=%.1f B",
+                    client, sweep, tickEnd, farHats, riderPushes, riddenTick, bareTick, riderTick);
             System.out.println("RIDER-ALLOC " + report);
             if (System.getProperty("rider.alloc.report") != null) return;
 
             assertTrue(sweep <= 8, report);
             assertTrue(tickEnd <= 8, report);
+            assertTrue(farHats <= 8, report);
             assertTrue(riderTick <= 64, report);
         } finally {
             close(ridden);
@@ -108,7 +138,8 @@ class RiderAllocationTest {
             replication.addEntity(RIDER + i, EntityTypeIds.ARMOR_STAND, new Vec3(i, 64, -3), 0, 0, 0, -1);
             replication.addEntity(TOP_RIDER + i, EntityTypeIds.ARMOR_STAND, new Vec3(i, 64, -3), 0, 0, 0, -1);
             if (i % 2 == 0) player.compensatedEntities.getEntity(TOP_RIDER + i).scale = 0.5F;
-            player.compensatedEntities.vehicles.applyVehiclePassengers(VEHICLE + i, new int[] {RIDER + i});
+            replication.addEntity(HAT + i, EntityTypeIds.SLIME, new Vec3(i, 64, -3), 0, 0, 0, -1);
+            player.compensatedEntities.vehicles.applyVehiclePassengers(VEHICLE + i, new int[] {RIDER + i, HAT + i});
             player.compensatedEntities.vehicles.applyVehiclePassengers(RIDER + i, new int[] {TOP_RIDER + i});
         }
         return player;

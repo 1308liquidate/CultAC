@@ -44,6 +44,9 @@ public class WorldData {
     @Setter
     int numCollidingTickingAfterPlayer;
 
+    /** The riders outside the player's riding trees among {@link #numCollidingTickingAfterPlayer}. */
+    int numRidersTickingAfterPlayer;
+
     int numPushing;
     int numCarriedPushing;
     CarriedPush carriedPush;
@@ -94,6 +97,7 @@ public class WorldData {
                 climbing,
                 numColliding,
                 numCollidingTickingAfterPlayer,
+                numRidersTickingAfterPlayer,
                 numPushing,
                 numCarriedPushing,
                 carriedPush,

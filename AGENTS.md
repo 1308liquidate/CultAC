@@ -75,8 +75,9 @@ For every anticheat change:
 
 - Only the local player's own riding tree is positioned and ticked: the tree under the root of its riding chain, plus the tree of the vehicle the server last put it on. This is Grim's model and an owner decision, not an optimisation to revisit.
 - Riders on any other entity (name tags, model parts on other players) are untracked: never positioned or ticked, and re-anchored at their current seat when they dismount or lose their vehicle.
-- Every reader of another entity's position or boxes (checks, collision, pushes, block placement, visibility, debug) skips entities for which `CompensatedEntities#isUntrackedRider` is true. An event-driven reader that needs such a rider's position uses `CompensatedEntities#currentMovementBox`.
-- `RiderAllocationTest` guards it: cosmetic riders on other players allocate nothing per passenger sweep or client tick.
+- Every reader of another entity's position or boxes (checks, collision, block placement, visibility, debug) skips entities for which `CompensatedEntities#isUntrackedRider` is true. An event-driven reader that needs such a rider's position uses `CompensatedEntities#currentMovementBox`.
+- Entity pushes are the one per-tick exception: a living untracked rider pushes the Java player from its seat (`CompensatedEntities#untrackedRiderPushBox`, widened over its root's possible positions) once `CompensatedEntities#untrackedRiderMayReach`, which allocates nothing, finds it can reach.
+- `RiderAllocationTest` guards it: cosmetic riders on other players allocate nothing per passenger sweep or client tick, and far living riders nothing in push collection.
 
 ## Rules for using smoketests to validate logic
 

@@ -59,6 +59,7 @@ public class WorldStageBuilder {
 
     private final SupportScan supportScan = new SupportScan();
     private int collidingTickingBeforePlayer;
+    private int ridersTickingAfterPlayer;
 
     public WorldData generateWorldData(
             CultPlayer player,
@@ -256,6 +257,7 @@ public class WorldStageBuilder {
                 climbing,
                 numColliding,
                 numColliding - collidingTickingBeforePlayer,
+                ridersTickingAfterPlayer,
                 numPushing,
                 numCarriedPushing,
                 carriedPush,
@@ -510,6 +512,7 @@ public class WorldStageBuilder {
     private int getNumEntitiesCollidingWith(CultPlayer player, SimulationContext context) {
         int numColliding = 0;
         collidingTickingBeforePlayer = 0;
+        ridersTickingAfterPlayer = 0;
         List<SimpleCollisionBox> entityCollisionBoxes = null;
         List<HardCollidingEntityCollision> hardCollidingEntityCollisions = null;
 
@@ -527,6 +530,7 @@ public class WorldStageBuilder {
                 if (entityBox == null) continue;
                 numColliding++;
                 if (entities.clientTickOrder(entity) < playerTickOrder) collidingTickingBeforePlayer++;
+                else if (entities.isUntrackedRider(entity)) ridersTickingAfterPlayer++;
                 boolean boatLike = entity.isBoat();
                 boolean minecartLike = entity.isMinecart();
                 if (boatLike || minecartLike || isBedrockHardCollidingEntity(entity)) {
@@ -572,10 +576,13 @@ public class WorldStageBuilder {
         int tickingAfterPlayer = 0;
         for (PacketEntity entity : entities.entityMap.values()) {
             if (!mayPushOrCollide(entity) || entities.clientTickOrder(entity) < playerTickOrder) continue;
+            // A rider pushes from the seat its vehicle gave it before this tick: the movement's own count holds it.
+            if (entities.isUntrackedRider(entity)) continue;
             if (collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch) != null)
                 tickingAfterPlayer++;
         }
-        context.getWorldData().setNumCollidingTickingAfterPlayer(tickingAfterPlayer);
+        WorldData world = context.getWorldData();
+        world.setNumCollidingTickingAfterPlayer(tickingAfterPlayer + world.getNumRidersTickingAfterPlayer());
     }
 
     /**
@@ -612,13 +619,35 @@ public class WorldStageBuilder {
             SimpleCollisionBox entityBounds,
             SimpleCollisionBox entityScratch) {
         if (!mayPushOrCollide(entity)) return null;
-        if (entities.sharesRootVehicleWithSelf(entity) || entities.isUntrackedRider(entity)) return null;
+        if (entities.sharesRootVehicleWithSelf(entity)) return null;
 
-        // MCP-Reborn push/collision checks use the entity's concrete
-        // bounding box, not the reach-expanded uncertainty box.
-        SimpleCollisionBox entityBox =
-                entity.toBoundingBox(player, entity.getPossibleMovementCollisionBoxes(entityBounds, entityScratch));
+        SimpleCollisionBox entityBox;
+        if (entities.isUntrackedRider(entity)) {
+            if (!mayPushAsUntrackedRider(player, entity)
+                    || !entities.untrackedRiderMayReach(entity, playerBox, entityBounds, entityScratch)) return null;
+            entityBox = entities.untrackedRiderPushBox(entity);
+            if (entityBox == null) return null;
+            entityBox = entity.toBoundingBox(player, entityBox);
+        } else {
+            // MCP-Reborn push/collision checks use the entity's concrete
+            // bounding box, not the reach-expanded uncertainty box.
+            entityBox =
+                    entity.toBoundingBox(player, entity.getPossibleMovementCollisionBoxes(entityBounds, entityScratch));
+        }
         return playerBox.isCollided(entityBox) ? entityBox : null;
+    }
+
+    /**
+     * Whether a rider outside the player's riding trees pushes it: Entity#rideTick runs LivingEntity#tick, whose aiStep
+     * pushes from the seat positionRider last gave the rider. Hard-colliding riders stay out, as Bedrock contact skips
+     * them.
+     */
+    private static boolean mayPushAsUntrackedRider(CultPlayer player, PacketEntity entity) {
+        return !player.isBedrockMovement()
+                && entity.isLivingEntity()
+                && !entity.isBoat()
+                && !entity.isMinecart()
+                && !isBedrockHardCollidingEntity(entity);
     }
 
     /** The type test {@link #collidingPusherBox} applies before any position or riding test. */

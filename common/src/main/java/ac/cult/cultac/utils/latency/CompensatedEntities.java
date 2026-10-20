@@ -203,6 +203,54 @@ public class CompensatedEntities {
         return entity.getPossibleMovementCollisionBoxes();
     }
 
+    /**
+     * Whether the seat of untracked {@code rider} can lie horizontally within {@code near}, without computing it.
+     * Passenger and vehicle attachment points lie within their entity's width, so each hop seats a rider within its
+     * vehicle's width plus its own width of the vehicle's centre, and the seat stays inside the root's box widened by
+     * those widths. Allocates nothing; {@code rootBox} and {@code scratch} are working space.
+     */
+    public boolean untrackedRiderMayReach(
+            PacketEntity rider, SimpleCollisionBox near, SimpleCollisionBox rootBox, SimpleCollisionBox scratch) {
+        double margin = 0.0D;
+        PacketEntity entity = rider;
+        for (int hops = 0; entity.getRiding() != null; hops++) {
+            if (hops > entityMap.size()) return true;
+            PacketEntity vehicle = entity.getRiding();
+            margin += BoundingBoxSize.getWidth(player, vehicle) + BoundingBoxSize.getWidth(player, entity);
+            entity = vehicle;
+        }
+        entity.getPossibleMovementCollisionBoxes(rootBox, scratch);
+        return rootBox.minX - margin < near.maxX
+                && rootBox.maxX + margin > near.minX
+                && rootBox.minZ - margin < near.maxZ
+                && rootBox.maxZ + margin > near.minZ;
+    }
+
+    /**
+     * The position box untracked {@code rider} may push from: its seat, widened by every position the root of its
+     * vehicle chain may hold. Null inside a riding cycle. Allocates; rule far riders out with
+     * {@link #untrackedRiderMayReach} first.
+     */
+    @Nullable
+    public SimpleCollisionBox untrackedRiderPushBox(PacketEntity rider) {
+        PacketEntity root = rootOf(rider);
+        SimpleCollisionBox seat = root == null ? null : untrackedRiderSeat(rider, 0);
+        if (seat == null) return null;
+        SimpleCollisionBox rootBox = root.getPossibleMovementCollisionBoxes();
+        // The seat follows the root's centre and feet, which range over the root's box less one root size.
+        double width = BoundingBoxSize.getWidth(player, root);
+        double spreadX = Math.max(0.0D, (rootBox.maxX - rootBox.minX - width) / 2.0D);
+        double spreadZ = Math.max(0.0D, (rootBox.maxZ - rootBox.minZ - width) / 2.0D);
+        double spreadY =
+                Math.max(0.0D, rootBox.maxY - rootBox.minY - Math.abs(BoundingBoxSize.getHeight(player, root)));
+        seat.minX -= spreadX;
+        seat.maxX += spreadX;
+        seat.minZ -= spreadZ;
+        seat.maxZ += spreadZ;
+        seat.maxY += spreadY;
+        return seat;
+    }
+
     // The seat box positionPassenger would give rider, with every untracked vehicle above it seated the same way.
     @Nullable
     private SimpleCollisionBox untrackedRiderSeat(PacketEntity rider, int hops) {
