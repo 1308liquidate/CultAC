@@ -344,6 +344,24 @@ class EntityInteractionVisibilityTest {
 
     @ParameterizedTest
     @MethodSource("clients")
+    void aPunchAimsAFrozenProjectileAlongTheLookOfTheAttacksTick(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version).asClient()) {
+            // TickRateManager#isEntityFrozen holds the fireball, not the player; AIM_DEFLECT sets its motion at once.
+            var fireball = setup.fireball(42, 1.5, 0, NO_OWNER);
+            setup.player.packetStateData.serverTicksFrozen = true;
+            setup.attack(42);
+            setup.clientTick();
+            setup.player.xRot = 90;
+            setup.clientTick();
+            setup.player.packetStateData.serverTicksFrozen = false;
+            setup.clientTick();
+            assertStops(fireball, version == ProtocolVersion.V26_3 ? 1.5 : 2.545);
+            assertEquals(.5, fireball.clientPhysicalPosition.x, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
     void aProjectileIsAtOneOfItsServerPositionsNeverBetweenThem(ProtocolVersion version) throws Exception {
         try (var setup = new Setup(version).asClient()) {
             // Both positions are 4.3 from the eye; the box spanning them passes 2.5 in front of it.

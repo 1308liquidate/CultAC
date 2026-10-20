@@ -40,8 +40,6 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     private boolean mayBeOnOwner = true;
     // Entity#tickCount, which ClientLevel#tickNonPassenger increments before each tick.
     private int tickCount;
-    // Whether a Player#attack since the client's last tick of this projectile aims it along the local player's look.
-    private boolean aimedByLocalAttack;
 
     public PacketEntityHurtingProjectile(CultPlayer player, int id, int type, Vec3 position, int data) {
         super(player, id, type, position.x, position.y, position.z);
@@ -75,10 +73,7 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     public void onMovement(CultPlayer player, boolean tickingReliably) {
         tickCount++;
         super.onMovement(player, tickingReliably);
-        boolean aimed = aimedByLocalAttack;
-        aimedByLocalAttack = false;
         if (!modelled()) return;
-        if (aimed) deltaMovement = lookAngle(player.xRot, player.yRot);
         Vec3 movement = deltaMovement;
         deltaMovement =
                 movement.add(movement.normalize().scale(accelerationPower)).scale(inWater ? liquidInertia : inertia);
@@ -106,7 +101,8 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
      * {@code Player#attack} before 26.3: {@code deflectProjectile} aims a {@code #redirectable_projectile} along the
      * attacker's look ({@code ProjectileDeflection#AIM_DEFLECT}) on the client too. {@code WindCharge#deflect} refuses
      * until the projectile has ticked five times. Mounted, the vehicle can turn the player between the attack and the
-     * rotation the client sends, so the look is not known.
+     * rotation the client sends, so the look is not known. The deflection lands in the attack's client tick, whether
+     * or not the projectile ticks in it.
      */
     public void onLocalAttack(ClientEntityQueries queries) {
         if (!modelled()
@@ -114,7 +110,15 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
                 || player.compensatedEntities.getSelf().inVehicle()
                 || !queries.redirectable(this)
                 || type == EntityTypeIds.WIND_CHARGE && tickCount < 5) return;
-        aimedByLocalAttack = true;
+        player.compensatedEntities.deflectAlongLookAtTickEnd(this);
+    }
+
+    /**
+     * {@code ProjectileDeflection#AIM_DEFLECT}: the delta movement becomes the look the local player attacked with,
+     * which is the rotation its client tick ends with.
+     */
+    public void aimAlongLocalLook() {
+        deltaMovement = lookAngle(player.xRot, player.yRot);
     }
 
     /** {@code Entity#calculateViewVector} of the local player's rotation, as {@code Entity#getLookAngle}. */

@@ -361,6 +361,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
 
     @Override
     public void onPlayerTickEnd(PacketReceiveEvent event) {
+        player.compensatedEntities.applyLocalDeflections();
         tickEntityInterpolationAtClientTickEnd();
         recountPushersAfterPlayer();
         player.compensatedEntities.vehicles.onClientTickEnd();
