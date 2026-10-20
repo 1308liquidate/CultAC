@@ -646,9 +646,26 @@ public class CultPlayer implements GrimUser {
         return sendTransaction(false, PING_TRAILING, 0);
     }
 
-    /** The ping that ends server tick {@code serverTick}, written after the tick's packets. */
+    /**
+     * The ping that ends server tick {@code serverTick}, allocated at its outbound position. The flush's
+     * reserved proof already follows the tick's packets, so it becomes this ping instead of a second one.
+     */
     public void sendEndOfTickTransaction(int serverTick) {
-        sendTransaction(false, PING_END_OF_TICK, serverTick);
+        user.executeAfterWrites(() -> {
+            TrackedTransaction pending = user.getCultConnection().pendingFlushProof();
+            if (pending == null) {
+                sendTransaction(false, PING_END_OF_TICK, serverTick);
+                return;
+            }
+            synchronized (this) {
+                int slot = Math.floorMod(pending.transaction(), RECENT_WIRE_IDS);
+                // Provenance may have been enabled after the proof was allocated.
+                if (recordProvenance && recentTransactions[slot] == pending.transaction()) {
+                    recentKinds[slot] = (byte) PING_END_OF_TICK;
+                    recentTicks[slot] = serverTick;
+                }
+            }
+        });
     }
 
     private int sendTransaction(boolean async, int kind, int serverTick) {
@@ -700,6 +717,26 @@ public class CultPlayer implements GrimUser {
         TrackedTransaction transaction = createTrackedTransaction(PING_LEADING, 0);
         user.write(transaction.packet());
         return transaction.transaction();
+    }
+
+    /**
+     * Use a single post-flush proof for ordinary Java entity/block updates. For native
+     * host bundles the existing self-contained proof remains authoritative.
+     */
+    @Nullable
+    public TrackedTransaction appendFlushProofTransaction(PacketSendEvent<?> event) {
+        var connection = user.getCultConnection();
+        if (isBedrockMovement()
+                || !connection.isPreparingWrites()
+                || (event.isInsideBundle() && !connection.flushBundleOpen())) {
+            return appendTrailingProofTransaction(event);
+        }
+        TrackedTransaction proof = connection.pendingFlushProof();
+        if (proof == null) {
+            proof = createTrackedTransactionPacketForDeferredSend();
+            if (proof != null) connection.reserveFlushProof(proof);
+        }
+        return proof;
     }
 
     @Nullable

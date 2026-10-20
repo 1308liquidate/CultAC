@@ -5,6 +5,7 @@ import ac.cult.cultac.network.CultNetworkManager;
 import ac.cult.cultac.network.CultWrite;
 import ac.cult.cultac.network.PacketDispatcher;
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.protocol.ConnectionLifecycle;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.PacketType;
@@ -32,6 +33,9 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
     private final CultConnection connection;
     private boolean insideBundle;
+    private int flushWavePackets;
+    // A Java bundle accepts at most 4,096 members, including the trailing proof.
+    private static final int MAX_FLUSH_WAVE_PACKETS = 4095;
     private Output emission;
     private boolean removed;
 
@@ -94,6 +98,10 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             ctx.write(message, promise);
             return;
         }
+        // Only protocol/bundle structure can interrupt a flush group; no packet-name denylist.
+        // During emission, queued wave frames precede this write; the emit loop closes the wave in order.
+        if (emission == null && connection.pendingFlushProof() != null && structuralWrite(message))
+            finishFlushWave(ctx);
         if (!connection.packets().translated() && message instanceof ByteBuf frame) {
             try {
                 var phase = connection.phase(PacketDirection.CLIENTBOUND);
@@ -103,12 +111,12 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                         connection.runInModel(
                                 () -> connection.observePacket(PacketDirection.CLIENTBOUND, phase, frame));
                     }
-                    ctx.write(frame, promise);
+                    writeRaw(ctx, frame, promise);
                     return;
                 }
             } catch (Throwable failure) {
                 CultNetworkManager.reportFailure("outbound packet lookup", failure);
-                ctx.write(frame, promise);
+                writeRaw(ctx, frame, promise);
                 return;
             }
         }
@@ -134,7 +142,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         } catch (Throwable failure) {
             CultNetworkManager.reportFailure("outbound model context", failure);
             if (!consumed[0]) {
-                if (message instanceof ByteBuf frame) ctx.write(frame, promise);
+                if (message instanceof ByteBuf frame) writeRaw(ctx, frame, promise);
                 else new Pending(message, promise).discard(failure);
             }
         }
@@ -142,8 +150,13 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
     @Override
     public void flush(ChannelHandlerContext ctx) {
-        if (emission == null) ctx.flush();
-        else emission.addLast(new Frame(null, null, null));
+        if (emission == null) {
+            finishFlushWave(ctx);
+            ctx.flush();
+        } else {
+            // A recursive flush happens after the frames already in emission.
+            emission.addLast(new Frame(null, null, null));
+        }
     }
 
     /** A host callback runs after all preceding synchronous writes and their proofs. */
@@ -188,8 +201,12 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 prepareGroup(ctx, group, pending.promise, activeFamilies, batch);
             } else {
                 boolean requested = expandPacket(ctx, pending, activeFamilies, batch);
-                if (!insideBundle && (requested || batch.output.size() > 1) && connection.clientHasLevel())
-                    wrap(ctx, batch.output);
+                // An explicit per-packet bundle remains necessary when no flush proof exists.
+                // A pending flush proof puts ordinary updates in the persistent outbound group.
+                if (!insideBundle
+                        && connection.pendingFlushProof() == null
+                        && (requested || batch.output.size() > 1)
+                        && connection.clientHasLevel()) wrap(ctx, batch.output);
             }
             output.append(batch.output);
         } catch (Throwable failure) {
@@ -455,6 +472,110 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         return new Frame(bytes, ctx.newPromise(), type);
     }
 
+    /**
+     * Bundle markers, independently tracked pings and protocol transitions are structural. A frame
+     * whose family the model does not know is treated as structural too.
+     */
+    private static boolean structural(PacketType<?> type) {
+        return type == null
+                || type == ClientboundPackets.BUNDLE_DELIMITER
+                || type == ClientboundPackets.PING
+                || ConnectionLifecycle.handles(type);
+    }
+
+    /** Frames without a dispatcher route carry no type; classify them by their wire family instead. */
+    private boolean structuralFrame(Frame frame) {
+        return structural(frame.type != null ? frame.type : wireType(frame.bytes));
+    }
+
+    /** The model family of a clientbound frame, whether or not Cult listens to it; null when unknown. */
+    private PacketType<?> wireType(ByteBuf frame) {
+        try {
+            return connection
+                    .packets()
+                    .type(
+                            connection.phase(PacketDirection.CLIENTBOUND),
+                            PacketDirection.CLIENTBOUND,
+                            Wire.peekVarInt(frame));
+        } catch (RuntimeException failure) {
+            return null;
+        }
+    }
+
+    private boolean structuralWrite(Object message) {
+        try {
+            if (message instanceof ByteBuf frame) return structural(wireType(frame));
+            if (message instanceof CultWrite write)
+                return structural(connection.packets().writableType(write.packet()));
+            // Explicit write groups are separate causal groups with their own bundle semantics.
+            return message instanceof CultConnection.WriteGroup;
+        } catch (RuntimeException failure) {
+            return true;
+        }
+    }
+
+    private void writeFrame(ChannelHandlerContext ctx, Frame frame) {
+        connection.observePacket(
+                PacketDirection.CLIENTBOUND, connection.phase(PacketDirection.CLIENTBOUND), frame.bytes);
+        ctx.write(frame.bytes, frame.promise);
+        if (frame.type == ClientboundPackets.BUNDLE_DELIMITER) insideBundle = !insideBundle;
+        else if (frame.type != null) {
+            try {
+                connection.forwarded(frame.type, null);
+            } catch (Throwable failure) {
+                CultNetworkManager.reportFailure("outbound protocol transition", failure);
+            }
+        }
+    }
+
+    /** A frame forwarded without expansion; inside an open flush bundle it is an ordinary member. */
+    private void writeRaw(ChannelHandlerContext ctx, ByteBuf frame, ChannelPromise promise) {
+        countFlushWaveMember(ctx);
+        ctx.write(frame, promise);
+    }
+
+    /** A flush bundle opens only while a proof is reserved; closing it places that proof. */
+    private void startFlushWave(ChannelHandlerContext ctx) {
+        if (connection.flushBundleOpen() || insideBundle || !connection.clientHasLevel()) return;
+        writeFrame(ctx, delimiter(ctx));
+        connection.flushBundleOpen(true);
+        flushWavePackets = 0;
+    }
+
+    /** Counts the next member, splitting the physical bundle without acknowledging the shared proof early. */
+    private void countFlushWaveMember(ChannelHandlerContext ctx) {
+        if (!connection.flushBundleOpen()) return;
+        if (flushWavePackets >= MAX_FLUSH_WAVE_PACKETS) {
+            writeFrame(ctx, delimiter(ctx));
+            writeFrame(ctx, delimiter(ctx));
+            flushWavePackets = 0;
+        }
+        ++flushWavePackets;
+    }
+
+    /** The reserved ping is the last bundle member before the actual outbound flush. */
+    private void finishFlushWave(ChannelHandlerContext ctx) {
+        var proof = connection.takeFlushProof();
+        if (proof != null) {
+            Output group = process(ctx, new Pending(proof.packet(), ctx.newPromise()));
+            settleGroups(ctx, group);
+            while (!group.isEmpty()) {
+                Frame frame = group.removeFirst();
+                if (frame.bytes == null) throw new IllegalStateException("Flush proof recursively flushed");
+                writeFrame(ctx, frame);
+            }
+            while (group.hasTasks())
+                CultNetworkManager.runDeferredPacketTask("flush proof tasks", group.tasks.removeFirst());
+            var player = connection.player();
+            if (player != null) player.markTrackedTransactionPacketSent(proof);
+        }
+        if (connection.flushBundleOpen()) {
+            writeFrame(ctx, delimiter(ctx));
+            connection.flushBundleOpen(false);
+            flushWavePackets = 0;
+        }
+    }
+
     private void emit(ChannelHandlerContext ctx, Output output) {
         if (removed || !ctx.channel().isActive()) {
             output.discard(new ClosedChannelException());
@@ -468,23 +589,20 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                     settleGroups(ctx, output);
                     Frame frame = output.removeFirst();
                     if (frame.bytes == null) {
+                        finishFlushWave(ctx);
                         ctx.flush();
                         continue;
                     }
-                    connection.observePacket(
-                            PacketDirection.CLIENTBOUND, connection.phase(PacketDirection.CLIENTBOUND), frame.bytes);
-                    ctx.write(frame.bytes, frame.promise);
-                    if (frame.type == ClientboundPackets.BUNDLE_DELIMITER) insideBundle = !insideBundle;
-                    else if (frame.type != null) {
-                        try {
-                            connection.forwarded(frame.type, null);
-                        } catch (Throwable failure) {
-                            CultNetworkManager.reportFailure("outbound protocol transition", failure);
-                        }
+                    if (connection.pendingFlushProof() != null) {
+                        if (structuralFrame(frame)) finishFlushWave(ctx);
+                        else startFlushWave(ctx);
                     }
+                    countFlushWaveMember(ctx);
+                    writeFrame(ctx, frame);
                 }
                 if (output.flush) {
                     output.flush = false;
+                    finishFlushWave(ctx);
                     ctx.flush();
                 }
                 if (!output.isEmpty()) continue;
@@ -509,6 +627,18 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) {
         removed = true;
+        // Uninstall and rebind happen on live connections. A flush bundle left open on the
+        // wire would absorb every later packet, so place its proof and close it first.
+        if (ctx.channel().isActive()) {
+            try {
+                finishFlushWave(ctx);
+                ctx.flush();
+            } catch (Throwable failure) {
+                CultNetworkManager.reportFailure("flush bundle close on removal", failure);
+            }
+        }
+        connection.takeFlushProof();
+        connection.flushBundleOpen(false);
     }
 
     private record Pending(Object message, ChannelPromise promise) {

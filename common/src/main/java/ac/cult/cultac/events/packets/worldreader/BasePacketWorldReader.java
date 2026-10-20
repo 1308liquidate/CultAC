@@ -193,7 +193,7 @@ public class BasePacketWorldReader {
         // thread. Put Cult's ping after the block update so the pong marks the point
         // where the client has processed the new block state.
         if (isNearPlayer(player, blockPosition, range)) {
-            CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
+            CultPlayer.TrackedTransaction transaction = player.appendFlushProofTransaction(event);
             if (transaction != null) {
                 if (blockChange != event.getOriginalPacket()) event.replace(blockChange);
                 player.compensatedWorld.handleServerBlockUpdate(blockPosition, state, transaction);
@@ -218,7 +218,9 @@ public class BasePacketWorldReader {
                 blockEvent.position().z());
         String dimension = packetDimension(player);
         if (isNearPlayer(player, blockPosition, range)) {
-            CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
+            // ClientPacketListener#handleBlockEvent runs Level#blockEvent in packet order, so the
+            // flush proof after it proves the event exactly as it does the block updates around it.
+            CultPlayer.TrackedTransaction transaction = player.appendFlushProofTransaction(event);
             if (transaction != null) {
                 if (blockEvent != event.getOriginalPacket()) event.replace(blockEvent);
                 event.getTasksAfterSend().add(() -> {
@@ -266,7 +268,7 @@ public class BasePacketWorldReader {
         }
 
         if (nearPlayer) {
-            CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
+            CultPlayer.TrackedTransaction transaction = player.appendFlushProofTransaction(event);
             if (transaction != null) {
                 multiBlockChange.runUpdates((x, y, z, state) ->
                         player.compensatedWorld.queueServerBlockUpdate(x, y, z, state, transaction.transaction()));

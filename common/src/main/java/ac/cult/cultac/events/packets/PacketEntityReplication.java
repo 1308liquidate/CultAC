@@ -1639,8 +1639,13 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             return;
         }
 
-        CultPlayer.TrackedTransaction proof =
-                useDelimiterProof ? appendTrailingProofTransaction(event, List.of(), true) : null;
+        // Only ordinary tracker movement is coalesced. Explicit teleports retain
+        // their own proof because a controlled vehicle can reply inside the handler.
+        CultPlayer.TrackedTransaction proof = !useDelimiterProof
+                ? null
+                : movement.kind() == MovementKind.TELEPORT_ENTITY
+                        ? appendTrailingProofTransaction(event, List.of(), true)
+                        : player.appendFlushProofTransaction(event);
         int firstTransaction = proof == null ? player.lastTransactionSent.get() : proof.transaction();
         if (data != null) {
             data.setLastTransactionHung(firstTransaction);

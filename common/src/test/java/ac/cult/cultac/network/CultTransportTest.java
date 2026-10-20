@@ -1299,6 +1299,98 @@ class CultTransportTest {
         }
     }
 
+    @Test
+    void flushWaveSharesOneTrailingProofUntilTheRealFlush() {
+        try (var f = new Fixture(false)) {
+            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
+            f.connection.reserveFlushProof(
+                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(41), false)));
+            f.channel.write(wireCamera(f, 1));
+            f.channel.write(wireCamera(f, 2));
+            f.channel.flush();
+            f.pump();
+            assertEquals(List.of("D", "minecraft:set_camera", "minecraft:set_camera", "P41", "D"), f.output());
+            assertNull(f.connection.pendingFlushProof());
+            f.channel.writeAndFlush(wireCamera(f, 3));
+            assertEquals(List.of("minecraft:set_camera"), f.output());
+        }
+    }
+
+    @Test
+    void anUnlistenedPacketStaysInsideTheFlushWave() {
+        try (var f = new Fixture(false)) {
+            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
+            f.connection.reserveFlushProof(
+                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(45), false)));
+            f.channel.write(wireCamera(f, 1));
+            f.channel.write(f.frame(CLIENTBOUND, PLAY, "sound"));
+            f.channel.write(wireCamera(f, 2));
+            f.channel.flush();
+            f.pump();
+            assertEquals(
+                    List.of("D", "minecraft:set_camera", "minecraft:sound", "minecraft:set_camera", "P45", "D"),
+                    f.output());
+        }
+    }
+
+    @Test
+    void nativeDelimiterClosesTheOutstandingFlushWaveWithoutNesting() {
+        try (var f = new Fixture(false)) {
+            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
+            f.connection.reserveFlushProof(
+                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(42), false)));
+            f.channel.write(wireCamera(f, 1));
+            f.channel.write(f.delimiter());
+            f.channel.write(f.ping(PLAY, 7));
+            f.channel.write(f.delimiter());
+            f.channel.flush();
+            f.pump();
+            assertEquals(List.of("D", "minecraft:set_camera", "P42", "D", "D", "P7", "D"), f.output());
+        }
+    }
+
+    @Test
+    void anIndependentPingIsAfterTheFlushProofAndNotInsideItsBundle() {
+        try (var f = new Fixture(false)) {
+            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
+            f.connection.reserveFlushProof(
+                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(43), false)));
+            f.channel.write(wireCamera(f, 1));
+            f.channel.write(f.ping(PLAY, 7));
+            f.channel.flush();
+            f.pump();
+            assertEquals(List.of("D", "minecraft:set_camera", "P43", "D", "P7"), f.output());
+        }
+    }
+
+    @Test
+    void oversizedFlushWaveSplitsBundlesButEmitsOnlyOneTrailingProof() {
+        try (var f = new Fixture(false)) {
+            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
+            f.connection.reserveFlushProof(
+                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(44), false)));
+            for (int id = 0; id < 4096; id++) f.channel.write(wireCamera(f, id));
+            f.channel.flush();
+            f.pump();
+            List<String> emitted = f.output();
+            assertEquals(4101, emitted.size());
+            assertEquals("D", emitted.get(0));
+            assertEquals("D", emitted.get(4096));
+            assertEquals("D", emitted.get(4097));
+            assertEquals("minecraft:set_camera", emitted.get(4098));
+            assertEquals("P44", emitted.get(4099));
+            assertEquals("D", emitted.get(4100));
+            assertEquals(1, emitted.stream().filter("P44"::equals).count());
+            assertNull(f.connection.pendingFlushProof());
+        }
+    }
+
+    private static ByteBuf wireCamera(Fixture f, int entityId) {
+        ByteBuf buffer = f.frame(CLIENTBOUND, PLAY, "set_camera");
+        Wire.writeVarInt(buffer, entityId);
+        return buffer;
+    }
+
     private static final class Fixture implements AutoCloseable {
         final EmbeddedChannel channel = new EmbeddedChannel();
         final TestTransportRoutes routes = new TestTransportRoutes(RUNTIME);
