@@ -57,14 +57,9 @@ public final class BlockSimulatorInventory {
             if (old.count() == changed.count()
                     && old.itemKey().equals(changed.itemKey())
                     && old.capturedPrototype().equals(changed.capturedPrototype())
-                    && old.capturedPrototype()
-                            .encodedNbt()
-                            .equals(changed.capturedPrototype().encodedNbt())
+                    && old.capturedPrototype().sameEncodedNbt(changed.capturedPrototype())
                     && old.patch().equals(changed.patch())
-                    && old.patch()
-                            .added()
-                            .encodedNbt()
-                            .equals(changed.patch().added().encodedNbt())) continue;
+                    && old.patch().added().sameEncodedNbt(changed.patch().added())) continue;
             var stack = copies.computeIfAbsent(changed, SimItemStack::copy);
             changes.put(index, stack);
         }
