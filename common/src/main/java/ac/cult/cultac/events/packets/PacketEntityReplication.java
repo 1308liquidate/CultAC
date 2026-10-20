@@ -362,6 +362,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         tickEntityInterpolationAtClientTickEnd();
         recountPushersAfterPlayer();
         player.compensatedEntities.vehicles.onClientTickEnd();
+        player.checkManager.getSimulationProcessor().recordRideTick();
         player.compensatedEntities.recordRideTickSeat();
         player.compensatedEntities.vehicles.updateServerControlledSafeSetbackPositionOnTickEnd();
         transformTick++;
@@ -1192,6 +1193,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     // Player#tick clears a passenger's ground state every ride tick.
                     player.onGround = false;
                     player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.FALSE);
+                    if (!player.compensatedEntities.getSelf().inVehicle()) {
+                        player.checkManager.getSimulationProcessor().endRide();
+                    }
                 }
                 player.compensatedEntities.vehicles.clearServerVehicle(vehicleId, transaction);
                 // Vehicle-switch state changes at the passenger transaction boundary.
@@ -1464,6 +1468,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 Vec3 velocity = PacketCodecUtil.quantizeLpVec3(SELF_DISMOUNT_VELOCITY);
                 player.compensatedEntities.playerEntity.deltaMovement = velocity;
                 player.checkManager.getSimulationProcessor().seedStartingVelocity(velocity);
+            }
+            if (wasPassenger && !player.compensatedEntities.getSelf().inVehicle() && !player.isBedrockMovement()) {
+                player.checkManager.getSimulationProcessor().endRide();
             }
             if (wasPassenger
                     && !player.compensatedEntities.getSelf().inVehicle()
