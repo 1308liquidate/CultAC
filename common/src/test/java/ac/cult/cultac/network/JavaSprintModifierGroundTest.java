@@ -45,6 +45,8 @@ class JavaSprintModifierGroundTest {
     private static final float QUADRUPLED = (float) ((double) 0.1F * 4.0D);
     // Player#getAttackStrengthScale passes 0.9 after five ticks at the default attack speed of 4.
     private static final int CHARGE_TICKS = 5;
+    private static final float INTO_CORNER = -45.0F;
+    private static final float AWAY = 135.0F;
     private static final AttributeModifier QUADRUPLED_MODIFIER =
             new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
 
@@ -129,6 +131,75 @@ class JavaSprintModifierGroundTest {
             result = f.tick(atWall, true);
             assertTrue(exact(result), describe(result));
         }
+    }
+
+    /**
+     * After a corner hid a possible attack reset, a move away from it that only vanilla's speed reproduces proves the
+     * reset: the server's modifier no longer moves the next tick.
+     */
+    @Test
+    void aMoveOnlyVanillasSpeedExplainsEndsATie() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 corner = cornerTie(f);
+            Vec3 velocity = leaveCorner(f, corner, CANONICAL);
+            assertSame(CompensatedEntities.SPRINTING_SPEED_MODIFIER, f.player.sprintState.heldModifier());
+            assertFalse(f.player.sprintState.outcomeOpen());
+            Vec3 delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, QUADRUPLED, AWAY));
+            PredictionResult result = f.tick(position.add(delta.x, 0.0, delta.z), true);
+            assertFalse(result.getFlags().isEmpty(), describe(result));
+        }
+    }
+
+    /** The mirror: a move only the server's modifier reproduces proves no reset happened. */
+    @Test
+    void aMoveOnlyTheServersSpeedExplainsEndsATie() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 corner = cornerTie(f);
+            Vec3 velocity = leaveCorner(f, corner, QUADRUPLED);
+            assertSame(QUADRUPLED_MODIFIER, f.player.sprintState.heldModifier());
+            assertFalse(f.player.sprintState.outcomeOpen());
+            Vec3 delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, CANONICAL, AWAY));
+            PredictionResult result = f.tick(position.add(delta.x, 0.0, delta.z), true);
+            assertFalse(result.getFlags().isEmpty(), describe(result));
+        }
+    }
+
+    /**
+     * A sprint diagonally into a corner: Entity#collide ends the attack tick's move there at either outcome, and
+     * LocalPlayer#isHorizontalCollisionMinor keeps the sprint, as the attempted move follows the input. The next move,
+     * pressed into the corner, ends there at either speed too, so both modifiers stay possible.
+     */
+    private Vec3 cornerTie(JavaTickFixture f) {
+        for (int y = FLOOR_Y; y <= FLOOR_Y + 1; y++) {
+            for (int i = -2; i <= 1; i++) {
+                f.player.compensatedWorld.updateBlock(new BlockPos(1, y, i), BlockIds.STONE.defaultState());
+                f.player.compensatedWorld.updateBlock(new BlockPos(i, y, 1), BlockIds.STONE.defaultState());
+            }
+        }
+        for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
+        position = startSprint(f, INTO_CORNER, CHARGE_TICKS);
+        holdQuadrupledModifier(f);
+        attack(f);
+        Vec3 corner = new Vec3(1.0 - 0.6F / 2.0F, FLOOR_Y, 1.0 - 0.6F / 2.0F);
+        PredictionResult result = f.tick(corner, true);
+        assertTrue(exact(result), describe(result));
+        assertSame(QUADRUPLED_MODIFIER, f.player.sprintState.heldModifier());
+        assertTrue(f.player.sprintState.canonicalPossible());
+        result = f.tick(corner, true);
+        assertTrue(exact(result), describe(result));
+        assertSame(QUADRUPLED_MODIFIER, f.player.sprintState.heldModifier());
+        assertTrue(f.player.sprintState.canonicalPossible());
+        return corner;
+    }
+
+    /** Turning away from the corner and sprinting off at {@code speed}; the velocity carried into the next tick. */
+    private Vec3 leaveCorner(JavaTickFixture f, Vec3 corner, float speed) {
+        f.player.xRot = AWAY;
+        Vec3 delta = ClientMoveInput.of(f, SPRINT, 1.0F, speed, AWAY);
+        position = corner.add(delta.x, 0.0, delta.z);
+        PredictionResult result = f.tick(position, true);
+        assertTrue(exact(result), describe(result));
+        return new Vec3(delta.x * FRICTION, 0.0, delta.z * FRICTION);
     }
 
     private Vec3 position;
