@@ -41,7 +41,10 @@ public final class UnknownCollisionProvider {
                 && player.compensatedEntities.getSelf().getRiding().isBoat();
         boolean inVehicle = player.compensatedEntities.getSelf().inVehicle();
 
-        for (PacketEntity entity : player.compensatedEntities.entityMap.values()) {
+        Iterable<PacketEntity> candidates = inBoat
+                ? player.compensatedEntities.entityMap.values()
+                : player.compensatedEntities.unknownCollisionCandidates();
+        for (PacketEntity entity : candidates) {
             if (player.compensatedEntities.isUntrackedRider(entity)) continue;
             if (entity.isBoat()) {
                 // Expand by 2 since boats suck.

@@ -527,7 +527,7 @@ public class WorldStageBuilder {
             CompensatedEntities entities = context.getEntities();
             long playerTickOrder = entities.getSelf().getClientTickOrder();
 
-            for (PacketEntity entity : entities.entityMap.values()) {
+            for (PacketEntity entity : entities.pushOrCollideCandidates()) {
                 SimpleCollisionBox entityBox =
                         collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch);
                 if (entityBox == null) continue;
@@ -579,8 +579,8 @@ public class WorldStageBuilder {
         CompensatedEntities entities = context.getEntities();
         long playerTickOrder = entities.getSelf().getClientTickOrder();
         int tickingAfterPlayer = 0;
-        for (PacketEntity entity : entities.entityMap.values()) {
-            if (!mayPushOrCollide(entity) || entities.clientTickOrder(entity) < playerTickOrder) continue;
+        for (PacketEntity entity : entities.pushOrCollideCandidates()) {
+            if (!entity.mayPushOrCollide() || entities.clientTickOrder(entity) < playerTickOrder) continue;
             // A rider pushes from the seat its vehicle gave it before this tick: the movement's own count holds it.
             if (entities.isUntrackedRider(entity)) continue;
             if (collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch) != null)
@@ -602,7 +602,7 @@ public class WorldStageBuilder {
         SimpleCollisionBox entityBounds = new SimpleCollisionBox();
         SimpleCollisionBox entityScratch = new SimpleCollisionBox();
         CompensatedEntities entities = player.compensatedEntities;
-        for (PacketEntity entity : entities.entityMap.values()) {
+        for (PacketEntity entity : entities.pushOrCollideCandidates()) {
             SimpleCollisionBox box =
                     collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch);
             if (box == null) continue;
@@ -624,7 +624,7 @@ public class WorldStageBuilder {
             SimpleCollisionBox playerBox,
             SimpleCollisionBox entityBounds,
             SimpleCollisionBox entityScratch) {
-        if (!mayPushOrCollide(entity)) return null;
+        if (!entity.mayPushOrCollide()) return null;
         if (entities.sharesRootVehicleWithSelf(entity)) return null;
 
         SimpleCollisionBox entityBox;
@@ -654,15 +654,6 @@ public class WorldStageBuilder {
                 && !entity.isBoat()
                 && !entity.isMinecart()
                 && !isBedrockHardCollidingEntity(entity);
-    }
-
-    /** The type test {@link #collidingPusherBox} applies before any position or riding test. */
-    private static boolean mayPushOrCollide(PacketEntity entity) {
-        boolean hardCollidingEntity = entity.isBoat() || entity.isMinecart() || isBedrockHardCollidingEntity(entity);
-        // Players can push living entities. Some entities also provide
-        // hard movement collision boxes that Bedrock consumes as geometry.
-        // The one exemption to a living entity is an armor stand (matters due to plugins sending them)
-        return !(!entity.isLivingEntity() && !hardCollidingEntity || entity.type == EntityTypeIds.ARMOR_STAND);
     }
 
     private static boolean isBedrockHardCollidingEntity(PacketEntity entity) {

@@ -1075,7 +1075,7 @@ public class CultPlayer implements GrimUser {
         PacketEntity riding = compensatedEntities.getSelf().getRiding();
         SimpleCollisionBox entityBox = new SimpleCollisionBox();
         SimpleCollisionBox scratch = new SimpleCollisionBox();
-        for (PacketEntity entity : compensatedEntities.entityMap.values()) {
+        for (PacketEntity entity : compensatedEntities.poseCollisionCandidates()) {
             if (!canCollideWithForPoseCheck(riding, entity)) {
                 continue;
             }

@@ -43,7 +43,7 @@ public class CompensatedEntities {
     private static final long LOCAL_PLAYER_CLIENT_TICK_ORDER = 0L;
     private static final int HELD_UPDATES = 4;
     private static final int HELD_ENTITIES = 256;
-    public final Int2ObjectOpenHashMap<PacketEntity> entityMap = new Int2ObjectOpenHashMap<>(40, 0.7f);
+    public final EntityMap entityMap = new EntityMap();
     public final Int2ObjectOpenHashMap<TrackerData> serverPositionsMap = new Int2ObjectOpenHashMap<>(40, 0.7f);
     private final Int2ObjectOpenHashMap<List<HeldAttributes>> pendingAttributes = new Int2ObjectOpenHashMap<>(10, 0.7f);
     private final Int2ObjectOpenHashMap<List<EquipmentEntry>> pendingEquipment = new Int2ObjectOpenHashMap<>(10, 0.7f);
@@ -54,6 +54,12 @@ public class CompensatedEntities {
     private final ArrayList<PacketEntity> addOrder = new ArrayList<>();
     // The sum of passengers.size() over entityMap values.
     private int trackedPassengers;
+    // Type-filtered entityMap values in entityMap iteration order, current while typeViewsAt matches the map.
+    private int typeViewsAt = -1;
+    private List<PacketEntity> pushOrCollideCandidates = List.of();
+    private List<PacketEntity> boats = List.of();
+    private List<PacketEntity> poseCollisionCandidates = List.of();
+    private List<PacketEntity> unknownCollisionCandidates = List.of();
 
     CultPlayer player;
 
@@ -103,6 +109,51 @@ public class CompensatedEntities {
         entityMap.clear();
         addOrder.clear();
         player.compensatedFireworks.clearLevel();
+    }
+
+    /** The entities passing {@link PacketEntity#mayPushOrCollide()}, in entityMap iteration order. Read only. */
+    public List<PacketEntity> pushOrCollideCandidates() {
+        refreshTypeViews();
+        return pushOrCollideCandidates;
+    }
+
+    /** The boats, in entityMap iteration order. Read only. */
+    public List<PacketEntity> boats() {
+        refreshTypeViews();
+        return boats;
+    }
+
+    /** The boats, minecarts, shulkers and happy ghasts, in entityMap iteration order. Read only. */
+    public List<PacketEntity> poseCollisionCandidates() {
+        refreshTypeViews();
+        return poseCollisionCandidates;
+    }
+
+    /** The boats, shulkers and {@link PacketEntityHappyGhast}s, in entityMap iteration order. Read only. */
+    public List<PacketEntity> unknownCollisionCandidates() {
+        refreshTypeViews();
+        return unknownCollisionCandidates;
+    }
+
+    private void refreshTypeViews() {
+        if (typeViewsAt == entityMap.mutations) return;
+        List<PacketEntity> pushOrCollide = new ArrayList<>();
+        List<PacketEntity> boatList = new ArrayList<>();
+        List<PacketEntity> pose = new ArrayList<>();
+        List<PacketEntity> unknown = new ArrayList<>();
+        for (PacketEntity entity : entityMap.values()) {
+            if (entity.mayPushOrCollide()) pushOrCollide.add(entity);
+            boolean boat = entity.isBoat();
+            boolean shulker = entity.type == EntityTypeIds.SHULKER;
+            if (boat) boatList.add(entity);
+            if (boat || entity.isMinecart() || shulker || entity.isHappyGhast()) pose.add(entity);
+            if (boat || shulker || entity instanceof PacketEntityHappyGhast) unknown.add(entity);
+        }
+        pushOrCollideCandidates = pushOrCollide;
+        boats = boatList;
+        poseCollisionCandidates = pose;
+        unknownCollisionCandidates = unknown;
+        typeViewsAt = entityMap.mutations;
     }
 
     private void track(PacketEntity entity) {
@@ -1324,4 +1375,31 @@ public class CompensatedEntities {
      * a smaller scale merged earlier updates set, or NaN.
      */
     private record HeldAttributes(List<AttributeSnapshot> values, int provenAt, float leastScale) {}
+
+    /** The tracked entities by id; {@code mutations} advances on every put, remove and clear. */
+    public static final class EntityMap extends Int2ObjectOpenHashMap<PacketEntity> {
+        private int mutations;
+
+        public EntityMap() {
+            super(40, 0.7f);
+        }
+
+        @Override
+        public PacketEntity put(int key, PacketEntity value) {
+            mutations++;
+            return super.put(key, value);
+        }
+
+        @Override
+        public PacketEntity remove(int key) {
+            mutations++;
+            return super.remove(key);
+        }
+
+        @Override
+        public void clear() {
+            mutations++;
+            super.clear();
+        }
+    }
 }

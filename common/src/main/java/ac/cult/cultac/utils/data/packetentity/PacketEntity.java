@@ -168,6 +168,15 @@ public class PacketEntity {
         return happyGhast;
     }
 
+    /** The type test a push or collision with the player applies before any position or riding test. */
+    public boolean mayPushOrCollide() {
+        boolean hardCollidingEntity = boat || minecart || type == EntityTypeIds.STRIDER || happyGhast;
+        // Players can push living entities. Some entities also provide
+        // hard movement collision boxes that Bedrock consumes as geometry.
+        // The one exemption to a living entity is an armor stand (matters due to plugins sending them)
+        return !(!living && !hardCollidingEntity || type == EntityTypeIds.ARMOR_STAND);
+    }
+
     public boolean isAnimal() {
         return EntityTypeUtil.isAnimal(type);
     }

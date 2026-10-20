@@ -51,16 +51,14 @@ class EntityScanParityTest {
     }
 
     @Test
-    void pusherTypeTestMatchesForEveryModelType() throws Exception {
-        Method mayPushOrCollide = WorldStageBuilder.class.getDeclaredMethod("mayPushOrCollide", PacketEntity.class);
-        mayPushOrCollide.setAccessible(true);
+    void pusherTypeTestMatchesForEveryModelType() {
         int accepted = 0;
         for (int id : modelTypes()) {
             PacketEntity entity = new PacketEntity(id, 1);
             boolean expected = oldPusherType(entity);
             assertEquals(
                     expected,
-                    mayPushOrCollide.invoke(null, entity),
+                    entity.mayPushOrCollide(),
                     EntityTypeUtil.getKey(id).toString());
             if (expected) accepted++;
         }
