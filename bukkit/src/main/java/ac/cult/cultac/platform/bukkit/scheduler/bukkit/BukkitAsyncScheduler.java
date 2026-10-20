@@ -37,7 +37,7 @@ public class BukkitAsyncScheduler implements AsyncScheduler {
             @NotNull GrimPlugin plugin, @NotNull Runnable task, long delay, long period, @NotNull TimeUnit timeUnit) {
         final Runnable guarded_task = RuntimeEnvironment.guard(task);
 
-        return new BukkitTaskHandle(bukkitScheduler.runTaskTimerAsynchronously(
+        return BukkitTaskHandle.repeating(bukkitScheduler.runTaskTimerAsynchronously(
                 CultACBukkitLoaderPlugin.LOADER,
                 guarded_task,
                 PlatformScheduler.convertTimeToTicks(delay, timeUnit),
@@ -49,7 +49,7 @@ public class BukkitAsyncScheduler implements AsyncScheduler {
             @NotNull GrimPlugin plugin, @NotNull Runnable task, long initialDelayTicks, long periodTicks) {
         final Runnable guarded_task = RuntimeEnvironment.guard(task);
 
-        return new BukkitTaskHandle(bukkitScheduler.runTaskTimerAsynchronously(
+        return BukkitTaskHandle.repeating(bukkitScheduler.runTaskTimerAsynchronously(
                 CultACBukkitLoaderPlugin.LOADER, guarded_task, initialDelayTicks, periodTicks));
     }
 

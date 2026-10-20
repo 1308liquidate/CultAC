@@ -67,7 +67,8 @@ public final class UnknownCollisionProvider {
                 if (canPush) {
                     addIntersecting(
                             boxes,
-                            entity.getPossibleCollisionBoxes(entityBox, scratch).expand(1),
+                            entity.toBoundingBox(player, entity.getPossibleCollisionBoxes(entityBox, scratch))
+                                    .expand(1),
                             queryBox);
                 }
             }

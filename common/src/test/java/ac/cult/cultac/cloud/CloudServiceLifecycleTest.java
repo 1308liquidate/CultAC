@@ -2,6 +2,7 @@ package ac.cult.cultac.cloud;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
 import ac.cult.cultac.cloud.CaptureFixture.Host;
 import ac.cult.cultac.cloud.transport.ConnectionFixture.Receiver;
@@ -82,6 +83,30 @@ class CloudServiceLifecycleTest {
 
             CloudService.configure(config(Map.of()), false);
             assertEquals("Cloud upload off", CloudService.status().get(0), "a reload still turns it off");
+        } finally {
+            CloudService.superseded("");
+        }
+    }
+
+    @Test
+    void workQueuedBeforeAHandOffLeavesThePipelineToTheNewerRuntime() throws Exception {
+        try (CaptureFixture fixture = new CaptureFixture(Host.SERVER, false);
+                Receiver receiver = new Receiver()) {
+            CloudCapture.segmentBinder((player, bind, playing) -> bind.accept("a"));
+            CloudService.configure(
+                    config(Map.of("cloud.url", receiver.url(), "cloud.api-key", "test-key", "cloud.proxy-id", "a")),
+                    false);
+            awaitOnLoop(fixture, () -> fixture.channel.pipeline().get(CloudCapture.INBOUND) != null);
+
+            // The update thread supersedes this generation while the player's loop is busy with the hand-off.
+            CloudService.superseded("-drain-1a2b3c4d");
+            CloudCapture.reconfigure(fixture.player);
+            CloudCapture.release(fixture.player);
+            CultAPI.INSTANCE.getPlayerDataManager().onDisconnect(fixture.user, true);
+            fixture.channel.runPendingTasks();
+
+            assertNull(fixture.channel.pipeline().get(CloudCapture.INBOUND), "the newer runtime's capture can attach");
+            assertNull(CloudCapture.of(fixture.player), "the released player gets no capture back");
         } finally {
             CloudService.superseded("");
         }

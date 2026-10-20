@@ -162,7 +162,7 @@ public class WorldStageBuilder {
                 player.onGround);
 
         boolean isSuffocating = mightBeSuffocating(player, simulationContext);
-        int numColliding = getNumEntitiesCollidingWith(simulationContext);
+        int numColliding = getNumEntitiesCollidingWith(player, simulationContext);
         CarriedPush carriedPush = player.checkManager.getSimulationProcessor().getCarriedPush();
         int numCarriedPushing = pushersFromLastTick(simulationContext, lastPrediction, !carriedPush.isZero());
         int numPushing = collidingTickingBeforePlayer + numCarriedPushing;
@@ -482,7 +482,7 @@ public class WorldStageBuilder {
         return pushes == null ? null : pushes.copy();
     }
 
-    private int getNumEntitiesCollidingWith(SimulationContext context) {
+    private int getNumEntitiesCollidingWith(CultPlayer player, SimulationContext context) {
         int numColliding = 0;
         collidingTickingBeforePlayer = 0;
         List<SimpleCollisionBox> entityCollisionBoxes = null;
@@ -498,7 +498,7 @@ public class WorldStageBuilder {
 
             for (PacketEntity entity : entities.entityMap.values()) {
                 SimpleCollisionBox entityBox =
-                        collidingPusherBox(entities, entity, playerBox, entityBounds, entityScratch);
+                        collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch);
                 if (entityBox == null) continue;
                 numColliding++;
                 if (entities.clientTickOrder(entity) < playerTickOrder) collidingTickingBeforePlayer++;
@@ -536,7 +536,7 @@ public class WorldStageBuilder {
      * Each one's LivingEntity#pushEntities runs after its own move in ClientLevel#tickEntities, so it pushes the
      * player from where its interpolation step that tick left it, not from where it was when the player moved.
      */
-    public static void recountCollidingTickingAfterPlayer(PredictionResult prediction) {
+    public static void recountCollidingTickingAfterPlayer(CultPlayer player, PredictionResult prediction) {
         SimulationContext context = prediction.getSimulationContext();
         if (context == null || context.getVehicle() != null) return;
         SimpleCollisionBox playerBox = pusherContactBox(context);
@@ -547,7 +547,7 @@ public class WorldStageBuilder {
         int tickingAfterPlayer = 0;
         for (PacketEntity entity : entities.entityMap.values()) {
             if (!mayPushOrCollide(entity) || entities.clientTickOrder(entity) < playerTickOrder) continue;
-            if (collidingPusherBox(entities, entity, playerBox, entityBounds, entityScratch) != null)
+            if (collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch) != null)
                 tickingAfterPlayer++;
         }
         context.getWorldData().setNumCollidingTickingAfterPlayer(tickingAfterPlayer);
@@ -565,7 +565,8 @@ public class WorldStageBuilder {
         SimpleCollisionBox entityScratch = new SimpleCollisionBox();
         CompensatedEntities entities = player.compensatedEntities;
         for (PacketEntity entity : entities.entityMap.values()) {
-            SimpleCollisionBox box = collidingPusherBox(entities, entity, playerBox, entityBounds, entityScratch);
+            SimpleCollisionBox box =
+                    collidingPusherBox(player, entities, entity, playerBox, entityBounds, entityScratch);
             if (box == null) continue;
             double width = BoundingBoxSize.getWidth(player, entity);
             // The box holds every box the entity may have this tick; its centre spans the box less one size.
@@ -579,6 +580,7 @@ public class WorldStageBuilder {
 
     /** The box of an entity that pushes or collides with the player when it touches {@code playerBox}, else null. */
     private static SimpleCollisionBox collidingPusherBox(
+            CultPlayer player,
             CompensatedEntities entities,
             PacketEntity entity,
             SimpleCollisionBox playerBox,
@@ -589,7 +591,8 @@ public class WorldStageBuilder {
 
         // MCP-Reborn push/collision checks use the entity's concrete
         // bounding box, not the reach-expanded uncertainty box.
-        SimpleCollisionBox entityBox = entity.getPossibleMovementCollisionBoxes(entityBounds, entityScratch);
+        SimpleCollisionBox entityBox =
+                entity.toBoundingBox(player, entity.getPossibleMovementCollisionBoxes(entityBounds, entityScratch));
         return playerBox.isCollided(entityBox) ? entityBox : null;
     }
 

@@ -10,6 +10,7 @@ import java.lang.reflect.Proxy;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.jetbrains.annotations.NotNull;
 
 /** Platform factory over plain native objects; installing it swaps the global loader until closed. */
@@ -27,6 +28,9 @@ public final class FakePlatformPlayers extends AbstractPlatformPlayerFactory<Fak
             return uuid;
         }
     }
+
+    /** The natives the server reports online; each is also found by its UUID's string as its name. */
+    public final List<Native> online = new CopyOnWriteArrayList<>();
 
     private final Field loaderField;
     private final Object originalLoader;
@@ -52,20 +56,17 @@ public final class FakePlatformPlayers extends AbstractPlatformPlayerFactory<Fak
 
     @Override
     protected Native getNativePlayer(@NotNull UUID uuid) {
-        return null;
+        return find(online, uuid.toString());
     }
 
     @Override
     protected Native getNativePlayer(@NotNull String name) {
-        return null;
+        return find(online, name);
     }
 
     @Override
     protected PlatformPlayer createPlatformPlayer(@NotNull Native nativePlayer) {
-        PlatformPlayer player = mock(PlatformPlayer.class);
-        when(player.getUniqueId()).thenReturn(nativePlayer.uuid());
-        when(player.getNative()).thenReturn(nativePlayer);
-        return player;
+        return wrapper(nativePlayer);
     }
 
     @Override
@@ -75,6 +76,20 @@ public final class FakePlatformPlayers extends AbstractPlatformPlayerFactory<Fak
 
     @Override
     protected Collection<Native> getNativeOnlinePlayers() {
-        return List.of();
+        return online;
+    }
+
+    public static Native find(Collection<Native> online, String name) {
+        return online.stream()
+                .filter(player -> player.uuid().toString().equals(name))
+                .findFirst()
+                .orElse(null);
+    }
+
+    public static PlatformPlayer wrapper(Native nativePlayer) {
+        PlatformPlayer player = mock(PlatformPlayer.class);
+        when(player.getUniqueId()).thenReturn(nativePlayer.uuid());
+        when(player.getNative()).thenReturn(nativePlayer);
+        return player;
     }
 }

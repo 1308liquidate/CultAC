@@ -108,6 +108,7 @@ class EntityScanParityTest {
     void recountMatchesTheTickOrderFirstScan() throws Exception {
         Method pusherBox = WorldStageBuilder.class.getDeclaredMethod(
                 "collidingPusherBox",
+                CultPlayer.class,
                 CompensatedEntities.class,
                 PacketEntity.class,
                 SimpleCollisionBox.class,
@@ -140,13 +141,19 @@ class EntityScanParityTest {
             int colliding = 0;
             for (PacketEntity entity : entities.entityMap.values()) {
                 boolean collides = pusherBox.invoke(
-                                null, entities, entity, playerBox, new SimpleCollisionBox(), new SimpleCollisionBox())
+                                null,
+                                f.player,
+                                entities,
+                                entity,
+                                playerBox,
+                                new SimpleCollisionBox(),
+                                new SimpleCollisionBox())
                         != null;
                 if (collides) colliding++;
                 if (entities.clientTickOrder(entity) < playerTickOrder) continue;
                 if (collides) expected++;
             }
-            WorldStageBuilder.recountCollidingTickingAfterPlayer(prediction);
+            WorldStageBuilder.recountCollidingTickingAfterPlayer(f.player, prediction);
             assertEquals(expected, context.getWorldData().getNumCollidingTickingAfterPlayer());
             assertTrue(expected > 0 && expected < colliding, "expected=" + expected + " colliding=" + colliding);
         }

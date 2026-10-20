@@ -33,6 +33,9 @@ import org.jetbrains.annotations.Nullable;
 public class CompensatedEntities {
     public final ClientPlayerModes clientPlayerModes = new ClientPlayerModes();
     private static final String SPRINTING_MODIFIER_ID = "minecraft:sprinting";
+    /** LivingEntity#SPEED_MODIFIER_SPRINTING, which LivingEntity#setSprinting adds to movement_speed. */
+    public static final AttributeModifier SPRINTING_SPEED_MODIFIER =
+            new AttributeModifier(SPRINTING_MODIFIER_ID, 0.3F, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
     public static final String SNOW_MODIFIER_ID = "minecraft:powder_snow";
     public static final Set<String> EXCLUDED_MODIFIER_IDS = Set.of(SPRINTING_MODIFIER_ID, SNOW_MODIFIER_ID);
     private static final String ATTRIBUTE_NAMESPACE = "minecraft:";
@@ -304,6 +307,12 @@ public class CompensatedEntities {
     // TODO: This doesn't belong here at all
     public double getPlayerMovementSpeed() {
         double speed = player.compensatedEntities.getSelf().playerSpeed;
+        return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
+    }
+
+    /** {@link #getPlayerMovementSpeed} while movement_speed carries the sprinting modifier. */
+    public double getSprintingPlayerMovementSpeed() {
+        double speed = player.compensatedEntities.getSelf().sprintingPlayerSpeed();
         return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
     }
 
@@ -678,6 +687,9 @@ public class CompensatedEntities {
         if ((entityType == EntityTypeIds.FISHING_BOBBER)) {
             return new PacketEntityHook(player, entityID, entityType, position.x, position.y, position.z, data);
         }
+        if (PacketEntityHurtingProjectile.isHurtingProjectile(entityType)) {
+            return new PacketEntityHurtingProjectile(player, entityID, entityType, position);
+        }
         return new PacketEntity(player, entityID, entityType, position.x, position.y, position.z);
     }
 
@@ -820,6 +832,8 @@ public class CompensatedEntities {
             var height = WatchableIndexUtil.getIndex(watchableObjects, 9);
             if (width != null && width.value() instanceof Float value) interaction.actionWidth = value;
             if (height != null && height.value() instanceof Float value) interaction.actionHeight = value;
+            // Interaction#onSyncedDataUpdated refreshes its dimensions on either field.
+            if (width != null || height != null) interaction.refreshDimensions(player);
         }
         var modelType = EntityTypeUtil.modelType(entity.type);
         if (modelType != null && modelType.has(ac.cult.blocksim.entity.EntityTypes.ARROW)) {
@@ -894,10 +908,12 @@ public class CompensatedEntities {
 
         Object value = sizeData.value();
         if (value instanceof Integer) {
-            ((PacketEntitySizeable) entity).size = Math.max((int) value, 1);
+            ((PacketEntitySizeable) entity).size = (int) value;
         } else if (value instanceof Byte) {
-            ((PacketEntitySizeable) entity).size = Math.max((byte) value, 1);
+            ((PacketEntitySizeable) entity).size = (byte) value;
         }
+        // AbstractCubeMob#onSyncedDataUpdated and Phantom#onSyncedDataUpdated refresh dimensions on ID_SIZE.
+        entity.refreshDimensions(player);
     }
 
     private void applyShulkerMetadata(PacketEntity entity, List<EntityMetadata.Entry> watchableObjects) {

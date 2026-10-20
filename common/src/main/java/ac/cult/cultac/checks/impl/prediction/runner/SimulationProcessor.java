@@ -279,7 +279,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 && (this.player.packetStateData.hasPassengerRotationThisClientTick()
                         || this.player.compensatedEntities.getSelf().inVehicle()
                         || this.player.compensatedEntities.vehicles.hasClientObservedServerVehicle()
-                        || this.player.compensatedEntities.vehicles.hasPlayerPassengerState());
+                        || this.player.compensatedEntities.vehicles.hasClientPlayerPassengerState());
     }
 
     private boolean isPacketHandlerRotationTeleport(ServerboundMovePlayer packet) {
@@ -287,9 +287,9 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     }
 
     public void onPlayerTickEnd(PacketReceiveEvent event) {
-        if (!this.player.compensatedEntities.vehicles.hasPlayerPassengerState()
-                && !this.player.packetStateData.hasPassengerRotationThisClientTick()) {
-            if (!this.player.isBedrockMovement()) {
+        if (!this.player.isBedrockMovement()) {
+            if (!this.player.compensatedEntities.vehicles.hasClientPlayerPassengerState()
+                    && !this.player.packetStateData.hasPassengerRotationThisClientTick()) {
                 if (!this.player.packetStateData.receivedMovementThisClientTick) {
                     if (CheckManagerListener.localPlayerTicked(this.player)) {
                         PredictionResult result = this.advanceNoPositionClientTick(
@@ -363,6 +363,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                                 this.lastOnGroundSkip.reset();
                             }
                         }
+                    } else {
+                        // PlayerInput precedes the passenger Rot each riding tick, even
+                        // when this passenger never commits a vehicle prediction.
+                        this.lastSneaking = this.player.isSneaking;
                     }
                 }
             }

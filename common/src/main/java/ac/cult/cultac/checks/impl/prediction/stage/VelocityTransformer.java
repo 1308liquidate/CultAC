@@ -5,6 +5,7 @@ import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHappyGhast;
@@ -72,8 +73,41 @@ public class VelocityTransformer {
         // utils.nmsutil.NextTickVelocityDeriver.findVelocitiesForNextTick(...), which derives
         // the carried delta from the accepted packet movement after the move.
 
+        input = applyCreativeFlightInput(player, input);
         input = applyMovementThreshold(input, simulationContext.getVersion(), simulationContext.getVehicle() == null);
         return applyJumps(player, input);
+    }
+
+    /**
+     * LocalPlayer#aiStep adds {@code inputYa * abilities.getFlyingSpeed() * 3.0F} while flying, before
+     * LivingEntity#aiStep's 0.003 cutoff; inputYa is +1 for jump and -1 for shift. From 1.21.2 the keys are the last
+     * PLAYER_INPUT sent (none sent means no keys: LocalPlayer#lastSentInput starts at Input.EMPTY). Older clients send
+     * no jump key, only shift (PRESS/RELEASE_SHIFT_KEY from LocalPlayer#sendPosition before the move), so jump can
+     * hold or not.
+     */
+    private List<PredVector> applyCreativeFlightInput(CultPlayer player, List<PredVector> input) {
+        if (simulationContext.getVehicle() != null || !player.isFlying) return input;
+        int[] inputs;
+        KnownInput keys = player.packetStateData.knownInput;
+        if (simulationContext.getVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)) {
+            int inputYa = (keys.jump() ? 1 : 0) - (keys.shift() ? 1 : 0);
+            if (inputYa == 0) return input;
+            inputs = new int[] {inputYa};
+        } else {
+            inputs = keys.shift() ? new int[] {-1, 0} : new int[] {0, 1};
+        }
+        List<PredVector> outputs = new ArrayList<>(input.size() * inputs.length);
+        for (PredVector vector : input) {
+            for (int inputYa : inputs) {
+                if (inputYa == 0) {
+                    outputs.add(vector);
+                    continue;
+                }
+                double impulse = (float) inputYa * player.flySpeed * 3.0F;
+                outputs.add(vector.add(0.0, impulse, 0.0, "Creative flight input"));
+            }
+        }
+        return outputs;
     }
 
     private boolean shouldThresholdBeforeItemControlledRiddenInput(CultPlayer player) {
@@ -144,11 +178,11 @@ public class VelocityTransformer {
 
     private List<PredVector> applyRideableInput(CultPlayer player, List<PredVector> input) {
         PacketEntity vehicle = simulationContext.getVehicle();
-        // LivingEntity#aiStep runs travelRidden only while the root isAlive(); a dead root travels on its
-        // immobile self input (LivingEntity#isImmobile, AbstractHorse#isImmobile), which is zero.
+        // LivingEntity#aiStep runs travelRidden only while the root isAlive() (health > 0, not the dead
+        // flag); otherwise it travels on its immobile self input (LivingEntity#isImmobile), which is zero.
         if (vehicle == null
                 || input.isEmpty()
-                || vehicle.isDead
+                || !vehicle.actionAlive
                 || !player.packetStateData.isVehicleMovementFromClientTick()
                 || !canUseItemControlledMovement(player, vehicle)
                 || EntityTypeUtil.isBoat(vehicle.type)) {
@@ -526,13 +560,14 @@ public class VelocityTransformer {
 
     private List<PredVector> applyJumps(CultPlayer player, List<PredVector> velocities) {
         boolean canPlayerJump = simulationContext.getWorldData().isCanJump();
-        // AbstractHorse#tickRidden and AbstractNautilus#tickRidden run the rider's jump inside travelRidden.
+        // AbstractHorse#tickRidden and AbstractNautilus#tickRidden run the rider's jump inside travelRidden,
+        // which LivingEntity#aiStep gates on isAlive().
         boolean canHorseJump = simulationContext.getVehicle() instanceof PacketEntityHorse horse
-                && !horse.isDead
+                && horse.actionAlive
                 && horse.horseJump > 0.0F
                 && simulationContext.getLastOnGround().determineOptimistically();
         boolean canNautilusDash = simulationContext.getVehicle() instanceof PacketEntityNautilus nautilus
-                && !nautilus.isDead
+                && nautilus.actionAlive
                 && nautilus.pendingJumpScale > 0.0D;
         if (!canPlayerJump && !canHorseJump && !canNautilusDash) return velocities;
 
@@ -639,7 +674,7 @@ public class VelocityTransformer {
             for (boolean isSprinting : simulationContext.getIsSprinting().getStates()) {
                 // To keep shit clean, we'll just do horse jumping separately
                 final PacketEntity vehicle = simulationContext.getVehicle();
-                if (vehicle instanceof PacketEntityHorse && vehicle.isDead) continue;
+                if (vehicle instanceof PacketEntityHorse && !vehicle.actionAlive) continue;
                 if (vehicle instanceof PacketEntityCamel) {
                     final PredVector dashed = applyCamelDash(player, vector, onHoney ? 0.5 : 1);
                     if (dashed != vector) outputs.add(dashed);

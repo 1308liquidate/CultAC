@@ -342,6 +342,12 @@ public class SimulationContext {
         return getFrictionInfluencedSpeed(blockUnderPlayer, player);
     }
 
+    /** Radius of the circular horizontal input allowance around the input-free movement. */
+    public double getHorizontalInputRadius(CultPlayer player) {
+        float speed = getMaxSpeed(player);
+        return getVehicle() == null ? speed * 1.3D : speed;
+    }
+
     /**
      * The largest moveRelative speed the client's sprint state permits. LivingEntity#getFrictionInfluencedSpeed
      * reads getSpeed(), which carries the minecraft:sprinting modifier, on the ground, and Player#getFlyingSpeed,
@@ -406,9 +412,23 @@ public class SimulationContext {
         return maxSpeed;
     }
 
+    /**
+     * LivingEntity#getFrictionInfluencedSpeed on the ground for the local player while its movement_speed carries
+     * minecraft:sprinting.
+     */
+    public float getSprintingGroundMoveRelativeSpeed(CultPlayer player) {
+        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        return getFrictionInfluencedSpeed(
+                blockUnderPlayer, player, entities.getSprintingPlayerMovementSpeed(), true, false, false);
+    }
+
     private float getFrictionInfluencedSpeed(
             float friction, CultPlayer player, boolean isOnGround, boolean water, boolean lava) {
-        final double normalSpeed = getPlayerMovementSpeed(player);
+        return getFrictionInfluencedSpeed(friction, player, getPlayerMovementSpeed(player), isOnGround, water, lava);
+    }
+
+    private float getFrictionInfluencedSpeed(
+            float friction, CultPlayer player, double normalSpeed, boolean isOnGround, boolean water, boolean lava) {
 
         if (vehicle instanceof PacketEntityNautilus && water) {
             // AbstractNautilus#travelInWater bypasses LivingEntity's generic

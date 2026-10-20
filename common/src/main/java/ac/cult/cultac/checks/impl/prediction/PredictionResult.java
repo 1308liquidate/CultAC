@@ -175,8 +175,7 @@ public class PredictionResult {
 
     /** Radius of the circular horizontal input allowance around the closest movement. */
     public double getHorizontalInputRadius() {
-        float speed = getSimulationContext().getMaxSpeed(player);
-        return getSimulationContext().getVehicle() == null ? speed * 1.3D : speed;
+        return getSimulationContext().getHorizontalInputRadius(player);
     }
 
     public Vec3 getInputVectorAndVerticals() {

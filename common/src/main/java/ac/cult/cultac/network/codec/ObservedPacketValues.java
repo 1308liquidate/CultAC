@@ -113,7 +113,14 @@ public final class ObservedPacketValues implements PacketValueAdapter {
                         ? toModel.blockState(packet.data())
                         : packet.data();
                 yield new ClientboundAddEntity(
-                        packet.entityId(), type, packet.position(), packet.yaw(), packet.pitch(), data, packet.uuid());
+                        packet.entityId(),
+                        type,
+                        packet.position(),
+                        packet.yaw(),
+                        packet.pitch(),
+                        data,
+                        packet.uuid(),
+                        packet.velocity());
             }
             case "minecraft:block_event" -> {
                 var packet = new BlockEventCodec().read(input, context);

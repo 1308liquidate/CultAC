@@ -28,6 +28,7 @@ import ac.cult.cultac.utils.data.ReachInterpolationData;
 import ac.cult.cultac.utils.enums.BoatEntityStatus;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.ArrayList;
@@ -229,7 +230,9 @@ public class PacketEntity {
             return;
         }
 
-        SimpleCollisionBox startingLocation = interpolationStartingLocation(player);
+        boolean placed = placedAtPacketPosition(player);
+        SimpleCollisionBox startingLocation =
+                placed ? packetPositionBox(player) : interpolationStartingLocation(player);
         boolean ridingInVehicle = player.compensatedEntities.getSelf().inVehicle();
         this.oldPacketLocation = newPacketLocation;
         this.newPacketLocation = new ReachInterpolationData(
@@ -238,8 +241,8 @@ public class PacketEntity {
                 desyncClientPos.x,
                 desyncClientPos.y,
                 desyncClientPos.z,
-                clientPhysicalYaw,
-                clientPhysicalPitch,
+                placed ? targetYaw : clientPhysicalYaw,
+                placed ? targetPitch : clientPhysicalPitch,
                 targetYaw,
                 targetPitch,
                 !ridingInVehicle,
@@ -356,7 +359,9 @@ public class PacketEntity {
             return;
         }
 
-        SimpleCollisionBox startingLocation = interpolationStartingLocation(player);
+        boolean placed = placedAtPacketPosition(player);
+        SimpleCollisionBox startingLocation =
+                placed ? packetPositionBox(player) : interpolationStartingLocation(player);
         float targetYaw = interpolationTargetYaw(yaw);
         float targetPitch = interpolationTargetPitch(pitch);
         if (matchesActiveInterpolationTarget(
@@ -370,8 +375,8 @@ public class PacketEntity {
                 desyncClientPos.x,
                 desyncClientPos.y,
                 desyncClientPos.z,
-                clientPhysicalYaw,
-                clientPhysicalPitch,
+                placed ? targetYaw : clientPhysicalYaw,
+                placed ? targetPitch : clientPhysicalPitch,
                 targetYaw,
                 targetPitch,
                 !player.compensatedEntities.getSelf().inVehicle(),
@@ -426,6 +431,32 @@ public class PacketEntity {
         return newPacketLocation != null
                 && newPacketLocation.hasActiveInterpolationTarget()
                 && newPacketLocation.getExactInterpolationStep() >= 0;
+    }
+
+    /**
+     * Whether a pre-26.3 Java client sets this entity straight onto a packet position: {@code Entity#lerpTo} (1.20.2,
+     * 1.21.1) and {@code Entity#moveOrInterpolateTo} without an {@code InterpolationHandler} (1.21.11) call
+     * {@code setPos}. Living entities other than shulkers, boats, minecarts, fishing hooks, experience orbs and
+     * displays interpolate in some of those versions.
+     */
+    private boolean placedAtPacketPosition(CultPlayer player) {
+        if (player.isBedrockMovement() || player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
+            return false;
+        }
+        if (type == EntityTypeIds.SHULKER) return true;
+        return !living
+                && !boat
+                && !minecart
+                && type != EntityTypeIds.FISHING_BOBBER
+                && type != EntityTypeIds.EXPERIENCE_ORB
+                && type != EntityTypeIds.BLOCK_DISPLAY
+                && type != EntityTypeIds.ITEM_DISPLAY
+                && type != EntityTypeIds.TEXT_DISPLAY;
+    }
+
+    private SimpleCollisionBox packetPositionBox(CultPlayer player) {
+        return GetBoundingBox.getPacketEntityBoundingBox(
+                player, desyncClientPos.x, desyncClientPos.y, desyncClientPos.z, this);
     }
 
     private SimpleCollisionBox interpolationStartingLocation(CultPlayer player) {
@@ -810,12 +841,12 @@ public class PacketEntity {
         return new Vec3(x, y, z);
     }
 
+    /** {@code Entity#refreshDimensions}: the current and pending positions take the entity's new dimensions. */
     public void refreshDimensions(CultPlayer player) {
-        if (desyncClientPos == null) {
-            return;
-        }
-        setPositionRaw(GetBoundingBox.getPacketEntityBoundingBox(
-                player, desyncClientPos.x, desyncClientPos.y, desyncClientPos.z, this));
+        float width = BoundingBoxSize.getWidth(player, this);
+        float height = BoundingBoxSize.getHeight(player, this);
+        newPacketLocation.resize(width, height);
+        if (oldPacketLocation != null) oldPacketLocation.resize(width, height);
     }
 
     public SimpleCollisionBox getPossibleCollisionBoxes() {
@@ -842,6 +873,22 @@ public class PacketEntity {
         if (oldPacketLocation == null) return out;
         return ReachInterpolationData.combineCollisionBox(
                 oldPacketLocation.getPossibleMovementLocationCombined(scratch), out, out);
+    }
+
+    /**
+     * Moves {@code box}, one of this entity's position boxes (minY at its position), onto its Java bounding box:
+     * {@code AbstractWindCharge#makeBoundingBox} starts the box 0.15F below the position, and {@code AABB} orders the
+     * corners, so a negative height spans below the position. Bedrock clients keep the position box. Readers of the
+     * position itself (riding offsets, eye positions) use the position box.
+     */
+    public SimpleCollisionBox toBoundingBox(CultPlayer player, SimpleCollisionBox box) {
+        if (player.isBedrockMovement()) return box;
+        if (type == EntityTypeIds.WIND_CHARGE || type == EntityTypeIds.BREEZE_WIND_CHARGE) {
+            box.offset(0, -0.15F, 0);
+        }
+        if (BoundingBoxSize.spansBelowPosition(player, this))
+            box.offset(0, -BoundingBoxSize.getHeight(player, this), 0);
+        return box;
     }
 
     public List<SimpleCollisionBox> getPossibleMovementCollisionBoxCandidates() {

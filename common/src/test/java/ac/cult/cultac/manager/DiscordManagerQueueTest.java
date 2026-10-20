@@ -216,6 +216,23 @@ class DiscordManagerQueueTest {
     }
 
     @Test
+    void anAnswerArrivingAfterStopIsIgnored() {
+        CompletableFuture<HttpResponse<String>> pending = new CompletableFuture<>();
+        script.add(() -> pending);
+        CompletableFuture<Boolean> result = queue.add(WEBHOOK, alert("Alice"));
+        queue.tick();
+
+        queue.stop();
+        int warnings = logs.size();
+        pending.completeExceptionally(new IOException("client closed"));
+        runUntil(60_000);
+
+        assertFalse(result.join());
+        assertEquals(1, sentBodies.size());
+        assertEquals(warnings, logs.size());
+    }
+
+    @Test
     void anAlertThatCannotBeRequestedIsLoggedAndDoesNotBlockTheNext() {
         script.add(() -> {
             throw new IllegalArgumentException("unsupported URI");
