@@ -357,6 +357,8 @@ public final class PlayerText {
     private final byte[] clientboundKinds;
     /** By packet id: each serverbound packet's identifier, null for one not known here; null when no id is known. */
     private final String[] serverbound;
+    /** By packet id: {@link #STRIP}, {@link #TEXT_FREE}, or withheld; null when no id is known. */
+    private final byte[] serverboundKinds;
 
     private final ProtocolContext openScreen;
     private final ProtocolContext combatKill;
@@ -393,6 +395,12 @@ public final class PlayerText {
         serverboundNames.addAll(TEXT_FREE_SERVERBOUND);
         serverboundNames.addAll(PRIVATE_SERVERBOUND);
         this.serverbound = serverboundIds == null ? null : byId(serverboundNames, serverboundIds);
+        this.serverboundKinds = serverbound == null ? null : new byte[serverbound.length];
+        for (int id = 0; serverbound != null && id < serverbound.length; id++) {
+            String name = serverbound[id];
+            if (name == null || PRIVATE_SERVERBOUND.contains(name)) serverboundKinds[id] = WITHHELD;
+            else serverboundKinds[id] = TEXT_FREE_SERVERBOUND.contains(name) ? TEXT_FREE : STRIP;
+        }
         ProtocolVersion supported = null;
         ProtocolContext openScreen = null;
         ProtocolContext combatKill = null;
@@ -527,14 +535,14 @@ public final class PlayerText {
             withheld.increment();
             return null;
         }
-        String identifier = id < 0 || id >= serverbound.length ? null : serverbound[id];
-        if (identifier == null || PRIVATE_SERVERBOUND.contains(identifier)) {
+        byte kind = id >= 0 && id < serverboundKinds.length ? serverboundKinds[id] : WITHHELD;
+        if (kind == WITHHELD) {
             withheld.increment();
             return null;
         }
-        if (TEXT_FREE_SERVERBOUND.contains(identifier)) return packet;
+        if (kind == TEXT_FREE) return packet;
         if (values == null && !textStripped) return unstripped(packet);
-        return counted(packet, strip(false, identifier, packet, null));
+        return counted(packet, strip(false, serverbound[id], packet, null));
     }
 
     /** Whether a packet goes out unstripped on a socket that said {@code textStripped} false: this protocol has no codec. */
