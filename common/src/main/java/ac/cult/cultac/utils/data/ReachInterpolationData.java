@@ -690,7 +690,7 @@ public class ReachInterpolationData {
                 startingLocation.maxX + widthChange / 2.0D,
                 startingLocation.maxY + heightChange,
                 startingLocation.maxZ + widthChange / 2.0D);
-        // A start smaller than the target never shrinks below the new size; the 7-argument box does not sort.
+        // A start smaller than the target never shrinks below the new size; the box constructor does not sort.
         if (start.maxX - start.minX < width - SIZE_EPSILON) {
             double centerX = (startingLocation.minX + startingLocation.maxX) / 2.0D;
             start.minX = centerX - width / 2.0D;
