@@ -52,6 +52,11 @@ public final class SectionSnapshot {
         return blocks.copy();
     }
 
+    /** The biome of every cell when the palette holds a single entry; -1 otherwise. */
+    public int uniformBiome() {
+        return biomes.singleValue();
+    }
+
     public int[] copyBiomes() {
         int[] values = new int[64];
         for (int i = 0; i < values.length; i++) values[i] = biomes.get(i);

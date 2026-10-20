@@ -1,6 +1,7 @@
 package ac.cult.cultac.events.packets.worldreader;
 
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.packet.SectionSnapshot;
 import ac.cult.cultac.network.packet.WorldPackets.Chunk;
 import ac.cult.cultac.network.packet.WorldPackets.ChunkBiomes;
 import ac.cult.cultac.player.CultPlayer;
@@ -28,7 +29,7 @@ public class PacketWorldReaderTwentySix extends BasePacketWorldReader {
             for (int i = 0; i < chunks.length; i++) {
                 var section = packet.decodedSections().get(i);
                 chunks[i] = new CachedSection(section.copyBlocks());
-                biomes[i] = section.copyBiomes();
+                biomes[i] = biomeValues(section);
             }
         } else {
             var bytes = Unpooled.wrappedBuffer(packet.sections());
@@ -59,6 +60,11 @@ public class PacketWorldReaderTwentySix extends BasePacketWorldReader {
                 packet.motionBlocking());
     }
 
+    private static int[] biomeValues(SectionSnapshot section) {
+        int biome = section.uniformBiome();
+        return biome < 0 ? section.copyBiomes() : CachedChunk.uniformBiomes(biome);
+    }
+
     private static int biomeRegistrySize(CultPlayer player) {
         return player.user.getCultConnection().require(RegistryNames.class).size("minecraft:worldgen/biome");
     }
@@ -74,7 +80,7 @@ public class PacketWorldReaderTwentySix extends BasePacketWorldReader {
                 if (chunk.decodedSections().size() != values.length)
                     throw new IllegalArgumentException("Biome section count differs from the received dimension");
                 for (int i = 0; i < values.length; i++)
-                    values[i] = chunk.decodedSections().get(i).copyBiomes();
+                    values[i] = biomeValues(chunk.decodedSections().get(i));
             } else {
                 var bytes = Unpooled.wrappedBuffer(chunk.sections());
                 try {

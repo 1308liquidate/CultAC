@@ -303,6 +303,11 @@ public final class PalettedSection {
         return result;
     }
 
+    /** The value at every index of a single-entry local palette; -1 for any other section. */
+    public int singleValue() {
+        return bits == 0 && !isGlobal() && paletteSize > 0 ? palette[0] : -1;
+    }
+
     /** False for a global palette, whose entries are only known after reading every index. */
     public boolean localPaletteWithin(int limit) {
         if (isGlobal()) return false;

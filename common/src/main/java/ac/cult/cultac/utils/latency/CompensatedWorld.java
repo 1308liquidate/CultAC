@@ -32,6 +32,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 
@@ -153,6 +154,7 @@ public class CompensatedWorld {
         private final int transaction;
         private MotionHeightmap motionHeightmap;
         private final List<ac.cult.cultac.network.packet.WorldPackets.BlockEntityUpdate> blockEntities;
+        private static final AtomicReferenceArray<int[]> UNIFORM_BIOMES = new AtomicReferenceArray<>(1024);
         private int[][] biomes;
 
         public CachedChunk(CachedSection[] sections, int transaction) {
@@ -181,13 +183,32 @@ public class CompensatedWorld {
                 return;
             }
             if (biomes.length != sections.length) throw new IllegalArgumentException("Biome section count mismatch");
-            this.biomes = Arrays.stream(biomes)
-                    .map(values -> {
-                        if (values.length != 64)
-                            throw new IllegalArgumentException("Biome section must contain 64 values");
-                        return values.clone();
-                    })
-                    .toArray(int[][]::new);
+            int[][] retained = new int[biomes.length][];
+            for (int i = 0; i < biomes.length; i++) {
+                int[] values = biomes[i];
+                if (values.length != 64) throw new IllegalArgumentException("Biome section must contain 64 values");
+                retained[i] = isUniform(values) ? uniformBiomes(values[0]) : values.clone();
+            }
+            this.biomes = retained;
+        }
+
+        /** 64 copies of {@code biome}; arrays are shared between chunks, so no caller may write to them. */
+        public static int[] uniformBiomes(int biome) {
+            if (biome < 0 || biome >= UNIFORM_BIOMES.length()) {
+                int[] values = new int[64];
+                Arrays.fill(values, biome);
+                return values;
+            }
+            int[] shared = UNIFORM_BIOMES.get(biome);
+            if (shared != null) return shared;
+            int[] values = new int[64];
+            Arrays.fill(values, biome);
+            return UNIFORM_BIOMES.compareAndSet(biome, null, values) ? values : UNIFORM_BIOMES.get(biome);
+        }
+
+        private static boolean isUniform(int[] values) {
+            for (int i = 1; i < values.length; i++) if (values[i] != values[0]) return false;
+            return true;
         }
 
         public int sectionCount() {
