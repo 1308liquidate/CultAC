@@ -470,6 +470,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 && lastPrediction != null
                 && !player.compensatedEntities.getSelf().inVehicle()) {
             SimpleCollisionBox oldBB = player.boundingBox;
+            double oldX = player.x, oldY = player.y, oldZ = player.z;
             try {
                 player.boundingBox = GetBoundingBox.getPlayerBoundingBox(player, position.x, position.y, position.z);
 
@@ -509,12 +510,19 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 if (clientVel.x != collide.x) clientVel = new Vec3(0, clientVel.y, clientVel.z);
                 if (clientVel.y != collide.y) {
                     boolean landed = clientVel.y < 0.0D;
+                    // Entity#checkSupportingBlock ranks candidates by distance from the post-move position.
+                    player.x = position.x;
+                    player.y = position.y;
+                    player.z = position.z;
                     MainSupportingBlockData support = player.checkManager
                             .getSimulationProcessor()
                             .mainSupportingBlockAfter(
                                     GetBoundingBox.getPlayerBoundingBox(player, position.x, position.y, position.z),
                                     collide,
                                     landed);
+                    player.x = oldX;
+                    player.y = oldY;
+                    player.z = oldZ;
                     double restitutedY = VelocityCandidates.afterVerticalCollision(
                             player,
                             BlockProperties.getOnPos(player, support, position),
@@ -536,6 +544,9 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                         context);
             } finally {
                 player.boundingBox = oldBB;
+                player.x = oldX;
+                player.y = oldY;
+                player.z = oldZ;
             }
         }
 
