@@ -138,7 +138,7 @@ final class ItemUseTestSupport {
         var context = mock(SimulationContext.class);
         when(context.getItemUse()).thenReturn(snapshot);
         when(context.getVersion()).thenReturn(ClientVersion.V_26_3);
-        when(context.getMaxSprintInputSpeed(any())).thenReturn(SPRINT_INPUT_SPEED);
+        when(context.getMaxSprintInputSpeed(any(), any())).thenReturn(SPRINT_INPUT_SPEED);
         var realities = new ArrayList<PredictionResult>();
         var result = new PredictionResult(
                 player, new PredVector(Vec3.ZERO), context, new Vec3(0, 0, WALK), null, realities, realities);

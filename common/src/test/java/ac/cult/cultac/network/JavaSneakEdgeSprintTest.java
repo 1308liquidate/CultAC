@@ -3,6 +3,7 @@ package ac.cult.cultac.network;
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,9 +17,11 @@ import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundUpdateAttributes;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -108,6 +111,76 @@ class JavaSneakEdgeSprintTest {
         }
     }
 
+    /**
+     * A sprinting client whose movement_speed the server replaced with a minecraft:sprinting modifier that quadruples
+     * it. ClientPacketListener#handleUpdateAttributes keeps that modifier while the client keeps sprinting, so the
+     * edge hides the quadrupled input; LivingEntity#setSprinting puts vanilla's modifier back only when sprinting
+     * restarts.
+     */
+    @Test
+    void aServerSprintModifierHoldsUntilSprintingRestarts() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            drop(f);
+            // Facing the drop, the edge backs off the whole input, so the moves alone do not show its speed.
+            float yaw = 0.0F;
+            rotate(f, yaw, 0.0F);
+            Vec3 position = new Vec3(0.3, FLOOR_Y, 1.299999);
+            Vec3 velocity = new Vec3(0.002, 0.0, 0.05);
+            f.place(position, velocity);
+            command(f, PlayerCommandAction.START_SPRINTING);
+            f.input(SPRINT_SNEAK);
+            double friction = 0.6F * 0.91F;
+            float sprintSpeed = (float) ((double) 0.1F * (1.0D + (double) 0.3F));
+            Vec3 delta = velocity.add(ClientMoveInput.of(f, SPRINT_SNEAK, 1.0F, sprintSpeed, yaw));
+            position = position.add(delta.x, 0.0, 0.0);
+            assertExact(f.tick(position, true));
+            velocity = new Vec3(delta.x * friction, 0.0, delta.z * friction);
+
+            var quadrupled =
+                    new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+            var attributes = new ClientboundUpdateAttributes(
+                    f.player.entityID,
+                    List.of(new AttributeSnapshot("minecraft:movement_speed", 0.1F, List.of(quadrupled))));
+            var event = new PacketSendEvent<>(
+                    f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.UPDATE_ATTRIBUTES, attributes, false);
+            f.player.packetEntityReplication.onUpdateAttributes(event, f.player, attributes);
+            event.tasksAfter().forEach(Runnable::run);
+            f.pongThrough(f.player.lastTransactionSent.get());
+
+            float quadrupledSpeed = (float) ((double) 0.1F * 4.0D);
+            for (int tick = 0; tick < 2; tick++) {
+                delta = velocity.add(ClientMoveInput.of(f, SPRINT_SNEAK, 0.3F, quadrupledSpeed, yaw));
+                position = position.add(delta.x, 0.0, 0.0);
+                assertExact(f.tick(position, true));
+                velocity = new Vec3(delta.x * friction, 0.0, delta.z * friction);
+            }
+            f.input(SPRINT);
+            delta = velocity.add(ClientMoveInput.of(f, SPRINT, 0.3F, quadrupledSpeed, yaw));
+            position = position.add(delta.x, -0.0784000015258789, delta.z);
+            assertExact(f.tick(position, false));
+            velocity = new Vec3(delta.x * friction, 0.0, delta.z * friction);
+            // LivingEntity#travelInAir off the edge: Player#getFlyingSpeed from the sprint flag, 0.91F, gravity, 0.98F.
+            double fall = (-0.0784000015258789 - 0.08D) * (double) 0.98F;
+            for (int tick = 0; tick < 3; tick++) {
+                delta = velocity.add(ClientMoveInput.of(f, SPRINT, 1.0F, 0.025999999F, yaw));
+                position = position.add(delta.x, fall, delta.z);
+                assertExact(f.tick(position, false));
+                velocity = new Vec3(delta.x * (double) 0.91F, 0.0, delta.z * (double) 0.91F);
+                fall = (fall - 0.08D) * (double) 0.98F;
+            }
+
+            command(f, PlayerCommandAction.STOP_SPRINTING);
+            f.move(position, false);
+            f.tickEnd();
+            command(f, PlayerCommandAction.START_SPRINTING);
+            f.move(position, false);
+            f.tickEnd();
+            assertEquals(
+                    sprintSpeed,
+                    (float) f.player.compensatedEntities.getMaxPlayerMovementSpeed(false, ClientSprintState.Outcome.ANY));
+        }
+    }
+
     /** A riptide spin can reset sprinting after travel, so its tick carries no sprint input the edge hides. */
     @Test
     void aRiptideSpinCarriesNoSprintInputTheEdgeHides() throws Exception {
@@ -140,6 +213,11 @@ class JavaSneakEdgeSprintTest {
                                     && Math.abs(next.z - carriedZ) < 1.0E-7),
                     "carried the hidden sprint input: " + describe(result));
         }
+    }
+
+    private static void command(JavaTickFixture f, PlayerCommandAction action) {
+        var packet = new ServerboundPlayerCommand(f.player.entityID, action, 0);
+        new PacketEntityAction().onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, packet), f.player, packet);
     }
 
     /** The fixture floor with its blocks from z = 1 removed. */

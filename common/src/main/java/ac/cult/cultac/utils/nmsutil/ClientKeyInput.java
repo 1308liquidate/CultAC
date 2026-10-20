@@ -1,6 +1,5 @@
 package ac.cult.cultac.utils.nmsutil;
 
-import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.player.CultPlayer;
@@ -16,20 +15,6 @@ import ac.cult.cultac.utils.math.Vec3;
  */
 public final class ClientKeyInput {
     private ClientKeyInput() {}
-
-    /**
-     * {@link #travelInput(CultPlayer, SimulationContext, KnownInput, float, float, float)} with no item in use, at the
-     * speed LivingEntity#getSpeed gives on the ground or in water: it carries minecraft:sprinting only while the
-     * client's movement_speed holds the modifier.
-     */
-    public static Vec3 travelInput(
-            CultPlayer player, SimulationContext context, KnownInput keys, float movingSlowlyFactor) {
-        boolean water = context.getWorldData().getInWater() == DesyncStatus.TRUE;
-        float speed = !water && player.sprintState.modifier()
-                ? context.getSprintingGroundMoveRelativeSpeed(player)
-                : context.getMoveRelativeSpeed(player, true, water, false);
-        return travelInput(player, context, keys, 1.0F, movingSlowlyFactor, speed);
-    }
 
     /**
      * LivingEntity#moveRelative's addition for {@code keys}: KeyboardInput#tick, LocalPlayer#modifyInput with

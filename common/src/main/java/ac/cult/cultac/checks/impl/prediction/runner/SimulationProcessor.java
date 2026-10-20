@@ -63,6 +63,7 @@ import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.anticheat.update.RotationUpdate;
 import ac.cult.cultac.utils.anticheat.update.VehiclePositionUpdate;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.data.HeadRotation;
 import ac.cult.cultac.utils.data.LastInstance;
@@ -1058,6 +1059,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.ticksWhileLoadingLevel = 0;
             this.lastXRot = xRot;
             this.lastYRot = yRot;
+            this.commitSprintOutcomes(result);
             this.player.minPlayerAttackSlow = 0;
             this.player.maxPlayerAttackSlow = 0;
             if (this.player.isFlying) {
@@ -1074,6 +1076,60 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         } else {
             this.applyProfileCommit(preparedCommit);
         }
+    }
+
+    /**
+     * Keeps the sprint modifiers of the movement this commit carries on; a setback this tick returns to its anchor's
+     * instead.
+     */
+    private void commitSprintOutcomes(PredictionResult result) {
+        ClientSprintState state = this.player.sprintState;
+        SetbackTeleportUtil setbacks = this.player.getSetbackTeleportUtil();
+        if (setbacks.isPendingSetback() && setbacks.lastKnownGoodPosition != null) {
+            state.restore(setbacks.lastKnownGoodPosition.getSprintOutcomes());
+            state.settleReset();
+            return;
+        }
+        if (!state.outcomeOpen()) return;
+        state.commit(sprintOutcomesAfter(this.player, result));
+    }
+
+    /**
+     * The sprint modifier state after committing {@code result}: the modifiers its accepted candidates moved with, or,
+     * when none was accepted, the one the committed candidate moved with.
+     */
+    public static ClientSprintState.Outcomes sprintOutcomesAfter(CultPlayer player, PredictionResult result) {
+        ClientSprintState state = player.sprintState;
+        if (result == null || !state.outcomeOpen()) return state.outcomes();
+        boolean[] used = new boolean[2];
+        for (PredictionResult reality : result.getRealities()) {
+            if (reality.getFlagSeverity() == 0.0) addSprintOutcome(player, reality, used);
+        }
+        if (!used[0] && !used[1]) addSprintOutcome(player, result, used);
+        if (!used[0] && !used[1]) return state.outcomes();
+        return state.outcomesAfter(used[0], used[1]);
+    }
+
+    private static void addSprintOutcome(CultPlayer player, PredictionResult candidate, boolean[] used) {
+        if (candidate.getInitialStartingVel() == null || candidate.getSimulationContext() == null) return;
+        switch (candidate.getSimulationContext().getSprintOutcome(player, candidate.getInitialStartingVel())) {
+            case CANONICAL -> used[0] = true;
+            case HELD -> used[1] = true;
+            default -> used[0] = used[1] = true;
+        }
+    }
+
+    /** Each candidate once per sprint modifier it can travel with while a possible attack reset leaves it open. */
+    private static List<PredVector> withSprintOutcomes(
+            CultPlayer player, SimulationContext context, List<PredVector> candidates) {
+        if (context.getVehicle() != null || !player.sprintState.outcomeOpen()) return candidates;
+        List<PredVector> split = new ArrayList<>(candidates.size() * 2);
+        for (PredVector candidate : candidates) {
+            for (ClientSprintState.Outcome outcome : player.sprintState.outcomesFor(candidate.getAttackSlows())) {
+                split.add(candidate.withSprintOutcome(outcome));
+            }
+        }
+        return split;
     }
 
     private void applyProfileCommit(PredictionCommit commit) {
@@ -1467,8 +1523,14 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                     curSimulationContext,
                     lastPrediction,
                     this.couldPotentiallyTickSkip);
-            List<PredVector> validInitialVelocities = engine.startingVelocities(
-                    new VelocityTransformer(curSimulationContext), player, contextPacketStart, curSimulationContext);
+            List<PredVector> validInitialVelocities = withSprintOutcomes(
+                    player,
+                    curSimulationContext,
+                    engine.startingVelocities(
+                            new VelocityTransformer(curSimulationContext),
+                            player,
+                            contextPacketStart,
+                            curSimulationContext));
             Vec3 sortTarget = curSimulationContext.getTarget();
             boolean java = !player.isBedrockMovement();
             TransactionVel receivedVelocity =

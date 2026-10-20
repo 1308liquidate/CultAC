@@ -1,11 +1,13 @@
 package ac.cult.cultac.checks.impl.prediction.pipeline.java;
 
 import ac.cult.cultac.checks.CultProcessor;
+import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.type.PostPredictionListener;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.data.MainSupportingBlockData;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
@@ -47,6 +49,7 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         return landedWithoutPosition(clientTick == movedClientTick + 1)
                 && canFire(
                         Vec3.ZERO,
+                        ClientSprintState.Outcome.ANY,
                         player.compensatedEntities.getJumpAmplifier(),
                         last == null || !position.equals(last.getSimulationContext().getEnd())
                                 ? new MainSupportingBlockData(null, false)
@@ -72,6 +75,7 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
                 : landed(result.getSimulationContext().getStart(), result.getTarget())
                         && canFire(
                                 result.getTarget(),
+                                sprintOutcome(result),
                                 result.getSimulationContext().getJumpAmplifier(),
                                 result.getSimulationContext().getWorldData().getMainSupportingBlockPos());
     }
@@ -83,6 +87,7 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
                         result.getSimulationContext().getLastStuckSpeed().y)
                 && canFire(
                         result.getTarget(),
+                        sprintOutcome(result),
                         result.getSimulationContext().getJumpAmplifier(),
                         result.getSimulationContext().getWorldData().getMainSupportingBlockPos());
     }
@@ -153,9 +158,15 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         return false;
     }
 
+    private static ClientSprintState.Outcome sprintOutcome(PredictionResult result) {
+        PredVector start = result.getInitialStartingVel();
+        return start == null ? ClientSprintState.Outcome.ANY : start.getSprintOutcome();
+    }
+
     // LocalPlayer#canAutoJump's remaining prerequisites and updateAutoJump's geometry for a move of {@code move}
     // ending at the player's position.
-    private boolean canFire(Vec3 move, Integer amplifier, MainSupportingBlockData support) {
+    private boolean canFire(
+            Vec3 move, ClientSprintState.Outcome sprint, Integer amplifier, MainSupportingBlockData support) {
         if (player.isSneaking
                 || player.inVehicle()
                 || BlockProperties.onHoneyBlock(player, support, new Vec3(player.x, player.y, player.z)))
@@ -168,8 +179,7 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         if (input.horizontalDistanceSqr() == 0) return false;
         float yaw = player.xRot * ((float) Math.PI / 180.0F);
         float sin = player.trigHandler.sin(yaw), cos = player.trigHandler.cos(yaw);
-        float speed = (float) (player.compensatedEntities.getPlayerMovementSpeed()
-                * (player.sprintState.modifier() ? 1.0D + (double) 0.3F : 1.0D));
+        float speed = (float) player.compensatedEntities.getMaxPlayerMovementSpeed(false, sprint);
         Vec3 begin = new Vec3(player.x, player.y, player.z);
         float dx = (float) move.x, dz = (float) move.z;
         Vec3 end = begin.add(dx, 0, dz), diff = new Vec3(dx, 0, dz);

@@ -20,6 +20,7 @@ import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngines;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfiles;
 import ac.cult.cultac.checks.impl.prediction.runner.KnockbackHandler;
+import ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor;
 import ac.cult.cultac.checks.impl.prediction.stage.UncertaintyPipeline;
 import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.ElytraTransform;
@@ -240,6 +241,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             if (!completedPrediction.getSetBackData().isBedrockTransportOnly()) {
                 lastKnownGoodPosition =
                         new SetbackPosWithVector(to, afterTickFriction, player.totalFlyingPacketsSent, profileState);
+                lastKnownGoodPosition.setSprintOutcomes(SimulationProcessor.sprintOutcomesAfter(
+                        player, predictionComplete.isTeleport() ? null : completedPrediction));
             }
         } else if ((!player.isBedrockMovement() || profileState != null)
                 && (requiredSetBack == null
@@ -252,6 +255,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             // As we didn't setback here, the new position is known to be safe!
             lastKnownGoodPosition =
                     new SetbackPosWithVector(to, afterTickFriction, player.totalFlyingPacketsSent, profileState);
+            lastKnownGoodPosition.setSprintOutcomes(SimulationProcessor.sprintOutcomesAfter(
+                    player, predictionComplete.isTeleport() ? null : completedPrediction));
         }
 
         if (requiredSetBack != null) requiredSetBack.tick();
@@ -389,6 +394,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
 
     private void blockMovementsUntilResync(boolean simulateNext, boolean fullResync, boolean ignoreUnchanged) {
         if (lastKnownGoodPosition == null) return; // Hasn't spawned
+        // A teleport changes neither attributes nor the sprint flag; the rejected moves' modifier evidence is dropped.
+        if (!player.isBedrockMovement()) player.sprintState.restore(lastKnownGoodPosition.getSprintOutcomes());
 
         // If the chunk hasn't loaded, we can't simulate their movement yet
         if (player.getSetbackTeleportUtil().insideUnloadedChunk()) {
