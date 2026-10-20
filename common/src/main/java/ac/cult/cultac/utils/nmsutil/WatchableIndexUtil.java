@@ -64,7 +64,8 @@ public final class WatchableIndexUtil {
     }
 
     public static EntityMetadata.Entry getIndex(List<EntityMetadata.Entry> objects, int index) {
-        for (EntityMetadata.Entry object : objects) {
+        for (int i = 0; i < objects.size(); i++) {
+            EntityMetadata.Entry object = objects.get(i);
             if (object.id() == index) return object;
         }
 
