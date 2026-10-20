@@ -188,6 +188,12 @@ public final class ClientEntityQueries {
                 .contains(modelType(target).key());
     }
 
+    /** Whether {@code entity} is in {@code #redirectable_projectile}, which {@code Player#attack} aims. */
+    public boolean redirectable(PacketEntity entity) {
+        return members("entity_type:minecraft:redirectable_projectile")
+                .contains(modelType(entity).key());
+    }
+
     private static boolean isWindCharge(int type) {
         return type == EntityTypeIds.WIND_CHARGE || type == EntityTypeIds.BREEZE_WIND_CHARGE;
     }

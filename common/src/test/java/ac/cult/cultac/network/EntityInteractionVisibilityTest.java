@@ -11,6 +11,7 @@ import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.checks.impl.visibility.InteractEntityVisibility;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
+import ac.cult.cultac.events.packets.listeners.PacketPlayerAttack;
 import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -291,6 +292,33 @@ class EntityInteractionVisibilityTest {
             setup.power(42, .05);
             setup.clientTick();
             assertEquals(5.2 - 1.045 + .9975, fireball.clientPhysicalPosition.z, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aFireballThePlayerPunchesTurnsToItsLookOnClientsBefore26_3(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version).asClient()) {
+            // Player#attack aims it along the look, (0, 0, 1) at yaw and pitch 0; its next tick moves it 1.045.
+            var fireball = setup.fireball(42, 1.5, 0, NO_OWNER);
+            setup.attack(42);
+            setup.clientTick();
+            assertStops(fireball, version == ProtocolVersion.V26_3 ? 1.5 : 2.545);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aWindChargeTurnsToThePunchingPlayersLookOnlyAfterFiveTicks(ProtocolVersion version) throws Exception {
+        for (int ticks = 4; ticks <= 5; ticks++) {
+            try (var setup = new Setup(version).asClient()) {
+                // WindCharge#deflect refuses while noDeflectTicks, 5 at spawn and lowered after each tick, is positive.
+                var charge = setup.projectile(42, "minecraft:wind_charge", 1.5, 0, NO_OWNER);
+                for (int tick = 0; tick < ticks; tick++) setup.clientTick();
+                setup.attack(42);
+                setup.clientTick();
+                assertStops(charge, ticks == 5 && version != ProtocolVersion.V26_3 ? 2.5 : 1.5);
+            }
         }
     }
 
@@ -806,6 +834,16 @@ class EntityInteractionVisibilityTest {
         void clientTick() {
             player.packetEntityReplication.onPlayerTickEnd(null);
             tickEnd();
+        }
+
+        void attack(int id) {
+            var packet = new ServerboundInteract(id, InteractAction.ATTACK, Hand.MAIN_HAND, Optional.empty(), false);
+            new PacketPlayerAttack()
+                    .onInteract(
+                            new PacketReceiveEvent<>(
+                                    fixture.user, ConnectionPhase.PLAY, ServerboundPackets.INTERACT, packet),
+                            player,
+                            packet);
         }
 
         void wall(String name) {

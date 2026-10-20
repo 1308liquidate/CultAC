@@ -10,6 +10,7 @@ import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.blockplace.ClientEntityQueries;
 import ac.cult.cultac.utils.blockplace.ClientEntityQueries.PickCandidates;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
@@ -39,6 +40,8 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     private boolean mayBeOnOwner = true;
     // Entity#tickCount, which ClientLevel#tickNonPassenger increments before each tick.
     private int tickCount;
+    // Whether a Player#attack since the client's last tick of this projectile aims it along the local player's look.
+    private boolean aimedByLocalAttack;
 
     public PacketEntityHurtingProjectile(CultPlayer player, int id, int type, Vec3 position, int data) {
         super(player, id, type, position.x, position.y, position.z);
@@ -72,7 +75,10 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     public void onMovement(CultPlayer player, boolean tickingReliably) {
         tickCount++;
         super.onMovement(player, tickingReliably);
+        boolean aimed = aimedByLocalAttack;
+        aimedByLocalAttack = false;
         if (!modelled()) return;
+        if (aimed) deltaMovement = lookAngle(player.xRot, player.yRot);
         Vec3 movement = deltaMovement;
         deltaMovement =
                 movement.add(movement.normalize().scale(accelerationPower)).scale(inWater ? liquidInertia : inertia);
@@ -94,6 +100,30 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
         return getRiding() == null
                 && !player.isBedrockMovement()
                 && !player.getClientVersion().isOlderThan(ClientVersion.V_1_21_2);
+    }
+
+    /**
+     * {@code Player#attack} before 26.3: {@code deflectProjectile} aims a {@code #redirectable_projectile} along the
+     * attacker's look ({@code ProjectileDeflection#AIM_DEFLECT}) on the client too. {@code WindCharge#deflect} refuses
+     * until the projectile has ticked five times. Mounted, the vehicle can turn the player between the attack and the
+     * rotation the client sends, so the look is not known.
+     */
+    public void onLocalAttack(ClientEntityQueries queries) {
+        if (!modelled()
+                || !player.getClientVersion().isOlderThan(ClientVersion.V_26_3)
+                || player.compensatedEntities.getSelf().inVehicle()
+                || !queries.redirectable(this)
+                || type == EntityTypeIds.WIND_CHARGE && tickCount < 5) return;
+        aimedByLocalAttack = true;
+    }
+
+    /** {@code Entity#calculateViewVector} of the local player's rotation, as {@code Entity#getLookAngle}. */
+    private static Vec3 lookAngle(float yaw, float pitch) {
+        float pitchRadians = pitch * ((float) Math.PI / 180.0F);
+        float yawRadians = -yaw * ((float) Math.PI / 180.0F);
+        float cosPitch = CultMath.cos(pitchRadians);
+        return new Vec3(
+                CultMath.sin(yawRadians) * cosPitch, -CultMath.sin(pitchRadians), CultMath.cos(yawRadians) * cosPitch);
     }
 
     /**
