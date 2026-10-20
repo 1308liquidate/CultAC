@@ -21,6 +21,7 @@ import ac.cult.cultac.utils.data.*;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
+import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
@@ -181,8 +182,7 @@ public class WorldStageBuilder {
         StuckSpeedData stuckSpeedData = calculateStuckSpeed(player, simulationContext, push);
 
         // Eye-fluid state is sampled at the movement start position.
-        player.wasEyeInWater = ClientFluidQueries.eyesInWater(
-                player, simulationContext.getFromMinimumExtent(), from, from.y + player.getEyeHeight());
+        player.wasEyeInWater = eyeInWater(player, simulationContext, player.pose);
         // Portal contact uses the swept inside-block volume.
         player.intersectedWithNetherPortal = Collisions.hasState(
                 player,
@@ -258,6 +258,16 @@ public class WorldStageBuilder {
                 fishingRodPulls,
                 pushesWhileLoadingLevel(player, simulationContext),
                 lastOnGround);
+    }
+
+    // EntityFluidInteraction#update finds the eye only among the fluids inside Entity#getFluidInteractionBox.
+    private static boolean eyeInWater(CultPlayer player, SimulationContext context, Pose pose) {
+        Vec3 from = context.getStart();
+        SimpleCollisionBox body = context.getVehicle() != null
+                ? context.getFromMinimumExtent()
+                : GetBoundingBox.getBoundingBoxFromPosAndSize(
+                        from.x, from.y, from.z, pose.width * player.dimensionScale, pose.height * player.dimensionScale);
+        return ClientFluidQueries.eyesInWater(player, body, from, from.y + pose.eyeHeight * player.dimensionScale);
     }
 
     private DesyncStatus sampleClimbingAtStart(CultPlayer player, SimulationContext context) {
