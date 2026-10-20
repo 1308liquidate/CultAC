@@ -8,6 +8,7 @@ import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoSneakSlow;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.OmniSprint;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.Speed;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.Strafe;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.NumFormatter;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -120,12 +121,13 @@ public class HorizontalAnalyzer implements EngineCheck {
                     player.compensatedEntities.getSelf().sneakingSpeed.value());
             double requiredAxis = Math.min(
                     Math.max(absInputX, absInputZ),
-                    minimumFlushInputAxis(
+                    minimumClippedInputAxis(
                             horizDiffX,
                             horizDiffZ,
                             result.getSimulationContext().getXRot(),
                             result.getCollideAxisData(),
-                            target));
+                            target,
+                            preCollisionMovement(result)));
             speedFlagAmount = requiredAxis - maxDirLength;
 
             if (speedFlagAmount > 0.001) {
@@ -279,14 +281,24 @@ public class HorizontalAnalyzer implements EngineCheck {
         return degrees;
     }
 
-    // Entity#collide clips any further movement into a wall the movement ends flush against, so the residual on
-    // that axis only bounds the input's movement from one side. Rotating the residual alone can then overstate an
-    // input axis; return the smallest largest input axis over that one-sided range, or MAX_VALUE without a wall.
-    static double minimumFlushInputAxis(
-            double residualX, double residualZ, float yaw, CollideAxisData collide, Vec3 target) {
+    // Entity#collide clips the velocity plus the input at a wall. On an axis whose pre-collision movement reaches
+    // past the probed wall, the input is the residual from that movement, not from the clip; on an axis the move ends
+    // flush against a wall, any further input towards it is clipped too, so the input there is a one-sided range.
+    // Return the smallest largest input axis over those inputs, or MAX_VALUE when no axis reaches a wall.
+    static double minimumClippedInputAxis(
+            double residualX,
+            double residualZ,
+            float yaw,
+            CollideAxisData collide,
+            Vec3 target,
+            Vec3 preCollisionMovement) {
         int sideX = flushSide(collide.getX(), target.x);
         int sideZ = flushSide(collide.getZ(), target.z);
-        if (sideX == 0 && sideZ == 0) return Double.MAX_VALUE;
+        boolean pastX = preCollisionMovement != null && reachesPast(collide.getX(), preCollisionMovement.x);
+        boolean pastZ = preCollisionMovement != null && reachesPast(collide.getZ(), preCollisionMovement.z);
+        if (sideX == 0 && sideZ == 0 && !pastX && !pastZ) return Double.MAX_VALUE;
+        if (pastX) residualX = target.x - preCollisionMovement.x;
+        if (pastZ) residualZ = target.z - preCollisionMovement.z;
 
         double best = Double.MAX_VALUE;
         float radians = yaw * 0.017453292f;
@@ -298,11 +310,39 @@ public class HorizontalAnalyzer implements EngineCheck {
             float sin = table[0], cos = table[1];
             double x = residualX * cos + residualZ * sin;
             double z = residualZ * cos - residualX * sin;
+            best = Math.min(best, Math.max(Math.abs(x), Math.abs(z)));
             // A world X/Z unit rotates to these input-space directions
             if (sideX != 0) best = Math.min(best, minimumMaxAxisAlong(x, z, sideX * cos, -sideX * sin));
             if (sideZ != 0) best = Math.min(best, minimumMaxAxisAlong(x, z, sideZ * sin, sideZ * cos));
         }
         return best;
+    }
+
+    /** Whether {@code movement} reaches past the probed wall, where Entity#collide would clip it. */
+    private static boolean reachesPast(CollideAxisData.CollideResult collide, double movement) {
+        return collide != null
+                && collide.isLikelyCollide()
+                && collide.getSide() * (movement - collide.getResult()) > 0.0D;
+    }
+
+    /**
+     * The movement the collision clipped, without the stuck speed like the target and the probe, or null when a piston
+     * or shulker shove moved the player separately.
+     */
+    private static Vec3 preCollisionMovement(PredictionResult result) {
+        MovementTrace trace = result.getValidMovements() == null
+                ? null
+                : result.getValidMovements().getClosestTrace();
+        if (trace == null
+                || trace.preCollisionMovement() == null
+                || trace.collisionBaseOffset().lengthSqr() > 1.0E-14) {
+            return null;
+        }
+        Vec3 stuck = trace.position().collisionStuckSpeedMultiplier(result.getSimulationContext());
+        if (stuck == null || stuck.x == 1.0D && stuck.y == 1.0D && stuck.z == 1.0D) {
+            return trace.preCollisionMovement();
+        }
+        return trace.preCollisionMovement().multiply(1 / stuck.x, 1 / stuck.y, 1 / stuck.z);
     }
 
     private static int flushSide(CollideAxisData.CollideResult collide, double movement) {

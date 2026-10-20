@@ -32,7 +32,8 @@ public final class CheckingCollisionProbe extends CollisionModifier {
             SimpleCollisionBox attemptedMovementExtents,
             ProbeDimensions dimensions,
             JavaCollisionState actor,
-            boolean followCandidateVerticalMovement) {
+            boolean followCandidateVerticalMovement,
+            double horizontalInputReach) {
         CollideAxisData expected = base.probeCollisions(
                 player,
                 context,
@@ -42,7 +43,8 @@ public final class CheckingCollisionProbe extends CollisionModifier {
                 attemptedMovementExtents,
                 dimensions,
                 actor,
-                followCandidateVerticalMovement);
+                followCandidateVerticalMovement,
+                horizontalInputReach);
         CollideAxisData actual = super.probeCollisions(
                 player,
                 context,
@@ -52,7 +54,8 @@ public final class CheckingCollisionProbe extends CollisionModifier {
                 attemptedMovementExtents,
                 dimensions,
                 actor,
-                followCandidateVerticalMovement);
+                followCandidateVerticalMovement,
+                horizontalInputReach);
         probes++;
         if (context.getLastOnGround().determineOptimistically()) groundedProbes++;
         String want = dump.apply(expected);

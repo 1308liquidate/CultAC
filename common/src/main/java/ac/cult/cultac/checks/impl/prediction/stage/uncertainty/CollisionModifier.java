@@ -244,9 +244,13 @@ public class CollisionModifier implements UncertaintyHandler {
             ProbeDimensions dimensions,
             JavaCollisionState actor) {
         return probeCollisions(
-                player, context, minY, target, playerPos, attemptedMovementExtents, dimensions, actor, false);
+                player, context, minY, target, playerPos, attemptedMovementExtents, dimensions, actor, false, 0.0D);
     }
 
+    /**
+     * Probes the collisions around the attempted movement. {@code horizontalInputReach} is how far input the
+     * attempted extents leave out can carry the movement on X and Z.
+     */
     public CollideAxisData probeCollisions(
             CultPlayer player,
             SimulationContext context,
@@ -256,7 +260,8 @@ public class CollisionModifier implements UncertaintyHandler {
             SimpleCollisionBox attemptedMovementExtents,
             ProbeDimensions dimensions,
             JavaCollisionState actor,
-            boolean followCandidateVerticalMovement) {
+            boolean followCandidateVerticalMovement,
+            double horizontalInputReach) {
         // Start with player bounding box
         SimpleCollisionBox grabBoxesBB = context.getFromMaximumExtent();
 
@@ -275,10 +280,16 @@ public class CollisionModifier implements UncertaintyHandler {
             if (target.y > 0) grabBoxesBB.maxY += target.y;
         }
         grabBoxesBB.expand(maxEpsilon(dimensions.epsilon()));
+        // Entity#collide gathers block shapes through expandTowards(movement), and that movement carries the input.
+        SimpleCollisionBox blockQuery = horizontalInputReach > 0.0D
+                ? grabBoxesBB
+                        .copy()
+                        .expand(horizontalInputReach * stuckSpeed.x, 0.0D, horizontalInputReach * stuckSpeed.z)
+                : grabBoxesBB;
 
         List<SimpleCollisionBox> collisions = probeCollisions;
         collisions.clear();
-        Collisions.getCollisionBoxes(player, grabBoxesBB, collisions, false, playerPos.y, actor);
+        Collisions.getCollisionBoxes(player, blockQuery, collisions, false, playerPos.y, actor);
 
         List<SimpleCollisionBox> found = probeUnknown;
         found.clear();

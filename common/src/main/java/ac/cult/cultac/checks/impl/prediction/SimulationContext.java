@@ -342,6 +342,12 @@ public class SimulationContext {
         return getFrictionInfluencedSpeed(blockUnderPlayer, player);
     }
 
+    /** Radius of the circular horizontal input allowance around the input-free movement. */
+    public double getHorizontalInputRadius(CultPlayer player) {
+        float speed = getMaxSpeed(player);
+        return getVehicle() == null ? speed * 1.3D : speed;
+    }
+
     /**
      * The largest moveRelative speed the client's sprint state permits. LivingEntity#getFrictionInfluencedSpeed
      * reads getSpeed(), which carries the minecraft:sprinting modifier, on the ground, and Player#getFlyingSpeed,

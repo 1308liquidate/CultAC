@@ -254,7 +254,8 @@ class PredictionDigestTest {
                 SimpleCollisionBox attemptedMovementExtents,
                 ProbeDimensions dimensions,
                 JavaCollisionState actor,
-                boolean followCandidateVerticalMovement) {
+                boolean followCandidateVerticalMovement,
+                double horizontalInputReach) {
             CollideAxisData result = super.probeCollisions(
                     player,
                     context,
@@ -264,7 +265,8 @@ class PredictionDigestTest {
                     attemptedMovementExtents,
                     dimensions,
                     actor,
-                    followCandidateVerticalMovement);
+                    followCandidateVerticalMovement,
+                    horizontalInputReach);
             Integer index = contexts.get(context);
             if (index == null) {
                 index = contexts.size();
