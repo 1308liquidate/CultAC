@@ -102,6 +102,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
 
     // Sync to netty
     public final ConcurrentLinkedDeque<TeleportData> pendingTeleports = new ConcurrentLinkedDeque<>();
+    /** The teleport whose ID a pre-26.3 client sent last, until the PosRot that must follow it. */
+    private TeleportData awaitingPosRot;
     private final ConcurrentLinkedQueue<VehicleTeleport> vehicleTeleports = new ConcurrentLinkedQueue<>();
     private BedrockCoordinateFrame activeBedrockCoordinateFrame = BedrockCoordinateFrame.IDENTITY;
 
@@ -1664,13 +1666,29 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         }
     }
 
-    /** ClientPacketListener#handleMovePlayer sends the teleport's ID, whatever position follows it. */
-    public void teleportAnswered(int teleportId) {
+    /**
+     * ClientPacketListener#handleMovePlayer answers a teleport with its ID, carrying the position from 26.3 on and
+     * followed by a PosRot before.
+     */
+    public void teleportAnswered(int teleportId, boolean carriesPosition) {
+        awaitingPosRot = null;
         for (TeleportData pending : pendingTeleports) {
             if (isJavaIdTeleport(pending) && !pending.isAnswered() && pending.getTeleportId() == teleportId) {
-                pending.setAnswered(true);
+                if (carriesPosition) {
+                    pending.setAnswered(true);
+                } else {
+                    awaitingPosRot = pending;
+                }
                 return;
             }
+        }
+    }
+
+    /** A PosRot from a client whose teleport answers carry no position. */
+    public void posRotReceived() {
+        if (awaitingPosRot != null) {
+            awaitingPosRot.setAnswered(true);
+            awaitingPosRot = null;
         }
     }
 

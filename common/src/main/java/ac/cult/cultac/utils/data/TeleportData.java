@@ -57,7 +57,7 @@ public class TeleportData {
     @Setter
     boolean sentDuringVehicleDismount;
 
-    /** The client sent this pending teleport's ID. */
+    /** The client sent this pending teleport's whole answer: its ID with the position, or its ID and a PosRot. */
     @Setter
     boolean answered;
 
