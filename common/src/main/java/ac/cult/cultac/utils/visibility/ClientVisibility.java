@@ -296,9 +296,7 @@ public final class ClientVisibility {
         return envelope;
     }
 
-    /** An entity that may be off its movement candidates ({@link PacketEntity#hasLossyPosition}) is never hidden. */
     public boolean entityHidden(PacketEntity entity, double positionError) {
-        if (entity.hasLossyPosition()) return false;
         double pickRadius = EntityTypeUtil.modelType(entity.type).has(EntityTypes.PROJECTILE) ? 1.0F : 0;
         // ProjectileUtil#getEntityHitResult clips the physical bounding box,
         // inflated only by the native pick radius/item margin. Reach's separate
@@ -315,9 +313,7 @@ public final class ClientVisibility {
         return hiddenForEverySelection(() -> entityHidden(target, positionError, 0));
     }
 
-    /** An entity that may be off its movement candidates ({@link PacketEntity#hasLossyPosition}) is never hidden. */
     public boolean entityInteractionHidden(PacketEntity entity, double positionError) {
-        if (entity.hasLossyPosition()) return false;
         double pickRadius = EntityTypeUtil.modelType(entity.type).has(EntityTypes.PROJECTILE) ? 1.0F : 0;
         return hiddenForEverySelection(() -> {
             for (SimpleCollisionBox group : entity.getPossibleMovementCollisionBoxGroups()) {

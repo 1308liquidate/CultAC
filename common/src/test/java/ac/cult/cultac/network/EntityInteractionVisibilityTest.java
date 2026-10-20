@@ -522,25 +522,6 @@ class EntityInteractionVisibilityTest {
     }
 
     @Test
-    void aMobPastAFoldedInterpolationStepIsNeverHidden() throws Exception {
-        try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
-            setup.cow(41, new Vec3(.5, 64, 1.5));
-            var cow = setup.player.compensatedEntities.getEntity(41);
-            for (int step = 0; step < 129; step++) {
-                var destination = new Vec3(step % 2 == 0 ? 5 : .5, 64, 1.5);
-                cow.onPositionPath(EntityPositionPath.linear(destination), true, null, null, setup.player, true);
-            }
-            setup.wall("stone");
-            // The queue keeps the cow at x .5, behind the wall; the client samples x 2, clear of it.
-            setup.clientTick();
-            assertTrue(cow.hasLossyPosition());
-            var visibility = new ClientVisibility(setup.player);
-            assertFalse(visibility.entityHidden(cow, 0));
-            assertFalse(visibility.entityInteractionHidden(cow, 0));
-        }
-    }
-
-    @Test
     void anOwnerPastAFoldedInterpolationStepKeepsItsProjectileOnIt() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
             setup.cow(41, new Vec3(.5, 64, 3.7));
