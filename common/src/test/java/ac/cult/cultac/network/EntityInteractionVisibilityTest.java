@@ -521,6 +521,26 @@ class EntityInteractionVisibilityTest {
         }
     }
 
+    @Test
+    void anOwnerPastAFoldedInterpolationStepKeepsItsProjectileOnIt() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
+            setup.cow(41, new Vec3(.5, 64, 3.7));
+            var cow = setup.player.compensatedEntities.getEntity(41);
+            for (int step = 0; step < 129; step++) {
+                var destination = new Vec3(step % 2 == 0 ? 12.5 : .5, 64, 3.7);
+                cow.onPositionPath(EntityPositionPath.linear(destination), true, null, null, setup.player, true);
+            }
+            var fireball =
+                    setup.projectile(42, "minecraft:fireball", new Vec3d(4.5, 64.5, 3.7), new Vec3d(0, 0, 0), 41);
+            // The queue samples the cow at x .5, clear of the fireball; the client samples x 4.5, still on it.
+            setup.clientTick();
+            assertTrue(cow.hasLossyPosition());
+            setup.motion(42, new Vec3d(8, 0, 0));
+            setup.clientTick();
+            assertEquals(4.5 + 8.1 * .95, fireball.clientPhysicalPosition.x, 1.0E-6);
+        }
+    }
+
     @ParameterizedTest
     @MethodSource("clients")
     void aFireballStopsAtTheLocalPlayer(ProtocolVersion version) throws Exception {

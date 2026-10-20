@@ -195,8 +195,8 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     /**
      * {@code Projectile#checkLeftOwner} at each possible position: the projectile has left once no pickable entity of
      * the owner's root vehicle and its passengers touches its box stretched by its delta movement and grown by one. It
-     * never returns. An owner-tree rider outside the local player's riding tree has no simulated position, so it may
-     * touch anywhere.
+     * never returns. An owner-tree rider outside the local player's riding tree has no simulated position, and one that
+     * may be off its candidates ({@link PacketEntity#hasLossyPosition}) proves nothing, so either may touch anywhere.
      */
     private void checkLeftOwner(ClientEntityQueries queries) {
         if (!mayBeOnOwner) return;
@@ -217,10 +217,12 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
         boolean mayTouch = false;
         for (PacketEntity entity : player.compensatedEntities.entityMap.values())
             mayTouch |= root(entity) == ownerRoot && player.compensatedEntities.isUntrackedRider(entity);
+        for (PickCandidates entity : tree) mayTouch |= entity.entity().hasLossyPosition();
         boolean touchingEverywhere = true;
         for (Box area : areas) {
             boolean touching = false;
             for (PickCandidates entity : tree) {
+                if (entity.entity().hasLossyPosition()) continue;
                 boolean every = !entity.boxes().isEmpty();
                 for (Box box : entity.boxes()) {
                     boolean touches = box != null && area.intersects(box);
