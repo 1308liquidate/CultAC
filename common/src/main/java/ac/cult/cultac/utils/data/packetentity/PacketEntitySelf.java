@@ -4,6 +4,7 @@ import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.sprint.SprintD;
 import ac.cult.cultac.network.packet.EntityPositionPath;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -116,9 +117,9 @@ public class PacketEntitySelf extends PacketEntity {
         refreshAttributeValues();
     }
 
-    /** movement_speed with LivingEntity#setSprinting's modifier, which {@link #playerSpeed} leaves out. */
-    public double sprintingPlayerSpeed() {
-        return movementSpeedAttribute.valueWith(CompensatedEntities.SPRINTING_SPEED_MODIFIER);
+    /** movement_speed with {@code sprinting} as its minecraft:sprinting modifier; {@link #playerSpeed} has none. */
+    public double playerSpeedWith(AttributeModifier sprinting) {
+        return movementSpeedAttribute.valueWith(sprinting);
     }
 
     private void refreshAttributeValues() {

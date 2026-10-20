@@ -8,6 +8,7 @@ import ac.cult.cultac.network.packet.InventoryPackets.EquipmentEntry;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.AttributeModifier;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.protocol.value.EntityPose;
@@ -333,9 +334,38 @@ public class CompensatedEntities {
         return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
     }
 
-    /** {@link #getPlayerMovementSpeed} while movement_speed carries the sprinting modifier. */
-    public double getSprintingPlayerMovementSpeed() {
-        double speed = player.compensatedEntities.getSelf().sprintingPlayerSpeed();
+    /**
+     * LivingEntity#getSpeed for each minecraft:sprinting modifier the client may hold in {@code outcome}: the held one
+     * or none, and vanilla's after a possible attack reset or, with {@code canonical}, for a sprint the client may
+     * start.
+     */
+    public double[] getPossiblePlayerMovementSpeeds(boolean canonical, ClientSprintState.Outcome outcome) {
+        ClientSprintState state = player.sprintState;
+        double canonicalSpeed = sprintingSpeed(SPRINTING_SPEED_MODIFIER);
+        if (outcome == ClientSprintState.Outcome.CANONICAL) return new double[] {canonicalSpeed};
+        AttributeModifier held = state.heldModifier();
+        double current = held == null ? getPlayerMovementSpeed() : sprintingSpeed(held);
+        boolean withCanonical = canonical
+                || switch (outcome) {
+                    case ANY -> state.outcomeOpen();
+                    case PRIOR -> state.canonicalPossible();
+                    default -> false;
+                };
+        if (!withCanonical || SPRINTING_SPEED_MODIFIER.equals(held)) {
+            return new double[] {current};
+        }
+        return new double[] {current, canonicalSpeed};
+    }
+
+    /** The largest of {@link #getPossiblePlayerMovementSpeeds}. */
+    public double getMaxPlayerMovementSpeed(boolean canonical, ClientSprintState.Outcome outcome) {
+        double max = 0.0D;
+        for (double speed : getPossiblePlayerMovementSpeeds(canonical, outcome)) max = Math.max(max, speed);
+        return max;
+    }
+
+    private double sprintingSpeed(AttributeModifier sprinting) {
+        double speed = player.compensatedEntities.getSelf().playerSpeedWith(sprinting);
         return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
     }
 
@@ -357,10 +387,10 @@ public class CompensatedEntities {
                 if (!player.isBedrockMovement()) player.combatAttributes.onServerSnapshot(snapshot);
                 if (matchesAttribute(snapshot, "movement_speed")) {
 
-                    boolean foundSprintingModifier = false;
+                    AttributeModifier foundSprintingModifier = null;
                     for (AttributeModifier modifier : snapshot.modifiers()) {
                         if (modifier.id().equals(SPRINTING_MODIFIER_ID)) {
-                            foundSprintingModifier = true;
+                            foundSprintingModifier = modifier;
                         }
                     }
 

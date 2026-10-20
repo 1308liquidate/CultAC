@@ -3,6 +3,7 @@ package ac.cult.cultac.checks.impl.prediction;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.data.TransactionVel;
 import ac.cult.cultac.utils.math.Vec3;
@@ -40,6 +41,10 @@ public class PredVector extends Vec3 {
     @Setter
     int attackSlows = 0;
 
+    // The minecraft:sprinting modifier this candidate travels with while a possible attack reset leaves it open
+    @Getter
+    ClientSprintState.Outcome sprintOutcome = ClientSprintState.Outcome.ANY;
+
     List<TransactionVel> packetModifiers = null;
 
     public PredVector(Vec3 vec, PredVector lastVector, String reason) {
@@ -55,12 +60,20 @@ public class PredVector extends Vec3 {
         this.isBoundedStep = lastVector.isBoundedStep;
         this.isTickSkip = lastVector.isTickSkip;
         this.attackSlows = lastVector.attackSlows;
+        this.sprintOutcome = lastVector.sprintOutcome;
         this.reason = reason;
         this.packetModifiers = lastVector.packetModifiers;
     }
 
     public PredVector(Vec3 input) {
         super(input.x, input.y, input.z);
+    }
+
+    /** This candidate travelling with {@code outcome}'s sprint modifier. */
+    public PredVector withSprintOutcome(ClientSprintState.Outcome outcome) {
+        PredVector candidate = new PredVector(this, this, "sprint modifier");
+        candidate.sprintOutcome = outcome;
+        return candidate;
     }
 
     public static PredVector fromStartingVector(Vec3 input) {

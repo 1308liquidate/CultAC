@@ -17,7 +17,7 @@ public final class ItemUseInput {
         return new ItemUseBurstResult(
                 input.x,
                 input.z,
-                context.getMaxSprintInputSpeed(result.getPlayer()),
+                context.getMaxSprintInputSpeed(result.getPlayer(), result.getInitialStartingVel()),
                 result.getSneakingInputMultiplier(),
                 context.getVersion());
     }
