@@ -107,6 +107,35 @@ class ClientSprintStateTest {
     }
 
     @Test
+    void restoringPastAPossibleAttackResetKeepsVanillasModifierPossible() {
+        ClientSprintState state = sprinting();
+        var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+        state.onServerModifier(server);
+        ClientSprintState.Outcomes anchor = state.outcomes();
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        state.onOutcomesAccepted(true, false);
+        assertFalse(state.outcomeOpen());
+        // The teleport does not undo the attack's reset, which aiStep may have followed with vanilla's modifier.
+        state.restore(anchor);
+        assertSame(server, state.heldModifier());
+        assertTrue(state.canonicalPossible());
+
+        // This tick's own possible reset keeps deciding its candidates by their damping.
+        state.onServerModifier(server);
+        anchor = state.outcomes();
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        state.restore(anchor);
+        assertTrue(state.resetOutcomePending());
+        assertFalse(state.canonicalPossible());
+        // Set back without a committed candidate, the reset stays undecided.
+        state.onMoveSetBack();
+        assertTrue(state.canonicalPossible());
+        assertFalse(state.resetOutcomePending());
+    }
+
+    @Test
     void possibleAttackResetOutcomesCollapseOnCertainEvents() {
         ClientSprintState state = sprinting();
         var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);

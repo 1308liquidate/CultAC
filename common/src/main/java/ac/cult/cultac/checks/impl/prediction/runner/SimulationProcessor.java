@@ -1083,13 +1083,15 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
      * instead.
      */
     private void commitSprintOutcomes(PredictionResult result) {
-        if (!this.player.sprintState.outcomeOpen()) return;
+        ClientSprintState state = this.player.sprintState;
         SetbackTeleportUtil setbacks = this.player.getSetbackTeleportUtil();
         if (setbacks.isPendingSetback() && setbacks.lastKnownGoodPosition != null) {
-            this.player.sprintState.restore(setbacks.lastKnownGoodPosition.getSprintOutcomes());
+            state.restore(setbacks.lastKnownGoodPosition.getSprintOutcomes());
+            state.onMoveSetBack();
             return;
         }
-        this.player.sprintState.restore(sprintOutcomesAfter(this.player, result));
+        if (!state.outcomeOpen()) return;
+        state.commit(sprintOutcomesAfter(this.player, result));
     }
 
     /**
