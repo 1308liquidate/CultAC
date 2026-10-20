@@ -57,7 +57,14 @@ public class BadPacketsR extends Check implements CheckListener {
     @CultPacketHandler
     public void onMovePlayer(
             final PacketReceiveEvent<ServerboundMovePlayer> event, CultPlayer player, ServerboundMovePlayer packet) {
-        if ((packet.hasPosition()) && !player.inVehicle()) {
+        if (!player.inVehicle()) {
+            if (packet.hasPosition()) positions++;
+            return;
+        }
+        // LocalPlayer#sendChanges sends a passenger's Rot every tick, and a MoveVehicle only for a vehicle it controls,
+        // so the Rot is the update of a passenger the vehicle does not require to move it.
+        if (!player.compensatedEntities.vehicles.mustEchoMoveVehicle(
+                player.compensatedEntities.getSelf().getRiding())) {
             positions++;
         }
     }
