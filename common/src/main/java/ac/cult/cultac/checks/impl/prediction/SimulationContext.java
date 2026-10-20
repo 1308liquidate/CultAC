@@ -359,20 +359,33 @@ public class SimulationContext {
         for (boolean onGround : worldData.getLastOnGround().getStates()) {
             for (boolean water : worldData.getInWater().getStates()) {
                 for (boolean lava : worldData.getInLava().getStates()) {
-                    float speed = getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava);
-                    maxSpeed = Math.max(maxSpeed, speed * sprintSpeedMultiplier(player, onGround, water || lava));
+                    float speed = groundSprintSpeed(player, onGround, water || lava)
+                            ? getFrictionInfluencedSpeed(
+                                    blockUnderPlayer,
+                                    player,
+                                    entities.getSprintingPlayerMovementSpeed(),
+                                    true,
+                                    false,
+                                    false)
+                            : getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava)
+                                    * (float) sprintSpeedMultiplier(player, onGround, water || lava);
+                    maxSpeed = Math.max(maxSpeed, speed);
                 }
             }
         }
         return maxSpeed;
     }
 
+    /** LivingEntity#getSpeed on the ground carries the minecraft:sprinting modifier the client holds. */
+    private boolean groundSprintSpeed(CultPlayer player, boolean onGround, boolean fluid) {
+        return onGround && !fluid && vehicle == null && !player.isFlying && sprintModifier;
+    }
+
     private double sprintSpeedMultiplier(CultPlayer player, boolean onGround, boolean fluid) {
         // Creative flight and vehicle travel keep their existing allowance.
         if (vehicle != null || player.isFlying) return 1.3D;
         // LivingEntity#travelInFluid moves by a fluid speed that already includes any sprint modifier
-        if (fluid) return 1.0D;
-        if (onGround) return sprintModifier ? 1.3D : 1.0D;
+        if (fluid || onGround) return 1.0D;
         return isSprinting.determineOptimistically() ? 1.3D : 1.0D;
     }
 
@@ -443,7 +456,8 @@ public class SimulationContext {
 
             if (waterMovementEfficiency > 0) {
                 // A player's getSpeed carries minecraft:sprinting only while applied; a vehicle's is getRiddenSpeed
-                float livingSpeed = (float) (vehicle == null && sprintModifier ? normalSpeed * 1.3 : normalSpeed);
+                float livingSpeed = (float)
+                        (vehicle == null && sprintModifier ? entities.getSprintingPlayerMovementSpeed() : normalSpeed);
                 speed += (livingSpeed - speed) * waterMovementEfficiency;
             }
             return speed;

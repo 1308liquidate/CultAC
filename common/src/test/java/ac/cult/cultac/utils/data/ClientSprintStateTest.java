@@ -1,8 +1,12 @@
 package ac.cult.cultac.utils.data;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.cultac.protocol.value.AttributeModifier;
+import ac.cult.cultac.utils.latency.CompensatedEntities;
 import org.junit.jupiter.api.Test;
 
 class ClientSprintStateTest {
@@ -16,11 +20,25 @@ class ClientSprintStateTest {
     }
 
     @Test
+    void serverSprintModifierHoldsUntilSetSprinting() {
+        ClientSprintState state = sprinting();
+        var server = new AttributeModifier("minecraft:sprinting", -1.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+        state.onServerModifier(server);
+        // The flag stays set, so aiStep never calls setSprinting.
+        state.onClientTick(true);
+        assertSame(server, state.heldModifier());
+        state.onClientTick(false);
+        assertNull(state.heldModifier());
+        state.onClientTick(true);
+        assertSame(CompensatedEntities.SPRINTING_SPEED_MODIFIER, state.heldModifier());
+    }
+
+    @Test
     void silentResprintAfterServerResetRestoresModifier() {
         ClientSprintState state = sprinting();
         // Server-side Player#causeExtraKnockback echoes sprint=false in entity data and attributes.
         state.onServerFlag(false);
-        state.onServerModifier(false);
+        state.onServerModifier(null);
         assertFalse(state.flag());
         // aiStep re-sprints; wasSprinting is still true, so no START_SPRINTING is sent.
         state.onClientTick(true);
@@ -35,7 +53,7 @@ class ClientSprintStateTest {
         assertFalse(state.modifier());
         // The server's echo of the earlier START_SPRINTING arrives after the client stopped.
         state.onServerFlag(true);
-        state.onServerModifier(true);
+        state.onServerModifier(CompensatedEntities.SPRINTING_SPEED_MODIFIER);
         // shouldStopRunSprinting -> setSprinting(false); wasSprinting is already false.
         state.onClientTick(false);
         assertFalse(state.flag());
@@ -46,7 +64,7 @@ class ClientSprintStateTest {
     void attributeOnlyUpdateKeepsFlagUntilNextTransition() {
         ClientSprintState state = sprinting();
         // A movement_speed sync while the server believes the player is not sprinting.
-        state.onServerModifier(false);
+        state.onServerModifier(null);
         state.onClientTick(true);
         assertTrue(state.flag());
         assertFalse(state.modifier());
@@ -59,7 +77,7 @@ class ClientSprintStateTest {
     @Test
     void attributeOnlyModifierWithoutSprintFlag() {
         ClientSprintState state = new ClientSprintState();
-        state.onServerModifier(true);
+        state.onServerModifier(CompensatedEntities.SPRINTING_SPEED_MODIFIER);
         state.onClientTick(false);
         assertFalse(state.flag());
         assertTrue(state.modifier());
@@ -69,7 +87,7 @@ class ClientSprintStateTest {
     void attackResetThatAiStepResprintedRestoresModifier() {
         ClientSprintState state = sprinting();
         // A movement_speed sync while the server believes the player is not sprinting.
-        state.onServerModifier(false);
+        state.onServerModifier(null);
         state.onClientTick(true);
         assertFalse(state.modifier());
         // Player#causeExtraKnockback -> setSprinting(false), then aiStep re-sprints without a packet.
@@ -88,7 +106,7 @@ class ClientSprintStateTest {
         assertFalse(state.flag());
         assertFalse(state.modifier());
         // The attack only bounds the tick it happened in.
-        state.onServerModifier(true);
+        state.onServerModifier(CompensatedEntities.SPRINTING_SPEED_MODIFIER);
         state.onClientTick(false);
         assertTrue(state.modifier());
     }
@@ -96,7 +114,7 @@ class ClientSprintStateTest {
     @Test
     void attackThatCannotResetSprintKeepsDesyncedModifier() {
         ClientSprintState state = sprinting();
-        state.onServerModifier(false);
+        state.onServerModifier(null);
         state.onClientTick(true);
         // A mob hit or a weak hit never reaches Player#causeExtraKnockback's setSprinting(false).
         state.onAttack(ClientSprintState.AttackReset.NONE);
@@ -108,7 +126,7 @@ class ClientSprintStateTest {
     @Test
     void certainResetFollowsTheClientExactly() {
         ClientSprintState state = sprinting();
-        state.onServerModifier(false);
+        state.onServerModifier(null);
         state.onClientTick(true);
         state.onAttack(ClientSprintState.AttackReset.CERTAIN);
         assertTrue(state.flagKnown());

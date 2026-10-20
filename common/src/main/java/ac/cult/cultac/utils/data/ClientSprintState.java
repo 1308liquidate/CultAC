@@ -1,5 +1,9 @@
 package ac.cult.cultac.utils.data;
 
+import ac.cult.cultac.protocol.value.AttributeModifier;
+import ac.cult.cultac.utils.latency.CompensatedEntities;
+import org.jetbrains.annotations.Nullable;
+
 /**
  * The Java client's sprint flag and sprint speed modifier, which MCP-Reborn writes independently.
  *
@@ -17,7 +21,8 @@ package ac.cult.cultac.utils.data;
  */
 public final class ClientSprintState {
     private boolean flag;
-    private boolean modifier;
+    // The minecraft:sprinting movement_speed modifier the client holds: the server's until setSprinting replaces it.
+    private @Nullable AttributeModifier modifier;
     private boolean sprintResetThisTick;
     private boolean flagUncertain;
     private boolean flagBeforeAiStep;
@@ -35,9 +40,9 @@ public final class ClientSprintState {
         flag = sprinting;
     }
 
-    /** Whether the server's movement_speed snapshot carries minecraft:sprinting, applied by its bundled proof. */
-    public void onServerModifier(boolean present) {
-        modifier = present;
+    /** The minecraft:sprinting modifier of the server's movement_speed snapshot, applied by its bundled proof. */
+    public void onServerModifier(@Nullable AttributeModifier sprinting) {
+        modifier = sprinting;
     }
 
     /**
@@ -49,7 +54,7 @@ public final class ClientSprintState {
         sprintResetThisTick = true;
         if (reset == AttackReset.CERTAIN) {
             flag = false;
-            modifier = false;
+            modifier = null;
         } else {
             flagUncertain = true;
         }
@@ -73,7 +78,7 @@ public final class ClientSprintState {
         // Unmodeled: wall-sprinting start->stop in one aiStep can clear the modifier early; this only errs lenient.
         // An attack reset that aiStep re-sprinted re-added the modifier.
         if (flag != wasSprinting || sprintResetThisTick && wasSprinting) {
-            modifier = wasSprinting;
+            modifier = wasSprinting ? CompensatedEntities.SPRINTING_SPEED_MODIFIER : null;
         }
         flag = wasSprinting;
         sprintResetThisTick = false;
@@ -107,14 +112,14 @@ public final class ClientSprintState {
             flag = false;
         }
         if (!keepAttributeModifiers) {
-            modifier = false;
+            modifier = null;
         }
     }
 
     /** ClientPacketListener#handleLogin creates a fresh LocalPlayer after Minecraft#clearClientLevel. */
     public void reset() {
         flag = false;
-        modifier = false;
+        modifier = null;
         flagBeforeAiStep = false;
         aiStepReconciled = false;
         sprintResetThisTick = false;
@@ -128,6 +133,11 @@ public final class ClientSprintState {
 
     /** Whether the client's movement_speed currently carries minecraft:sprinting. */
     public boolean modifier() {
+        return modifier != null;
+    }
+
+    /** The minecraft:sprinting modifier the client's movement_speed currently carries, or null. */
+    public @Nullable AttributeModifier heldModifier() {
         return modifier;
     }
 }

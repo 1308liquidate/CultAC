@@ -310,9 +310,15 @@ public class CompensatedEntities {
         return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
     }
 
-    /** {@link #getPlayerMovementSpeed} while movement_speed carries the sprinting modifier. */
+    /**
+     * {@link #getPlayerMovementSpeed} with the minecraft:sprinting modifier the client holds, or with the one
+     * LivingEntity#setSprinting adds when it holds none.
+     */
     public double getSprintingPlayerMovementSpeed() {
-        double speed = player.compensatedEntities.getSelf().sprintingPlayerSpeed();
+        AttributeModifier held = player.sprintState.heldModifier();
+        double speed = player.compensatedEntities
+                .getSelf()
+                .playerSpeedWith(held == null ? SPRINTING_SPEED_MODIFIER : held);
         return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
     }
 
@@ -334,10 +340,10 @@ public class CompensatedEntities {
                 if (!player.isBedrockMovement()) player.combatAttributes.onServerSnapshot(snapshot);
                 if (matchesAttribute(snapshot, "movement_speed")) {
 
-                    boolean foundSprintingModifier = false;
+                    AttributeModifier foundSprintingModifier = null;
                     for (AttributeModifier modifier : snapshot.modifiers()) {
                         if (modifier.id().equals(SPRINTING_MODIFIER_ID)) {
-                            foundSprintingModifier = true;
+                            foundSprintingModifier = modifier;
                         }
                     }
 
