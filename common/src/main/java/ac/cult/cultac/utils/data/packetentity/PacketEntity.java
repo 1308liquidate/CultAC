@@ -94,6 +94,8 @@ public class PacketEntity {
 
     public ReachInterpolationData oldPacketLocation;
     public ReachInterpolationData newPacketLocation;
+    // Set by an unproven receipt or a queue fold; only a snap onto an authoritative position clears it.
+    private boolean trackedPositionInexact;
     private long clientTickOrder = Long.MAX_VALUE;
     // Reused: valid only until the client tick that computed it applies it.
     private SimpleCollisionBox exactAfterClientTickBox;
@@ -248,6 +250,17 @@ public class PacketEntity {
                 !ridingInVehicle,
                 this,
                 uncertainInitialSteps);
+        trackedPositionInexact = true;
+        keepPositionCertainty();
+    }
+
+    /** Carries an inexact tracked position into the current snapshots, and a fold out of them. */
+    private void keepPositionCertainty() {
+        if (newPacketLocation == null) return;
+        if (!newPacketLocation.hasExactPosition()) trackedPositionInexact = true;
+        if (!trackedPositionInexact) return;
+        newPacketLocation.markPositionInexact();
+        if (oldPacketLocation != null) oldPacketLocation.markPositionInexact();
     }
 
     /** Packet processing appends to the client's queue; its codec base remains separate. */
@@ -300,6 +313,8 @@ public class PacketEntity {
             newPacketLocation.setPhysicalBeforePathAppend(
                     actualPath, targetYaw, targetPitch, clientPhysicalPosition, clientPhysicalYaw, clientPhysicalPitch);
             newPacketLocation.appendPath(actualPath, targetYaw, targetPitch);
+            if (!bundled) trackedPositionInexact = true;
+            keepPositionCertainty();
             return;
         }
         if (bundled)
@@ -382,6 +397,7 @@ public class PacketEntity {
                 !player.compensatedEntities.getSelf().inVehicle(),
                 this,
                 false);
+        keepPositionCertainty();
     }
 
     private float interpolationTargetYaw(@Nullable Float yaw) {
@@ -650,6 +666,7 @@ public class PacketEntity {
             float physicalPitch) {
         this.oldPacketLocation = null;
         this.newPacketLocation = interpolationData.copy();
+        keepPositionCertainty();
         tickPacketInterpolationPreservingPhysical(player, physicalPosition, physicalYaw, physicalPitch);
     }
 
@@ -780,6 +797,7 @@ public class PacketEntity {
         this.clientPhysicalPositionExact = true;
         // Snapping to an exact position means interpolation is disabled
         this.newPacketLocation = new ReachInterpolationData(box);
+        this.trackedPositionInexact = false;
     }
 
     private SimpleCollisionBox passengerPhysicalBox;

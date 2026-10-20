@@ -61,6 +61,8 @@ public class ReachInterpolationData {
     private int interpolationStepsHighBound = 0;
     private int interpolationSteps = 1;
     private final boolean reachesUsePacketPositionUncertainty;
+    // Reach judges a Java snapshot without the margin until a queue fold or an uncertain receipt clears this.
+    private boolean positionExact;
     // getPossibleMovementLocationCombined while boundsValid; every write to its inputs clears boundsValid.
     private boolean boundsValid;
     private double boundsMinX, boundsMinY, boundsMinZ, boundsMaxX, boundsMaxY, boundsMaxZ;
@@ -87,6 +89,7 @@ public class ReachInterpolationData {
         this.interpolationStepsHighBound = other.interpolationStepsHighBound;
         this.interpolationSteps = other.interpolationSteps;
         this.reachesUsePacketPositionUncertainty = other.reachesUsePacketPositionUncertainty;
+        this.positionExact = other.positionExact;
     }
 
     public ReachInterpolationData copy() {
@@ -149,6 +152,7 @@ public class ReachInterpolationData {
         this.targetYaw = targetYaw;
         this.targetPitch = targetPitch;
         this.reachesUsePacketPositionUncertainty = true;
+        this.positionExact = !player.isBedrockMovement();
         this.interpolationSteps = vanillaInterpolationStepsFor(entity);
 
         if (!player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
@@ -173,6 +177,15 @@ public class ReachInterpolationData {
 
     public boolean usesSteppedInterpolation() {
         return interpolationQueue != null;
+    }
+
+    /** Whether reach judges this snapshot without the packet-position margin. */
+    public boolean hasExactPosition() {
+        return positionExact;
+    }
+
+    public void markPositionInexact() {
+        positionExact = false;
     }
 
     public void setPhysicalBeforePathAppend(
@@ -237,6 +250,7 @@ public class ReachInterpolationData {
             Step oldest = interpolationQueue.removeFirst();
             Step next = interpolationQueue.removeFirst();
             interpolationQueue.addFirst(new Step(next.transform(), oldest.ticks() + next.ticks()));
+            positionExact = false;
         }
         interpolationQueue.addLast(new Step(transform, ticks));
         remainingTicks += ticks;
@@ -378,6 +392,7 @@ public class ReachInterpolationData {
         this.startingLocation = finishedLoc.copy();
         this.targetLocation = finishedLoc.copy();
         this.reachesUsePacketPositionUncertainty = false;
+        this.positionExact = true;
     }
 
     private int getInterpolationSteps() {
@@ -403,7 +418,7 @@ public class ReachInterpolationData {
 
     public SimpleCollisionBox getPossibleLocationCombined(SimpleCollisionBox out) {
         SimpleCollisionBox box = getPossibleMovementLocationCombined(out);
-        if (reachesUsePacketPositionUncertainty) {
+        if (reachesUsePacketPositionUncertainty && !positionExact) {
             // Packet-position uncertainty applies to reach queries only: vanilla
             // EntityGetter#getEntityCollisions uses the concrete bounding box, so
             // movement physics must never see this expansion.

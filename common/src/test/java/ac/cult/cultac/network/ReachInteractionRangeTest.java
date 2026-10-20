@@ -20,6 +20,7 @@ import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.EntityMetadata;
+import ac.cult.cultac.network.packet.EntityPositionPath;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.player.PlayerObserver;
@@ -30,6 +31,7 @@ import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityPositionSync;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundExplode;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
@@ -45,6 +47,7 @@ import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.protocol.value.PlayerSpawnInfo;
+import ac.cult.cultac.protocol.value.PositionPath;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityPlayer;
@@ -725,6 +728,53 @@ class ReachInteractionRangeTest {
             assertEquals(List.of(), setup.attack(EntityTypeIds.ZOMBIE, .5, 2.5));
             assertEquals(List.of("PlayerHitboxes"), setup.attack(EntityTypeIds.PLAYER, 2.5, 2.0));
             assertEquals(List.of("EntityHitboxes"), setup.attack(EntityTypeIds.ZOMBIE, 2.5, 2.0));
+        }
+    }
+
+    // A Java client holds a target moved only by proven movements exactly where the server tracks it.
+    @Test
+    void aTargetMovedOnlyByBundledMovementsIsJudgedWithoutAMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertFalse(setup.attack(2.99));
+            assertTrue(setup.attack(3.01));
+            assertEquals(List.of(), setup.attackAfter(2.99, entity -> setup.moveAwayAndBack(entity, 4, true)));
+            assertEquals(
+                    List.of("EntityReach"), setup.attackAfter(3.01, entity -> setup.moveAwayAndBack(entity, 4, true)));
+        }
+    }
+
+    // The client may have received an unbundled movement before any tick between its proofs.
+    @Test
+    void aTargetMovedByAnUnbundledMovementKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackAfter(3.01, entity -> setup.moveAwayAndBack(entity, 2, false)));
+            assertEquals(
+                    List.of("EntityReach"), setup.attackAfter(3.10, entity -> setup.moveAwayAndBack(entity, 2, false)));
+        }
+    }
+
+    // A folded queue samples the client's interpolation only approximately.
+    @Test
+    void aTargetWhoseQueueFoldedKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackAfter(3.01, entity -> setup.moveAwayAndBack(entity, 200, true)));
+            assertEquals(
+                    List.of("EntityReach"),
+                    setup.attackAfter(3.10, entity -> setup.moveAwayAndBack(entity, 200, true)));
+        }
+    }
+
+    // A position sync too far to interpolate snaps the client's target onto the server's position.
+    @Test
+    void aSnapOntoAFarPositionSyncDropsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of("EntityReach"), setup.attackAfter(3.01, entity -> {
+                setup.moveAwayAndBack(entity, 2, false);
+                Vec3 at = entity.newPacketLocation.targetPosition();
+                setup.positionSync(entity.getEntityId(), at.add(100, 0, 0));
+                setup.positionSync(entity.getEntityId(), at);
+                setup.moveAwayAndBack(entity, 2, true);
+            }));
         }
     }
 
@@ -1539,6 +1589,41 @@ class ReachInteractionRangeTest {
                     flagged.add(checks.get(i).getCheckName());
             }
             return flagged;
+        }
+
+        // Attacks a zombie whose hitbox face is this far down the look once this history of tracked movements, ending
+        // where it spawned, has finished interpolating; returns the checks that flagged.
+        List<String> attackAfter(double distance, Consumer<PacketEntity> history) {
+            int id = nextEntity++;
+            player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, distance - 1.2), 0, 0, 0);
+            PacketEntity entity = player.compensatedEntities.getEntity(id);
+            history.accept(entity);
+            for (int tick = 0; tick < 1_000 && entity.newPacketLocation.hasActiveInterpolationTarget(); tick++)
+                tickEnd();
+            assertFalse(entity.newPacketLocation.hasActiveInterpolationTarget());
+            assertTrue(entity.newPacketLocation.usesSteppedInterpolation());
+            return attackEntity(id, EntityTypeIds.ZOMBIE, () -> {});
+        }
+
+        // This many movements half a block along +z and back, each proven by its bundle or by its second transaction.
+        void moveAwayAndBack(PacketEntity entity, int moves, boolean bundled) {
+            Vec3 at = entity.desyncClientPos;
+            for (int move = 1; move <= moves; move++) {
+                Vec3 to = move % 2 == 0 ? at : at.add(0, 0, .5);
+                entity.onPositionPath(EntityPositionPath.linear(to), true, null, null, player, bundled);
+                if (!bundled) entity.onSecondTransaction();
+            }
+        }
+
+        // A position sync outside any bundle, its first and second transactions answered.
+        void positionSync(int id, Vec3 to) {
+            var packet = new ClientboundEntityPositionSync(
+                    id, new PositionPath.Linear(new Vec3d(to.x, to.y, to.z)), 0, 0, false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_POSITION_SYNC, packet, false);
+            player.packetEntityReplication.onEntityPositionSync(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
         }
 
         // The attack reached ReachCheck's measurement, so no exemption in ReachCheck#handleInteract dropped it.
