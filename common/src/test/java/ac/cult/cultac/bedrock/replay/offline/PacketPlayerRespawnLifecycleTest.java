@@ -18,6 +18,7 @@ import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
 import ac.cult.cultac.network.codec.ModelRegistryNamesState;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.protocol.player.User;
+import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketType;
@@ -344,6 +345,31 @@ public final class PacketPlayerRespawnLifecycleTest {
             assertTrue(targets.isEmpty());
             addFairReachTarget(player, 43);
             assertEquals("A player spawned after the LOGIN belongs to the new level", 1, targets.size());
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
+    @Test
+    public void loginSendDropsTeleportsTheOldLevelWithheld() throws Exception {
+        OfflineCultTestBootstrap.installConfig();
+        CultPlayer player = offlineJavaPlayer();
+        try {
+            var teleports = player.getSetbackTeleportUtil();
+            teleports.addSentTeleport(new Vec3(1, 64, 1), 5, new RelativeFlag(0), true, 1);
+            teleports.addSentTeleport(new Vec3(2, 64, 2), 6, new RelativeFlag(0), true, 2);
+            // Only ID teleports are dropped; an entity-to-self teleport leaves as before.
+            teleports.addImmediatePlayerTeleport(new Vec3(0, 64, 0), Vec3.ZERO, new RelativeFlag(0), 4, 0, 0, 0, 0);
+
+            ClientboundLogin login = loginPacket(true);
+            new PacketPlayerRespawn().onLogin(sendEvent(player, ClientboundPackets.LOGIN, login), player, login);
+
+            assertEquals(1, teleports.pendingTeleports.size());
+            assertTrue(teleports.pendingTeleports.peekFirst().isPositionOnly());
+            // The new backend numbers its teleports from the start again.
+            teleports.addSentTeleport(new Vec3(3, 64, 3), 7, new RelativeFlag(0), true, 1);
+            assertEquals(
+                    "A teleport sent after the LOGIN belongs to the new level", 2, teleports.pendingTeleports.size());
         } finally {
             OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
         }
