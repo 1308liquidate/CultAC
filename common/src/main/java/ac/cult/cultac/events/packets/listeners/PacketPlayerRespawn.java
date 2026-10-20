@@ -30,6 +30,7 @@ import ac.cult.cultac.utils.data.SprintingState;
 import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntitySelf;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.FlightToggle;
 
 public class PacketPlayerRespawn {
 
@@ -156,6 +157,7 @@ public class PacketPlayerRespawn {
                     player.actionManager.onJavaPlayerReplacement();
                     // LocalPlayer starts from Input.EMPTY and sends PLAYER_INPUT once its keys differ from it.
                     player.packetStateData.knownInput = KnownInput.DEFAULT;
+                    FlightToggle.reset(player.packetStateData);
                     player.boatData.clearInput();
                     player.onGround = player.lastOnGround = false;
                     player.isSneaking = false;
@@ -262,6 +264,8 @@ public class PacketPlayerRespawn {
             player.isSneaking = false;
             // ClientPacketListener#handleRespawn starts the new LocalPlayer from Input.EMPTY unless KEEP_ENTITY_DATA.
             if (!keepEntityData) player.packetStateData.knownInput = KnownInput.DEFAULT;
+            // ClientPacketListener#handleRespawn gives every new LocalPlayer a fresh KeyboardInput.
+            FlightToggle.reset(player.packetStateData);
             final BadPacketsF badPacketsF = player.checkManager.getListener(BadPacketsF.class);
             badPacketsF.exemptNext = true;
             player.lastOnGround = false;

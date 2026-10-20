@@ -5,7 +5,6 @@ import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
@@ -16,6 +15,7 @@ import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
+import ac.cult.cultac.utils.nmsutil.FlightToggle;
 import ac.cult.cultac.utils.nmsutil.WaterCurrent;
 import java.util.ArrayList;
 import java.util.List;
@@ -85,25 +85,23 @@ public class VelocityTransformer {
     }
 
     /**
-     * LocalPlayer#aiStep runs jumpFromGround when a jump press turns flight on while on the ground, ahead of the
-     * flight input; the spectator start presses nothing. The player_abilities of that start precedes this tick's
-     * player_input and move.
+     * LocalPlayer#aiStep runs jumpFromGround when its double-tap toggle turns flight on while on the ground, ahead of
+     * the flight input. The player_abilities of that start precedes this tick's player_input and move. Any other
+     * flight start is a player_abilities ServerGamePacketListenerImpl#handlePlayerAbilities accepts without a jump.
      */
     private List<PredVector> applyFlightTakeoff(CultPlayer player, List<PredVector> velocities) {
-        if (!player.packetStateData.flyingStartBeforeTravel
-                || !player.packetStateData.knownInput.jump()
-                || player.gamemode == GameMode.SPECTATOR) {
-            return velocities;
-        }
+        if (!player.packetStateData.flyingStartBeforeTravel || !FlightToggle.canToggle(player)) return velocities;
         List<Boolean> onGroundStates = simulationContext.getLastOnGround().getStates();
+        if (!onGroundStates.contains(true)) return velocities;
         List<PredVector> outputs = new ArrayList<>();
-        if (onGroundStates.contains(false)) outputs.addAll(velocities);
-        if (onGroundStates.contains(true)) {
-            for (PredVector velocity : velocities) {
-                outputs.addAll(applyPossibleJumpStates(player, velocity));
-            }
-            // LivingEntity#jumpFromGround leaves the velocity unchanged at or below 1.0E-5F.
-            if (!onGroundStates.contains(false) && jumpFromGroundCanDoNothing(player)) outputs.addAll(velocities);
+        for (PredVector velocity : velocities) {
+            outputs.addAll(applyPossibleJumpStates(player, velocity));
+        }
+        // An unarmed timer leaves a jumpless start; LivingEntity#jumpFromGround does nothing at or below 1.0E-5F.
+        if (onGroundStates.contains(false)
+                || FlightToggle.unarmedPossible(player.packetStateData)
+                || jumpFromGroundCanDoNothing(player)) {
+            outputs.addAll(velocities);
         }
         return outputs;
     }

@@ -185,12 +185,12 @@ class CreativeFlightTest {
     }
 
     /**
-     * LocalPlayer#aiStep runs jumpFromGround when a jump press turns flight on while on the ground, before the
+     * LocalPlayer#aiStep runs jumpFromGround when a double-tap turns flight on while on the ground, before the
      * flight input, so a knockback taken on that tick rises by the jump and the impulse.
      */
     @Test
     void aKnockbackOnAGroundedFlightToggleTakesTheTakeoffJumpAndTheImpulse() throws Exception {
-        try (var f = flying(GROUND, false)) {
+        try (var f = armedOnTheGround(true)) {
             f.pongThrough(f.velocity(KNOCKBACK));
             f.abilities(true);
             assertTrue(f.player.isFlying, "the toggle did not apply");
@@ -204,7 +204,7 @@ class CreativeFlightTest {
     /** With shift held too the impulses cancel, and the takeoff jump alone lifts the knockback. */
     @Test
     void aKnockbackOnAGroundedFlightToggleWithShiftHeldTakesTheTakeoffJump() throws Exception {
-        try (var f = flying(GROUND, false)) {
+        try (var f = armedOnTheGround(true)) {
             f.pongThrough(f.velocity(KNOCKBACK));
             f.abilities(true);
             f.input(JUMP_SHIFT);
@@ -214,10 +214,52 @@ class CreativeFlightTest {
         }
     }
 
+    /** The first press only arms Player#jumpTriggerTime, so flight turned on with it has no takeoff jump. */
+    @Test
+    void aTakeoffJumpOnAnUnarmedFirstPressFlags() throws Exception {
+        try (var f = flying(GROUND, false)) {
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            f.input(JUMP);
+
+            f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** LocalPlayer#aiStep toggles only on the jump key going down, so a held jump has no takeoff jump. */
+    @Test
+    void aTakeoffJumpWithJumpHeldSinceTheArmingPressFlags() throws Exception {
+        try (var f = armedOnTheGround(false)) {
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            assertTrue(f.player.isFlying, "the flight start did not apply");
+
+            f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** Player#jumpTriggerTime runs out 7 ticks after the arming press. */
+    @Test
+    void aTakeoffJumpAfterTheArmingPressRanOutFlags() throws Exception {
+        try (var f = armedOnTheGround(true)) {
+            for (int tick = 0; tick < 5; tick++) {
+                assertPredicted(f.tick(GROUND, true));
+            }
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            f.input(JUMP);
+
+            f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
     /** LivingEntity#jumpFromGround does nothing without jump strength, so the toggle keeps the knockback. */
     @Test
     void aGroundedFlightToggleWithoutJumpStrengthKeepsTheKnockback() throws Exception {
-        try (var f = flying(GROUND, false)) {
+        try (var f = armedOnTheGround(true)) {
             f.player.compensatedEntities.getSelf().jumpStrength = 0;
             f.pongThrough(f.velocity(KNOCKBACK));
             f.abilities(true);
@@ -263,6 +305,21 @@ class CreativeFlightTest {
         JavaTickFixture f = new JavaTickFixture();
         f.place(position, Vec3.ZERO);
         grantFlight(f, flying);
+        return f;
+    }
+
+    /**
+     * A player the server lets fly that presses jump in the air on the tick before it lands, arming
+     * Player#jumpTriggerTime without a jump, and lands releasing it or holding it.
+     */
+    private static JavaTickFixture armedOnTheGround(boolean releaseOnLanding) throws Exception {
+        JavaTickFixture f = new JavaTickFixture();
+        f.place(GROUND.add(0, 0.3, 0), new Vec3(0, -0.2, 0));
+        grantFlight(f, false);
+        f.input(JUMP);
+        assertPredicted(f.tick(GROUND.add(0, 0.1, 0), false));
+        if (releaseOnLanding) f.input(NONE);
+        assertPredicted(f.tick(GROUND, true));
         return f;
     }
 
