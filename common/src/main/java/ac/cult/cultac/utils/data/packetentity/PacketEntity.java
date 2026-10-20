@@ -94,7 +94,7 @@ public class PacketEntity {
 
     public ReachInterpolationData oldPacketLocation;
     public ReachInterpolationData newPacketLocation;
-    // Set by an unproven receipt or a queue fold; only a snap onto an authoritative position clears it.
+    // Set by an unproven receipt, fold, teleport, far sync or uncertain vehicle; holds for the entity's lifetime.
     private boolean trackedPositionInexact;
     private long clientTickOrder = Long.MAX_VALUE;
     // Reused: valid only until the client tick that computed it applies it.
@@ -261,6 +261,26 @@ public class PacketEntity {
         if (!trackedPositionInexact) return;
         newPacketLocation.markPositionInexact();
         if (oldPacketLocation != null) oldPacketLocation.markPositionInexact();
+    }
+
+    /** Keeps the packet-position margin for the rest of this entity's lifetime. */
+    public void markPositionInexact() {
+        trackedPositionInexact = true;
+        keepPositionCertainty();
+    }
+
+    /** Takes on the uncertainty of a position derived from {@code source} and the vehicles it rides. */
+    public void inheritPositionCertainty(@Nullable PacketEntity source) {
+        for (int hops = 0; source != null && source != this && hops <= 64; source = source.riding, hops++) {
+            if (source.hasInexactPosition()) {
+                markPositionInexact();
+                return;
+            }
+        }
+    }
+
+    private boolean hasInexactPosition() {
+        return trackedPositionInexact || (newPacketLocation != null && !newPacketLocation.hasExactPosition());
     }
 
     /** Packet processing appends to the client's queue; its codec base remains separate. */
@@ -797,7 +817,7 @@ public class PacketEntity {
         this.clientPhysicalPositionExact = true;
         // Snapping to an exact position means interpolation is disabled
         this.newPacketLocation = new ReachInterpolationData(box);
-        this.trackedPositionInexact = false;
+        keepPositionCertainty();
     }
 
     private SimpleCollisionBox passengerPhysicalBox;

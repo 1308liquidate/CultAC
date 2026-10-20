@@ -1740,6 +1740,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             } else {
                 applyBundledMovement(entity, movement);
             }
+            markUncertainPosition(entity, movement);
             applyDeltaMovementUpdate(entity, movement.deltaMovement());
             clearPacketHandlerDeltaMovement(movement);
             player.compensatedEntities.updatePassengerPositions();
@@ -1759,6 +1760,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     }
                     applyEntityRotationAndGround(entity, movement.yaw(), movement.onGround());
                     applyBundleFirstMovement(entity, movement);
+                    markUncertainPosition(entity, movement);
                     applyDeltaMovementUpdate(entity, movement.deltaMovement());
                     clearPacketHandlerDeltaMovement(movement);
                     player.compensatedEntities.updatePassengerPositions();
@@ -1802,6 +1804,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             }
             applyEntityRotationAndGround(entity, movement.yaw(), movement.onGround());
             applyFirstMovement(entity, movement);
+            markUncertainPosition(entity, movement);
             applyDeltaMovementUpdate(entity, movement.deltaMovement());
             clearPacketHandlerDeltaMovement(movement);
             player.compensatedEntities.updatePassengerPositions();
@@ -1826,10 +1829,21 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     movement.yaw(),
                     movement.pitch());
             entity.onSecondTransaction();
+            // Clients that saw the sync after a different tracked position may have interpolated instead.
+            entity.markPositionInexact();
             return true;
         }
         entity.onPositionPath(path, position.hasPosition(), movement.yaw(), movement.pitch(), player, bundled);
         return true;
+    }
+
+    // The model interpolates every teleport and legacy position sync, which a client may snap to instead.
+    private void markUncertainPosition(PacketEntity entity, EntityMovement movement) {
+        if (movement.kind() == MovementKind.TELEPORT_ENTITY
+                || (movement.kind() == MovementKind.POSITION_SYNC
+                        && player.getClientVersion().isOlderThan(ClientVersion.V_26_3))) {
+            entity.markPositionInexact();
+        }
     }
 
     private void applyFirstMovement(PacketEntity entity, EntityMovement movement) {

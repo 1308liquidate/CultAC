@@ -186,7 +186,9 @@ public class CompensatedEntities {
     public void settleIfUntrackedRider(PacketEntity rider) {
         if (!isUntrackedRider(rider)) return;
         SimpleCollisionBox seat = untrackedRiderSeat(rider, 0);
-        if (seat != null) rider.settleAtSeat(player, seat);
+        if (seat == null) return;
+        rider.inheritPositionCertainty(rider.getRiding());
+        rider.settleAtSeat(player, seat);
     }
 
     /**
@@ -586,6 +588,7 @@ public class CompensatedEntities {
 
     public void positionPassenger(PacketEntity riding, PacketEntity passenger) {
         Vec3 passengerPosition = BoundingBoxSize.getRidingOffsetFromVehicle(riding, passenger, player);
+        passenger.inheritPositionCertainty(riding);
         passenger.setPassengerPosition(
                 player,
                 GetBoundingBox.getPacketEntityBoundingBox(
