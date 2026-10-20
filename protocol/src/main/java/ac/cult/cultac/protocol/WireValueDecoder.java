@@ -122,7 +122,8 @@ public interface WireValueDecoder extends AutoCloseable {
         }
     }
 
-    record MetadataValue(int index, String kind, Object value, byte[] bytes) {}
+    /** The entry's wire bytes are {@code length} bytes of the decoded buffer from its absolute index {@code offset}. */
+    record MetadataValue(int index, String kind, Object value, int offset, int length) {}
 
     /** Builds the consumer's owned NBT tree directly, without a serialized transport copy. */
     interface NbtFactory<T> {
@@ -206,7 +207,11 @@ public interface WireValueDecoder extends AutoCloseable {
         return metadata(version, input, registries).stream()
                 .map(value -> value.kind().equals("item")
                         ? new MetadataValue(
-                                value.index(), value.kind(), decoded((ItemValue) value.value(), factory), value.bytes())
+                                value.index(),
+                                value.kind(),
+                                decoded((ItemValue) value.value(), factory),
+                                value.offset(),
+                                value.length())
                         : value)
                 .toList();
     }
