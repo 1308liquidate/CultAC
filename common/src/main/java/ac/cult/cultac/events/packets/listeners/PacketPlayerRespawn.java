@@ -124,6 +124,7 @@ public class PacketPlayerRespawn {
             // Minecraft#clearClientLevel discards the LocalPlayer before a reconfiguration login.
             player.isSprinting = false;
             player.sprintState.reset();
+            player.swimState.reset();
             player.attackStrength.reset();
             player.combatAttributes.reset();
             player.checkManager.getListener(BadPacketsF.class).lastSprinting = false;
@@ -365,6 +366,7 @@ public class PacketPlayerRespawn {
             player.packetStateData.lastSendPositionPitch = Float.NaN;
             if (!player.isBedrockMovement()) player.onLocalPlayerCreated();
             player.sprintState.onRespawn(keepEntityData, keepAttributeModifiers);
+            player.swimState.onRespawn(keepEntityData);
             player.attackStrength.reset();
             player.combatAttributes.onRespawn(keepAttributeModifiers);
             player.isSprinting = !player.isBedrockMovement() && player.sprintState.flag();

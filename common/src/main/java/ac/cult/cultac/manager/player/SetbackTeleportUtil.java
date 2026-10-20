@@ -50,9 +50,12 @@ import ac.cult.cultac.utils.lists.EvictingQueue;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.VectorUtils;
+import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.Collisions;
+import ac.cult.cultac.utils.nmsutil.Friction;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.IsUsingItem;
+import ac.cult.cultac.utils.nmsutil.VelocityCandidates;
 import ac.grim.grimac.api.event.events.GrimPlayerSetbackEvent;
 import ac.grim.grimac.api.event.events.GrimTeleportEvent;
 import java.util.Collections;
@@ -213,6 +216,10 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 speed = 0.0f;
             }
             initialVel = UncertaintyHelper.handleCircular(initialVel, context.getTarget(), speed);
+            if (VelocityCandidates.collidedVertically(result)) {
+                initialVel = initialVel.withY(
+                        VelocityCandidates.afterVerticalCollision(result, initialVel.y), "vertical restitution");
+            }
 
             afterTickFriction = simulateFriction(
                     initialVel,
@@ -463,6 +470,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 && lastPrediction != null
                 && !player.compensatedEntities.getSelf().inVehicle()) {
             SimpleCollisionBox oldBB = player.boundingBox;
+            double oldX = player.x, oldY = player.y, oldZ = player.z;
             try {
                 player.boundingBox = GetBoundingBox.getPlayerBoundingBox(player, position.x, position.y, position.z);
 
@@ -500,7 +508,30 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 }
 
                 if (clientVel.x != collide.x) clientVel = new Vec3(0, clientVel.y, clientVel.z);
-                if (clientVel.y != collide.y) clientVel = new Vec3(clientVel.x, 0, clientVel.z);
+                if (clientVel.y != collide.y) {
+                    boolean landed = clientVel.y < 0.0D;
+                    // Entity#checkSupportingBlock ranks candidates by distance from the post-move position.
+                    player.x = position.x;
+                    player.y = position.y;
+                    player.z = position.z;
+                    MainSupportingBlockData support = player.checkManager
+                            .getSimulationProcessor()
+                            .mainSupportingBlockAfter(
+                                    GetBoundingBox.getPlayerBoundingBox(player, position.x, position.y, position.z),
+                                    collide,
+                                    landed);
+                    player.x = oldX;
+                    player.y = oldY;
+                    player.z = oldZ;
+                    double restitutedY = VelocityCandidates.afterVerticalCollision(
+                            player,
+                            BlockProperties.getOnPos(player, support, position),
+                            context.isSneaking(),
+                            true,
+                            clientVel.y,
+                            collide.y);
+                    clientVel = new Vec3(clientVel.x, restitutedY, clientVel.z);
+                }
                 if (clientVel.z != collide.z) clientVel = new Vec3(clientVel.x, clientVel.y, 0);
 
                 clientVel = simulateFriction(
@@ -513,6 +544,9 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                         context);
             } finally {
                 player.boundingBox = oldBB;
+                player.x = oldX;
+                player.y = oldY;
+                player.z = oldZ;
             }
         }
 
@@ -589,7 +623,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             simulated = input.multiply(0.99F, 0.98F, 0.99F);
         } else { // Gliding doesn't have friction, we handle it differently
             final double horizFriction = wasOnGround ? 0.91F * 0.6F : 0.91F;
-            simulated = input.subtract(0.0D, gravity, 0.0D).multiply(horizFriction, 0.98f, horizFriction);
+            simulated = new Vec3(input.x, Friction.applyAirGravity(player, input.y, gravity), input.z)
+                    .multiply(horizFriction, 0.98f, horizFriction);
         }
 
         // stop 1.8 players from stepping onto 1.25 high blocks, because why not?

@@ -13,6 +13,7 @@ import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
+import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.utils.collisions.ClientBlockShapes;
 import ac.cult.cultac.utils.collisions.datatypes.CollisionBox;
@@ -21,6 +22,7 @@ import ac.cult.cultac.utils.data.*;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
+import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
@@ -180,9 +182,19 @@ public class WorldStageBuilder {
         // boundary, including idle ticks; prediction must not advance them again.
         StuckSpeedData stuckSpeedData = calculateStuckSpeed(player, simulationContext, push);
 
-        // Eye-fluid state is sampled at the movement start position.
-        player.wasEyeInWater = ClientFluidQueries.eyesInWater(
-                player, simulationContext.getFromMinimumExtent(), from, from.y + player.getEyeHeight());
+        // Entity#baseTick samples the eye at the movement start, at the pose Player#updatePlayerPose left last tick.
+        boolean eyeInWater = eyeInWater(player, simulationContext, player.pose);
+        // LocalPlayer#isUnderWater is the eye Player#updateIsUnderwater read before this tick's Entity#baseTick.
+        boolean underwater = lastPrediction != null
+                && lastPrediction.getSimulationContext().getWorldData().isEyeInWater();
+        // Entity#updateSwimming runs in Entity#baseTick, before LocalPlayer#aiStep updates the sprint and flying
+        // flags; Player#updateSwimming clears it while flying, which only a flight kept since last tick proves.
+        boolean swimming = simulationContext.getVehicle() == null
+                && !(player.isFlying && player.swimState.flewLastTick())
+                && player.sprintState.flagBeforeAiStep()
+                && (player.swimState.swimming() && player.gamemode != GameMode.SPECTATOR
+                        ? isInWater.determineOptimistically()
+                        : underwater && player.compensatedWorld.getWaterFluidLevelAt(from.x, from.y, from.z) > 0);
         // Portal contact uses the swept inside-block volume.
         player.intersectedWithNetherPortal = Collisions.hasState(
                 player,
@@ -257,7 +269,20 @@ public class WorldStageBuilder {
                 mainSupportingBlockData,
                 fishingRodPulls,
                 pushesWhileLoadingLevel(player, simulationContext),
-                lastOnGround);
+                lastOnGround,
+                eyeInWater,
+                underwater,
+                swimming);
+    }
+
+    // EntityFluidInteraction#update finds the eye only among the fluids inside Entity#getFluidInteractionBox.
+    private static boolean eyeInWater(CultPlayer player, SimulationContext context, Pose pose) {
+        Vec3 from = context.getStart();
+        SimpleCollisionBox body = context.getVehicle() != null
+                ? context.getFromMinimumExtent()
+                : GetBoundingBox.getBoundingBoxFromPosAndSize(
+                        from.x, from.y, from.z, pose.width * player.dimensionScale, pose.height * player.dimensionScale);
+        return ClientFluidQueries.eyesInWater(player, body, from, from.y + pose.eyeHeight * player.dimensionScale);
     }
 
     private DesyncStatus sampleClimbingAtStart(CultPlayer player, SimulationContext context) {
@@ -919,7 +944,7 @@ public class WorldStageBuilder {
         return fishingRodPulls;
     }
 
-    private MainSupportingBlockData findMainSupportingBlockPos(
+    public MainSupportingBlockData findMainSupportingBlockPos(
             CultPlayer player,
             SimulationContext lastContext,
             double lastMovementX,

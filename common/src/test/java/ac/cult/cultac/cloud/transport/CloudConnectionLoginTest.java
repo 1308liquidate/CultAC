@@ -146,7 +146,7 @@ class CloudConnectionLoginTest {
 
             CloudSettings off = settings(receiver.url(), "test-key", CloudSettings.PROTOCOLS);
             connections.configure(new CloudSettings(
-                    off.url(), off.apiKey(), off.serverIdTemplate(), off.proxyId(), off.protocols(), true));
+                    off.url(), off.apiKey(), off.serverIdTemplate(), off.proxyId(), off.protocols(), true, false));
             connections.forServer("proxy.a");
             receiver.allowConnect();
             connect = JsonParser.parseString(receiver.connectBodies.poll(5, TimeUnit.SECONDS))

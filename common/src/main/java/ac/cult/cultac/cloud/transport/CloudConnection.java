@@ -105,6 +105,11 @@ public final class CloudConnection {
 
         /** The service sent a finding. Called on the socket's listener thread. */
         void finding(IntakeWire.Event event);
+
+        /** Hears the team sockets: on the sender thread when one opens, else on whichever thread closed or read it. */
+        default TeamSocket.Listener team() {
+            return TeamSocket.Listener.NONE;
+        }
     }
 
     private static final Gson GSON = new Gson();
@@ -199,6 +204,23 @@ public final class CloudConnection {
 
     private final DiagUpload perfUpload = new DiagUpload();
     private final Perf perf;
+    /** Whether connect offers team sync ({@code cloud.team-sync}). */
+    private final boolean offerTeam;
+    /** The open socket, while its connect answered {@code team}. */
+    private volatile Team teamSocket;
+
+    /** The socket of {@code generation} as a team socket. */
+    private record Team(CloudConnection connection, long generation) implements TeamSocket {
+        @Override
+        public boolean send(byte[] record) {
+            return connection.send(generation, record, 0);
+        }
+
+        @Override
+        public String serverId() {
+            return connection.serverId();
+        }
+    }
 
     private volatile WebSocket socket;
     private volatile long generation;
@@ -327,6 +349,7 @@ public final class CloudConnection {
             String serverId,
             List<Integer> protocols,
             boolean offerPerf,
+            boolean offerTeam,
             SharedTransport shared,
             Owner owner,
             Timing timing) {
@@ -335,6 +358,7 @@ public final class CloudConnection {
         this.serverId = serverId;
         this.protocols = List.copyOf(protocols);
         this.offerPerf = offerPerf;
+        this.offerTeam = offerTeam;
         this.shared = shared;
         this.owner = owner;
         liveness = new SocketLiveness(timing.quietNanos());
@@ -668,6 +692,7 @@ public final class CloudConnection {
             body.addProperty("textStripped", textStripped);
             body.addProperty("diag", DiagWire.VERSION);
             if (offerPerf) body.addProperty("perf", PerfWire.VERSION);
+            if (offerTeam) body.addProperty("team", TeamSocket.VERSION);
             JsonObject agent = agent();
             body.add("agent", agent);
             HttpResponse<String> response = http.send(
@@ -726,6 +751,17 @@ public final class CloudConnection {
             reloaded = false;
             openedNanos = System.nanoTime();
             liveness.opened(clock.getAsLong());
+            if (offerTeam) {
+                // Before the socket is published, so the close of this socket always follows its open.
+                Team team = new Team(this, opened);
+                Boolean answered = connected.team == null ? null : connected.team.enabled;
+                if (answered != null) teamSocket = team;
+                try {
+                    owner.team().opened(team, answered);
+                } catch (RuntimeException failure) {
+                    LogUtil.warn("Team sync could not take an opened socket", failure);
+                }
+            }
             socket = webSocket;
             webSocket.request(1);
             failing = false;
@@ -879,6 +915,8 @@ public final class CloudConnection {
         DiagLimitsJson diag;
         /** Present when the service takes the perf offered: its limits. */
         PerfLimitsJson perf;
+        /** Present when the service takes the team sync offered: the organization's state. */
+        TeamStateJson team;
 
         /** The perf limits answered; null when the service took none. */
         PerfLimits perfLimits() {
@@ -963,6 +1001,11 @@ public final class CloudConnection {
         long uploadBytesPerSecond;
         boolean wholeJvm;
         long skipMsptMicros;
+    }
+
+    /** {@code ConnectResponse.team} in connect's JSON; {@code {}} is disabled. */
+    static final class TeamStateJson {
+        boolean enabled;
     }
 
     /** Which anticheat connects, from which build, with which config, and whether it acts on what it finds. */
@@ -1259,6 +1302,15 @@ public final class CloudConnection {
         gone.abort();
         diagnostics.socketClosed(ended);
         perf.socketClosed(ended);
+        Team team = teamSocket;
+        teamSocket = null;
+        if (team != null) {
+            try {
+                owner.team().closed(team);
+            } catch (RuntimeException failure) {
+                LogUtil.warn("Team sync could not take a closed socket", failure);
+            }
+        }
         for (Stream stream : streams.values()) {
             try {
                 stream.disconnected(ended);
@@ -1351,6 +1403,20 @@ public final class CloudConnection {
                         }
                         if (reply instanceof IntakeWire.PerfStartReply start) {
                             perf.start(generation, start.profile(), start.seconds());
+                            continue;
+                        }
+                        if (reply instanceof IntakeWire.TeamStateReply state) {
+                            Team team = teamSocket;
+                            if (team != null && team.generation() == generation) {
+                                owner.team().state(team, state.enabled());
+                            }
+                            continue;
+                        }
+                        if (reply instanceof IntakeWire.TeamSweepReply sweep) {
+                            Team team = teamSocket;
+                            if (team != null && team.generation() == generation) {
+                                owner.team().sweep(team, sweep.players());
+                            }
                             continue;
                         }
                         Stream stream = streams.get(reply.player());

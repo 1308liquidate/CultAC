@@ -48,8 +48,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             SimpleCollisionBox targetBox,
             Vec3 targetSize,
             int type,
-            boolean livingEntity,
-            boolean exempt,
+            boolean enforced,
             AttackReach reach) {}
 
     /**
@@ -164,8 +163,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                         getReachBox(entity),
                         getReachSize(entity),
                         entity.type,
-                        entity.isLivingEntity(),
-                        isReachExempt(entity),
+                        isEnforced(entity),
                         reach));
             }
 
@@ -220,9 +218,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     //
     // Meaning that the other check should be the only one that flags.
     private boolean isKnownInvalid(PacketEntity reachEntity, AttackReach reach) {
-        // If the entity doesn't exist, or if it is exempt, or if it is dead
-        if ((isReachExempt(reachEntity) || !reachEntity.isLivingEntity())
-                && reachEntity.type != EntityTypeIds.END_CRYSTAL) return false; // exempt
+        if (!isEnforced(reachEntity)) return false;
 
         // Filter out what we assume to be cheats
         if (cancelBuffer != 0) {
@@ -239,8 +235,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                     attack.targetBox(),
                     attack.targetSize(),
                     attack.type(),
-                    attack.livingEntity(),
-                    attack.exempt(),
+                    attack.enforced(),
                     attack.fromCandidates(),
                     attack.reach(),
                     false);
@@ -295,8 +290,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                 getReachBox(reachEntity),
                 getReachSize(reachEntity),
                 reachEntity.type,
-                reachEntity.isLivingEntity(),
-                isReachExempt(reachEntity),
+                isEnforced(reachEntity),
                 fromCandidates,
                 reach,
                 isPrediction);
@@ -347,8 +341,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             SimpleCollisionBox targetBox,
             Vec3 targetSize,
             int type,
-            boolean livingEntity,
-            boolean exempt,
+            boolean enforced,
             List<Vec3> fromCandidates,
             AttackReach reach,
             boolean isPrediction) {
@@ -358,8 +351,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
 
         measureBest(targetBox, targetSize, fromCandidates, reach, isPrediction);
 
-        // if the entity is not exempt and the entity is alive
-        if ((!exempt && livingEntity) || type == EntityTypeIds.END_CRYSTAL) {
+        if (enforced) {
             if (bestDistance == Double.POSITIVE_INFINITY) {
                 cancelBuffer = 1;
                 return "Missed hitbox";
@@ -848,8 +840,12 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    private boolean isReachExempt(PacketEntity reachEntity) {
-        return reachEntity.type == EntityTypeIds.SHULKER || EntityTypeUtil.isBoat(reachEntity.type);
+    // The targets whose picked box Cult models: living entities but shulkers, end crystals, and a Java client's boats,
+    // which AbstractBoat moves only by LinearInterpolationHandler's 3 steps to the position the server sent.
+    private boolean isEnforced(PacketEntity reachEntity) {
+        if (reachEntity.type == EntityTypeIds.END_CRYSTAL) return true;
+        if (reachEntity.isBoat()) return !player.isBedrockMovement();
+        return reachEntity.isLivingEntity() && reachEntity.type != EntityTypeIds.SHULKER;
     }
 
     @Override

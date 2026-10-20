@@ -150,6 +150,17 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         return this.velocityScratch;
     }
 
+    /** Entity#checkSupportingBlock after a move of {@code movement} that ended with the box {@code box}. */
+    public MainSupportingBlockData mainSupportingBlockAfter(SimpleCollisionBox box, Vec3 movement, boolean onGround) {
+        return this.worldStageBuilder.findMainSupportingBlockPos(
+                player,
+                this.lastPrediction == null ? null : this.lastPrediction.getSimulationContext(),
+                movement.x,
+                movement.z,
+                box,
+                onGround);
+    }
+
     public Set<Vec3> getValidPlayerStartingVels() {
         return this.validPlayerStartingVels;
     }
@@ -1073,6 +1084,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.player.riptideSpinAttackTicks = Math.max(0, this.player.riptideSpinAttackTicks - 1);
             this.couldPotentiallyTickSkip = false;
             this.player.compensatedEntities.fishingRodPulls.clear();
+            if (!this.player.isBedrockMovement()) {
+                this.player.swimState.onClientTick(
+                        result.getSimulationContext().getWorldData().isSwimming(), this.player.isFlying);
+            }
             this.player.refreshPlayerPose();
         } else {
             this.applyProfileCommit(preparedCommit);

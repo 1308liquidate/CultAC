@@ -166,7 +166,8 @@ class ItemUseProofTest {
             assertEquals(6, policy.history().size());
             assertEquals(2, policy.history().desynced());
             assertEquals(before, check.violations);
-            verify(setbacks).executeNonSimulatingSetback();
+            verify(setbacks).executeViolationSetback();
+            verify(setbacks, never()).executeNonSimulatingSetback();
         }
     }
 

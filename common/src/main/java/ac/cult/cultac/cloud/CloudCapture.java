@@ -845,6 +845,8 @@ public final class CloudCapture implements PlayerObserver {
             case IntakeWire.DiagLimitsReply ignored -> {}
             case IntakeWire.PerfLimitsReply ignored -> {}
             case IntakeWire.PerfStartReply ignored -> {}
+            case IntakeWire.TeamStateReply ignored -> {}
+            case IntakeWire.TeamSweepReply ignored -> {}
             case IntakeWire.Event ignored -> {}
             case IntakeWire.Capture capture -> {
                 if (!unstreamed) stream.capture(capture.serverbound(), capture.clientbound(), capture.dimension());
