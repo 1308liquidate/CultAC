@@ -11,6 +11,7 @@ import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.wire.Wire;
 import io.netty.buffer.ByteBuf;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.function.IntPredicate;
 import java.util.function.IntUnaryOperator;
@@ -96,7 +97,16 @@ public final class PalettedSection {
             }
         }
         // Since 1.21.5 arrays have a fixed length derived from the configuration.
-        for (int i = 0; i < section.words.length; i++) section.words[i] = input.readLong();
+        int bytes = section.words.length * Long.BYTES;
+        if (input.readableBytes() >= bytes && input.nioBufferCount() == 1) {
+            input.nioBuffer(input.readerIndex(), bytes)
+                    .order(ByteOrder.BIG_ENDIAN)
+                    .asLongBuffer()
+                    .get(section.words);
+            input.skipBytes(bytes);
+        } else {
+            for (int i = 0; i < section.words.length; i++) section.words[i] = input.readLong();
+        }
         return section;
     }
 
@@ -396,9 +406,19 @@ public final class PalettedSection {
     }
 
     boolean isUniform() {
-        int first = codeAt(0);
-        for (int i = 1; i < size; i++) if (codeAt(i) != first) return false;
-        return true;
+        if (bits == 0) return true;
+        int first = codeAt(0), perWord = 64 / bits, full = size / perWord;
+        if (words.length != (size + perWord - 1) / perWord) {
+            for (int i = 1; i < size; i++) if (codeAt(i) != first) return false;
+            return true;
+        }
+        long pattern = 0;
+        for (int slot = 0; slot < perWord; slot++) pattern |= (long) first << (slot * bits);
+        long used = perWord * bits == 64 ? -1L : (1L << (perWord * bits)) - 1;
+        for (int index = 0; index < full; index++) if ((words[index] & used) != pattern) return false;
+        if (full == words.length) return true;
+        long tail = (1L << ((size - full * perWord) * bits)) - 1;
+        return (words[full] & tail) == (pattern & tail);
     }
 
     int contentHash() {
