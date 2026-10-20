@@ -68,6 +68,15 @@ public class WorldData {
     /** The previous client tick's ground state, before this tick's pushes or riptide mark it unknown. */
     DesyncStatus carriedOnGround;
 
+    /** Entity#isEyeInFluid(WATER) after this tick's Entity#baseTick. */
+    boolean eyeInWater;
+
+    /** LocalPlayer#isUnderWater during this tick: the previous tick's {@link #eyeInWater}. */
+    boolean underwater;
+
+    /** Entity#isSwimming after this tick's Entity#updateSwimming; true if the client may swim. */
+    boolean swimming;
+
     /** A shallow copy: carry contexts share its sub-objects and boxes, so none may be mutated in place. */
     public WorldData copy() {
         return new WorldData(
@@ -98,7 +107,10 @@ public class WorldData {
                 mainSupportingBlockPos,
                 fishingRodPulls,
                 loadingLevelPushes,
-                carriedOnGround);
+                carriedOnGround,
+                eyeInWater,
+                underwater,
+                swimming);
     }
 
     public boolean mustBeInLiquid() {
