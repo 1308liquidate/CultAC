@@ -6,6 +6,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufUtil;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -16,15 +17,25 @@ public final class ProjectedPackets implements AutoCloseable {
     /** Owns its buffer until it is transferred to the transport. */
     public record Encoded(List<ByteBuf> frames) {}
 
+    private static final Object NO_MODEL_TYPE = new Object();
+
     private final ProtocolRuntime observed, model;
     private final Supplier<PacketValueAdapter> adapter;
     private final byte[][] bundleDelimiters = new byte[ConnectionPhase.values().length][];
+    private final Object[][][] modelTypes;
     private boolean closed;
 
     public ProjectedPackets(ProtocolRuntime observed, ProtocolRuntime model, Supplier<PacketValueAdapter> adapter) {
         this.observed = Objects.requireNonNull(observed);
         this.model = Objects.requireNonNull(model);
         this.adapter = Objects.requireNonNull(adapter);
+        modelTypes = new Object[ConnectionPhase.values().length][PacketDirection.values().length][];
+        for (ConnectionPhase phase : ConnectionPhase.values()) {
+            for (PacketDirection direction : PacketDirection.values()) {
+                modelTypes[phase.ordinal()][direction.ordinal()] =
+                        new Object[observed.data().packets(phase, direction).size()];
+            }
+        }
     }
 
     public ProtocolRuntime observed() {
@@ -38,10 +49,21 @@ public final class ProjectedPackets implements AutoCloseable {
     /** The model family of observed wire packet {@code id}; null when the model has none. */
     public PacketType<?> type(ConnectionPhase phase, PacketDirection direction, int id) {
         var bound = observed.binding(phase, direction, id);
-        return bound == null
-                ? model.typeForKey(direction.name().toLowerCase(java.util.Locale.ROOT) + "."
-                        + observed.data().packets(phase, direction).name(id).replace("minecraft:", ""))
-                : bound.type();
+        if (bound != null) return bound.type();
+        Object[] types = modelTypes[phase.ordinal()][direction.ordinal()];
+        if (id < 0 || id >= types.length) return modelType(phase, direction, id);
+        Object type = types[id];
+        if (type == null) {
+            PacketType<?> resolved = modelType(phase, direction, id);
+            type = resolved == null ? NO_MODEL_TYPE : resolved;
+            types[id] = type;
+        }
+        return type == NO_MODEL_TYPE ? null : (PacketType<?>) type;
+    }
+
+    private PacketType<?> modelType(ConnectionPhase phase, PacketDirection direction, int id) {
+        return model.typeForKey(direction.name().toLowerCase(Locale.ROOT) + "."
+                + observed.data().packets(phase, direction).name(id).replace("minecraft:", ""));
     }
 
     /** Borrows the physical frame; no generated frames or mirrored observations exist. */
