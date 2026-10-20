@@ -15,6 +15,7 @@ import ac.cult.cultac.events.packets.listeners.PacketPlayerAttack;
 import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.packet.EntityPositionPath;
 import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
@@ -478,6 +479,27 @@ class EntityInteractionVisibilityTest {
             assertFalse(entities.ridesIndirectly(entities.getSelf(), entities.getEntity(41)));
             for (int tick = 0; tick < 4; tick++) setup.clientTick();
             assertStops(fireball, 8 - first - second - third - fourth);
+        }
+    }
+
+    @Test
+    void aMobPastAFoldedInterpolationStepDoesNotStopAProjectile() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
+            setup.cow(41, new Vec3(.5, 64, 3.7));
+            var cow = setup.player.compensatedEntities.getEntity(41);
+            // The 129th destination folds the first two, so the queue goes straight back to x .5. The client keeps
+            // every step and samples a third of the way to x 12.5 first, x 4.5, off the fireball's path.
+            for (int step = 0; step < 129; step++) {
+                var destination = new Vec3(step % 2 == 0 ? 12.5 : .5, 64, 3.7);
+                cow.onPositionPath(EntityPositionPath.linear(destination), true, null, null, setup.player, true);
+            }
+            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertTrue(cow.hasLossyPosition());
+            assertStops(fireball, 5 - 2.185);
+            // The next tick finishes the folded step, after which the client and the queue agree again.
+            setup.clientTick();
+            assertFalse(cow.hasLossyPosition());
         }
     }
 

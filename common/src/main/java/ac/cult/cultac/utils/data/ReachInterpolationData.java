@@ -63,6 +63,8 @@ public class ReachInterpolationData {
     private final boolean reachesUsePacketPositionUncertainty;
     // Reach judges a Java snapshot without the margin until a queue fold or an uncertain receipt clears this.
     private boolean positionExact;
+    // The front queued step is a fold, so the client passes destinations the queue no longer holds.
+    private boolean foldedStepQueued;
     // getPossibleMovementLocationCombined while boundsValid; every write to its inputs clears boundsValid.
     private boolean boundsValid;
     private double boundsMinX, boundsMinY, boundsMinZ, boundsMaxX, boundsMaxY, boundsMaxZ;
@@ -90,6 +92,7 @@ public class ReachInterpolationData {
         this.interpolationSteps = other.interpolationSteps;
         this.reachesUsePacketPositionUncertainty = other.reachesUsePacketPositionUncertainty;
         this.positionExact = other.positionExact;
+        this.foldedStepQueued = other.foldedStepQueued;
     }
 
     public ReachInterpolationData copy() {
@@ -184,6 +187,14 @@ public class ReachInterpolationData {
         return positionExact;
     }
 
+    /**
+     * Whether the client may be off every movement location: until the client finishes a folded step, it interpolates
+     * through destinations the fold dropped ({@code SteppedInterpolationHandler} keeps every step).
+     */
+    public boolean hasDroppedSteps() {
+        return foldedStepQueued;
+    }
+
     public void markPositionInexact() {
         positionExact = false;
     }
@@ -251,6 +262,7 @@ public class ReachInterpolationData {
             Step next = interpolationQueue.removeFirst();
             interpolationQueue.addFirst(new Step(next.transform(), oldest.ticks() + next.ticks()));
             positionExact = false;
+            foldedStepQueued = true;
         }
         interpolationQueue.addLast(new Step(transform, ticks));
         remainingTicks += ticks;
@@ -292,6 +304,7 @@ public class ReachInterpolationData {
             currentStepTicks -= step.ticks();
             lastStep = step.transform();
             interpolationQueue.removeFirst();
+            foldedStepQueued = false;
         }
         return steppedTarget;
     }
@@ -305,6 +318,7 @@ public class ReachInterpolationData {
 
     private void cancelSteppedInterpolation() {
         interpolationQueue.clear();
+        foldedStepQueued = false;
         remainingTicks = 0.0F;
         interpolationSpeed = 1.0F;
     }

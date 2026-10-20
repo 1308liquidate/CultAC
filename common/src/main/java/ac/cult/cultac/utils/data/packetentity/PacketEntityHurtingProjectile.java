@@ -128,8 +128,8 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
 
     /**
      * The boxes of the entities {@code Projectile#canHitEntity} certainly accepts at one known position: a target
-     * whose candidate positions disagree, or whose owner rule depends on a {@code leftOwner} the engine does not know,
-     * is left out. Before 26.3 the client deflects the projectile off a {@code deflects_projectiles} target, so those
+     * whose candidate positions disagree, that may be off its one candidate ({@link PacketEntity#hasLossyPosition}),
+     * or whose owner rule depends on a {@code leftOwner} the engine does not know, is left out. Before 26.3 the client deflects the projectile off a {@code deflects_projectiles} target, so those
      * are left out too.
      */
     private List<Box> certainTargets(ClientEntityQueries queries) {
@@ -138,6 +138,7 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
         List<Box> targets = new ArrayList<>();
         for (PickCandidates target : queries.projectileTargets(this)) {
             if (target.boxes().size() != 1 || target.boxes().getFirst() == null) continue;
+            if (target.entity().hasLossyPosition()) continue;
             if (ownerRoot != null && mayBeOnOwner && root(target.entity()) == ownerRoot) continue;
             if (deflectsOnClient && queries.deflects(target.entity(), this)) continue;
             targets.add(target.boxes().getFirst());
