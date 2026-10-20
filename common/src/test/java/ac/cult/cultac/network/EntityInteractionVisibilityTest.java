@@ -38,6 +38,7 @@ import ac.cult.cultac.utils.inventory.ItemUtil;
 import ac.cult.cultac.utils.latency.ClientComponentRegistries;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
+import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
 import ac.cult.cultac.utils.visibility.ClientVisibility;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
@@ -56,6 +57,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mockito;
 
 class EntityInteractionVisibilityTest {
+    // An add_entity data value that names no entity.
+    private static final int NO_OWNER = -1;
+
     static Stream<ProtocolVersion> clients() {
         return Stream.of(ProtocolVersion.V1_21_11, ProtocolVersion.V26_3);
     }
@@ -290,10 +294,106 @@ class EntityInteractionVisibilityTest {
         }
     }
 
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aFireballStopsAtAMobInFrontOfAWall(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 2, state("stone"));
+            setup.cow(41, new Vec3(.5, 64, 3.7));
+            // The step from z 5 to 2.815 meets the cow's face at 4.15 before the wall's at 3.
+            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertEquals(4.15, fireball.clientPhysicalPosition.z, 1.0E-6);
+            assertEquals(4.15, fireball.getPossibleMovementCollisionBoxes().maxZ - .5, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aFireballStopsAtTheWallBeforeAMobBehindIt(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 2, state("stone"));
+            setup.cow(41, new Vec3(.5, 64, 1.5));
+            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertEquals(3, fireball.clientPhysicalPosition.z, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aFireballPassesMobsBeyondItsStepOrBesideItsPath(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.cow(40, new Vec3(.5, 64, 1.5));
+            setup.cow(41, new Vec3(1.5, 64, 3.7));
+            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertEquals(5 - 2.185, fireball.clientPhysicalPosition.z, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aFireballPassesThroughItsOwnerUntilItHasLeftIt(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.cow(41, new Vec3(.5, 64, 3.7));
+            var fireball = setup.fireball(42, 5, -2.2, 41);
+            setup.clientTick();
+            assertEquals(5 - 2.185, fireball.clientPhysicalPosition.z, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aMobThatMayHaveMovedOffThePathLeavesBothStopsAsCandidates(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            setup.cow(41, new Vec3(.5, 64, 3.7));
+            // Until the client answers the move, the cow may still be on the path or interpolating off it.
+            setup.player.compensatedEntities.getEntity(41).onFirstTransaction(false, true, 3.5, 64, 3.7, setup.player);
+            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertEquals(5 - 2.185, fireball.clientPhysicalPosition.z, 1.0E-6);
+            var stops = fireball.getPossibleMovementCollisionBoxCandidates().stream()
+                    .map(box -> box.minZ + .5)
+                    .sorted()
+                    .toList();
+            assertEquals(2, stops.size());
+            assertEquals(5 - 2.185, stops.get(0), 1.0E-6);
+            assertEquals(4.15, stops.get(1), 1.0E-6);
+            var envelope = fireball.getPossibleMovementCollisionBoxes();
+            assertEquals(5 - 2.185 - .5, envelope.minZ, 1.0E-6);
+            assertEquals(4.15 + .5, envelope.maxZ, 1.0E-6);
+            assertNull(fireball.getExactMovementCollisionBox());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aFireballStopsAtTheLocalPlayer(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            // The player's box spans z -1.8 to -1.2; the step runs from .5 to -1.685.
+            var fireball = setup.fireball(42, .5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertEquals(-1.2, fireball.clientPhysicalPosition.z, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void theHitMarginGrowsByATwentiethPerTickFromTheThirdTick(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            // Tick 3 runs from z 5.867 to 4.739 and meets the cow's face at 4.95, inflated by 0.05.
+            setup.cow(41, new Vec3(.5, 64, 4.5));
+            var fireball = setup.fireball(42, 8, -1, NO_OWNER);
+            for (int tick = 0; tick < 3; tick++) setup.clientTick();
+            assertEquals(5, fireball.clientPhysicalPosition.z, 1.0E-6);
+        }
+    }
+
     @Test
     void clientsBefore1_21_2KeepAProjectileAtItsServerPosition() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V1_21_11)) {
-            setup.spawn(42, "minecraft:wind_charge", new Vec3d(.5, 65.12, 4.5), new Vec3d(0, 0, -1.5));
+            setup.spawn(42, "minecraft:wind_charge", new Vec3d(2.5, 65.12, 4.5), new Vec3d(0, 0, -1.5));
             var charge = setup.player.compensatedEntities.getEntity(42);
             JavaTickFixture.setField(CultPlayer.class, setup.player, "resolvedClientVersion", ClientVersion.V_1_21);
             for (int tick = 0; tick < 4; tick++) setup.clientTick();
@@ -536,6 +636,7 @@ class EntityInteractionVisibilityTest {
             player.x = .5;
             player.y = 64;
             player.z = -1.5;
+            player.boundingBox = GetBoundingBox.getCollisionBoxForPlayer(player, .5, 64, -1.5);
             player.registryState = new ClientComponentRegistries();
             var world = player.compensatedWorld;
             var dimension = player.getWorldRegistries().dimension("minecraft:overworld");
@@ -558,6 +659,28 @@ class EntityInteractionVisibilityTest {
                     fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ADD_ENTITY, packet, false);
             player.packetEntityReplication.onAddEntity(event, player, packet);
             acknowledge(event);
+        }
+
+        void cow(int id, Vec3 position) {
+            player.compensatedEntities.addEntity(id, EntityTypeIds.COW, position, 0, 0, 0);
+        }
+
+        PacketEntity fireball(int id, double z, double velocityZ, int owner) {
+            if (fixture.user.getPlayer() == null) fixture.user.bind(Mockito.mock(PlatformPlayer.class));
+            var packet = new ClientboundAddEntity(
+                    id,
+                    "minecraft:fireball",
+                    new Vec3d(.5, 64.5, z),
+                    0,
+                    0,
+                    owner,
+                    new UUID(0, id),
+                    new Vec3d(0, 0, velocityZ));
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ADD_ENTITY, packet, false);
+            player.packetEntityReplication.onAddEntity(event, player, packet);
+            acknowledge(event);
+            return player.compensatedEntities.getEntity(id);
         }
 
         void motion(int id, Vec3d velocity) {
