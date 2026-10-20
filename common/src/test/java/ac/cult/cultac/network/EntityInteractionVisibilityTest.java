@@ -380,6 +380,42 @@ class EntityInteractionVisibilityTest {
 
     @ParameterizedTest
     @MethodSource("clients")
+    void aWindChargePassesThroughAnEndCrystalThatStopsAFireball(ProtocolVersion version) throws Exception {
+        // The crystal's 2-wide box spans z 2.7 to 4.7 across both steps from z 5.
+        try (var setup = new Setup(version)) {
+            setup.player.compensatedEntities.addEntity(41, EntityTypeIds.END_CRYSTAL, new Vec3(.5, 64, 3.7), 0, 0, 0);
+            var charge = setup.projectile(42, "minecraft:wind_charge", 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertEquals(2.8, charge.clientPhysicalPosition.z, 1.0E-6);
+        }
+        try (var setup = new Setup(version)) {
+            setup.player.compensatedEntities.addEntity(41, EntityTypeIds.END_CRYSTAL, new Vec3(.5, 64, 3.7), 0, 0, 0);
+            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertEquals(4.7, fireball.clientPhysicalPosition.z, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void aWindChargePassesThroughAnotherWindChargeThatStopsAFireball(ProtocolVersion version) throws Exception {
+        // The resting charge's box spans z 3.54375 to 3.85625 and y 64.35 to 64.6625 around the path.
+        try (var setup = new Setup(version)) {
+            setup.projectile(41, "minecraft:wind_charge", 3.7, 0, NO_OWNER);
+            var charge = setup.projectile(42, "minecraft:wind_charge", 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertEquals(2.8, charge.clientPhysicalPosition.z, 1.0E-6);
+        }
+        try (var setup = new Setup(version)) {
+            setup.projectile(41, "minecraft:wind_charge", 3.7, 0, NO_OWNER);
+            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            assertEquals(3.85625, fireball.clientPhysicalPosition.z, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
     void theHitMarginGrowsByATwentiethPerTickFromTheThirdTick(ProtocolVersion version) throws Exception {
         try (var setup = new Setup(version)) {
             // Tick 3 runs from z 5.867 to 4.739 and meets the cow's face at 4.95, inflated by 0.05.
@@ -666,10 +702,14 @@ class EntityInteractionVisibilityTest {
         }
 
         PacketEntity fireball(int id, double z, double velocityZ, int owner) {
+            return projectile(id, "minecraft:fireball", z, velocityZ, owner);
+        }
+
+        PacketEntity projectile(int id, String type, double z, double velocityZ, int owner) {
             if (fixture.user.getPlayer() == null) fixture.user.bind(Mockito.mock(PlatformPlayer.class));
             var packet = new ClientboundAddEntity(
                     id,
-                    "minecraft:fireball",
+                    type,
                     new Vec3d(.5, 64.5, z),
                     0,
                     0,

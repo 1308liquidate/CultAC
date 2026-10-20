@@ -148,19 +148,22 @@ public final class ClientEntityQueries {
 
     /**
      * The entities {@code ProjectileUtil#getEntityHitResult} can select for {@code source} before its owner rule:
-     * {@code Entity#canBeHitByProjectile} (alive and pickable) without {@code noPhysics}, the local player first.
+     * {@code Entity#canBeHitByProjectile} (alive and pickable) without {@code noPhysics}, the local player first. A
+     * wind charge also skips wind charges and end crystals ({@code AbstractWindCharge#canHitEntity}).
      */
     public List<PickCandidates> projectileTargets(PacketEntity source) {
         var result = new ArrayList<PickCandidates>();
         var self = player.compensatedEntities.getSelf();
         if (player.gamemode != GameMode.SPECTATOR && self.actionAlive)
             result.add(new PickCandidates(self, List.of(localBox())));
+        boolean windCharge = isWindCharge(source.type);
         for (var entity : player.compensatedEntities.entityMap.values()) {
             if (entity == source
                     || !present(entity)
                     || !pickable(entity)
                     || entity.isLivingEntity() && !entity.actionAlive
-                    || noPhysics(entity)) continue;
+                    || noPhysics(entity)
+                    || windCharge && (isWindCharge(entity.type) || entity.type == EntityTypeIds.END_CRYSTAL)) continue;
             result.add(new PickCandidates(entity, candidateBoxes(entity)));
         }
         return result;
@@ -175,6 +178,10 @@ public final class ClientEntityQueries {
             if (present(entity) && !spectator(entity) && pickable(entity))
                 result.add(new PickCandidates(entity, candidateBoxes(entity)));
         return result;
+    }
+
+    private static boolean isWindCharge(int type) {
+        return type == EntityTypeIds.WIND_CHARGE || type == EntityTypeIds.BREEZE_WIND_CHARGE;
     }
 
     // Interaction and ShulkerBullet set noPhysics on construction; a spectator player is not pickable.
