@@ -145,8 +145,7 @@ public final class ClientEntityQueries {
     private void requireDragonParts() {
         for (var entity : player.compensatedEntities.entityMap.values())
             if (modelType(entity).key().equals("minecraft:ender_dragon"))
-                throw new IllegalStateException(
-                        "Client entity picking requires the dragon's independently positioned parts");
+                throw new SimWorldView.UndecidedQueryException("ender dragon part pick");
     }
 
     private boolean pickable(PacketEntity entity) {
@@ -241,7 +240,7 @@ public final class ClientEntityQueries {
             if (Boolean.TRUE.equals(result)) return true;
             unresolved |= result == null;
         }
-        if (unresolved) throw new IllegalStateException("Client entity candidates disagree on the block action query");
+        if (unresolved) throw new SimWorldView.UndecidedQueryException("entity candidates disagree");
         return false;
     }
 
