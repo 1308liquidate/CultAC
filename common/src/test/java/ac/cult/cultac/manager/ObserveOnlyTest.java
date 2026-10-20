@@ -254,6 +254,7 @@ class ObserveOnlyTest {
                 User user = user(new EmbeddedChannel());
                 set(player, "user", user);
                 doCallRealMethod().when(player).timedOut();
+                doCallRealMethod().when(player).withheld(any());
                 try (var ignored = installConfig(observeOnly, failOpen)) {
                     player.timedOut();
                 }

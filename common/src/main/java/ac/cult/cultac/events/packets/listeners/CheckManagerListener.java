@@ -509,6 +509,9 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                             .data()
                             .version()
                             .atLeast(ac.cult.cultac.protocol.ProtocolVersion.V26_3);
+            if (legacyJavaWire && packet.hasRotation()) {
+                player.getSetbackTeleportUtil().posRotReceived();
+            }
             teleportData = player.isBedrockMovement()
                             || legacyJavaWire
                             || player.getSetbackTeleportUtil().hasIdlessJavaPositionTeleport()

@@ -378,6 +378,12 @@ public final class CultConnection implements CodecState {
         serverbound = ConnectionLifecycle.nextPhase(PacketDirection.SERVERBOUND, serverbound, type, packet);
         clientbound = ConnectionLifecycle.nextPhase(PacketDirection.CLIENTBOUND, clientbound, type, packet);
         if (clientbound != ConnectionPhase.PLAY) levelLost();
+        // Registry data is decoded whether or not a player is attached, so each configuration restarts its
+        // received registries here for every connection, not only for inspected ones.
+        if (type == ClientboundPackets.START_CONFIGURATION && platform != null) {
+            var values = platform.modelValues();
+            if (values != null) values.beginConfiguration();
+        }
         if (type == ServerboundPackets.CLIENT_TICK_END || serverbound != ConnectionPhase.PLAY) clientTickEnded();
         else if (type == ServerboundPackets.MOVE_PLAYER
                 && packets.observed().supports(ServerboundPackets.CLIENT_TICK_END)) midClientTick = true;
