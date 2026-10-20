@@ -1,0 +1,125 @@
+package ac.cult.cultac.checks.impl.prediction.checks;
+
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
+import ac.cult.cultac.checks.impl.prediction.PredVector;
+import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.UnknownCollisionProvider;
+import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
+import ac.cult.cultac.network.protocol.ClientVersion;
+import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.ClientItemUseState;
+import ac.cult.cultac.utils.data.KnownInput;
+import ac.cult.cultac.utils.data.StuckEdgeData;
+import ac.cult.cultac.utils.math.CultMath;
+import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.ClientKeyInput;
+import ac.cult.cultac.utils.nmsutil.Collisions;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Whether the keys of the client's latest PLAYER_INPUT move the player the way it moved. LocalPlayer#sendChanges sends
+ * them before the tick's position with the keys KeyboardInput#tick read for that tick's travel, so on the ground the
+ * tick adds exactly their input to the starting velocity before Entity#move collides it. Player#maybeBackOffFromEdge
+ * shortens that move only while Player#isStayingOnGroundSurface, which is LocalPlayer#isShiftKeyDown.
+ */
+final class ReportedKeyInput {
+    private static final Vec3 NO_STUCK_SPEED = new Vec3(1, 1, 1);
+
+    private ReportedKeyInput() {}
+
+    /**
+     * The horizontal distance between the client's movement and the nearest movement the reported keys produce from
+     * this candidate's starting velocity and uncertainties, or 0 when the tick's state does not decide that input.
+     */
+    static double offset(CultPlayer player, PredictionResult result, PredictionResult lastResult) {
+        SimulationContext context = result.getSimulationContext();
+        if (!appliesTo(player, result, lastResult)) return 0.0D;
+        SimpleCollisionBox extents = result.getValidMovements().getCollisionIgnoredMaxStartingVelExtents();
+        if (extents == null) return 0.0D;
+
+        KnownInput keys = player.packetStateData.knownInput;
+        ClientItemUseState.Snapshot use = context.getItemUse();
+        // LocalPlayer#isMovingSlowly crouches exactly when the previous keys held shift.
+        float slow = context.isLastSneaking()
+                ? (float) player.compensatedEntities.getSelf().sneakingSpeed.value()
+                : 1.0F;
+        float walk = context.getMoveRelativeSpeed(player, true, false, false);
+        // LivingEntity#getFrictionInfluencedSpeed reads getSpeed(), which carries minecraft:sprinting while applied.
+        // ClientSprintState can still hold the modifier after one aiStep started and stopped a wall sprint.
+        float sprint = context.isSprintModifier() ? (float) (walk * 1.3D) : walk;
+        double best = Double.MAX_VALUE;
+        for (float speed : new float[] {walk, sprint}) {
+            // LocalPlayer#modifyInput's item multiplier is the legal one, or the required one of a use the client owes.
+            for (float itemUse : new float[] {use.legalMultiplier(), use.requiredMultiplier()}) {
+                Vec3 input = ClientKeyInput.travelInput(player, context, keys, itemUse, slow, speed);
+                if (input == null) return 0.0D;
+                best = Math.min(best, offset(player, result, extents, input));
+                if (best == 0.0D) return 0.0D;
+            }
+        }
+        return best;
+    }
+
+    private static double offset(CultPlayer player, PredictionResult result, SimpleCollisionBox extents, Vec3 input) {
+        Vec3 target = result.getTarget();
+        // The starting velocity and uncertainties nearest the movement the keys leave unexplained.
+        double startX = CultMath.clamp(target.x - input.x, extents.minX, extents.maxX);
+        double startZ = CultMath.clamp(target.z - input.z, extents.minZ, extents.maxZ);
+        double deltaX = startX + input.x;
+        double deltaZ = startZ + input.z;
+        double offset = Math.hypot(deltaX - target.x, deltaZ - target.z);
+        if (offset <= HorizontalAnalyzer.HORIZONTAL_INPUT_UNCERTAINTY) return offset;
+
+        // Entity#collide clips the delta, so an axis that reaches past an obstacle ends on it.
+        SimulationContext context = result.getSimulationContext();
+        PredVector start = result.getInitialStartingVel();
+        SimpleCollisionBox box = context.getFromActualPose();
+        Vec3 movement = Collisions.collide(player, box, deltaX, start.y, deltaZ);
+        offset = Math.min(offset, Math.hypot(movement.x - target.x, movement.z - target.z));
+        if (offset <= HorizontalAnalyzer.HORIZONTAL_INPUT_UNCERTAINTY) return offset;
+
+        // Entities and changing blocks the engine cannot place exactly may also clip it, but only where the client
+        // stopped: an unknown box must lie in the rest of the keys' move, from the reported end onwards.
+        SimpleCollisionBox rest = box.copy()
+                .offset(target.x, target.y, target.z)
+                .expandToCoordinate(movement.x - target.x, 0, movement.z - target.z);
+        List<SimpleCollisionBox> unknown = new ArrayList<>();
+        UnknownCollisionProvider.addMovementUnknownCollisions(
+                player, context, context.getStart(), rest, unknown, new SimpleCollisionBox(), new SimpleCollisionBox());
+        return unknown.isEmpty() ? offset : 0.0D;
+    }
+
+    private static boolean appliesTo(CultPlayer player, PredictionResult result, PredictionResult lastResult) {
+        SimulationContext context = result.getSimulationContext();
+        WorldData world = context.getWorldData();
+        StuckEdgeData edge = world.getSneak();
+        StuckEdgeData lastEdge = lastResult == null
+                ? null
+                : lastResult.getSimulationContext().getWorldData().getSneak();
+        return player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_6)
+                && !player.isBedrockMovement()
+                // No PLAYER_INPUT yet leaves the keys at Input.EMPTY, which MultiPlayerGameMode#createPlayer starts
+                // every LocalPlayer from; LocalPlayer#sendChanges only sends keys that differ from the last sent.
+                // LocalPlayer#applyInput reads the keys only while LocalPlayer#isControlledCamera.
+                && player.cameraEntity.isSelf()
+                && context.getVehicle() == null
+                && !player.isFlying
+                && !context.usesFallFlyingMovement()
+                && result.getInitialStartingVel() != null
+                && result.getValidMovements() != null
+                && world.getLastOnGround() == DesyncStatus.TRUE
+                && world.getInWater() == DesyncStatus.FALSE
+                && world.getInLava() == DesyncStatus.FALSE
+                && world.getClimbingAtStart() == DesyncStatus.FALSE
+                && !world.isMightBeInBlock()
+                // Entity#move scales the delta by the stuck speed before Entity#collide.
+                && NO_STUCK_SPEED.equals(context.getLastStuckSpeed())
+                && world.getStuckSpeed().getUnknownStuckSpeedMultiplier() == null
+                // A shift edge shortens the delta through Player#maybeBackOffFromEdge; Sneaking models that movement.
+                && !edge.isOnEdge()
+                && (lastEdge == null || !lastEdge.isOnEdge());
+    }
+}

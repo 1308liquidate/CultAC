@@ -30,6 +30,7 @@ import ac.cult.cultac.checks.impl.prediction.PredictionSetbackState;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext.HardCollidingEntityCollision;
 import ac.cult.cultac.checks.impl.prediction.checks.PredCheckRunner;
+import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoFallPseudo;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngines;
@@ -958,17 +959,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             boolean createProfileVerboseLog = movementProfile.shouldCreateVerboseLog(this.player, result);
             boolean recordProfileDebug = BedrockPredictionDebug.shouldRecordMovementDebug(this.player, result);
             this.player.compensatedEntities.vehicles.consumeVehicleSwitchPredictionOffset(result);
-            if (!result.isExempt() && result.getFlagSeverity() > 0.0) {
-                this.dumpRecentFlagsWhenDebugging(result);
-                if (!CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
-                    this.player.getSetbackTeleportUtil().resyncWorld();
-                }
-                boolean bedrockMovementFlag = this.player.isBedrockMovement() && result.hasFlag(BedrockMovement.class);
-                if (this.player.shouldEnforceMovementSetbacks() || createProfileVerboseLog || bedrockMovementFlag) {
-                    result.setIdentifier(nextDebugIdentifier());
-                    result.setProfileVerboseLog(createProfileVerboseLog);
-                }
-            }
+            this.prepareFlaggedPrediction(result, createProfileVerboseLog);
 
             if (result.getIdentifier() == 0 && (createProfileVerboseLog || recordProfileDebug)) {
                 result.setIdentifier(nextDebugIdentifier());
@@ -999,6 +990,19 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             long took = System.nanoTime() - start;
             computeTimeNS = (long) (computeTimeNS * 499L / 500.0 + took / 500.0);
             return result;
+        }
+    }
+
+    private void prepareFlaggedPrediction(PredictionResult result, boolean createProfileVerboseLog) {
+        if (result.isExempt() || result.getFlagSeverity() <= 0.0) return;
+        this.dumpRecentFlagsWhenDebugging(result);
+        if (!CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
+            this.player.getSetbackTeleportUtil().resyncWorld();
+        }
+        boolean bedrockMovementFlag = this.player.isBedrockMovement() && result.hasFlag(BedrockMovement.class);
+        if (this.player.shouldEnforceMovementSetbacks() || createProfileVerboseLog || bedrockMovementFlag) {
+            result.setIdentifier(nextDebugIdentifier());
+            result.setProfileVerboseLog(createProfileVerboseLog);
         }
     }
 
@@ -1209,6 +1213,13 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             }
             this.callPredictionEndListeners(committed, null);
             this.commitPredictionState(committed, end, movement, xRot, yRot, movementProfile);
+        } else if (!result.isExempt() && result.hasFlag(InputKeys.class)) {
+            // LocalPlayer#sendPosition withholds a position only within 2.0E-4 of xLast and before the 20th tick, so
+            // this tick ended there; the reported keys cannot leave the client there. Judge it like a sent move.
+            if (end != position) this.commitPlayerPosition(end);
+            this.prepareFlaggedPrediction(result, movementProfile.shouldCreateVerboseLog(this.player, result));
+            this.callPredictionEndListeners(result, null);
+            this.commitPredictionState(result, end, movement, xRot, yRot, movementProfile);
         }
         if (flyingThroughTravel) {
             this.stopFlyingAfterTravel();

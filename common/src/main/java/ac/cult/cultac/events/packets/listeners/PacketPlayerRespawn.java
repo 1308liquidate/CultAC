@@ -9,6 +9,8 @@ import ac.cult.cultac.checks.impl.badpackets.BadPacketsF;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsG;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsH;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsM;
+import ac.cult.cultac.checks.impl.breaking.AirLiquidBreak;
+import ac.cult.cultac.checks.impl.breaking.FastBreak;
 import ac.cult.cultac.checks.impl.combat.FairReach;
 import ac.cult.cultac.checks.impl.elytra.ElytraC;
 import ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor;
@@ -110,6 +112,10 @@ public class PacketPlayerRespawn {
         // ClientPacketListener#handleLogin clears clientLoaded until ServerboundPlayerLoadedPacket.
         player.packetStateData.playerLoadedIntoLevel = false;
         player.packetStateData.lastSentTickPosition = null;
+        player.packetStateData.lastSentTickYaw = Float.NaN;
+        player.packetStateData.lastSentTickPitch = Float.NaN;
+        player.packetStateData.lastSendPositionYaw = Float.NaN;
+        player.packetStateData.lastSendPositionPitch = Float.NaN;
         if (!player.isBedrockMovement()) player.onLocalPlayerCreated();
         if (!player.isBedrockMovement()) {
             // Minecraft#clearClientLevel discards the LocalPlayer before a reconfiguration login.
@@ -147,6 +153,8 @@ public class PacketPlayerRespawn {
                 player.compensatedEntities.clearClientLevel();
                 player.compensatedWorld.isRaining = false;
                 player.checkManager.getListener(BadPacketsA.class).resetCarriedIndex();
+                player.checkManager.getListener(AirLiquidBreak.class).resetPending();
+                player.checkManager.getListener(FastBreak.class).resetDestroyDelay();
                 if (newJavaLocalPlayer) {
                     player.actionManager.onJavaPlayerReplacement();
                     // LocalPlayer starts from Input.EMPTY and sends PLAYER_INPUT once its keys differ from it.
@@ -336,6 +344,10 @@ public class PacketPlayerRespawn {
             // ClientPacketListener#handleRespawn clears clientLoaded until ServerboundPlayerLoadedPacket.
             player.packetStateData.playerLoadedIntoLevel = false;
             player.packetStateData.lastSentTickPosition = null;
+            player.packetStateData.lastSentTickYaw = Float.NaN;
+            player.packetStateData.lastSentTickPitch = Float.NaN;
+            player.packetStateData.lastSendPositionYaw = Float.NaN;
+            player.packetStateData.lastSendPositionPitch = Float.NaN;
             if (!player.isBedrockMovement()) player.onLocalPlayerCreated();
             player.sprintState.onRespawn(keepEntityData, keepAttributeModifiers);
             player.attackStrength.reset();

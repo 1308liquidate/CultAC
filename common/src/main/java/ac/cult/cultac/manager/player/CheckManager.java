@@ -491,6 +491,7 @@ public class CheckManager {
         return listenerMap(List.<PostPredictionListener>of(
                 new InvalidStep(player),
                 new NoSneakSlow(player),
+                new InputKeys(player),
                 new OmniSprint(player),
                 new NoFallPseudo(player),
                 new VerticalOffset(player),
@@ -540,6 +541,7 @@ public class CheckManager {
         registerEarlyReceive(registrations, packetChecks.get(SelfInteract.class));
         registerEarlyReceive(registrations, packetChecks.get(MultiActionsA.class));
         registerEarlyReceive(registrations, packetChecks.get(MultiActionsE.class));
+        registerEarlyReceive(registrations, packetChecks.get(AirLiquidBreak.class));
         registerEarlyReceive(registrations, packetChecks.get(FastBreak.class));
         registerEarlyReceive(registrations, packetChecks.get(MultiBreak.class));
         registerEarlyReceive(registrations, packetChecks.get(NoSwingBreak.class));
