@@ -180,6 +180,14 @@ public final class ClientEntityQueries {
         return result;
     }
 
+    /** Whether {@code Entity#deflection} is not {@code NONE} for {@code projectile} hitting {@code target}. */
+    public boolean deflects(PacketEntity target, PacketEntity projectile) {
+        // Breeze#deflection is NONE for wind charges.
+        if (modelType(target).key().equals("minecraft:breeze") && isWindCharge(projectile.type)) return false;
+        return members("entity_type:minecraft:deflects_projectiles")
+                .contains(modelType(target).key());
+    }
+
     private static boolean isWindCharge(int type) {
         return type == EntityTypeIds.WIND_CHARGE || type == EntityTypeIds.BREEZE_WIND_CHARGE;
     }

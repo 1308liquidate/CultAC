@@ -916,11 +916,6 @@ public class PacketEntity {
         return List.of(getPossibleMovementCollisionBoxes());
     }
 
-    /** Whether some client state of this entity has a position the engine does not bound. */
-    public boolean hasUnboundedPosition() {
-        return false;
-    }
-
     public long getClientTickOrder() {
         return clientTickOrder;
     }

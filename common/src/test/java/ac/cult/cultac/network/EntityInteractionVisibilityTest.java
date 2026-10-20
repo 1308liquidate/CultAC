@@ -345,25 +345,38 @@ class EntityInteractionVisibilityTest {
 
     @ParameterizedTest
     @MethodSource("clients")
-    void aMobThatMayHaveMovedOffThePathLeavesBothStopsAsCandidates(ProtocolVersion version) throws Exception {
+    void aMobWhosePositionIsNotKnownDoesNotStopAProjectile(ProtocolVersion version) throws Exception {
         try (var setup = new Setup(version).asClient()) {
             setup.cow(41, new Vec3(.5, 64, 3.7));
             // Until the client answers the move, the cow may still be on the path or interpolating off it.
             setup.player.compensatedEntities.getEntity(41).onFirstTransaction(false, true, 3.5, 64, 3.7, setup.player);
             var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
             setup.clientTick();
-            assertEquals(5 - 2.185, fireball.clientPhysicalPosition.z, 1.0E-6);
-            var stops = fireball.getPossibleMovementCollisionBoxCandidates().stream()
-                    .map(box -> box.minZ + .5)
-                    .sorted()
-                    .toList();
-            assertEquals(2, stops.size());
-            assertEquals(5 - 2.185, stops.get(0), 1.0E-6);
-            assertEquals(4.15, stops.get(1), 1.0E-6);
-            var envelope = fireball.getPossibleMovementCollisionBoxes();
-            assertEquals(5 - 2.185 - .5, envelope.minZ, 1.0E-6);
-            assertEquals(4.15 + .5, envelope.maxZ, 1.0E-6);
-            assertNull(fireball.getExactMovementCollisionBox());
+            assertStops(fireball, 5 - 2.185);
+            assertEquals(5 - 2.185, fireball.getExactMovementCollisionBox().minZ + .5, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    void anOwnerTreeWithAnUnplacedRiderKeepsTheProjectilePassingIt(ProtocolVersion version) throws Exception {
+        // The boat spans z 3.0125 to 4.3875. One tick from z 8 takes the fireball out of reach of it; its fourth step,
+        // 4.689 to 3.474, meets the boat grown by the 0.1 margin at 4.4875.
+        double first = 1.045, second = (first + .1) * .95, third = (second + .1) * .95, fourth = (third + .1) * .95;
+        try (var setup = new Setup(version).asClient()) {
+            setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
+            var fireball = setup.fireball(42, 8, -1, 41);
+            for (int tick = 0; tick < 4; tick++) setup.clientTick();
+            assertStops(fireball, 4.4875);
+        }
+        try (var setup = new Setup(version).asClient()) {
+            // The cow riding the owner's boat has no simulated position, so the projectile may still be on its owner.
+            setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
+            setup.cow(40, new Vec3(.5, 64, 3.7));
+            setup.player.compensatedEntities.getEntity(40).mount(setup.player.compensatedEntities.getEntity(41));
+            var fireball = setup.fireball(42, 8, -1, 41);
+            for (int tick = 0; tick < 4; tick++) setup.clientTick();
+            assertStops(fireball, 8 - first - second - third - fourth);
         }
     }
 
@@ -656,6 +669,14 @@ class EntityInteractionVisibilityTest {
             assertEquals("InteractEntityVisibility", setup.check.getConfigName());
             assertEquals("cult.interact.entity.visibility", setup.check.getStableKey());
         }
+    }
+
+    /** The projectile is at z {@code z} on every possible position. */
+    private static void assertStops(PacketEntity projectile, double z) {
+        assertEquals(z, projectile.clientPhysicalPosition.z, 1.0E-6);
+        var stops = projectile.getPossibleMovementCollisionBoxCandidates();
+        assertEquals(1, stops.size());
+        assertEquals(z, (stops.getFirst().minZ + stops.getFirst().maxZ) / 2, 1.0E-6);
     }
 
     private static int state(String name) {
