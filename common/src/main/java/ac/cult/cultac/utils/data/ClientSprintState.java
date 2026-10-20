@@ -23,6 +23,8 @@ public final class ClientSprintState {
     private boolean flag;
     // The minecraft:sprinting movement_speed modifier the client holds: the server's until setSprinting replaces it.
     private @Nullable AttributeModifier modifier;
+    // A possible attack reset that aiStep silently re-sprinted may also have replaced it with vanilla's modifier.
+    private boolean canonicalPossible;
     private boolean sprintResetThisTick;
     private boolean flagUncertain;
     private boolean flagBeforeAiStep;
@@ -43,6 +45,7 @@ public final class ClientSprintState {
     /** The minecraft:sprinting modifier of the server's movement_speed snapshot, applied by its bundled proof. */
     public void onServerModifier(@Nullable AttributeModifier sprinting) {
         modifier = sprinting;
+        canonicalPossible = false;
     }
 
     /**
@@ -55,6 +58,7 @@ public final class ClientSprintState {
         if (reset == AttackReset.CERTAIN) {
             flag = false;
             modifier = null;
+            canonicalPossible = false;
         } else {
             flagUncertain = true;
         }
@@ -77,8 +81,12 @@ public final class ClientSprintState {
         }
         // Unmodeled: wall-sprinting start->stop in one aiStep can clear the modifier early; this only errs lenient.
         // An attack reset that aiStep re-sprinted re-added the modifier.
-        if (flag != wasSprinting || sprintResetThisTick && wasSprinting) {
+        if (flag != wasSprinting) {
             modifier = wasSprinting ? CompensatedEntities.SPRINTING_SPEED_MODIFIER : null;
+            canonicalPossible = false;
+        } else if (sprintResetThisTick && wasSprinting) {
+            // Only a possible reset leaves the flag: Player#attack resets only after damage and positive knockback.
+            canonicalPossible |= !CompensatedEntities.SPRINTING_SPEED_MODIFIER.equals(modifier);
         }
         flag = wasSprinting;
         sprintResetThisTick = false;
@@ -113,6 +121,7 @@ public final class ClientSprintState {
         }
         if (!keepAttributeModifiers) {
             modifier = null;
+            canonicalPossible = false;
         }
     }
 
@@ -120,6 +129,7 @@ public final class ClientSprintState {
     public void reset() {
         flag = false;
         modifier = null;
+        canonicalPossible = false;
         flagBeforeAiStep = false;
         aiStepReconciled = false;
         sprintResetThisTick = false;
@@ -131,13 +141,21 @@ public final class ClientSprintState {
         return flag;
     }
 
-    /** Whether the client's movement_speed currently carries minecraft:sprinting. */
+    /** Whether the client's movement_speed may currently carry minecraft:sprinting. */
     public boolean modifier() {
-        return modifier != null;
+        return modifier != null || canonicalPossible;
     }
 
-    /** The minecraft:sprinting modifier the client's movement_speed currently carries, or null. */
+    /**
+     * The minecraft:sprinting modifier the client's movement_speed carries unless a possible attack reset replaced it,
+     * or null.
+     */
     public @Nullable AttributeModifier heldModifier() {
         return modifier;
+    }
+
+    /** Whether a possible attack reset may have replaced {@link #heldModifier} with vanilla's modifier. */
+    public boolean canonicalPossible() {
+        return canonicalPossible;
     }
 }

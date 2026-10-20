@@ -34,6 +34,44 @@ class ClientSprintStateTest {
     }
 
     @Test
+    void possibleAttackResetKeepsTheServerSprintModifierBesideVanillas() {
+        ClientSprintState state = sprinting();
+        var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+        state.onServerModifier(server);
+        // Player#attack may or may not have reached causeExtraKnockback; aiStep keeps sprinting either way.
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        assertSame(server, state.heldModifier());
+        assertTrue(state.canonicalPossible());
+        // Neither outcome is resolved by later ticks of the same sprint.
+        state.onClientTick(true);
+        assertSame(server, state.heldModifier());
+        assertTrue(state.canonicalPossible());
+        // The server's next movement_speed snapshot is certain.
+        state.onServerModifier(server);
+        assertFalse(state.canonicalPossible());
+
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        assertTrue(state.canonicalPossible());
+        // LivingEntity#setSprinting(false) removes the modifier in either outcome.
+        state.onClientTick(false);
+        assertNull(state.heldModifier());
+        assertFalse(state.canonicalPossible());
+    }
+
+    @Test
+    void certainAttackResetResprintsWithVanillasModifier() {
+        ClientSprintState state = sprinting();
+        state.onServerModifier(
+                new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+        state.onAttack(ClientSprintState.AttackReset.CERTAIN);
+        state.onClientTick(true);
+        assertSame(CompensatedEntities.SPRINTING_SPEED_MODIFIER, state.heldModifier());
+        assertFalse(state.canonicalPossible());
+    }
+
+    @Test
     void silentResprintAfterServerResetRestoresModifier() {
         ClientSprintState state = sprinting();
         // Server-side Player#causeExtraKnockback echoes sprint=false in entity data and attributes.
