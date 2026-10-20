@@ -1760,10 +1760,35 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private void scheduleTransactionBoundMovement(EntityMovement movement, int firstTransaction) {
-        int entityId = movement.entityId();
-        MovementKind kind = movement.kind();
-        int deltaMovementSequence = movement.deltaMovement().packetHandlerSequence();
-        player.latencyUtils.addRealTimeTask(firstTransaction, () -> {
+        player.latencyUtils.addRealTimeTask(firstTransaction, new TransactionBoundMovement(movement, firstTransaction));
+    }
+
+    /**
+     * A movement applied at its transaction and settled at the next one. The same task is queued again for the second
+     * transaction, so {@code second} says which half runs.
+     */
+    private final class TransactionBoundMovement implements Runnable {
+        private final EntityMovement movement;
+        private final int firstTransaction;
+        private final int entityId;
+        private final MovementKind kind;
+        private final int deltaMovementSequence;
+        private boolean second;
+
+        private TransactionBoundMovement(EntityMovement movement, int firstTransaction) {
+            this.movement = movement;
+            this.firstTransaction = firstTransaction;
+            this.entityId = movement.entityId();
+            this.kind = movement.kind();
+            this.deltaMovementSequence = movement.deltaMovement().packetHandlerSequence();
+        }
+
+        @Override
+        public void run() {
+            if (second) {
+                applySecondMovement(entityId, kind, deltaMovementSequence, false);
+                return;
+            }
             PacketEntity entity = applicableMovementEntity(movement);
             if (entity == null) {
                 return;
@@ -1773,9 +1798,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             applyDeltaMovementUpdate(entity, movement.deltaMovement());
             clearPacketHandlerDeltaMovement(movement);
             player.compensatedEntities.updatePassengerPositions();
-            player.latencyUtils.addRealTimeTask(
-                    firstTransaction + 1, () -> applySecondMovement(entityId, kind, deltaMovementSequence, false));
-        });
+            second = true;
+            player.latencyUtils.addRealTimeTask(firstTransaction + 1, this);
+        }
     }
 
     private boolean applyClientPath(PacketEntity entity, EntityMovement movement, boolean bundled) {
