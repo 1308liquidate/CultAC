@@ -6,7 +6,7 @@ import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.latency.CompensatedWorld;
 import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
-import it.unimi.dsi.fastutil.longs.Long2IntMap;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -51,8 +51,8 @@ class WorldAllocationTest {
         try (var services = new RecordConsumerServices();
                 var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
             var world = fixture.player.compensatedWorld;
-            var collision = (Long2IntMap) field(world, "recentClientCollisionChanges");
-            var fluid = (Long2IntMap) field(world, "recentClientFluidChanges");
+            var collision = (Long2IntOpenHashMap) field(world, "recentClientCollisionChanges");
+            var fluid = (Long2IntOpenHashMap) field(world, "recentClientFluidChanges");
             var kinds = (Long2ByteOpenHashMap) field(world, "recentClientFluidChangeKinds");
             for (int i = 0; i < 100; i++) {
                 collision.put(i, i % 3 + 1);

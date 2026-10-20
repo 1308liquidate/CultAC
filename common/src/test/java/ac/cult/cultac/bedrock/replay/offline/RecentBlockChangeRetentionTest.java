@@ -12,10 +12,13 @@ import java.lang.reflect.Field;
 import java.util.Map;
 import org.junit.Test;
 
-/** Block-change state that only client_tick_end expires stays bounded for a client that never ends a tick. */
+/** Block-change state keeps every entry for its exact client-tick lifetime, however many changes arrive. */
 public class RecentBlockChangeRetentionTest {
+    // A bulk update larger than a 16x16x16 section.
+    private static final int BULK = 4096 + 64;
+
     @Test
-    public void recentChangesKeepTheNewestWithoutTickEnds() throws Exception {
+    public void bulkServerUpdatesKeepEveryChangeForThreeTickEnds() throws Exception {
         OfflineCultTestBootstrap.installConfig();
         CultPlayer player = javaPlayer();
         try {
@@ -24,26 +27,27 @@ public class RecentBlockChangeRetentionTest {
                     DataTables.defaults().registry().block("minecraft:stone").defaultState();
             int water =
                     DataTables.defaults().registry().block("minecraft:water").defaultState();
-            int cap = intConstant("MAX_RECENT_CLIENT_CHANGES");
-            int count = cap + 64;
             world.ensureValidationChunkLoaded(0, 0);
-            // Stone changes only collision and water only fluid, so each map gets its own count of changes.
-            for (int i = 0; i < count; i++) {
+            // An explosion or fill sends this many updates within one client tick; stone changes only collision
+            // and water only fluid.
+            for (int i = 0; i < BULK; i++) {
                 BlockPos pos = position(i);
-                world.updateBlock(pos.getX(), pos.getY(), pos.getZ(), stone);
-                pos = position(count + i);
                 world.updateBlock(pos.getX(), pos.getY(), pos.getZ(), water);
+                pos = position(BULK + i);
+                world.updateBlock(pos.getX(), pos.getY(), pos.getZ(), stone);
             }
 
-            assertEquals(cap, ((Map<?, ?>) field(world, "recentClientCollisionChanges")).size());
-            assertEquals(cap, ((Map<?, ?>) field(world, "recentClientFluidChanges")).size());
-            assertEquals(cap, ((Map<?, ?>) field(world, "recentClientFluidChangeKinds")).size());
-            assertFalse(world.hasRecentClientCollisionChanges(box(position(0))));
-            assertFalse(world.hasRecentClientWaterChanges(box(position(count))));
-            assertTrue(world.hasRecentClientCollisionChanges(box(position(count - 1))));
-            assertTrue(world.hasRecentClientWaterChanges(box(position(2 * count - 1))));
+            for (int tick = 0; tick < 2; tick++) {
+                assertTrue(world.hasRecentClientWaterChanges(box(position(0))));
+                assertTrue(world.hasRecentClientCollisionChanges(box(position(BULK))));
+                world.removeInvalidPistonLikeStuff();
+            }
+            assertTrue(world.hasRecentClientWaterChanges(box(position(0))));
+            assertTrue(world.hasRecentClientCollisionChanges(box(position(BULK))));
+            assertTrue(world.hasRecentClientWaterChanges(box(position(BULK - 1))));
 
-            for (int tick = 0; tick < 3; tick++) world.removeInvalidPistonLikeStuff();
+            world.removeInvalidPistonLikeStuff();
+            assertFalse(world.hasRecentClientWaterChanges(box(position(0))));
             assertTrue(((Map<?, ?>) field(world, "recentClientCollisionChanges")).isEmpty());
             assertTrue(((Map<?, ?>) field(world, "recentClientFluidChanges")).isEmpty());
             assertTrue(((Map<?, ?>) field(world, "recentClientFluidChangeKinds")).isEmpty());
@@ -53,7 +57,7 @@ public class RecentBlockChangeRetentionTest {
     }
 
     @Test
-    public void selectionSnapshotStopsRecordingWithoutTickEnds() throws Exception {
+    public void selectionSnapshotKeepsEveryOriginalState() throws Exception {
         OfflineCultTestBootstrap.installConfig();
         CultPlayer player = javaPlayer();
         try {
@@ -61,15 +65,13 @@ public class RecentBlockChangeRetentionTest {
             int air = DataTables.defaults().registry().block("minecraft:air").defaultState();
             int stone =
                     DataTables.defaults().registry().block("minecraft:stone").defaultState();
-            int cap = intConstant("MAX_SELECTION_ORIGINAL_STATES");
-            int count = cap + 64;
             world.ensureValidationChunkLoaded(0, 0);
-            for (int i = 0; i < count; i++) {
+            for (int i = 0; i < BULK; i++) {
                 BlockPos pos = position(i);
                 world.updateBlock(pos.getX(), pos.getY(), pos.getZ(), stone);
             }
             world.beginSelectionSnapshot();
-            for (int i = 0; i < count; i++) {
+            for (int i = 0; i < BULK; i++) {
                 BlockPos pos = position(i);
                 world.advanceClientPredictionSequence();
                 world.startPredicting();
@@ -77,9 +79,10 @@ public class RecentBlockChangeRetentionTest {
                 world.stopPredicting(0);
             }
 
-            assertEquals(cap, ((Map<?, ?>) field(world, "selectionOriginalStates")).size());
-            assertEquals(stone, (int) world.withSelectionSnapshot(() -> world.getBlockStateIdAt(position(0))));
-            assertEquals(stone, (int) world.withSelectionSnapshot(() -> world.getBlockStateIdAt(position(cap - 1))));
+            for (int i : new int[] {0, BULK / 2, BULK - 1}) {
+                assertEquals(stone, (int) world.withSelectionSnapshot(() -> world.getBlockStateIdAt(position(i))));
+                assertEquals(air, world.getBlockStateIdAt(position(i)));
+            }
 
             world.endSelectionSnapshot();
             assertTrue(((Map<?, ?>) field(world, "selectionOriginalStates")).isEmpty());
@@ -107,11 +110,5 @@ public class RecentBlockChangeRetentionTest {
         Field field = CompensatedWorld.class.getDeclaredField(name);
         field.setAccessible(true);
         return field.get(world);
-    }
-
-    private static int intConstant(String name) throws Exception {
-        Field field = CompensatedWorld.class.getDeclaredField(name);
-        field.setAccessible(true);
-        return field.getInt(null);
     }
 }
