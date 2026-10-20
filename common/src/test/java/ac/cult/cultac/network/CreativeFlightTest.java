@@ -437,6 +437,35 @@ class CreativeFlightTest {
         }
     }
 
+    /**
+     * ClientPacketListener#handleLogin gives a LocalPlayer it keeps a new KeyboardInput, so a jump held across the
+     * LOGIN goes down again on the next aiStep and toggles an armed Player#jumpTriggerTime.
+     */
+    @Test
+    void aJumpHeldAcrossALoginThatKeepsThePlayerTogglesTheArmedTimer() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            login(f, GameMode.CREATIVE);
+            relayTheFloor(f);
+            f.player.packetStateData.playerLoadedIntoLevel = true;
+            f.teleport(GROUND.add(0, 0.3, 0), new RelativeFlag(0));
+            f.place(GROUND.add(0, 0.3, 0), new Vec3(0, -0.2, 0));
+            f.input(JUMP);
+            assertPredicted(f.tick(GROUND.add(0, 0.1, 0), false));
+            assertPredicted(f.tick(GROUND, true));
+
+            f.pongThrough(ItemUseTestSupport.login(f.player, GameMode.CREATIVE));
+            assertTrue((f.player.packetStateData.jumpTriggerTimes & 1) == 0, "the LOGIN replaced the player");
+            relayTheFloor(f);
+            f.player.packetStateData.playerLoadedIntoLevel = true;
+            f.teleport(GROUND, new RelativeFlag(0));
+
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            assertPredicted(f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false));
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
     /** A step up ahead lets LocalPlayer#updateAutoJump fire, so the press may not reach the toggle. */
     @Test
     void aPressWhereAnAutoJumpCanFireMayLeaveTheToggleUnarmed() throws Exception {

@@ -160,6 +160,8 @@ public class PacketPlayerRespawn {
                 player.checkManager.getListener(FastBreak.class).resetDestroyDelay();
                 // ClientPacketListener#handleLogin runs MultiPlayerGameMode#setLocalMode on the local player.
                 PacketChangeGameState.applyGameModeAbilities(player, loginMode, newJavaLocalPlayer);
+                // ClientPacketListener#handleLogin gives the local player a new KeyboardInput, even one it keeps.
+                player.packetStateData.lastTickJump = false;
                 if (newJavaLocalPlayer) {
                     player.actionManager.onJavaPlayerReplacement();
                     // LocalPlayer starts from Input.EMPTY and sends PLAYER_INPUT once its keys differ from it.
