@@ -31,9 +31,9 @@ class SlimeSizeMetadataTest {
         }
     }
 
-    /** Before 1.20.5, and on Bedrock, Slime#getDimensions scales 2.04 by 0.255 per size. */
+    /** Before 1.20.5 and on Bedrock the existing 2.04 by 0.255 per size formula stays; Bedrock is unverified. */
     @Test
-    void olderAndBedrockClientsScaleTheLegacySlimeDimensions() {
+    void olderAndBedrockClientsKeepTheExistingSlimeFormula() {
         try (var f = new RecordReceiveFixture(ProtocolVersion.V1_21_11)) {
             var entities = f.player.compensatedEntities;
             entities.addEntity(4343, EntityTypeIds.SLIME, new Vec3(0.5, 64, 0.5), 0, 0, 0);

@@ -236,10 +236,7 @@ public class BoundingBoxSize {
                 && getHeightMinusBaby(entity, player.getClientVersion(), player.isBedrockMovement()) < 0;
     }
 
-    /**
-     * AbstractCubeMob#getDefaultDimensions scales the type's 0.52 by the size from 1.20.5; earlier clients and Bedrock
-     * scale 2.04 by 0.255 per size.
-     */
+    /** From 1.20.5 AbstractCubeMob#getDefaultDimensions scales the type's 0.52 by the size. */
     private static boolean scalesCubeMobType(ClientVersion version, boolean bedrock) {
         return !bedrock && version.isNewerThanOrEquals(ClientVersion.V_1_20_5);
     }
