@@ -209,6 +209,7 @@ public final class PortalSync {
         if (sockets.isEmpty() && Boolean.TRUE.equals(announced)) announced = null;
         if (!enabled()) {
             if (link.enabled) turnedOff("no enabled socket is open");
+            if (!sockets.isEmpty()) announce(false, "Team sync off: the organization has it off");
         } else if (link.carried) {
             reportEveryoneAgain();
             debug.accept("Team sync: a socket that carried reports closed; reporting every watched player again");

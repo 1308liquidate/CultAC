@@ -115,6 +115,24 @@ class CloudConnectionTeamTest {
     }
 
     @Test
+    void aTeamAnswerWithoutEnabledOpensDisabled() throws Exception {
+        try (Globals globals = new Globals();
+                Receiver receiver = new Receiver()) {
+            Heard heard = new Heard();
+            receiver.connections.onTeam(heard);
+            receiver.connections.configure(settings(receiver.url(), true));
+            receiver.connections.forServer("proxy.a");
+            receiver.allowConnect("\"protocol\":5,\"team\":{}");
+
+            assertEquals("opened false", heard.next());
+            Channel channel = receiver.handshakes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(channel);
+            reply(channel, Reply.newBuilder().setTeamState(TeamState.newBuilder().setEnabled(true)));
+            assertEquals("state true", heard.next());
+        }
+    }
+
+    @Test
     void aSocketWithoutATeamAnswerHearsNoTeamTraffic() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {

@@ -215,6 +215,35 @@ class PortalSyncTest {
     }
 
     @Test
+    void losingTheLastEnabledSocketWhileADisabledOneStaysLogsOff() {
+        sync.opened(a, true);
+        sync.opened(b, false);
+        sync.closed(a);
+        sync.state(b, true);
+
+        assertEquals(
+                List.of(
+                        "Team sync on: reporting portal roles to the cloud",
+                        "Team sync off: the organization has it off",
+                        "Team sync on: reporting portal roles to the cloud"),
+                info);
+    }
+
+    @Test
+    void anOffAlreadyLoggedIsNotLoggedAgainWhenTheEnabledSocketCloses() {
+        sync.opened(a, true);
+        sync.state(a, false);
+        sync.opened(b, false);
+        sync.closed(a);
+
+        assertEquals(
+                List.of(
+                        "Team sync on: reporting portal roles to the cloud",
+                        "Team sync off: the organization has it off"),
+                info);
+    }
+
+    @Test
     void aLostRoleIsReportedAsNoneAfterAResync() {
         sync.opened(a, true);
         UUID admin = join(1, Role.ADMIN);
