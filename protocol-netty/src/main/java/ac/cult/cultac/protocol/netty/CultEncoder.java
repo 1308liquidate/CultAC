@@ -24,6 +24,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
 /** Prepares and emits ordered packet groups synchronously on the connection event loop. */
 public final class CultEncoder extends ChannelOutboundHandlerAdapter {
@@ -31,6 +33,8 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     private static final String HOST_CONTROL_NAME = NAME + "-host-control";
 
     private final CultConnection connection;
+    private final RouteProbe routeProbe = new RouteProbe();
+    private final ReentrantWrites reentrantWrites = new ReentrantWrites();
     private boolean insideBundle;
     private Output emission;
     private boolean removed;
@@ -159,8 +163,13 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         // Recursive callbacks finish first and append their complete groups here.
         // The enclosing group's frames have not been appended yet, so these writes
         // precede even its opening delimiter. No retained expansion tree is needed.
-        connection.reentrantWriter(
-                (message, promise) -> prepare(ctx, new Pending(message, promise), activeFamilies, output));
+        var enclosingCtx = reentrantWrites.ctx;
+        var enclosingFamilies = reentrantWrites.activeFamilies;
+        var enclosingOutput = reentrantWrites.output;
+        reentrantWrites.ctx = ctx;
+        reentrantWrites.activeFamilies = activeFamilies;
+        reentrantWrites.output = output;
+        connection.reentrantWriter(reentrantWrites);
         try {
             prepare(ctx, pending, activeFamilies, output);
             return output;
@@ -169,6 +178,9 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             throw failure;
         } finally {
             connection.reentrantWriter(null);
+            reentrantWrites.ctx = enclosingCtx;
+            reentrantWrites.activeFamilies = enclosingFamilies;
+            reentrantWrites.output = enclosingOutput;
         }
     }
 
@@ -292,7 +304,8 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         boolean requested = false;
         int transferred = 0;
         try {
-            for (ByteBuf frame : encoded.frames()) {
+            for (int i = 0; i < encoded.frames().size(); i++) {
+                ByteBuf frame = encoded.frames().get(i);
                 var part = encoded.frames().size() == 1 ? pending.promise : ctx.newPromise();
                 if (parts != null) parts.add(part);
                 transferred++;
@@ -321,25 +334,19 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             Batch batch) {
         var phase = connection.phase(PacketDirection.CLIENTBOUND);
         boolean requested = false;
-        // The route the predicate found for the frame's type, and whether it was skipped as untracked.
-        PacketDispatcher.Route[] probed = new PacketDispatcher.Route[2];
         PacketType<?> forwardedType = null;
         try {
-            var values = connection.packets().read(phase, PacketDirection.CLIENTBOUND, bytes, connection, type -> {
-                var route = connection.dispatcher().get(type);
-                if (route == null) return false;
-                probed[0] = route;
-                if (phase != ConnectionPhase.PLAY || tracked()) return true;
-                if (route.send() != null && route.send().hasConnectionHandlers()) return true;
-                probed[1] = route;
-                return false;
-            });
-            if (probed[1] != null) forwardedType = probed[1].type();
-            for (var value : values) {
-                var route = probed[0];
+            routeProbe.phase = phase;
+            routeProbe.found = null;
+            routeProbe.skipped = null;
+            var value = connection.packets().readOne(phase, PacketDirection.CLIENTBOUND, bytes, connection, routeProbe);
+            var route = routeProbe.found;
+            if (routeProbe.skipped != null) forwardedType = routeProbe.skipped.type();
+            if (value != null) {
                 forwardedType = route.type();
                 connection.prepare();
-                if (silent || route.send() == null || activeFamilies.contains(route.type())) continue;
+            }
+            if (value != null && !silent && route.send() != null && !activeFamilies.contains(route.type())) {
                 activeFamilies.addLast(route.type());
                 try {
                     var type = (PacketType<ClientboundPacket>) route.type();
@@ -391,6 +398,38 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
     }
 
+    /** Reset before each frame's read; the routes are assigned after {@link #tracked()}, which can expand frames. */
+    private final class RouteProbe implements Predicate<PacketType<?>> {
+        ConnectionPhase phase;
+        PacketDispatcher.Route found;
+        PacketDispatcher.Route skipped;
+
+        @Override
+        public boolean test(PacketType<?> type) {
+            var phase = this.phase;
+            var route = connection.dispatcher().get(type);
+            if (route == null) return false;
+            boolean consumed = phase != ConnectionPhase.PLAY
+                    || tracked()
+                    || route.send() != null && route.send().hasConnectionHandlers();
+            found = route;
+            skipped = consumed ? null : route;
+            return consumed;
+        }
+    }
+
+    /** Prepares writes made while a write group is processed, into that group's output. */
+    private final class ReentrantWrites implements BiConsumer<Object, ChannelPromise> {
+        ChannelHandlerContext ctx;
+        Families activeFamilies;
+        Output output;
+
+        @Override
+        public void accept(Object message, ChannelPromise promise) {
+            prepare(ctx, new Pending(message, promise), activeFamilies, output);
+        }
+    }
+
     /**
      * Send routes without connection handlers dispatch only to an attached player, so an untracked
      * connection's play values for them would be decoded and discarded; those frames still forward
@@ -417,7 +456,8 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 : null;
         int transferred = 0;
         try {
-            for (ByteBuf frame : replacement.frames()) {
+            for (int i = 0; i < replacement.frames().size(); i++) {
+                ByteBuf frame = replacement.frames().get(i);
                 var part = replacement.frames().size() == 1 ? promise : ctx.newPromise();
                 if (parts != null) parts.add(part);
                 batch.add(new Frame(frame, part, transferred == 0 ? type : null));
