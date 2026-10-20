@@ -1307,6 +1307,9 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.prepareFlaggedPrediction(result, movementProfile.shouldCreateVerboseLog(this.player, result));
             this.callPredictionEndListeners(result, null);
             this.commitPredictionState(result, end, movement, xRot, yRot, movementProfile);
+        } else if (result.isExempt()) {
+            // LocalPlayer#aiStep crouches the next tick from this tick's shift, whether or not it sends a position.
+            this.lastSneaking = this.player.isSneaking;
         }
         if (flyingThroughTravel) {
             this.stopFlyingAfterTravel();
