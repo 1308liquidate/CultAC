@@ -644,9 +644,13 @@ public final class PerfRecorder {
     /** One JFR stack trace's frames at a time, leaf first, read through JFR's own name strings. */
     private static final class Frames implements StackTrie.StackTraceView {
         private List<RecordedFrame> frames = List.of();
+        private int at = -1;
+        private RecordedMethod method;
 
         Frames reset(List<RecordedFrame> frames) {
             this.frames = frames;
+            at = -1;
+            method = null;
             return this;
         }
 
@@ -657,14 +661,23 @@ public final class PerfRecorder {
 
         @Override
         public String type(int fromLeaf) {
-            RecordedMethod method = frames.get(fromLeaf).getMethod();
+            RecordedMethod method = methodAt(fromLeaf);
             return method == null ? UNKNOWN : method.getType().getName();
         }
 
         @Override
         public String method(int fromLeaf) {
-            RecordedMethod method = frames.get(fromLeaf).getMethod();
+            RecordedMethod method = methodAt(fromLeaf);
             return method == null ? UNKNOWN : method.getName();
+        }
+
+        /** Each frame's method is looked up once for its type and name, which are read one after the other. */
+        private RecordedMethod methodAt(int fromLeaf) {
+            if (fromLeaf != at) {
+                method = frames.get(fromLeaf).getMethod();
+                at = fromLeaf;
+            }
+            return method;
         }
     }
 }
