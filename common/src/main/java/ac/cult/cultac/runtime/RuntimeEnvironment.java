@@ -2,14 +2,12 @@ package ac.cult.cultac.runtime;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.reload.api.HostContext;
-import ac.cult.reload.host.Callbacks;
 import ac.cult.reload.host.HttpClients;
 import ac.grim.grimac.api.AbstractCheck;
 import ac.grim.grimac.api.GrimUser;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.concurrent.CompletionStage;
-import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
 /** This class is private to each generation; offline fixtures have no host context. */
@@ -45,10 +43,6 @@ public final class RuntimeEnvironment {
 
     public static Runnable once(Runnable task) {
         return context == null ? task : context.resources().once(task);
-    }
-
-    public static <A, B> BiConsumer<A, B> completion(BiConsumer<A, B> callback) {
-        return context == null ? callback : Callbacks.guard(context.resources(), callback);
     }
 
     public static HttpClient http(Duration timeout) {
