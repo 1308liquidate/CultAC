@@ -878,6 +878,87 @@ class ReachInteractionRangeTest {
         }
     }
 
+    // A late receipt of the root's move leaves the client's rider 2.98 away at any chain depth.
+    @Test
+    void aSeatAtTheEndOfAVehicleChainKeepsTheMargin() throws Exception {
+        for (int depth : new int[] {1, 65, 66, 80}) {
+            try (var setup = new Setup()) {
+                var entities = setup.player.compensatedEntities;
+                entities.addEntity(200, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1.78), 0, 0, 0);
+                PacketEntity root = entities.getEntity(200);
+                PacketEntity rider = root;
+                for (int i = 1; i <= depth; i++) {
+                    entities.addEntity(200 + i, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1.78), 0, 0, 0);
+                    PacketEntity child = entities.getEntity(200 + i);
+                    child.mount(rider);
+                    rider = child;
+                }
+                setup.tickEnd();
+                root.onFirstTransaction(false, true, .5, 64, 1.84, setup.player);
+                entities.settleIfUntrackedRider(rider);
+                rider.eject();
+                Vec3 seat = rider.clientPhysicalPosition;
+                rider.onPositionPath(EntityPositionPath.linear(seat), true, 1F, 0F, setup.player, true);
+                setup.player.y = seat.y;
+                setup.player.lastY = seat.y;
+                assertEquals(
+                        List.of(),
+                        setup.attackEntity(rider.getEntityId(), EntityTypeIds.ZOMBIE, () -> {}),
+                        "depth " + depth);
+            }
+        }
+    }
+
+    // A rider whose vehicle chain has no root gets no seat and no proof.
+    @Test
+    void aRiderOfAVehicleCycleKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            var entities = setup.player.compensatedEntities;
+            entities.addEntity(101, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            entities.addEntity(102, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity rider = entities.getEntity(101);
+            PacketEntity vehicle = entities.getEntity(102);
+            rider.mount(vehicle);
+            vehicle.mount(rider);
+            assertTrue(rider.newPacketLocation.hasExactPosition());
+            entities.settleIfUntrackedRider(rider);
+            assertFalse(rider.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // Mounting and dismounting before any ride tick leaves the client's rider at its spawn, 2.99 away.
+    @Test
+    void aRiderMountedAndDismountedBeforeItsRideTickKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.bind();
+            var entities = setup.player.compensatedEntities;
+            entities.addEntity(301, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1.81), 0, 0, 0);
+            entities.addEntity(302, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1.79), 0, 0, 0);
+            PacketEntity rider = entities.getEntity(302);
+            setup.setPassengers(301, List.of(302));
+            setup.setPassengers(301, List.of());
+            Vec3 seat = rider.clientPhysicalPosition;
+            setup.bundledPositionSync(302, seat);
+            setup.player.y = seat.y;
+            setup.player.lastY = seat.y;
+            assertEquals(List.of(), setup.attackEntity(302, EntityTypeIds.ZOMBIE, () -> {}));
+        }
+    }
+
+    // A rider seated before its ride tick is still at its spawn on the client, 2.99 away.
+    @Test
+    void aRiderMountedBeforeItsRideTickKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.bind();
+            var entities = setup.player.compensatedEntities;
+            entities.addEntity(301, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1.81), 0, 0, 0);
+            entities.addEntity(302, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1.79), 0, 0, 0);
+            PacketEntity rider = entities.getEntity(302);
+            setup.setPassengers(301, List.of(302));
+            assertFalse(rider.newPacketLocation.hasExactPosition());
+        }
+    }
+
     private static final class Setup implements AutoCloseable {
         final RecordConsumerServices services = new RecordConsumerServices();
         final RecordReceiveFixture fixture;
@@ -1741,6 +1822,15 @@ class ReachInteractionRangeTest {
             } finally {
                 useBundleDelimiter(true);
             }
+        }
+
+        void setPassengers(int vehicle, List<Integer> passengers) {
+            var packet = new ClientboundSetPassengers(vehicle, passengers);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.SET_PASSENGERS, packet, false);
+            player.packetEntityReplication.onSetPassengers(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
         }
 
         // A position sync in its own bundle, its proof answered.

@@ -1829,7 +1829,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     movement.yaw(),
                     movement.pitch());
             entity.onSecondTransaction();
-            // Clients that saw the sync after a different tracked position may have interpolated instead.
+            // A sync can be near in another feasible client position.
             entity.markPositionInexact();
             return true;
         }

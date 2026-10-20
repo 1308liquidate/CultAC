@@ -94,7 +94,7 @@ public class PacketEntity {
 
     public ReachInterpolationData oldPacketLocation;
     public ReachInterpolationData newPacketLocation;
-    // Set by an unproven receipt, fold, teleport, far sync or uncertain vehicle; holds for the entity's lifetime.
+    // Set by an unproven receipt, fold, teleport, far sync, seat placement or uncertain vehicle; holds for life.
     private boolean trackedPositionInexact;
     private long clientTickOrder = Long.MAX_VALUE;
     // Reused: valid only until the client tick that computed it applies it.
@@ -269,14 +269,9 @@ public class PacketEntity {
         keepPositionCertainty();
     }
 
-    /** Takes on the uncertainty of a position derived from {@code source} and the vehicles it rides. */
-    public void inheritPositionCertainty(@Nullable PacketEntity source) {
-        for (int hops = 0; source != null && source != this && hops <= 64; source = source.riding, hops++) {
-            if (source.hasInexactPosition()) {
-                markPositionInexact();
-                return;
-            }
-        }
+    /** Takes on the uncertainty of a position derived from {@code vehicle}, whose flag covers its own ancestry. */
+    public void inheritPositionCertainty(@Nullable PacketEntity vehicle) {
+        if (vehicle != null && vehicle.hasInexactPosition()) markPositionInexact();
     }
 
     private boolean hasInexactPosition() {
@@ -845,6 +840,7 @@ public class PacketEntity {
         oldPacketLocation = null;
         bedrockInterpolation = null;
         setPositionRaw(seat, clientPhysicalYaw, clientPhysicalPitch);
+        markPositionInexact();
         if (!player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
             desyncClientPos = codecBase;
         }

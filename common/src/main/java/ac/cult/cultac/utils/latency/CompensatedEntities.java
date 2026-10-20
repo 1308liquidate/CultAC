@@ -186,9 +186,8 @@ public class CompensatedEntities {
     public void settleIfUntrackedRider(PacketEntity rider) {
         if (!isUntrackedRider(rider)) return;
         SimpleCollisionBox seat = untrackedRiderSeat(rider, 0);
-        if (seat == null) return;
-        rider.inheritPositionCertainty(rider.getRiding());
-        rider.settleAtSeat(player, seat);
+        if (seat != null) rider.settleAtSeat(player, seat);
+        else rider.markPositionInexact();
     }
 
     /**
