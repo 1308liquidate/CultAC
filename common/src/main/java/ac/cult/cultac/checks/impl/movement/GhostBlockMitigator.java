@@ -79,8 +79,7 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
 
             for (GhostBlock ghostBlock : pseudoPlaces.values()) {
                 // ignore end crystals
-                if (ghostBlock.getItemUsed() != null && ghostBlock.getItemUsed().getItem() == ItemTypes.END_CRYSTAL)
-                    continue;
+                if (isEndCrystal(ghostBlock)) continue;
 
                 final SimpleCollisionBox place = new SimpleCollisionBox(ghostBlock.getPosition()).expandMax(0, 0.5, 0);
                 if (place.isIntersected(movement)) {
@@ -146,10 +145,16 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
     }
 
     public void handlePseudoPlace(GhostBlock ghostBlock) {
-        if (pseudoPlaces.size() >= MAX_PSEUDO_PLACES && !pseudoPlaces.containsKey(ghostBlock.getPosition())) {
+        GhostBlock existing = pseudoPlaces.remove(ghostBlock.getPosition());
+        if (existing != null && isEndCrystal(ghostBlock) && !isEndCrystal(existing)) ghostBlock = existing;
+        if (pseudoPlaces.size() >= MAX_PSEUDO_PLACES) {
             pseudoPlaces.remove(pseudoPlaces.keySet().iterator().next());
         }
         pseudoPlaces.put(ghostBlock.getPosition(), ghostBlock);
+    }
+
+    private static boolean isEndCrystal(GhostBlock ghostBlock) {
+        return ghostBlock.getItemUsed() != null && ghostBlock.getItemUsed().getItem() == ItemTypes.END_CRYSTAL;
     }
 
     // This method is called if and only if it isn't placed on a known desync pos

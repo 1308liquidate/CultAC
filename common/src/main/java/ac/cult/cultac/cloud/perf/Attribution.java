@@ -14,6 +14,30 @@ final class Attribution {
      */
     static final List<String> GROUPS = List.of("tick", "netty", "anticheat", "other", "perf");
 
+    /**
+     * Packages besides CultAC's that a profile without {@code wholeJvm} names: the JDK, the server and proxy, and
+     * zstd-jni, which the plugin jars ship unrelocated.
+     */
+    static final List<String> PUBLIC_PACKAGES = List.of(
+            "java.",
+            "javax.",
+            "jdk.",
+            "sun.",
+            "com.sun.",
+            "io.netty.",
+            "net.minecraft.",
+            "com.mojang.",
+            "org.bukkit.",
+            "org.spigotmc.",
+            "io.papermc.",
+            "com.destroystokyo.paper.",
+            "ca.spottedleaf.",
+            "com.velocitypowered.",
+            "com.github.luben.zstd.");
+
+    /** The name a class outside {@link #named} has in a profile without {@code wholeJvm}. */
+    static final String OTHER_NAME = "(other)";
+
     static final int TICK = 0;
     static final int NETTY = 1;
     static final int OWN = 2;
@@ -26,6 +50,25 @@ final class Attribution {
     static boolean own(String type) {
         for (int i = 0; i < PACKAGES.size(); i++) {
             if (type.startsWith(PACKAGES.get(i))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Whether a profile without {@code wholeJvm} may name a class: CultAC's, of {@link #PUBLIC_PACKAGES}, the
+     * recorder's own parenthesized markers, or an array of a primitive or of such a class, as JFR names arrays.
+     */
+    static boolean named(String type) {
+        int dims = 0;
+        while (dims < type.length() && type.charAt(dims) == '[') dims++;
+        if (dims > 0) {
+            if (type.length() == dims + 1) return true;
+            if (type.charAt(dims) != 'L' || !type.endsWith(";")) return false;
+            type = type.substring(dims + 1, type.length() - 1);
+        }
+        if (type.startsWith("(") || own(type)) return true;
+        for (int i = 0; i < PUBLIC_PACKAGES.size(); i++) {
+            if (type.startsWith(PUBLIC_PACKAGES.get(i))) return true;
         }
         return false;
     }

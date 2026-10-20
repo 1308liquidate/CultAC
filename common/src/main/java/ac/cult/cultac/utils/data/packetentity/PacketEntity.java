@@ -94,6 +94,8 @@ public class PacketEntity {
 
     public ReachInterpolationData oldPacketLocation;
     public ReachInterpolationData newPacketLocation;
+    // Set by an unproven receipt, fold, teleport, far sync, seat placement or uncertain vehicle; holds for life.
+    private boolean trackedPositionInexact;
     private long clientTickOrder = Long.MAX_VALUE;
     // Reused: valid only until the client tick that computed it applies it.
     private SimpleCollisionBox exactAfterClientTickBox;
@@ -248,6 +250,32 @@ public class PacketEntity {
                 !ridingInVehicle,
                 this,
                 uncertainInitialSteps);
+        trackedPositionInexact = true;
+        keepPositionCertainty();
+    }
+
+    /** Carries an inexact tracked position into the current snapshots, and a fold out of them. */
+    private void keepPositionCertainty() {
+        if (newPacketLocation == null) return;
+        if (!newPacketLocation.hasExactPosition()) trackedPositionInexact = true;
+        if (!trackedPositionInexact) return;
+        newPacketLocation.markPositionInexact();
+        if (oldPacketLocation != null) oldPacketLocation.markPositionInexact();
+    }
+
+    /** Keeps the packet-position margin for the rest of this entity's lifetime. */
+    public void markPositionInexact() {
+        trackedPositionInexact = true;
+        keepPositionCertainty();
+    }
+
+    /** Takes on the uncertainty of a position derived from {@code vehicle}, whose flag covers its own ancestry. */
+    public void inheritPositionCertainty(@Nullable PacketEntity vehicle) {
+        if (vehicle != null && vehicle.hasInexactPosition()) markPositionInexact();
+    }
+
+    private boolean hasInexactPosition() {
+        return trackedPositionInexact || (newPacketLocation != null && !newPacketLocation.hasExactPosition());
     }
 
     /** Packet processing appends to the client's queue; its codec base remains separate. */
@@ -300,6 +328,8 @@ public class PacketEntity {
             newPacketLocation.setPhysicalBeforePathAppend(
                     actualPath, targetYaw, targetPitch, clientPhysicalPosition, clientPhysicalYaw, clientPhysicalPitch);
             newPacketLocation.appendPath(actualPath, targetYaw, targetPitch);
+            if (!bundled) trackedPositionInexact = true;
+            keepPositionCertainty();
             return;
         }
         if (bundled)
@@ -382,6 +412,7 @@ public class PacketEntity {
                 !player.compensatedEntities.getSelf().inVehicle(),
                 this,
                 false);
+        keepPositionCertainty();
     }
 
     private float interpolationTargetYaw(@Nullable Float yaw) {
@@ -650,6 +681,7 @@ public class PacketEntity {
             float physicalPitch) {
         this.oldPacketLocation = null;
         this.newPacketLocation = interpolationData.copy();
+        keepPositionCertainty();
         tickPacketInterpolationPreservingPhysical(player, physicalPosition, physicalYaw, physicalPitch);
     }
 
@@ -780,6 +812,7 @@ public class PacketEntity {
         this.clientPhysicalPositionExact = true;
         // Snapping to an exact position means interpolation is disabled
         this.newPacketLocation = new ReachInterpolationData(box);
+        keepPositionCertainty();
     }
 
     private SimpleCollisionBox passengerPhysicalBox;
@@ -807,6 +840,7 @@ public class PacketEntity {
         oldPacketLocation = null;
         bedrockInterpolation = null;
         setPositionRaw(seat, clientPhysicalYaw, clientPhysicalPitch);
+        markPositionInexact();
         if (!player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
             desyncClientPos = codecBase;
         }
@@ -841,12 +875,16 @@ public class PacketEntity {
         return new Vec3(x, y, z);
     }
 
-    /** {@code Entity#refreshDimensions}: the current and pending positions take the entity's new dimensions. */
+    /** {@code Entity#refreshDimensions}: the current, pending and seated positions take the entity's new dimensions. */
     public void refreshDimensions(CultPlayer player) {
         float width = BoundingBoxSize.getWidth(player, this);
         float height = BoundingBoxSize.getHeight(player, this);
         newPacketLocation.resize(width, height);
         if (oldPacketLocation != null) oldPacketLocation.resize(width, height);
+        if (passengerPhysicalBox != null) {
+            Vec3 feet = positionFromCollisionBox(passengerPhysicalBox);
+            passengerPhysicalBox = GetBoundingBox.getBoundingBoxFromPosAndSize(feet.x, feet.y, feet.z, width, height);
+        }
     }
 
     public SimpleCollisionBox getPossibleCollisionBoxes() {

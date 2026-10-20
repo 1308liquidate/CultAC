@@ -1,8 +1,10 @@
 package ac.cult.cultac.utils.latency;
 
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.anticheat.LogThrottle;
 
 public class LatencyUtils {
+    private static final LogThrottle FAILURES = new LogThrottle();
     private final LatencyTaskQueue transactionMap = new LatencyTaskQueue();
     private final CultPlayer player;
 
@@ -57,8 +59,7 @@ public class LatencyUtils {
         try {
             queuedTask.run();
         } catch (Exception e) {
-            System.out.println("An error has occurred when running transactions for player: " + player.user.getName());
-            e.printStackTrace();
+            FAILURES.error(e.getClass().getName(), "Transaction task failed for " + player.user.getName(), e);
         }
     }
 }

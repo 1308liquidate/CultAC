@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import jdk.jfr.EventType;
 import jdk.jfr.FlightRecorder;
 import jdk.jfr.consumer.RecordedClass;
@@ -47,7 +48,8 @@ public final class PerfRecorder {
     /** Allocated classes tracked apart; past it new classes are counted as one. */
     static final int MAX_ALLOC_CLASSES = 4096;
 
-    private static final String OTHER_CLASSES = "(other)";
+    private static final String OTHER_CLASSES = Attribution.OTHER_NAME;
+    private static final Pattern KEPT_FLAG = Pattern.compile("-XX:(?:[+-]\\w+|\\w+=\\d+(?:\\.\\d+)?[kKmMgGtT]?)");
     private static final String UNKNOWN = "(unknown)";
     private static final long READ_EVERY_NANOS = TimeUnit.SECONDS.toNanos(5);
     private static final long POLL_MILLIS = 100;
@@ -330,10 +332,17 @@ public final class PerfRecorder {
         return value == null ? "" : value;
     }
 
-    /** The JVM's -X sizing and -XX flags; system properties may carry secrets and are left out. */
     private static List<String> jvmFlags() {
-        return ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
-                .filter(flag -> flag.startsWith("-XX:") || flag.startsWith("-Xm") || flag.startsWith("-Xss"))
+        return jvmFlags(ManagementFactory.getRuntimeMXBean().getInputArguments());
+    }
+
+    /**
+     * The -X sizing, boolean -XX and numeric -XX flags of {@code arguments}; system properties and other -XX values
+     * may carry commands, paths or secrets and are left out.
+     */
+    static List<String> jvmFlags(List<String> arguments) {
+        return arguments.stream()
+                .filter(flag -> KEPT_FLAG.matcher(flag).matches() || flag.startsWith("-Xm") || flag.startsWith("-Xss"))
                 .toList();
     }
 
@@ -597,9 +606,13 @@ public final class PerfRecorder {
             return dispatchThread;
         }
 
-        /** The classes that allocated most; without {@code wholeJvm} only bytes on stacks with a CultAC frame. */
+        /**
+         * The classes that allocated most; without {@code wholeJvm} only bytes on stacks with a CultAC frame, and
+         * classes outside {@link Attribution#named} merged as {@link #OTHER_CLASSES}.
+         */
         synchronized List<PerfClassAlloc> topClasses(boolean wholeJvm) {
             List<PerfClassAlloc> all = new ArrayList<>();
+            long unnamed = 0;
             for (Map.Entry<String, long[]> entry : classes.entrySet()) {
                 long own = 0;
                 long other = 0;
@@ -607,9 +620,14 @@ public final class PerfRecorder {
                     own += entry.getValue()[i];
                     other += entry.getValue()[i + 1];
                 }
+                if (!wholeJvm && (entry.getKey().equals(OTHER_CLASSES) || !Attribution.named(entry.getKey()))) {
+                    unnamed += own;
+                    continue;
+                }
                 if (own > 0) all.add(classAlloc(entry.getKey(), own, true));
                 if (other > 0 && wholeJvm) all.add(classAlloc(entry.getKey(), other, false));
             }
+            if (unnamed > 0) all.add(classAlloc(OTHER_CLASSES, unnamed, true));
             all.sort(Comparator.comparingLong(PerfClassAlloc::getBytes).reversed());
             return all.size() > TOP_ALLOC_CLASSES ? all.subList(0, TOP_ALLOC_CLASSES) : all;
         }

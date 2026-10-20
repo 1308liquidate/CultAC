@@ -26,15 +26,26 @@ public final class FrameCopies {
     public static byte[] bytes(ByteBuf frame) {
         if (!viewable(frame)) return ByteBufUtil.getBytes(frame);
         byte[] bytes = new byte[frame.readableBytes()];
+        copyViewable(frame, bytes);
+        return bytes;
+    }
+
+    /** Copies the frame's readable bytes into an array of exactly their length; its indices are unchanged. */
+    public static void copyInto(ByteBuf frame, byte[] bytes) {
+        if (bytes.length != frame.readableBytes()) throw new IllegalArgumentException("Frame length changed");
+        if (viewable(frame)) copyViewable(frame, bytes);
+        else frame.getBytes(frame.readerIndex(), bytes);
+    }
+
+    private static void copyViewable(ByteBuf frame, byte[] bytes) {
         int from = frame.readerIndex();
         if (bytes.length > SCALAR_COPY_BYTES || frame.order() != ByteOrder.BIG_ENDIAN) {
             frame.internalNioBuffer(from, bytes.length).get(bytes);
-            return bytes;
+            return;
         }
         int at = 0;
         for (; at + Long.BYTES <= bytes.length; at += Long.BYTES) LONGS.set(bytes, at, frame.getLong(from + at));
         for (; at < bytes.length; at++) bytes[at] = frame.getByte(from + at);
-        return bytes;
     }
 
     private static boolean viewable(ByteBuf frame) {
