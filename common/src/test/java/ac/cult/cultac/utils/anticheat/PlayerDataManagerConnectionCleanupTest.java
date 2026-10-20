@@ -100,7 +100,7 @@ class PlayerDataManagerConnectionCleanupTest {
         assertEquals(List.of(), AlertSets.subscribed(bound));
         assertNull(tracker.currentSessionId(uuid, meta()));
         assertNull(tracker.currentSessionId(uuid));
-        verify(toggles).evict(uuid);
+        verify(toggles).evict(uuid, user.getConnectionId());
         assertNull(PlatformPlayerCache.getInstance().getPlayer(uuid));
         assertFalse(manager.isExemptUser(user));
     }
@@ -113,9 +113,29 @@ class PlayerDataManagerConnectionCleanupTest {
         assertFalse(manager.onDisconnect(user, true));
 
         assertEquals(session, tracker.currentSessionId(uuid, meta()));
-        verify(toggles, never()).evict(uuid);
+        verify(toggles, never()).evict(any(), any());
         assertEquals(List.of("NORMAL", "VERBOSE", "BRAND"), AlertSets.subscribed(bound));
         assertSame(bound, user.getPlayer());
+    }
+
+    @Test
+    void configuringPlayerRemovedBeforeBindingReleasesItsToggleSlot() {
+        UUID configuring = UUID.randomUUID();
+        User pending = TestUsers.create(new User.Profile(configuring, "configuring"), new EmbeddedChannel());
+        try {
+            manager.addUser(pending);
+            verify(toggles).prefetch(configuring, pending.getConnectionId());
+            // An observe-only ping timeout in configuration exempts the user; the next poll removes it.
+            manager.exemptUser(pending);
+            assertTrue(manager.remove(pending));
+            assertNull(pending.getPlayer());
+
+            assertFalse(manager.onDisconnect(pending));
+
+            verify(toggles).evict(configuring, pending.getConnectionId());
+        } finally {
+            ((EmbeddedChannel) pending.getChannel()).finishAndReleaseAll();
+        }
     }
 
     private SessionTracker.ClientMeta meta() {

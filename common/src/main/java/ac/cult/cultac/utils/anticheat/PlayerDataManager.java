@@ -120,7 +120,7 @@ public class PlayerDataManager {
         CloudModule.playerRegistered(created);
         UUID uuid = user.getUUID();
         if (uuid != null && CultAPI.INSTANCE.getDataStoreLifecycle() != null) {
-            CultAPI.INSTANCE.getDataStoreLifecycle().playerToggleStore().prefetch(uuid);
+            CultAPI.INSTANCE.getDataStoreLifecycle().playerToggleStore().prefetch(uuid, user.getConnectionId());
         }
     }
 
@@ -171,7 +171,7 @@ public class PlayerDataManager {
         }
         if (tracked == null) {
             clearExemptions(user);
-            if (user.getPlayer() != null) releaseConnection(user, null, transferred);
+            releaseConnection(user, null, transferred);
             return false;
         }
 
@@ -198,7 +198,7 @@ public class PlayerDataManager {
                     .getDataStoreLifecycle()
                     .liveWriteHooks()
                     .onQuitFromUserDisconnect(user, tracked, System.currentTimeMillis());
-            CultAPI.INSTANCE.getDataStoreLifecycle().playerToggleStore().evict(uuid);
+            CultAPI.INSTANCE.getDataStoreLifecycle().playerToggleStore().evict(uuid, user.getConnectionId());
         }
 
         PlatformPlayer quittingPlayer = user.getPlayer();
