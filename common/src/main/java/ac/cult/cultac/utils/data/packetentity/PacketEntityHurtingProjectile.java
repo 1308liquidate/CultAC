@@ -112,15 +112,16 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
     /**
      * {@code ClientPacketListener#handleEntityPositionSync}, which sets the position and the codec base. A hurting
      * projectile has {@code InterpolationHandler.NO_OP}, so each server position the client applies is set directly.
+     * {@code afterPacket} says whether the transaction it applies at follows the packet.
      */
-    public void onPositionSync() {
+    public void onPositionSync(boolean afterPacket) {
         codecBaseKnown = true;
-        placeExactly();
+        placeExactly(afterPacket);
     }
 
     /** {@code ClientPacketListener#handleMoveEntity} with a position, decoded against the codec base. */
-    public void onMoveEntity() {
-        if (codecBaseKnown) placeExactly();
+    public void onMoveEntity(boolean afterPacket) {
+        if (codecBaseKnown) placeExactly(afterPacket);
         else diverge();
     }
 
@@ -128,13 +129,18 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
      * {@code ClientPacketListener#handleTeleportEntity}, which leaves the codec base. A position relative to the
      * client's own carries any difference along.
      */
-    public void onTeleport(boolean absolute) {
+    public void onTeleport(boolean absolute, boolean afterPacket) {
         codecBaseKnown = false;
-        if (absolute) placeExactly();
+        if (absolute) placeExactly(afterPacket);
         else diverge();
     }
 
-    private void placeExactly() {
+    // A lone candidate set at a transaction sent before the packet may be ahead of the client.
+    private void placeExactly(boolean afterPacket) {
+        if (!afterPacket && oldPacketLocation == null) {
+            diverge();
+            return;
+        }
         anchoring = diverged;
         anchor();
     }
