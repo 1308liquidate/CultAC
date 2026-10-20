@@ -49,7 +49,10 @@ final class ReportedKeyInput {
         float walk = context.getMoveRelativeSpeed(player, true, false, false);
         // LivingEntity#getFrictionInfluencedSpeed reads getSpeed(), which carries minecraft:sprinting while applied.
         // ClientSprintState can still hold the modifier after one aiStep started and stopped a wall sprint.
-        float[] sprint = context.isSprintModifier() ? context.getGroundMoveRelativeSpeeds(player) : new float[0];
+        float[] sprint = context.isSprintModifier()
+                ? context.getGroundMoveRelativeSpeeds(
+                        player, context.getSprintOutcome(player, result.getInitialStartingVel()))
+                : new float[0];
         float[] speeds = new float[sprint.length + 1];
         speeds[0] = walk;
         System.arraycopy(sprint, 0, speeds, 1, sprint.length);

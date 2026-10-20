@@ -1053,6 +1053,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.ticksWhileLoadingLevel = 0;
             this.lastXRot = xRot;
             this.lastYRot = yRot;
+            this.commitAttackOutcome(result);
             this.player.minPlayerAttackSlow = 0;
             this.player.maxPlayerAttackSlow = 0;
             if (this.player.isFlying) {
@@ -1069,6 +1070,21 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         } else {
             this.applyProfileCommit(preparedCommit);
         }
+    }
+
+    /** Keeps the sprint modifiers of the attack outcomes the accepted travel candidates followed. */
+    private void commitAttackOutcome(PredictionResult result) {
+        if (!this.player.sprintState.resetOutcomePending()) return;
+        boolean reset = false, kept = false;
+        for (PredictionResult reality : result.getRealities()) {
+            if (reality.getFlagSeverity() != 0.0 || reality.getInitialStartingVel() == null) continue;
+            if (reality.getInitialStartingVel().getAttackSlows() > 0) {
+                reset = true;
+            } else {
+                kept = true;
+            }
+        }
+        this.player.sprintState.onAttackOutcome(reset, kept);
     }
 
     private void applyProfileCommit(PredictionCommit commit) {

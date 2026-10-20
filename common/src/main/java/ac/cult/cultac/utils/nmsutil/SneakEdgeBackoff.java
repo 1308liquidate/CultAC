@@ -8,6 +8,7 @@ import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
@@ -81,7 +82,8 @@ final class SneakEdgeBackoff {
             return deltaMovementFrom(player, result, context, accepted, movingSlowlyFactor, speed);
         }
         Vec3 found = null;
-        for (float speed : context.getGroundMoveRelativeSpeeds(player)) {
+        ClientSprintState.Outcome outcome = context.getSprintOutcome(player, result.getInitialStartingVel());
+        for (float speed : context.getGroundMoveRelativeSpeeds(player, outcome)) {
             Vec3 carry = deltaMovementFrom(player, result, context, accepted, movingSlowlyFactor, speed);
             if (carry == null) continue;
             if (found != null && !found.equals(carry)) return null;

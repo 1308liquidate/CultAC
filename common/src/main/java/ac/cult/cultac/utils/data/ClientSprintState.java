@@ -23,8 +23,10 @@ public final class ClientSprintState {
     private boolean flag;
     // The minecraft:sprinting movement_speed modifier the client holds: the server's until setSprinting replaces it.
     private @Nullable AttributeModifier modifier;
-    // A possible attack reset that aiStep silently re-sprinted may also have replaced it with vanilla's modifier.
+    // An earlier possible attack reset that aiStep silently re-sprinted may also have replaced it with vanilla's.
     private boolean canonicalPossible;
+    // This tick's possible attack reset: travel carries vanilla's modifier exactly when Player#attack damped it.
+    private boolean resetOutcomePending;
     private boolean sprintResetThisTick;
     private boolean flagUncertain;
     private boolean flagBeforeAiStep;
@@ -37,6 +39,17 @@ public final class ClientSprintState {
         CERTAIN
     }
 
+    /**
+     * Which outcome of this tick's possible attack reset a travel candidate follows. Player#causeExtraKnockback damps
+     * deltaMovement by 0.6 and calls setSprinting(false) together, so a damped candidate travels with the modifier
+     * aiStep's re-sprint adds and an undamped one with the modifier held before the attack.
+     */
+    public enum Outcome {
+        ANY,
+        KEPT,
+        RESET
+    }
+
     /** Entity shared flag 3 from self entity data, applied by its bundled proof. */
     public void onServerFlag(boolean sprinting) {
         flag = sprinting;
@@ -46,6 +59,7 @@ public final class ClientSprintState {
     public void onServerModifier(@Nullable AttributeModifier sprinting) {
         modifier = sprinting;
         canonicalPossible = false;
+        resetOutcomePending = false;
     }
 
     /**
@@ -59,6 +73,7 @@ public final class ClientSprintState {
             flag = false;
             modifier = null;
             canonicalPossible = false;
+            resetOutcomePending = false;
         } else {
             flagUncertain = true;
         }
@@ -84,13 +99,30 @@ public final class ClientSprintState {
         if (flag != wasSprinting) {
             modifier = wasSprinting ? CompensatedEntities.SPRINTING_SPEED_MODIFIER : null;
             canonicalPossible = false;
+            resetOutcomePending = false;
         } else if (sprintResetThisTick && wasSprinting) {
             // Only a possible reset leaves the flag: Player#attack resets only after damage and positive knockback.
-            canonicalPossible |= !CompensatedEntities.SPRINTING_SPEED_MODIFIER.equals(modifier);
+            resetOutcomePending = !CompensatedEntities.SPRINTING_SPEED_MODIFIER.equals(modifier);
         }
         flag = wasSprinting;
         sprintResetThisTick = false;
         flagUncertain = false;
+    }
+
+    /**
+     * The move after this tick's possible attack reset is committed. {@code reset} and {@code kept} say whether an
+     * accepted travel candidate followed {@link Outcome#RESET} or {@link Outcome#KEPT}; the modifier is the one the
+     * accepted candidates prove, or either while candidates of both outcomes, or none, are accepted.
+     */
+    public void onAttackOutcome(boolean reset, boolean kept) {
+        if (!resetOutcomePending) return;
+        resetOutcomePending = false;
+        if (reset && !kept) {
+            modifier = CompensatedEntities.SPRINTING_SPEED_MODIFIER;
+            canonicalPossible = false;
+        } else if (reset || !kept) {
+            canonicalPossible = true;
+        }
     }
 
     /** A LocalPlayer#tick movement packet opens its tick; the next {@link #onClientTick} reconciles its aiStep. */
@@ -122,6 +154,7 @@ public final class ClientSprintState {
         if (!keepAttributeModifiers) {
             modifier = null;
             canonicalPossible = false;
+            resetOutcomePending = false;
         }
     }
 
@@ -130,6 +163,7 @@ public final class ClientSprintState {
         flag = false;
         modifier = null;
         canonicalPossible = false;
+        resetOutcomePending = false;
         flagBeforeAiStep = false;
         aiStepReconciled = false;
         sprintResetThisTick = false;
@@ -143,7 +177,7 @@ public final class ClientSprintState {
 
     /** Whether the client's movement_speed may currently carry minecraft:sprinting. */
     public boolean modifier() {
-        return modifier != null || canonicalPossible;
+        return modifier != null || canonicalPossible || resetOutcomePending;
     }
 
     /**
@@ -154,8 +188,13 @@ public final class ClientSprintState {
         return modifier;
     }
 
-    /** Whether a possible attack reset may have replaced {@link #heldModifier} with vanilla's modifier. */
+    /** Whether an earlier possible attack reset may have replaced {@link #heldModifier} with vanilla's modifier. */
     public boolean canonicalPossible() {
         return canonicalPossible;
+    }
+
+    /** Whether this tick's travel follows a possible attack reset's {@link Outcome}s until its move is committed. */
+    public boolean resetOutcomePending() {
+        return resetOutcomePending;
     }
 }

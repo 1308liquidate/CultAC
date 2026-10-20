@@ -175,7 +175,7 @@ public class PredictionResult {
 
     /** Radius of the circular horizontal input allowance around the closest movement. */
     public double getHorizontalInputRadius() {
-        return getSimulationContext().getHorizontalInputRadius(player);
+        return getSimulationContext().getHorizontalInputRadius(player, initialStartingVel);
     }
 
     public Vec3 getInputVectorAndVerticals() {

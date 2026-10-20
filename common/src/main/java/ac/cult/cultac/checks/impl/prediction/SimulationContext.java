@@ -10,6 +10,7 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ClientItemUseState;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.LastInstance;
 import ac.cult.cultac.utils.data.MainSupportingBlockData;
@@ -81,7 +82,7 @@ public class SimulationContext {
     // Whether movement_speed may carry minecraft:sprinting during travel
     @Setter
     boolean sprintModifier = true;
-    private float[] groundMoveRelativeSpeeds;
+    private float[][] groundMoveRelativeSpeeds;
     // The movement_efficiency attribute during travel; LivingEntity#getBlockSpeedFactor lerps the block's factor to 1
     @Setter
     float movementEfficiency;
@@ -343,16 +344,18 @@ public class SimulationContext {
         return getFrictionInfluencedSpeed(blockUnderPlayer, player);
     }
 
-    /** Radius of the circular horizontal input allowance around the input-free movement. */
-    public double getHorizontalInputRadius(CultPlayer player) {
-        return getVehicle() == null ? getHorizontalInputAllowance(player) : getMaxSpeed(player);
+    /** Radius of the circular horizontal input allowance around the input-free movement of {@code candidate}. */
+    public double getHorizontalInputRadius(CultPlayer player, PredVector candidate) {
+        return getVehicle() == null
+                ? getHorizontalInputAllowance(player, getSprintOutcome(player, candidate))
+                : getMaxSpeed(player);
     }
 
     /**
      * The 1.3x allowance on each state's input speed, widened on the ground to every getSpeed() the client's sprint
-     * modifier allows there.
+     * modifier allows there in {@code outcome}.
      */
-    public double getHorizontalInputAllowance(CultPlayer player) {
+    public double getHorizontalInputAllowance(CultPlayer player, ClientSprintState.Outcome outcome) {
         float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
         double allowance = 0;
         for (boolean onGround : worldData.getLastOnGround().getStates()) {
@@ -360,9 +363,10 @@ public class SimulationContext {
                 for (boolean lava : worldData.getInLava().getStates()) {
                     allowance = Math.max(
                             allowance,
-                            getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava) * 1.3D);
+                            getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava, outcome)
+                                    * 1.3D);
                     if (groundSprintSpeed(player, onGround, water || lava)) {
-                        for (float speed : getGroundMoveRelativeSpeeds(player)) {
+                        for (float speed : getGroundMoveRelativeSpeeds(player, outcome)) {
                             allowance = Math.max(allowance, speed);
                         }
                     }
@@ -372,23 +376,34 @@ public class SimulationContext {
         return allowance;
     }
 
+    /** The outcome of this tick's possible attack reset that {@code candidate}'s attack damping commits it to. */
+    public ClientSprintState.Outcome getSprintOutcome(CultPlayer player, PredVector candidate) {
+        if (candidate == null || vehicle != null || !player.sprintState.resetOutcomePending()) {
+            return ClientSprintState.Outcome.ANY;
+        }
+        return candidate.getAttackSlows() > 0 ? ClientSprintState.Outcome.RESET : ClientSprintState.Outcome.KEPT;
+    }
+
     /**
      * The largest moveRelative speed the client's sprint state permits. LivingEntity#getFrictionInfluencedSpeed
      * reads getSpeed(), which carries the minecraft:sprinting modifier, on the ground, and Player#getFlyingSpeed,
      * which reads the sprint flag, in the air.
      */
-    public double getMaxSprintInputSpeed(CultPlayer player) {
+    public double getMaxSprintInputSpeed(CultPlayer player, PredVector candidate) {
+        ClientSprintState.Outcome outcome = getSprintOutcome(player, candidate);
         float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
         double maxSpeed = 0;
         for (boolean onGround : worldData.getLastOnGround().getStates()) {
             for (boolean water : worldData.getInWater().getStates()) {
                 for (boolean lava : worldData.getInLava().getStates()) {
                     if (groundSprintSpeed(player, onGround, water || lava)) {
-                        for (float speed : getGroundMoveRelativeSpeeds(player)) maxSpeed = Math.max(maxSpeed, speed);
+                        for (float speed : getGroundMoveRelativeSpeeds(player, outcome)) {
+                            maxSpeed = Math.max(maxSpeed, speed);
+                        }
                     } else {
                         maxSpeed = Math.max(
                                 maxSpeed,
-                                getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava)
+                                getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava, outcome)
                                         * (float) sprintSpeedMultiplier(player, onGround, water || lava));
                     }
                 }
@@ -403,22 +418,28 @@ public class SimulationContext {
     }
 
     /**
-     * LivingEntity#getFrictionInfluencedSpeed on the ground for each getSpeed() the client's sprint modifier allows,
-     * with vanilla's modifier also allowed for a riptide spin's sprint.
+     * LivingEntity#getFrictionInfluencedSpeed on the ground for each getSpeed() the client's sprint modifier allows in
+     * {@code outcome}, with vanilla's modifier also allowed for a riptide spin's sprint.
      */
-    public float[] getGroundMoveRelativeSpeeds(CultPlayer player) {
+    public float[] getGroundMoveRelativeSpeeds(CultPlayer player, ClientSprintState.Outcome outcome) {
         if (groundMoveRelativeSpeeds == null) {
+            groundMoveRelativeSpeeds = new float[ClientSprintState.Outcome.values().length][];
+        }
+        float[] cached = groundMoveRelativeSpeeds[outcome.ordinal()];
+        if (cached == null) {
             float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
             double[] speeds = vehicle == null
-                    ? entities.getPossiblePlayerMovementSpeeds(sprintModifier && !player.sprintState.modifier())
+                    ? entities.getPossiblePlayerMovementSpeeds(
+                            sprintModifier && !player.sprintState.modifier(), outcome)
                     : new double[] {getPlayerMovementSpeed(player)};
-            float[] moveRelative = new float[speeds.length];
+            cached = new float[speeds.length];
             for (int i = 0; i < speeds.length; i++) {
-                moveRelative[i] = getFrictionInfluencedSpeed(blockUnderPlayer, player, speeds[i], true, false, false);
+                cached[i] = getFrictionInfluencedSpeed(
+                        blockUnderPlayer, player, speeds[i], true, false, false, ClientSprintState.Outcome.ANY);
             }
-            groundMoveRelativeSpeeds = moveRelative;
+            groundMoveRelativeSpeeds[outcome.ordinal()] = cached;
         }
-        return groundMoveRelativeSpeeds;
+        return cached;
     }
 
     private double sprintSpeedMultiplier(CultPlayer player, boolean onGround, boolean fluid) {
@@ -467,11 +488,28 @@ public class SimulationContext {
 
     private float getFrictionInfluencedSpeed(
             float friction, CultPlayer player, boolean isOnGround, boolean water, boolean lava) {
-        return getFrictionInfluencedSpeed(friction, player, getPlayerMovementSpeed(player), isOnGround, water, lava);
+        return getFrictionInfluencedSpeed(friction, player, isOnGround, water, lava, ClientSprintState.Outcome.ANY);
     }
 
     private float getFrictionInfluencedSpeed(
-            float friction, CultPlayer player, double normalSpeed, boolean isOnGround, boolean water, boolean lava) {
+            float friction,
+            CultPlayer player,
+            boolean isOnGround,
+            boolean water,
+            boolean lava,
+            ClientSprintState.Outcome outcome) {
+        return getFrictionInfluencedSpeed(
+                friction, player, getPlayerMovementSpeed(player), isOnGround, water, lava, outcome);
+    }
+
+    private float getFrictionInfluencedSpeed(
+            float friction,
+            CultPlayer player,
+            double normalSpeed,
+            boolean isOnGround,
+            boolean water,
+            boolean lava,
+            ClientSprintState.Outcome outcome) {
 
         if (vehicle instanceof PacketEntityNautilus && water) {
             // AbstractNautilus#travelInWater bypasses LivingEntity's generic
@@ -488,7 +526,7 @@ public class SimulationContext {
                 // A player's getSpeed carries minecraft:sprinting only while applied; a vehicle's is getRiddenSpeed
                 float livingSpeed = (float)
                         (vehicle == null && sprintModifier
-                                ? entities.getMaxPlayerMovementSpeed(!player.sprintState.modifier())
+                                ? entities.getMaxPlayerMovementSpeed(!player.sprintState.modifier(), outcome)
                                 : normalSpeed);
                 speed += (livingSpeed - speed) * waterMovementEfficiency;
             }

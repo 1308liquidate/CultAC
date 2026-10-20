@@ -8,6 +8,7 @@ import ac.cult.cultac.network.packet.InventoryPackets.EquipmentEntry;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.AttributeModifier;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.protocol.value.EntityPose;
@@ -311,22 +312,31 @@ public class CompensatedEntities {
     }
 
     /**
-     * LivingEntity#getSpeed for each minecraft:sprinting modifier the client may hold: the held one or none, and
-     * vanilla's after a possible attack reset or, with {@code canonical}, for a sprint the client may start.
+     * LivingEntity#getSpeed for each minecraft:sprinting modifier the client may hold in {@code outcome}: the held one
+     * or none, and vanilla's after a possible attack reset or, with {@code canonical}, for a sprint the client may
+     * start.
      */
-    public double[] getPossiblePlayerMovementSpeeds(boolean canonical) {
-        AttributeModifier held = player.sprintState.heldModifier();
+    public double[] getPossiblePlayerMovementSpeeds(boolean canonical, ClientSprintState.Outcome outcome) {
+        ClientSprintState state = player.sprintState;
+        double canonicalSpeed = sprintingSpeed(SPRINTING_SPEED_MODIFIER);
+        if (outcome == ClientSprintState.Outcome.RESET && state.resetOutcomePending()) {
+            return new double[] {canonicalSpeed};
+        }
+        AttributeModifier held = state.heldModifier();
         double current = held == null ? getPlayerMovementSpeed() : sprintingSpeed(held);
-        if (!(canonical || player.sprintState.canonicalPossible()) || SPRINTING_SPEED_MODIFIER.equals(held)) {
+        boolean withCanonical = canonical
+                || state.canonicalPossible()
+                || outcome == ClientSprintState.Outcome.ANY && state.resetOutcomePending();
+        if (!withCanonical || SPRINTING_SPEED_MODIFIER.equals(held)) {
             return new double[] {current};
         }
-        return new double[] {current, sprintingSpeed(SPRINTING_SPEED_MODIFIER)};
+        return new double[] {current, canonicalSpeed};
     }
 
     /** The largest of {@link #getPossiblePlayerMovementSpeeds}. */
-    public double getMaxPlayerMovementSpeed(boolean canonical) {
+    public double getMaxPlayerMovementSpeed(boolean canonical, ClientSprintState.Outcome outcome) {
         double max = 0.0D;
-        for (double speed : getPossiblePlayerMovementSpeeds(canonical)) max = Math.max(max, speed);
+        for (double speed : getPossiblePlayerMovementSpeeds(canonical, outcome)) max = Math.max(max, speed);
         return max;
     }
 

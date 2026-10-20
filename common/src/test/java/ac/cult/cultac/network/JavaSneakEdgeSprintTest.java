@@ -21,6 +21,7 @@ import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -174,7 +175,9 @@ class JavaSneakEdgeSprintTest {
             command(f, PlayerCommandAction.START_SPRINTING);
             f.move(position, false);
             f.tickEnd();
-            assertEquals(sprintSpeed, (float) f.player.compensatedEntities.getMaxPlayerMovementSpeed(false));
+            assertEquals(
+                    sprintSpeed,
+                    (float) f.player.compensatedEntities.getMaxPlayerMovementSpeed(false, ClientSprintState.Outcome.ANY));
         }
     }
 

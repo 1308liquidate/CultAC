@@ -34,18 +34,49 @@ class ClientSprintStateTest {
     }
 
     @Test
-    void possibleAttackResetKeepsTheServerSprintModifierBesideVanillas() {
+    void possibleAttackResetFollowsTheOutcomesTheAcceptedMoveProves() {
         ClientSprintState state = sprinting();
         var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
         state.onServerModifier(server);
         // Player#attack may or may not have reached causeExtraKnockback; aiStep keeps sprinting either way.
         state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
         state.onClientTick(true);
+        assertTrue(state.resetOutcomePending());
+        assertTrue(state.modifier());
+        // Only undamped candidates were accepted: the reset did not happen.
+        state.onAttackOutcome(false, true);
+        assertSame(server, state.heldModifier());
+        assertFalse(state.canonicalPossible());
+        assertFalse(state.resetOutcomePending());
+
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        // Candidates of both outcomes were accepted: either modifier stays possible.
+        state.onAttackOutcome(true, true);
         assertSame(server, state.heldModifier());
         assertTrue(state.canonicalPossible());
-        // Neither outcome is resolved by later ticks of the same sprint.
+        // A later tick's undamped candidates do not resolve an earlier tie.
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
         state.onClientTick(true);
-        assertSame(server, state.heldModifier());
+        state.onAttackOutcome(false, true);
+        assertTrue(state.canonicalPossible());
+
+        // Only damped candidates were accepted: aiStep re-sprinted with vanilla's modifier.
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        state.onAttackOutcome(true, false);
+        assertSame(CompensatedEntities.SPRINTING_SPEED_MODIFIER, state.heldModifier());
+        assertFalse(state.canonicalPossible());
+    }
+
+    @Test
+    void possibleAttackResetOutcomesCollapseOnCertainEvents() {
+        ClientSprintState state = sprinting();
+        var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+        state.onServerModifier(server);
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        state.onAttackOutcome(false, false);
         assertTrue(state.canonicalPossible());
         // The server's next movement_speed snapshot is certain.
         state.onServerModifier(server);
@@ -53,9 +84,11 @@ class ClientSprintStateTest {
 
         state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
         state.onClientTick(true);
-        assertTrue(state.canonicalPossible());
         // LivingEntity#setSprinting(false) removes the modifier in either outcome.
         state.onClientTick(false);
+        assertNull(state.heldModifier());
+        assertFalse(state.resetOutcomePending());
+        state.onAttackOutcome(true, false);
         assertNull(state.heldModifier());
         assertFalse(state.canonicalPossible());
     }
