@@ -5,6 +5,7 @@ import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.FluidTags;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.network.packet.WorldPackets.SectionBlocksUpdate;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
@@ -530,6 +531,21 @@ public class CompensatedWorld {
         player.latencyUtils.addRealTimeTask(transaction, () -> {
             if (queuedLevel == level) handleServerBlockUpdate(x, y, z, state, transaction);
             serverBlockView.applied(position, id);
+        });
+    }
+
+    public void queueServerBlockUpdates(SectionBlocksUpdate update, int transaction) {
+        long[] ids = new long[update.size()];
+        int[] sent = {0};
+        update.runUpdates((x, y, z, state) -> ids[sent[0]++] = serverBlockView.sent(
+                BlockPos.asLong(x, y, z), ViaClientBlockShapeMappings.clientBlockStateId(player, stateIdOrAir(state))));
+        int queuedLevel = level;
+        player.latencyUtils.addRealTimeTask(transaction, () -> {
+            int[] applied = {0};
+            update.runUpdates((x, y, z, state) -> {
+                if (queuedLevel == level) handleServerBlockUpdate(x, y, z, state, transaction);
+                serverBlockView.applied(BlockPos.asLong(x, y, z), ids[applied[0]++]);
+            });
         });
     }
 
