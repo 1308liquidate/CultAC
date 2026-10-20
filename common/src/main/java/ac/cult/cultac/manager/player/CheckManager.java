@@ -78,6 +78,7 @@ import ac.cult.cultac.player.PlayerObserver;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.PacketType;
+import ac.cult.cultac.protocol.PacketTypeTable;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPacket;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.cultac.utils.anticheat.update.BlockBreak;
@@ -161,12 +162,12 @@ public class CheckManager {
     /** Set on the packet thread while a tick end's handlers run. */
     private boolean dispatchingTickEnd;
 
-    private Map<PacketType<?>, PacketReceiveRoute<Object>> earlyReceiveRoutes = Map.of();
+    private PacketTypeTable<PacketReceiveRoute<Object>> earlyReceiveRoutes = PacketTypeTable.empty();
     private final List<DecodedPacketReceiveListener> decodedReceiveListeners = new ArrayList<>();
     private final List<PacketReceiveHandler<ServerboundPacket>> nonAsyncReceiveHandlers = new ArrayList<>();
-    private Map<PacketType<?>, PacketReceiveRoute<Object>> prePredictionReceiveRoutes = Map.of();
-    private Map<PacketType<?>, PacketReceiveRoute<Object>> receiveRoutes = Map.of();
-    private Map<PacketType<?>, PacketSendRoute<Object>> sendRoutes = Map.of();
+    private PacketTypeTable<PacketReceiveRoute<Object>> prePredictionReceiveRoutes = PacketTypeTable.empty();
+    private PacketTypeTable<PacketReceiveRoute<Object>> receiveRoutes = PacketTypeTable.empty();
+    private PacketTypeTable<PacketSendRoute<Object>> sendRoutes = PacketTypeTable.empty();
 
     public Collection<Check> getAllChecks() {
         return allChecks.values();
@@ -828,10 +829,11 @@ public class CheckManager {
     }
 
     private void buildPacketRoutes(PacketRegistrations registrations) {
-        earlyReceiveRoutes = registrations.receive.receiveRoutes(ReceiveStage.EARLY);
-        prePredictionReceiveRoutes = registrations.prePredictionReceive.receiveRoutes(ReceiveStage.ORDINARY);
-        receiveRoutes = registrations.receive.receiveRoutes(ReceiveStage.ORDINARY);
-        sendRoutes = registrations.send.sendRoutes();
+        earlyReceiveRoutes = PacketTypeTable.of(registrations.receive.receiveRoutes(ReceiveStage.EARLY));
+        prePredictionReceiveRoutes =
+                PacketTypeTable.of(registrations.prePredictionReceive.receiveRoutes(ReceiveStage.ORDINARY));
+        receiveRoutes = PacketTypeTable.of(registrations.receive.receiveRoutes(ReceiveStage.ORDINARY));
+        sendRoutes = PacketTypeTable.of(registrations.send.sendRoutes());
     }
 
     /** False only when the callback resolves to an interface's empty default, so skipping the call is a no-op. */

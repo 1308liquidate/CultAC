@@ -4,6 +4,7 @@ import ac.cult.cultac.protocol.data.ProtocolData;
 import ac.cult.cultac.protocol.packet.Packets;
 import ac.cult.cultac.protocol.wire.Wire;
 import io.netty.buffer.ByteBuf;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -18,7 +19,9 @@ public final class ProtocolRuntime {
     private final ResolvedPacket<?>[][][] bindings;
     private final Map<Class<?>, PacketType<?>> byRecord;
     private final Map<String, PacketType<?>> byKey;
-    private final Map<PacketType<?>, Integer> slots;
+    /** Each catalog type's slot by {@link PacketType#index()}; -1 for any other type. */
+    private final int[] slots;
+
     private final Set<PacketType<?>> supported;
     private final int[][] encodeIds;
 
@@ -35,7 +38,8 @@ public final class ProtocolRuntime {
         }
         Map<Class<?>, PacketType<?>> records = new HashMap<>();
         Map<String, PacketType<?>> keys = new HashMap<>();
-        Map<PacketType<?>, Integer> slots = new HashMap<>();
+        int[] slots = new int[catalog.stream().mapToInt(PacketType::index).max().orElse(-1) + 1];
+        Arrays.fill(slots, -1);
         Set<PacketType<?>> supported = new HashSet<>();
         for (int slot = 0; slot < catalog.size(); slot++) {
             PacketType<?> type = catalog.get(slot);
@@ -43,7 +47,7 @@ public final class ProtocolRuntime {
                     || (!type.isOpaque() && records.put(type.recordClass(), type) != null)) {
                 throw new ProtocolResolutionException("Duplicate catalog key/record: " + type);
             }
-            slots.put(type, slot);
+            slots[type.index()] = slot;
             // The version's data decides which declared names exist; a family absent from it stays unsupported.
             List<String> present = type.wireNames(data);
             if (present.isEmpty()) continue;
@@ -81,7 +85,7 @@ public final class ProtocolRuntime {
         }
         this.byRecord = Map.copyOf(records);
         this.byKey = Map.copyOf(keys);
-        this.slots = Map.copyOf(slots);
+        this.slots = slots;
         this.supported = Set.copyOf(supported);
         encodeIds = new int[ConnectionPhase.values().length][catalog.size()];
         for (ConnectionPhase phase : ConnectionPhase.values()) {
@@ -104,8 +108,8 @@ public final class ProtocolRuntime {
 
     /** The first of a non-variant family's names bound to it in {@code phase}; -1 when none is. */
     int encodeId(ConnectionPhase phase, PacketType<?> type) {
-        Integer slot = slots.get(type);
-        return slot == null ? -1 : encodeIds[phase.ordinal()][slot];
+        int slot = slotOrAbsent(type);
+        return slot < 0 ? -1 : encodeIds[phase.ordinal()][slot];
     }
 
     private static <R> ResolvedPacket<R> resolve(PacketType<R> type, ProtocolContext context, int slot) {
@@ -144,7 +148,12 @@ public final class ProtocolRuntime {
     }
 
     public boolean contains(PacketType<?> type) {
-        return byKey.get(type.key()) == type;
+        return slotOrAbsent(type) >= 0;
+    }
+
+    private int slotOrAbsent(PacketType<?> type) {
+        int index = type.index();
+        return index < slots.length ? slots[index] : -1;
     }
 
     public PacketType<?> typeForKey(String key) {
@@ -157,14 +166,14 @@ public final class ProtocolRuntime {
 
     /** Dense index of a catalog type in this runtime, for per-type tables that frame lookups reach through {@link ResolvedPacket#slot()}. */
     public int slot(PacketType<?> type) {
-        Integer slot = slots.get(type);
-        if (slot == null) throw new IllegalArgumentException("Foreign packet family: " + type);
+        int slot = slotOrAbsent(type);
+        if (slot < 0) throw new IllegalArgumentException("Foreign packet family: " + type);
         return slot;
     }
 
     /** One past the largest {@link #slot}; every catalog type has a slot, supported on this version or not. */
     public int slotCount() {
-        return slots.size();
+        return catalog.size();
     }
 
     public ResolvedPacket<?> binding(ConnectionPhase phase, PacketDirection direction, int id) {
