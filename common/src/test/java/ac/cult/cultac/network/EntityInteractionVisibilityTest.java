@@ -15,8 +15,8 @@ import ac.cult.cultac.events.packets.listeners.PacketPlayerAttack;
 import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
-import ac.cult.cultac.network.packet.EntityPositionPath;
 import ac.cult.cultac.network.packet.EntityMetadata;
+import ac.cult.cultac.network.packet.EntityPositionPath;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
@@ -963,7 +963,8 @@ class EntityInteractionVisibilityTest {
                     new PacketReceiveEvent<>(fixture.user, ConnectionPhase.PLAY, ServerboundPackets.INTERACT, packet);
             player.checkManager.dispatchEarlyReceive(event);
             // Clients before 26.1 follow each INTERACT_AT with the INTERACT for the same entity and hand.
-            if (action == InteractAction.INTERACT_AT && player.getClientVersion().isOlderThan(ClientVersion.V_26_1))
+            if (action == InteractAction.INTERACT_AT
+                    && player.getClientVersion().isOlderThan(ClientVersion.V_26_1))
                 player.checkManager.dispatchEarlyReceive(new PacketReceiveEvent<>(
                         fixture.user,
                         ConnectionPhase.PLAY,
