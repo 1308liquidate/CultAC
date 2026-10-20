@@ -34,6 +34,7 @@ import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoFallPseudo;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngines;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaPredictionCarry;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfile;
@@ -1310,6 +1311,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         } else if (result.isExempt()) {
             // LocalPlayer#aiStep crouches the next tick from this tick's shift, whether or not it sends a position.
             this.lastSneaking = this.player.isSneaking;
+            this.player.checkManager.getListener(JavaAutoJump.class).onExemptNoPositionTick(result);
         }
         if (flyingThroughTravel) {
             this.stopFlyingAfterTravel();

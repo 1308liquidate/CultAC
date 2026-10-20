@@ -74,6 +74,9 @@ class CreativeFlightTest {
     private static final double STANDING_Y = (0 - 0.08) * 0.98F;
     /** LivingEntity#getFrictionInfluencedSpeed on stone at 0.1 movement speed, times the 0.98 forward input. */
     private static final double WALK_STEP = (double) 0.98F * (double) (0.1F * (0.21600002F / (0.6F * 0.6F * 0.6F)));
+    // The forward movement of a tick that starts in the air.
+    private static final double AIR_STEP = (double) 0.98F * (double) 0.02F;
+    private static final double GROUND_FRICTION = 0.6F * 0.91F;
 
     @Test
     void aVelocityTakenInFlightWithJumpHeldRisesByTheFlightImpulse() throws Exception {
@@ -521,7 +524,13 @@ class CreativeFlightTest {
             for (int z = 0; z <= 8; z++) block(f, 0, FLOOR_Y - 1, z, BlockIds.AIR.defaultState());
             block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
             assertTrue(
-                    unarmedAfterAWalkingPressAfterFlight(f, new Vec3(0.5, FLOOR_Y, 0.299), new Vec3(0, 0, 0.1), JUMP_POWER),
+                    unarmedAfterAWalkAfterFlight(
+                            f,
+                            new Vec3(0.5, FLOOR_Y, 0.299),
+                            true,
+                            null,
+                            new Vec3(0, 0, WALK_STEP),
+                            new Vec3(0, JUMP_POWER, WALK_STEP * GROUND_FRICTION)),
                     "the walk off the ledge was not grounded");
 
             PredictionResult takeoff = pressInTheAirThenTakeOff(f);
@@ -537,7 +546,13 @@ class CreativeFlightTest {
             for (int z = 0; z <= 8; z++) block(f, 0, FLOOR_Y - 1, z, BlockIds.AIR.defaultState());
             block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
             assertFalse(
-                    unarmedAfterAWalkingPressAfterFlight(f, new Vec3(0.5, FLOOR_Y, 0.301), new Vec3(0, 0, 0.1), JUMP_POWER),
+                    unarmedAfterAWalkAfterFlight(
+                            f,
+                            new Vec3(0.5, FLOOR_Y, 0.301),
+                            false,
+                            null,
+                            new Vec3(0, STANDING_Y, AIR_STEP),
+                            new Vec3(0, (STANDING_Y - 0.08) * 0.98F, AIR_STEP * 0.91F)),
                     "an auto-jump past the ledge was kept");
 
             pressInTheAirThenTakeOff(f);
@@ -549,17 +564,70 @@ class CreativeFlightTest {
     @Test
     void aStepUpWhereAnAutoJumpCanFireAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
         try (var f = new JavaTickFixture()) {
-            int slab = DataTables.defaults().registry().block("minecraft:stone_slab").defaultState();
-            block(f, 0, FLOOR_Y, 1, slab);
-            block(f, 0, FLOOR_Y, 2, BlockIds.STONE.defaultState());
-            block(f, 0, FLOOR_Y + 1, 2, slab);
+            halfSlabStepAhead(f);
+            double z = 0.48 + WALK_STEP;
             assertTrue(
-                    unarmedAfterAWalkingPressAfterFlight(f, GROUND, new Vec3(0, 0.5, 0.5), JUMP_POWER),
+                    unarmedAfterAWalkAfterFlight(
+                            f,
+                            GROUND,
+                            true,
+                            new Vec3(0, -0.1, 0.48),
+                            new Vec3(0, 0.5, z),
+                            new Vec3(0, JUMP_POWER, z * GROUND_FRICTION)),
                     "the step up was not grounded");
 
             PredictionResult takeoff = pressInTheAirThenTakeOff(f);
             assertPredicted(takeoff);
             assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /**
+     * Entity#collide resolves the whole descent before it steps, so a fall a block down onto the floor that steps up
+     * onto a half slab ends on the ground.
+     */
+    @Test
+    void aFallThatStepsUpWhereAnAutoJumpCanFireAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            halfSlabStepAhead(f);
+            double z = 0.48 + AIR_STEP;
+            assertTrue(
+                    unarmedAfterAWalkAfterFlight(
+                            f,
+                            GROUND.add(0, 1, 0),
+                            false,
+                            new Vec3(0, -1.2, 0.48),
+                            new Vec3(0, -0.5, z),
+                            new Vec3(0, JUMP_POWER, z * 0.91F)),
+                    "the fall that steps up was not grounded");
+
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /** A full block beside the half slab stops the step's Z, so a step up through the corner keeps no auto-jump. */
+    @Test
+    void aTakeoffRenewedByAnAutoJumpThroughACornerAfterFlightFlags() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            int slab = DataTables.defaults().registry().block("minecraft:stone_slab").defaultState();
+            block(f, 1, FLOOR_Y, 0, slab);
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            block(f, 1, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            block(f, 1, FLOOR_Y + 1, 1, slab);
+            assertFalse(
+                    unarmedAfterAWalkAfterFlight(
+                            f,
+                            GROUND,
+                            true,
+                            null,
+                            new Vec3(0.25, 0.5, 0.25),
+                            new Vec3(0, JUMP_POWER, 0.25 * GROUND_FRICTION)),
+                    "a step through the corner was kept");
+
+            pressInTheAirThenTakeOff(f);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
         }
     }
 
@@ -816,38 +884,47 @@ class CreativeFlightTest {
      * simulation exempts the walk.
      */
     private static boolean unarmedAfterAWalkingPressAfterFlight(JavaTickFixture f, double rise) {
-        return unarmedAfterAWalkingPressAfterFlight(f, GROUND, new Vec3(0, 0, WALK_STEP), rise);
+        return unarmedAfterAWalkAfterFlight(
+                f, GROUND, true, null, new Vec3(0, 0, WALK_STEP), new Vec3(0, rise, WALK_STEP * GROUND_FRICTION));
     }
 
-    /** As {@link #unarmedAfterAWalkingPressAfterFlight(JavaTickFixture, double)}, walking {@code walk} from {@code from}. */
-    private static boolean unarmedAfterAWalkingPressAfterFlight(
-            JavaTickFixture f, Vec3 from, Vec3 walk, double rise) {
-        f.place(from.add(0, 0.3, 0), Vec3.ZERO);
+    /**
+     * A player the server lets fly comes to rest at {@code from}: sinking onto the floor there with shift held when
+     * {@code onFloor}, hovering otherwise. The server ends the flight and a tick passes with nothing to send. A tick
+     * walking forward, after a set_entity_motion of {@code velocity} when there is one, moves the player by
+     * {@code walk}, then a press moves it by {@code press}; whether Player#jumpTriggerTime can still be unarmed.
+     */
+    private static boolean unarmedAfterAWalkAfterFlight(
+            JavaTickFixture f, Vec3 from, boolean onFloor, Vec3 velocity, Vec3 walk, Vec3 press) {
+        f.place(onFloor ? from.add(0, IMPULSE, 0) : from, Vec3.ZERO);
         grantFlight(f, true);
-        f.input(NONE);
-        assertTrue(f.tick(from.add(0, 0.3, 0), false).isExempt(), "the flight was judged");
+        f.input(onFloor ? SHIFT : NONE);
+        assertTrue(f.tick(from, onFloor).isExempt(), "the flight was judged");
         grantFlight(f, false);
-        f.tick(from, true);
+        f.input(NONE);
+        f.tickEnd();
         f.input(FORWARD);
+        if (velocity != null) f.pongThrough(f.velocity(velocity));
         assertTrue(f.tick(from.add(walk), true).isExempt(), "the walk was judged");
         f.input(JUMP);
-        f.tick(from.add(walk).add(0, rise, walk.z * (0.6F * 0.91F)), false);
+        f.tick(from.add(walk).add(press), false);
         return (f.player.packetStateData.jumpTriggerTimes & 1) != 0;
     }
 
     /**
-     * On the ticks after the server ends the player's flight, a fall to {@code gap} above the floor against a wall
-     * ahead, a tick walking into the wall that the client reports as StatusOnly, or as an unchanged position when
-     * {@code sendPosition}, then a press; whether Player#jumpTriggerTime can still be unarmed after the press.
+     * On the ticks after the server ends the player's flight, a hover {@code gap} above the floor against a wall
+     * ahead, a tick with nothing to send, a tick walking into the wall that falls onto the floor, reported as
+     * StatusOnly or, when {@code sendPosition}, as an unchanged position, then a press; whether
+     * Player#jumpTriggerTime can still be unarmed after the press.
      */
     private static boolean unarmedAfterAClippedLandingAfterFlight(JavaTickFixture f, double gap, boolean sendPosition) {
         Vec3 rest = new Vec3(0.5, FLOOR_Y + gap, 0.7);
-        f.place(rest.add(0, 0.3, 0), Vec3.ZERO);
+        f.place(rest, Vec3.ZERO);
         grantFlight(f, true);
         f.input(NONE);
-        assertTrue(f.tick(rest.add(0, 0.3, 0), false).isExempt(), "the flight was judged");
+        assertTrue(f.tick(rest, false).isExempt(), "the flight was judged");
         grantFlight(f, false);
-        f.tick(rest, false);
+        f.tickEnd();
         f.input(FORWARD);
         if (sendPosition) {
             assertTrue(f.tick(rest, true).isExempt(), "the landing was judged");
@@ -859,6 +936,13 @@ class CreativeFlightTest {
         return (f.player.packetStateData.jumpTriggerTimes & 1) != 0;
     }
 
+    /** A half slab on the floor ahead, and a step up a block and a half high past it. */
+    private static void halfSlabStepAhead(JavaTickFixture f) {
+        int slab = DataTables.defaults().registry().block("minecraft:stone_slab").defaultState();
+        block(f, 0, FLOOR_Y, 1, slab);
+        block(f, 0, FLOOR_Y, 2, BlockIds.STONE.defaultState());
+        block(f, 0, FLOOR_Y + 1, 2, slab);
+    }
 
     /**
      * A release and a press in the air without player_abilities, the landing, and a grounded double-tap under a
