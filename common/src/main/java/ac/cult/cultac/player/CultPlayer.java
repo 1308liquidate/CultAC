@@ -568,6 +568,9 @@ public class CultPlayer implements GrimUser {
         }
 
         SentTransaction acknowledged = acknowledgeThrough(id);
+        if (!isBedrockMovement() && getSetbackTeleportUtil().hasWithheldJavaTeleport()) {
+            withheld("answered a ping sent after a teleport it did not answer");
+        }
 
         // ViaVersion rate-limits inbound packets; our own transactions don't count
         if (packetTracker != null) {
@@ -1065,13 +1068,18 @@ public class CultPlayer implements GrimUser {
     }
 
     public void timedOut() {
+        withheld("no ping answered within " + maxTransactionTime + " s");
+    }
+
+    /** A client withholding a packet a vanilla client always sends is treated as one withholding its pongs. */
+    public void withheld(String what) {
         // Not failsOpen(): the client decides whether to answer a ping, so withholding them must not buy an exemption.
         if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
-            LogUtil.warn(
-                    "Not inspecting " + getName() + " any more; no ping answered within " + maxTransactionTime + " s");
+            LogUtil.warn("Not inspecting " + getName() + " any more; " + what);
             CultAPI.INSTANCE.getPlayerDataManager().exemptUser(user);
             return;
         }
+        LogUtil.warn(getName() + " " + what);
         disconnect(MessageUtil.miniMessage(MessageUtil.replacePlaceholders(
                 this, CultAPI.INSTANCE.getConfigManager().getDisconnectTimeout())));
     }
