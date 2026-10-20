@@ -116,6 +116,9 @@ final class StackTrie {
 
     private final List<String> frames = new ArrayList<>(List.of(TRUNCATED, TRUNCATED_OWN));
     private final BitSet ownFrames = new BitSet();
+    /** Frames a profile without {@code wholeJvm} names; the rest are {@link Attribution#OTHER_NAME}. */
+    private final BitSet namedFrames = new BitSet();
+
     private int nodes;
     private long capped;
     private long cpuTotal;
@@ -124,6 +127,8 @@ final class StackTrie {
 
     StackTrie() {
         ownFrames.set(TRUNCATED_OWN_ID);
+        namedFrames.set(TRUNCATED_ID);
+        namedFrames.set(TRUNCATED_OWN_ID);
     }
 
     void add(StackTraceView stack, int threadGroup, long cpu, long nat, long allocBytes) {
@@ -208,7 +213,8 @@ final class StackTrie {
      * The tree as a profile's frames, thread groups, stacks and totals: nodes under {@link #PRUNE_FRACTION} of their
      * kind's weight fold into their parent, and the fraction doubles until zstd of the profile fits
      * {@code maxEncodedBytes}. Without {@code wholeJvm} only stacks with a CultAC frame, or of the recorder's own
-     * threads, are kept; totals count all.
+     * threads, are kept, and a frame of a class outside {@link Attribution#named} is {@link Attribution#OTHER_NAME};
+     * totals count all.
      */
     PerfProfile.Builder encode(boolean wholeJvm, long maxEncodedBytes) {
         return encode(wholeJvm, maxEncodedBytes, () -> false);
@@ -259,6 +265,7 @@ final class StackTrie {
             frames.add(frame);
             frameNames.put(frame, id);
             if (Attribution.own(type)) ownFrames.set(id);
+            if (Attribution.named(type)) namedFrames.set(id);
         }
         frameIds.computeIfAbsent(type, ignored -> new HashMap<>()).put(method, id);
         return id;
@@ -300,6 +307,7 @@ final class StackTrie {
         private final double allocMin;
         private final int[] path = new int[MAX_DEPTH];
         private final int[] outputIds = new int[frames.size()];
+        private int otherId = -1;
 
         Emitter(PerfProfile.Builder profile, boolean wholeJvm, double fraction) {
             this.profile = profile;
@@ -345,6 +353,13 @@ final class StackTrie {
         }
 
         private int outputId(int frame) {
+            if (!wholeJvm && !namedFrames.get(frame)) {
+                if (otherId < 0) {
+                    otherId = profile.getFramesCount();
+                    profile.addFrames(Attribution.OTHER_NAME);
+                }
+                return otherId;
+            }
             int id = outputIds[frame];
             if (id < 0) {
                 id = profile.getFramesCount();
