@@ -723,14 +723,9 @@ public final class IntakeWire {
     }
 
     /**
-     * The bytes a record of {@code length} body bytes takes in a frame, its own field in the frame included: a
+     * The bytes a record of {@code length} body bytes takes in a frame, short of its own field's tag and length: a
      * clientbound one with its server tick delta and ping kind, a whole pong with its {@code skipped} pings.
      */
-    public static long captureBytes(int kind, long sinceLast, int length, int tickDelta, int pingKind, int skipped) {
-        int record = recordSize(kind, sinceLast, length, tickDelta, pingKind, skipped);
-        return 1 + CodedOutputStream.computeUInt32SizeNoTag(record) + record;
-    }
-
     private static int recordSize(int kind, long sinceLast, int length, int tickDelta, int pingKind, int skipped) {
         int size = kind == PING_MARKER
                 ? CodedOutputStream.computeEnumSize(PING_MARKER, pingKind)
@@ -749,7 +744,7 @@ public final class IntakeWire {
     public static final class FrameBuilder {
         /** Record slots a builder starts again with once a frame past {@link #MAX_KEPT_RECORDS} is cleared. */
         static final int RESTING_RECORDS = 256;
-        /** The most record slots kept between frames, 128 KiB. */
+        /** The most record slots kept between frames, about 160 KiB of arrays. */
         static final int MAX_KEPT_RECORDS = 4096;
 
         private int count;
@@ -760,6 +755,7 @@ public final class IntakeWire {
         private int[] tickDeltas = new int[32];
         private int[] pingKinds = new int[32];
         private int[] skips = new int[32];
+        private int[] sizes = new int[32];
         private long serverTick = -1;
         private long bytes;
 
@@ -780,6 +776,7 @@ public final class IntakeWire {
                 tickDeltas = Arrays.copyOf(tickDeltas, count * 2);
                 pingKinds = Arrays.copyOf(pingKinds, count * 2);
                 skips = Arrays.copyOf(skips, count * 2);
+                sizes = Arrays.copyOf(sizes, count * 2);
             }
             kinds[count] = kind;
             this.sinceLast[count] = sinceLast;
@@ -788,8 +785,10 @@ public final class IntakeWire {
             tickDeltas[count] = tickDelta;
             pingKinds[count] = pingKind;
             skips[count] = skipped;
+            int size = recordSize(kind, sinceLast, length, tickDelta, pingKind, skipped);
+            sizes[count] = size;
             count++;
-            bytes += captureBytes(kind, sinceLast, length, tickDelta, pingKind, skipped);
+            bytes += 1 + CodedOutputStream.computeUInt32SizeNoTag(size) + size;
         }
 
         /** The server tick of the frame's first clientbound record. */
@@ -827,8 +826,7 @@ public final class IntakeWire {
                 if (seq != 0) stream.writeUInt64(FRAME_SEQ, seq);
                 for (int i = 0; i < count; i++) {
                     stream.writeTag(FRAME_RECORDS, 2);
-                    stream.writeUInt32NoTag(
-                            recordSize(kinds[i], sinceLast[i], lengths[i], tickDeltas[i], pingKinds[i], skips[i]));
+                    stream.writeUInt32NoTag(sizes[i]);
                     if (kinds[i] == PING_MARKER) {
                         stream.writeEnum(PING_MARKER, pingKinds[i]);
                     } else {
@@ -858,6 +856,7 @@ public final class IntakeWire {
                 tickDeltas = new int[RESTING_RECORDS];
                 pingKinds = new int[RESTING_RECORDS];
                 skips = new int[RESTING_RECORDS];
+                sizes = new int[RESTING_RECORDS];
             } else {
                 Arrays.fill(payloads, 0, count, null);
             }

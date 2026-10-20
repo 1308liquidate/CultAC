@@ -965,12 +965,11 @@ class IntakeWireTest {
     }
 
     @Test
-    void captureBytesCountsARecordsWholeField() {
+    void aFrameBuilderCountsARecordsWholeField() {
         IntakeWire.FrameBuilder builder = new IntakeWire.FrameBuilder();
         add(builder, IntakeWire.SERVERBOUND, 300, new byte[200]);
         int body = CodedOutputStream.computeTagSize(IntakeWire.SERVERBOUND) + 2 + 200 + 1 + 2;
         assertEquals(1 + 2 + body, builder.bytes());
-        assertEquals(builder.bytes(), IntakeWire.captureBytes(IntakeWire.SERVERBOUND, 300, 200, 0, 0, 0));
     }
 
     @Test
