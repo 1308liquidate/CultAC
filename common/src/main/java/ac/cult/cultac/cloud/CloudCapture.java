@@ -594,6 +594,7 @@ public final class CloudCapture implements PlayerObserver {
         closed = null;
         channel = null;
         capturing = false;
+        if (stream != null) stream.reset();
         stream = null;
         engine = null;
         leave();

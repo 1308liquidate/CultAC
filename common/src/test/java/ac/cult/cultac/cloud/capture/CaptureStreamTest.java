@@ -107,6 +107,66 @@ class CaptureStreamTest {
     }
 
     @Test
+    void reusableCopyCapacityStaysBoundedAndIsGivenBackWhenTrafficQuietsStallsOrResets() {
+        long process = CapturePacketCopies.processBytes();
+        CaptureStream stream = answered(new TestSink());
+        ByteBuf wire = PooledByteBufAllocator.DEFAULT.directBuffer(300);
+        long second = 1_000_000_000L;
+        try {
+            long nanos = 0;
+            long peak = 0;
+            for (int tick = 1; tick <= 40; tick++) {
+                nanos = tick * 50_000_000L;
+                for (int packet = 0; packet < 160; packet++)
+                    serverbound(stream, wire, 1 + (tick * 7 + packet * 13) % 256, nanos);
+                stream.cut(nanos);
+                if (tick > 3) verdict(stream, tick - 3, tick - 3, 0);
+                peak = Math.max(peak, stream.pooledBytes());
+                assertTrue(stream.pooledBytes() <= CapturePacketCopies.PLAYER_BYTES, stream.pooledBytes() + "");
+            }
+            for (int tick = 38; tick <= 40; tick++) verdict(stream, tick, tick, 0);
+            assertTrue(peak > CapturePacketCopies.MAX_RETAINED_BYTES, peak + "");
+
+            for (int tick = 41; tick <= 100; tick++) {
+                nanos += second;
+                serverbound(stream, wire, 1, nanos);
+                stream.cut(nanos);
+                verdict(stream, tick, tick, 0);
+                assertTrue(stream.pooledBytes() <= CapturePacketCopies.PLAYER_BYTES, stream.pooledBytes() + "");
+            }
+            long quiet = stream.pooledBytes();
+            assertTrue(quiet <= 2 * CapturePacketCopies.POOL_BYTES + 64, quiet + " after a peak of " + peak);
+
+            for (int tick = 101; tick <= 200; tick++) {
+                nanos += 50_000_000L;
+                for (int packet = 0; packet < 160; packet++)
+                    serverbound(stream, wire, 1 + (tick * 11 + packet * 17) % 256, nanos);
+                stream.cut(nanos);
+                assertTrue(stream.pooledBytes() <= CapturePacketCopies.PLAYER_BYTES, stream.pooledBytes() + "");
+                assertTrue(
+                        CapturePacketCopies.processBytes() - process <= CapturePacketCopies.PLAYER_BYTES,
+                        CapturePacketCopies.processBytes() - process + "");
+            }
+
+            stream.reset();
+
+            assertEquals(0, stream.pooledBytes());
+            assertEquals(process, CapturePacketCopies.processBytes());
+        } finally {
+            wire.release();
+        }
+    }
+
+    private static void serverbound(CaptureStream stream, ByteBuf wire, int length, long nanos) {
+        wire.clear()
+                .writeByte(77)
+                .writeByte(SERVERBOUND_ID)
+                .writeZero(length - 1)
+                .readerIndex(1);
+        stream.tap(IntakeWire.SERVERBOUND, SERVERBOUND_ID, wire, nanos, 0, 0, null, 0);
+    }
+
+    @Test
     void firstJoinWithAnOpenSocketIsByteIdenticalToAnImmediateJoin() {
         TestSink immediate = new TestSink();
         CaptureStream a = new CaptureStream(PLAYER);

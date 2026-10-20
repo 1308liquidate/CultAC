@@ -3,6 +3,7 @@ package ac.cult.cultac.cloud.capture;
 import ac.cult.cultac.cloud.intake.v3.Outcome;
 import ac.cult.cultac.cloud.transport.CloudConnection;
 import ac.cult.cultac.cloud.wire.IntakeWire;
+import ac.cult.cultac.network.FrameCopies;
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
 import java.util.ArrayDeque;
@@ -284,6 +285,10 @@ public final class CaptureStream {
     private CapturePacketCopies copies;
     /** Packet copies a released frame left, for the next frame to reuse. */
     private CapturePacketCopies spareCopies;
+
+    private final CapturePacketCopies.Budget copyBudget = new CapturePacketCopies.Budget();
+    /** The latest clock a copy or cut has seen, against which idle copy capacity is trimmed. */
+    private long copyClock = Long.MIN_VALUE;
     /** Counts captures; an action belongs to the one it was tapped under. */
     private long generation;
     /** The open frame's position of the last serverbound packet the tap saw; -1 when the frame does not hold it. */
@@ -540,15 +545,30 @@ public final class CaptureStream {
      * {@code source}'s readable bytes, which stay the caller's, lives until the open frame is sent, dropped or reset.
      */
     public void tap(int kind, int id, ByteBuf source, long nanos, int minY, int height, Session session, int pingKind) {
-        tap(kind, id, copy(source), nanos, minY, height, session, pingKind);
+        tap(kind, id, copy(source, nanos), nanos, minY, height, session, pingKind);
     }
 
-    private byte[] copy(ByteBuf source) {
+    private byte[] copy(ByteBuf source, long nanos) {
+        copyClock = Math.max(copyClock, nanos);
+        if (source.readableBytes() > CapturePacketCopies.MAX_PACKET_BYTES) return FrameCopies.bytes(source);
         if (copies == null) {
-            copies = spareCopies != null ? spareCopies : new CapturePacketCopies();
+            copies = spareCopies != null ? spareCopies : CapturePacketCopies.of(copyBudget, nanos);
             spareCopies = null;
+            if (copies == null) return FrameCopies.bytes(source);
         }
-        return copies.copy(source);
+        return copies.copy(source, nanos);
+    }
+
+    /** Reusable packet-copy capacity this stream's pools hold, bookkeeping included. */
+    long pooledBytes() {
+        return copyBudget.bytes();
+    }
+
+    private void releaseCopies(CapturePacketCopies released) {
+        if (released == null) return;
+        released.clear(copyClock);
+        if (spareCopies == null) spareCopies = released;
+        else released.release();
     }
 
     /** As {@link #tap(int, int, byte[], long, int, int, Session)}, for a ping of {@code PingKind} {@code pingKind}. */
@@ -735,7 +755,7 @@ public final class CaptureStream {
         frameWorld = false;
         frame = new ArrayList<>();
         frameBytes = 0;
-        if (copies != null) copies.clear();
+        if (copies != null) copies.clear(copyClock);
         releaseOpen();
         List<TerrainRecord> terrain = framedTerrain;
         framedTerrain = NO_TERRAIN;
@@ -780,6 +800,11 @@ public final class CaptureStream {
     /** The client ended a tick: its frame is complete, and waits for CultAC's verdict on it. */
     public void cut(long nanos) {
         cuts++;
+        copyClock = Math.max(copyClock, nanos);
+        if (spareCopies != null && copyClock - spareCopies.lastUse() > CapturePacketCopies.IDLE_NANOS) {
+            spareCopies.release();
+            spareCopies = null;
+        }
         if (pendingJoin != null && sink.send(pendingJoin)) pendingJoin = null;
         List<ActionRef> cutActions = actions;
         actions = NO_ACTIONS;
@@ -886,11 +911,8 @@ public final class CaptureStream {
         if (tick.reserved != 0) sink.release(tick.reserved);
         heldBytes -= tick.reserved;
         tick.reserved = 0;
-        if (tick.copies != null) {
-            tick.copies.clear();
-            if (spareCopies == null) spareCopies = tick.copies;
-            tick.copies = null;
-        }
+        releaseCopies(tick.copies);
+        tick.copies = null;
     }
 
     /** A frame's terrain records are done with: those it did not carry to the service are owed again. */
@@ -1339,8 +1361,14 @@ public final class CaptureStream {
         lose(actions);
         actions = NO_ACTIONS;
         lastServerbound = -1;
-        for (Tick tick : awaiting) lose(tick.actions);
-        for (Tick tick : held) lose(tick.actions);
+        for (Tick tick : awaiting) {
+            lose(tick.actions);
+            if (tick.copies != null) tick.copies.release();
+        }
+        for (Tick tick : held) {
+            lose(tick.actions);
+            if (tick.copies != null) tick.copies.release();
+        }
         outcomesDropped.addAndGet(outcomes.size());
         outcomes.clear();
         sending = List.of();
@@ -1368,7 +1396,10 @@ public final class CaptureStream {
         sinceKeyframe = 0;
         frame = new ArrayList<>();
         frameBytes = 0;
-        if (copies != null) copies.clear();
+        if (copies != null) copies.release();
+        if (spareCopies != null) spareCopies.release();
+        copies = null;
+        spareCopies = null;
         overflow = false;
         awaiting.clear();
         if (sink != null && heldBytes != 0) sink.release(heldBytes);
