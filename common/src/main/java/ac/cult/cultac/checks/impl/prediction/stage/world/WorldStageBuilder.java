@@ -13,6 +13,7 @@ import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
+import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.utils.collisions.ClientBlockShapes;
 import ac.cult.cultac.utils.collisions.datatypes.CollisionBox;
@@ -191,7 +192,7 @@ public class WorldStageBuilder {
         boolean swimming = simulationContext.getVehicle() == null
                 && !(player.isFlying && player.swimState.flewLastTick())
                 && player.sprintState.flagBeforeAiStep()
-                && (player.swimState.swimming()
+                && (player.swimState.swimming() && player.gamemode != GameMode.SPECTATOR
                         ? isInWater.determineOptimistically()
                         : underwater && player.compensatedWorld.getWaterFluidLevelAt(from.x, from.y, from.z) > 0);
         // Portal contact uses the swept inside-block volume.
