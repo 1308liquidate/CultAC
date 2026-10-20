@@ -55,7 +55,6 @@ import ac.cult.cultac.utils.nmsutil.IsUsingItem;
 import ac.grim.grimac.api.event.events.GrimPlayerSetbackEvent;
 import ac.grim.grimac.api.event.events.GrimTeleportEvent;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -100,11 +99,6 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
     }
 
     private static final float ROTATION_TELEPORT_EPSILON = 1.0E-4F;
-    /**
-     * Paper honours only its newest teleport ID and a client accepts each teleport within a round trip, so only a
-     * client that withholds its accepts holds more than a few. Past this many the oldest is dropped.
-     */
-    private static final int MAX_PENDING_JAVA_TELEPORTS = 64;
 
     // Sync to netty
     public final ConcurrentLinkedDeque<TeleportData> pendingTeleports = new ConcurrentLinkedDeque<>();
@@ -1660,7 +1654,6 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         }
 
         pendingTeleports.add(data);
-        dropOldestJavaTeleports();
 
         data = data.copyWithLocation(safePosition);
         this.requiredSetBack = new SetBackData(data, player.xRot, player.yRot, null, false, plugin);
@@ -1671,18 +1664,27 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         }
     }
 
-    // The newest is the required setback, so it is never the one dropped.
-    private void dropOldestJavaTeleports() {
-        int excess = -MAX_PENDING_JAVA_TELEPORTS;
+    /** ClientPacketListener#handleMovePlayer sends the teleport's ID, whatever position follows it. */
+    public void teleportAnswered(int teleportId) {
         for (TeleportData pending : pendingTeleports) {
-            if (isJavaIdTeleport(pending)) excess++;
-        }
-        for (Iterator<TeleportData> it = pendingTeleports.iterator(); excess > 0 && it.hasNext(); ) {
-            if (isJavaIdTeleport(it.next())) {
-                it.remove();
-                excess--;
+            if (isJavaIdTeleport(pending) && !pending.isAnswered() && pending.getTeleportId() == teleportId) {
+                pending.setAnswered(true);
+                return;
             }
         }
+    }
+
+    /**
+     * Whether the client handled a ping sent after a player_position teleport without answering it.
+     * ClientPacketListener#handleMovePlayer sends its answer before the client handles the next ping, so a vanilla
+     * client never does.
+     */
+    public boolean hasWithheldJavaTeleport() {
+        int received = player.lastTransactionReceived.get();
+        for (TeleportData pending : pendingTeleports) {
+            if (isJavaIdTeleport(pending) && !pending.isAnswered() && received > pending.getTransaction()) return true;
+        }
+        return false;
     }
 
     /** A player_position teleport, which the Java client accepts by ID. */

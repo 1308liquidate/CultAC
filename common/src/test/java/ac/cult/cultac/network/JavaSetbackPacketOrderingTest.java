@@ -106,6 +106,74 @@ class JavaSetbackPacketOrderingTest {
     @EnumSource(
             value = ProtocolVersion.class,
             names = {"V26_2", "V26_3"})
+    void everyRelativeTeleportOfABurstSentBeforeTheFirstResponseIsAccepted(ProtocolVersion version)
+            throws Exception {
+        try (var setup = new Setup(version)) {
+            var teleports = setup.player.getSetbackTeleportUtil();
+            int burst = 65;
+            // Each X += 1 teleport follows its own leading ping; all are sent before the client answers the first.
+            for (int id = 1; id <= burst; id++) {
+                teleports.addSentTeleport(new Vec3(1, 64, .5), 20 + 2 * id, RelativeFlag.X, true, id);
+            }
+
+            for (int id = 1; id <= burst; id++) {
+                setup.player.lastTransactionReceived.set(20 + 2 * id);
+                double x = .5 + id;
+                if (version == ProtocolVersion.V26_2) {
+                    var ack = new ServerboundAcceptTeleportation(id, null, 0, 0);
+                    var ackEvent = new PacketReceiveEvent<>(
+                            setup.fixture.user, ConnectionPhase.PLAY, ServerboundPackets.ACCEPT_TELEPORTATION, ack);
+                    new PacketServerTeleport().onAcceptTeleportation(ackEvent, setup.player, ack);
+                    var packet = new ServerboundMovePlayer(x, 64, .5, 0, 0, false, false, true, true);
+                    var event = new PacketReceiveEvent<>(
+                            setup.fixture.user, ConnectionPhase.PLAY, ServerboundPackets.MOVE_PLAYER, packet);
+                    setup.listener.onMovePlayer(event, setup.player, packet);
+                } else {
+                    var packet = new ServerboundAcceptTeleportation(id, new Vec3d(x, 64, .5), 0, 0);
+                    var event = new PacketReceiveEvent<>(
+                            setup.fixture.user, ConnectionPhase.PLAY, ServerboundPackets.ACCEPT_TELEPORTATION, packet);
+                    new PacketServerTeleport().onAcceptTeleportation(event, setup.player, packet);
+                    assertFalse(event.isCancelled(), "teleport " + id);
+                }
+                assertEquals(burst - id, teleports.pendingTeleports.size(), "teleport " + id);
+                assertEquals(x, setup.player.x, 1.0E-12, "teleport " + id);
+                assertFalse(teleports.hasWithheldJavaTeleport(), "teleport " + id);
+            }
+            assertTrue(teleports.pendingTeleports.isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ProtocolVersion.class,
+            names = {"V26_2", "V26_3"})
+    void aTeleportProcessedWithoutItsResponseIsWithheld(ProtocolVersion version) throws Exception {
+        try (var setup = new Setup(version)) {
+            var teleports = setup.player.getSetbackTeleportUtil();
+            teleports.addSentTeleport(new Vec3(2, 64, 2), 20, new RelativeFlag(0), true, 1);
+            teleports.addSentTeleport(new Vec3(3, 64, 3), 22, new RelativeFlag(0), true, 2);
+            // handleMovePlayer answers before the client handles the trailing ping, so until that pong it may be
+            // in flight.
+            setup.player.lastTransactionReceived.set(20);
+            assertFalse(teleports.hasWithheldJavaTeleport());
+            // A wrong position is still an answer; checkTeleportQueue judges it.
+            var ack = new ServerboundAcceptTeleportation(
+                    1, version == ProtocolVersion.V26_2 ? null : new Vec3d(9, 64, 9), 0, 0);
+            var event = new PacketReceiveEvent<>(
+                    setup.fixture.user, ConnectionPhase.PLAY, ServerboundPackets.ACCEPT_TELEPORTATION, ack);
+            new PacketServerTeleport().onAcceptTeleportation(event, setup.player, ack);
+            setup.player.lastTransactionReceived.set(22);
+            assertFalse(teleports.hasWithheldJavaTeleport());
+
+            setup.player.lastTransactionReceived.set(23);
+            assertTrue(teleports.hasWithheldJavaTeleport());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ProtocolVersion.class,
+            names = {"V26_2", "V26_3"})
     void blockedReminderIsPredictedAndResetsTheCounter(ProtocolVersion version) throws Exception {
         try (var setup = new Setup(version)) {
             setup.pendingSetback();

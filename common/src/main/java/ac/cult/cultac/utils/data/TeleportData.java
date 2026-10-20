@@ -57,6 +57,10 @@ public class TeleportData {
     @Setter
     boolean sentDuringVehicleDismount;
 
+    /** The client sent this pending teleport's ID. */
+    @Setter
+    boolean answered;
+
     @Setter
     Boolean bedrockOnGround;
 

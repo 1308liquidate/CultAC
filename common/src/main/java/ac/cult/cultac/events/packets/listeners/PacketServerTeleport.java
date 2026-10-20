@@ -31,6 +31,7 @@ public class PacketServerTeleport {
             // Geyser's Java acknowledgement does not prove Bedrock processed the teleport.
             return;
         }
+        player.getSetbackTeleportUtil().teleportAnswered(ack.id());
         // The wire packet is ID-only through 26.2 and carries position in
         // 26.3. The transport preserves the intercepted endpoint's wire format.
         if (ack.position() == null) {
