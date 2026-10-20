@@ -236,9 +236,8 @@ public final class PacketEntityHurtingProjectile extends PacketEntity {
         return owner == null ? null : root(owner);
     }
 
-    private static PacketEntity root(PacketEntity entity) {
-        while (entity.getRiding() != null) entity = entity.getRiding();
-        return entity;
+    private PacketEntity root(PacketEntity entity) {
+        return player.compensatedEntities.rootOf(entity);
     }
 
     /**

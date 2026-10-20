@@ -52,6 +52,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -433,6 +434,48 @@ class EntityInteractionVisibilityTest {
             setup.cow(40, new Vec3(.5, 64, 3.7));
             setup.player.compensatedEntities.getEntity(40).mount(setup.player.compensatedEntities.getEntity(41));
             var fireball = setup.fireball(42, 8, -1, 41);
+            for (int tick = 0; tick < 4; tick++) setup.clientTick();
+            assertStops(fireball, 8 - first - second - third - fourth);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void aPassengerListClosingARidingCycleIsRefused(ProtocolVersion version) throws Exception {
+        double first = 1.045, second = (first + .1) * .95, third = (second + .1) * .95, fourth = (third + .1) * .95;
+        try (var setup = new Setup(version).asClient()) {
+            // Entity#startRiding refuses a vehicle that rides the passenger, so boat 41 stays the root.
+            setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
+            setup.entity(43, EntityTypeIds.OAK_BOAT, 3.7);
+            var fireball = setup.fireball(42, 8, -1, 41);
+            var entities = setup.player.compensatedEntities;
+            assertTrue(entities.vehicles.applyVehiclePassengers(41, new int[] {43}));
+            assertTrue(entities.vehicles.applyVehiclePassengers(43, new int[] {41}));
+            assertSame(entities.getEntity(41), entities.getEntity(43).getRiding());
+            assertNull(entities.getEntity(41).getRiding());
+            assertTrue(entities.getEntity(43).passengers.isEmpty());
+            // Boat 43 rides outside the local player's tree, so the projectile may still be on its owner.
+            for (int tick = 0; tick < 4; tick++) setup.clientTick();
+            assertStops(fireball, 8 - first - second - third - fourth);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
+    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void aRidingCycleEndsEveryRootWalk(ProtocolVersion version) throws Exception {
+        double first = 1.045, second = (first + .1) * .95, third = (second + .1) * .95, fourth = (third + .1) * .95;
+        try (var setup = new Setup(version).asClient()) {
+            setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
+            setup.entity(43, EntityTypeIds.OAK_BOAT, 3.7);
+            var fireball = setup.fireball(42, 8, -1, 41);
+            var entities = setup.player.compensatedEntities;
+            entities.getEntity(43).mount(entities.getEntity(41));
+            entities.getEntity(41).mount(entities.getEntity(43));
+            // A cycle has no root: its riders are untracked and the owner counts as left.
+            assertNull(entities.rootOf(entities.getEntity(41)));
+            assertFalse(entities.ridesIndirectly(entities.getSelf(), entities.getEntity(41)));
             for (int tick = 0; tick < 4; tick++) setup.clientTick();
             assertStops(fireball, 8 - first - second - third - fourth);
         }

@@ -295,15 +295,24 @@ public class CompensatedEntities {
         return root != null && root == rootOf(playerEntity);
     }
 
-    // Null inside a riding cycle (a server mounting a vehicle on its own passenger), which has no root.
+    /** {@code Entity#getRootVehicle}; null inside a riding cycle, which has no root. */
     @Nullable
-    private PacketEntity rootOf(PacketEntity entity) {
+    public PacketEntity rootOf(PacketEntity entity) {
         PacketEntity root = entity;
         for (int hops = 0; root.getRiding() != null; hops++) {
             if (hops > entityMap.size()) return null;
             root = root.getRiding();
         }
         return root;
+    }
+
+    /** Whether {@code entity} rides {@code vehicle} directly or through other vehicles; a riding cycle ends the walk. */
+    public boolean ridesIndirectly(PacketEntity entity, PacketEntity vehicle) {
+        PacketEntity riding = entity.getRiding();
+        for (int hops = 0; riding != null && hops <= entityMap.size(); hops++, riding = riding.getRiding()) {
+            if (riding == vehicle) return true;
+        }
+        return false;
     }
 
     // TODO: This doesn't belong here at all
