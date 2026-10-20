@@ -262,6 +262,59 @@ class PortalSyncTest {
     }
 
     @Test
+    void aDemotionCarriedOnAClosedSocketIsSentAgain() {
+        sync.opened(a, true);
+        sync.opened(b, true);
+        UUID demoted = join(1, Role.MODERATOR);
+        sync.tick();
+        online.put(demoted, new Online("Player1", null));
+        sync.permissionsChanged(demoted);
+        sync.tick();
+        assertEquals(PortalRole.PORTAL_ROLE_NONE, a.sent.get(1).get(0).getRole());
+
+        sync.closed(a);
+        sync.tick();
+
+        assertEquals(List.of(demoted), b.players(0));
+        assertEquals(PortalRole.PORTAL_ROLE_NONE, b.sent.get(0).get(0).getRole());
+    }
+
+    @Test
+    void aQueuedDemotionDroppedWhileOffIsSentWhenSyncComesBack() {
+        sync.opened(a, true);
+        UUID demoted = join(1, Role.MODERATOR);
+        sync.tick();
+        online.put(demoted, new Online("Player1", null));
+        sync.permissionsChanged(demoted);
+        a.takes = false;
+        a.onSend = () -> sync.state(a, false);
+        sync.tick();
+
+        a.takes = true;
+        a.onSend = null;
+        sync.state(a, true);
+        sync.tick();
+
+        assertEquals(List.of(demoted), a.players(1));
+        assertEquals(PortalRole.PORTAL_ROLE_NONE, a.sent.get(1).get(0).getRole());
+    }
+
+    @Test
+    void aResyncTheFullQueueTurnedAwayIsSentOnceThereIsRoom() {
+        sync.opened(a, true);
+        sync.opened(b, true);
+        UUID staff = join(0, Role.MODERATOR);
+        sync.tick();
+        for (int n = 1; n <= PortalSync.MAX_QUEUED; n++) join(n, Role.VIEWER);
+        sync.closed(a);
+        for (int i = 0; i < 10; i++) sync.tick();
+
+        boolean resent = false;
+        for (int i = 0; i < b.sent.size(); i++) resent |= b.players(i).contains(staff);
+        assertTrue(resent);
+    }
+
+    @Test
     void reportsGoOnTheLongestOpenEnabledSocket() {
         sync.opened(a, false);
         sync.opened(b, true);

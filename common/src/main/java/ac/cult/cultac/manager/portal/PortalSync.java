@@ -129,11 +129,16 @@ public final class PortalSync {
     private final Map<UUID, Report> queue = new LinkedHashMap<>();
     /** Online players whose join check ran; only their permission changes are re-checked. */
     private final Set<UUID> watched = new HashSet<>();
-    /** The role last queued for each watched player; absent when none was, or the last report was none. */
+    /**
+     * The role last queued for each watched player: null when the last report was no role, absent when none was
+     * queued. A resync re-sends every present entry.
+     */
     private final Map<UUID, Role> reported = new HashMap<>();
     private final Set<UUID> changed = new LinkedHashSet<>();
     /** The next tick reports each watched player's state whatever was reported before. */
     private boolean resync;
+    /** Reports turned away by a full queue since the last tick. */
+    private int full;
 
     /** The open team sockets, longest open first. */
     private final Map<TeamSocket, Link> sockets = new LinkedHashMap<>();
@@ -173,7 +178,7 @@ public final class PortalSync {
         if (online == null) return;
         synchronized (this) {
             watched.add(uuid);
-            if (online.role() != null && online.role() != reported.get(uuid)) apply(uuid, online);
+            if (online.role() != null && online.role() != reported.get(uuid)) apply(uuid, online, false);
         }
     }
 
@@ -256,6 +261,12 @@ public final class PortalSync {
     public void tick() {
         List<UUID> recheckNow;
         boolean all;
+        int turnedAway;
+        synchronized (this) {
+            turnedAway = full;
+            full = 0;
+        }
+        if (turnedAway > 0) debug.accept("Team sync queue full; turned away " + turnedAway + " reports");
         synchronized (this) {
             for (Iterator<UUID> it = watched.iterator(); it.hasNext(); ) {
                 if (!players.isOnline(it.next())) it.remove();
@@ -275,7 +286,7 @@ public final class PortalSync {
                 if (online == null) watched.remove(uuid);
                 else if (all
                         ? online.role() != null || reported.containsKey(uuid)
-                        : online.role() != reported.get(uuid)) apply(uuid, online);
+                        : online.role() != reported.get(uuid)) apply(uuid, online, all);
             }
         }
 
@@ -355,21 +366,23 @@ public final class PortalSync {
         }
     }
 
-    private void apply(UUID uuid, Online online) {
+    private void apply(UUID uuid, Online online, boolean resyncing) {
         if (!validName(online.name())) return;
         if (!enqueue(new Report(uuid, online.name(), online.role(), false))) {
-            if (enabled()) changed.add(uuid);
+            if (enabled()) {
+                changed.add(uuid);
+                resync |= resyncing;
+            }
             return;
         }
-        if (online.role() != null) reported.put(uuid, online.role());
-        else reported.remove(uuid);
+        reported.put(uuid, online.role());
     }
 
     /** Queues {@code report} while team sync is on and the queue has room. */
     private boolean enqueue(Report report) {
         if (!enabled()) return false;
         if (queue.size() >= MAX_QUEUED && !queue.containsKey(report.uuid())) {
-            debug.accept("Team sync queue full; dropped a report");
+            full++;
             return false;
         }
         queue.put(report.uuid(), report);
