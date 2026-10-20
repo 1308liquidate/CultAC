@@ -4,13 +4,10 @@ import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
-import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
-import ac.cult.cultac.utils.data.KnownInput;
-import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
@@ -51,7 +48,8 @@ final class SneakEdgeBackoff {
         SimulationContext context = result.getSimulationContext();
         if (player == null || context == null || !appliesTo(player, result, context)) return null;
 
-        float sneakingSpeed = (float) player.compensatedEntities.getSelf().sneakingSpeed.value();
+        float sneakingSpeed =
+                (float) player.compensatedEntities.getSelf().sneakingSpeed.value();
         if (context.getWorldData().getInWater() != DesyncStatus.TRUE) {
             return deltaMovementFrom(
                     player, result, context, accepted, context.isLastSneaking() ? sneakingSpeed : 1.0F);
@@ -75,7 +73,7 @@ final class SneakEdgeBackoff {
             float movingSlowlyFactor) {
         boolean water = context.getWorldData().getInWater() == DesyncStatus.TRUE;
         PredVector start = result.getInitialStartingVel();
-        Vec3 input = travelInput(player, context, player.packetStateData.knownInput, movingSlowlyFactor);
+        Vec3 input = ClientKeyInput.travelInput(player, context, player.packetStateData.knownInput, movingSlowlyFactor);
         if (input == null) return null;
         // LocalPlayer#aiStep's goDownInWater adds -0.04F while shift is held in water, before travel.
         double deltaY = water ? start.y + (double) -0.04F : start.y;
@@ -142,44 +140,6 @@ final class SneakEdgeBackoff {
     private static boolean stillWaterInput(SimulationContext context) {
         return context.getWorldData().getInFlowingLiquid() == DesyncStatus.FALSE
                 && context.getWaterMovementEfficiency() == 0.0F;
-    }
-
-    /**
-     * LivingEntity#moveRelative's addition for {@code keys} on the ground: KeyboardInput#tick, LocalPlayer#modifyInput
-     * and Entity#getInputVector. LocalPlayer#aiStep computes crouching from the previous keys before Input#tick. Null
-     * when a pose the context does not determine could slow the input.
-     */
-    static Vec3 travelInput(CultPlayer player, SimulationContext context, KnownInput keys, float movingSlowlyFactor) {
-        Vec3 start = context.getStart();
-        SimpleCollisionBox standing = GetBoundingBox.getBoundingBoxFromPosAndSize(
-                        start.x,
-                        start.y,
-                        start.z,
-                        Pose.STANDING.width * context.getScale(),
-                        Pose.STANDING.height * context.getScale())
-                .expand(-SimpleCollisionBox.COLLISION_EPSILON);
-        // LocalPlayer#isMovingSlowly: with room to stand, the player crouches exactly when shift was held.
-        if (!Collisions.isEmpty(player, standing)) return null;
-
-        Vec3 modified = VelocityTransformer.getExactControllerModifiedInputStatic(
-                new Vec3(keys.strafeImpulse(), 0.0D, keys.forwardImpulse()), movingSlowlyFactor);
-        boolean water = context.getWorldData().getInWater() == DesyncStatus.TRUE;
-        // LivingEntity#getSpeed carries minecraft:sprinting only while the client's movement_speed holds the modifier.
-        float speed = !water && player.sprintState.modifier()
-                ? context.getSprintingGroundMoveRelativeSpeed(player)
-                : context.getMoveRelativeSpeed(player, true, water, false);
-        return inputVector(context, modified, speed);
-    }
-
-    /** Entity#getInputVector. */
-    private static Vec3 inputVector(SimulationContext context, Vec3 input, float speed) {
-        double lengthSqr = input.lengthSqr();
-        if (lengthSqr < 1.0E-7D) return Vec3.ZERO;
-        Vec3 movement = (lengthSqr > 1.0D ? input.normalize() : input).scale(speed);
-        float yawRadians = context.getXRot() * ((float) Math.PI / 180F);
-        float sin = context.getTrig().sin(yawRadians);
-        float cos = context.getTrig().cos(yawRadians);
-        return new Vec3(movement.x * cos - movement.z * sin, movement.y, movement.z * cos + movement.x * sin);
     }
 
     /** Player#maybeBackOffFromEdge once its flying, mover, shift and Player#isAboveGround conditions hold. */

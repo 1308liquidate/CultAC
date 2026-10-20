@@ -341,6 +341,10 @@ public class CultPlayer implements GrimUser {
     /** A login or respawn replaced the LocalPlayer, which has not ticked yet. */
     public void onLocalPlayerCreated() {
         packetStateData.localPlayerTickedSinceSpawn = false;
+        packetStateData.lastSentTickYaw = 0;
+        packetStateData.lastSentTickPitch = 0;
+        packetStateData.lastSendPositionYaw = 0;
+        packetStateData.lastSendPositionPitch = 0;
         headArcFrom = Float.NaN;
         unclampedHeadYaw = Float.NaN;
         boatYawBeforeTurn = Float.NaN;
