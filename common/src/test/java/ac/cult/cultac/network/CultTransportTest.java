@@ -7,6 +7,7 @@ import static org.mockito.Mockito.*;
 
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.manager.player.SetbackTeleportUtil;
+import ac.cult.cultac.network.logging.PacketLogObserver;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.*;
@@ -215,6 +216,32 @@ class CultTransportTest {
             assertTrue(f.channel.config().isAutoRead());
             inbound.release();
             outbound.release();
+        }
+    }
+
+    @Test
+    void anEmptyInboundFrameIsForwardedUnread() {
+        for (boolean owned : List.of(false, true)) {
+            try (var f = new Fixture(owned)) {
+                var observed = new AtomicInteger();
+                f.connection.packetObserver(new PacketLogObserver() {
+                    @Override
+                    public void packet(PacketDirection direction, ConnectionPhase phase, ByteBuf frame) {
+                        observed.incrementAndGet();
+                    }
+                });
+                f.routes.receive(ServerboundPackets.PONG, event -> {});
+                // Vanilla's ByteToMessageDecoder never decodes an empty buffer.
+                f.channel.pipeline().replace("decoder", "decoder", new ChannelInboundHandlerAdapter());
+                ByteBuf empty = Unpooled.buffer(0);
+                f.channel.writeInbound(empty);
+                f.pump();
+                assertSame(empty, f.channel.readInbound());
+                assertEquals(1, empty.refCnt());
+                assertTrue(f.channel.isOpen());
+                assertEquals(0, observed.get(), "the empty frame is not read");
+                empty.release();
+            }
         }
     }
 

@@ -874,8 +874,8 @@ public class CompensatedEntities {
         if (entity instanceof PacketEntityHook) {
             EntityMetadata.Entry hookedData =
                     WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.FISHING_HOOKED_ENTITY);
-            if (hookedData == null) return;
-            ((PacketEntityHook) entity).attached = (Integer) hookedData.value() - 1; // the server adds 1 to the ID
+            if (!(hookedData != null && hookedData.value() instanceof Integer hooked)) return;
+            ((PacketEntityHook) entity).attached = hooked - 1; // the server adds 1 to the ID
         }
 
         if (entity instanceof PacketEntityRideable) {
@@ -953,16 +953,16 @@ public class CompensatedEntities {
         }
         if (entity.type == EntityTypeIds.PIG) {
             EntityMetadata.Entry boostData = WatchableIndexUtil.getIndex(watchableObjects, layout.pigBoostTime());
-            if (boostData != null) {
-                ((PacketEntityRideable) entity).boost.onSynced((int) boostData.value());
+            if (boostData != null && boostData.value() instanceof Integer boost) {
+                ((PacketEntityRideable) entity).boost.onSynced(boost);
             }
             return;
         }
 
         if (entity instanceof PacketEntityStrider) {
             EntityMetadata.Entry boostData = WatchableIndexUtil.getIndex(watchableObjects, layout.striderBoostTime());
-            if (boostData != null) {
-                ((PacketEntityRideable) entity).boost.onSynced((int) boostData.value());
+            if (boostData != null && boostData.value() instanceof Integer boost) {
+                ((PacketEntityRideable) entity).boost.onSynced(boost);
             }
         }
     }
@@ -970,8 +970,7 @@ public class CompensatedEntities {
     private void applyHorseMetadata(
             PacketEntity entity, List<EntityMetadata.Entry> watchableObjects, WatchableIndexUtil.Layout layout) {
         EntityMetadata.Entry flagsData = WatchableIndexUtil.getIndex(watchableObjects, layout.horseFlags());
-        if (flagsData != null) {
-            byte flags = (byte) flagsData.value();
+        if (flagsData != null && flagsData.value() instanceof Byte flags) {
             PacketEntityHorse horse = (PacketEntityHorse) entity;
             horse.isTame = (flags & 0x02) != 0;
             // Through 1.21.4, AbstractHorse#isSaddled reads flag 0x04 from
@@ -984,8 +983,8 @@ public class CompensatedEntities {
 
         if (entity instanceof PacketEntityCamel camel) {
             EntityMetadata.Entry dashData = WatchableIndexUtil.getIndex(watchableObjects, layout.camelDash());
-            if (dashData != null) {
-                camel.setDashingFromMetadata((boolean) dashData.value());
+            if (dashData != null && dashData.value() instanceof Boolean dashing) {
+                camel.setDashingFromMetadata(dashing);
             }
         }
     }
