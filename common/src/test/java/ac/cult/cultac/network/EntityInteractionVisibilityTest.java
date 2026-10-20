@@ -178,7 +178,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aWindChargeMovesAlongItsSpawnVelocityEachClientTick(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             // The charge is 9.19 from the eye at its server position, 2.43 after four client ticks.
             setup.spawn(
                     42,
@@ -196,7 +196,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aProjectileStopsAtTheFirstBlockOnItsPath(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 2, state("stone"));
             // The block spans z 2..3 on 42's path: 42 stops at z 3, out of range; 43 passes it and ends in range.
             setup.spawn(42, "minecraft:wind_charge", new Vec3d(.5, 64.5, 6), new Vec3d(0, 0, -1.5));
@@ -210,7 +210,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aFireballAcceleratesByATenthAndKeepsNinetyFivePercentEachClientTick(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             // Launched at 1 block per tick, a fireball covers 3.261 in three client ticks: 42 is in range from 3.2
             // on, 43 up to 3.35.
             setup.spawn(42, "minecraft:fireball", new Vec3d(.5, 65.12, 5.2), new Vec3d(0, 0, -1));
@@ -227,7 +227,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aFireballInWaterKeepsEightyPercentEachClientTick(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             for (int z = 0; z < 6; z++)
                 setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 65, z, state("water"));
             setup.spawn(42, "minecraft:fireball", new Vec3d(.5, 65.12, 5.2), new Vec3d(0, 0, -1));
@@ -246,7 +246,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void setEntityMotionSetsTheVelocityAProjectileTicksAlong(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.spawn(42, "minecraft:wind_charge", new Vec3d(.5, 65.12, 5), Vec3d.ZERO);
             setup.motion(42, new Vec3d(0, 0, -1.5));
             for (int tick = 0; tick < 3; tick++) {
@@ -260,7 +260,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void projectilePowerSetsTheAccelerationAFireballTicksWith(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.spawn(42, "minecraft:fireball", new Vec3d(.5, 65.12, 5.2), Vec3d.ZERO);
             var fireball = setup.player.compensatedEntities.getEntity(42);
             setup.motion(42, new Vec3d(0, 0, -1));
@@ -281,7 +281,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aDeflectedFireballTicksWithTheMotionAndPowerOfItsBundle(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.spawn(42, "minecraft:fireball", new Vec3d(.5, 65.12, 5.2), new Vec3d(0, 0, -1));
             var fireball = setup.player.compensatedEntities.getEntity(42);
             setup.clientTick();
@@ -297,7 +297,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aFireballStopsAtAMobInFrontOfAWall(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 2, state("stone"));
             setup.cow(41, new Vec3(.5, 64, 3.7));
             // The step from z 5 to 2.815 meets the cow's face at 4.15 before the wall's at 3.
@@ -311,7 +311,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aFireballStopsAtTheWallBeforeAMobBehindIt(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 2, state("stone"));
             setup.cow(41, new Vec3(.5, 64, 1.5));
             var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
@@ -323,7 +323,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aFireballPassesMobsBeyondItsStepOrBesideItsPath(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.cow(40, new Vec3(.5, 64, 1.5));
             setup.cow(41, new Vec3(1.5, 64, 3.7));
             var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
@@ -335,7 +335,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aFireballPassesThroughItsOwnerUntilItHasLeftIt(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.cow(41, new Vec3(.5, 64, 3.7));
             var fireball = setup.fireball(42, 5, -2.2, 41);
             setup.clientTick();
@@ -346,7 +346,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aMobThatMayHaveMovedOffThePathLeavesBothStopsAsCandidates(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.cow(41, new Vec3(.5, 64, 3.7));
             // Until the client answers the move, the cow may still be on the path or interpolating off it.
             setup.player.compensatedEntities.getEntity(41).onFirstTransaction(false, true, 3.5, 64, 3.7, setup.player);
@@ -370,7 +370,7 @@ class EntityInteractionVisibilityTest {
     @ParameterizedTest
     @MethodSource("clients")
     void aFireballStopsAtTheLocalPlayer(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             // The player's box spans z -1.8 to -1.2; the step runs from .5 to -1.685.
             var fireball = setup.fireball(42, .5, -2.2, NO_OWNER);
             setup.clientTick();
@@ -382,13 +382,13 @@ class EntityInteractionVisibilityTest {
     @MethodSource("clients")
     void aWindChargePassesThroughAnEndCrystalThatStopsAFireball(ProtocolVersion version) throws Exception {
         // The crystal's 2-wide box spans z 2.7 to 4.7 across both steps from z 5.
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.player.compensatedEntities.addEntity(41, EntityTypeIds.END_CRYSTAL, new Vec3(.5, 64, 3.7), 0, 0, 0);
             var charge = setup.projectile(42, "minecraft:wind_charge", 5, -2.2, NO_OWNER);
             setup.clientTick();
             assertEquals(2.8, charge.clientPhysicalPosition.z, 1.0E-6);
         }
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.player.compensatedEntities.addEntity(41, EntityTypeIds.END_CRYSTAL, new Vec3(.5, 64, 3.7), 0, 0, 0);
             var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
             setup.clientTick();
@@ -400,13 +400,13 @@ class EntityInteractionVisibilityTest {
     @MethodSource("clients")
     void aWindChargePassesThroughAnotherWindChargeThatStopsAFireball(ProtocolVersion version) throws Exception {
         // The resting charge's box spans z 3.54375 to 3.85625 and y 64.35 to 64.6625 around the path.
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.projectile(41, "minecraft:wind_charge", 3.7, 0, NO_OWNER);
             var charge = setup.projectile(42, "minecraft:wind_charge", 5, -2.2, NO_OWNER);
             setup.clientTick();
             assertEquals(2.8, charge.clientPhysicalPosition.z, 1.0E-6);
         }
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             setup.projectile(41, "minecraft:wind_charge", 3.7, 0, NO_OWNER);
             var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
             setup.clientTick();
@@ -416,8 +416,20 @@ class EntityInteractionVisibilityTest {
 
     @ParameterizedTest
     @MethodSource("clients")
+    void aFireballTicksBeforeAWindChargeAddedAfterIt(ProtocolVersion version) throws Exception {
+        // ClientLevel#tickEntities runs in add order: 42 meets 41's box at z 3.85625 before 41 steps off the path.
+        try (var setup = new Setup(version).asClient()) {
+            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
+            setup.projectile(41, "minecraft:wind_charge", new Vec3d(.5, 64.5, 3.7), new Vec3d(1, 0, 0), NO_OWNER);
+            setup.clientTick();
+            assertEquals(3.85625, fireball.clientPhysicalPosition.z, 1.0E-6);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
     void theHitMarginGrowsByATwentiethPerTickFromTheThirdTick(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version)) {
+        try (var setup = new Setup(version).asClient()) {
             // Tick 3 runs from z 5.867 to 4.739 and meets the cow's face at 4.95, inflated by 0.05.
             setup.cow(41, new Vec3(.5, 64, 4.5));
             var fireball = setup.fireball(42, 8, -1, NO_OWNER);
@@ -684,6 +696,16 @@ class EntityInteractionVisibilityTest {
                     .registerForwardingEarlyReceivePackets(routes, PacketListenerPriority.LOW));
         }
 
+        /** Ticks the client as {@code version}, not as the 26.3 model the older host's wire translates to. */
+        Setup asClient() throws Exception {
+            JavaTickFixture.setField(
+                    CultPlayer.class,
+                    player,
+                    "resolvedClientVersion",
+                    ClientVersion.fromProtocolVersion(version.protocol()));
+            return this;
+        }
+
         void entity(int id, int type, double z) {
             player.compensatedEntities.addEntity(id, type, new Vec3(.5, 64, z), 0, 0, 0);
         }
@@ -706,16 +728,12 @@ class EntityInteractionVisibilityTest {
         }
 
         PacketEntity projectile(int id, String type, double z, double velocityZ, int owner) {
+            return projectile(id, type, new Vec3d(.5, 64.5, z), new Vec3d(0, 0, velocityZ), owner);
+        }
+
+        PacketEntity projectile(int id, String type, Vec3d position, Vec3d velocity, int owner) {
             if (fixture.user.getPlayer() == null) fixture.user.bind(Mockito.mock(PlatformPlayer.class));
-            var packet = new ClientboundAddEntity(
-                    id,
-                    type,
-                    new Vec3d(.5, 64.5, z),
-                    0,
-                    0,
-                    owner,
-                    new UUID(0, id),
-                    new Vec3d(0, 0, velocityZ));
+            var packet = new ClientboundAddEntity(id, type, position, 0, 0, owner, new UUID(0, id), velocity);
             var event = new PacketSendEvent<>(
                     fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ADD_ENTITY, packet, false);
             player.packetEntityReplication.onAddEntity(event, player, packet);
@@ -772,6 +790,13 @@ class EntityInteractionVisibilityTest {
             var event =
                     new PacketReceiveEvent<>(fixture.user, ConnectionPhase.PLAY, ServerboundPackets.INTERACT, packet);
             player.checkManager.dispatchEarlyReceive(event);
+            // Clients before 26.1 follow each INTERACT_AT with the INTERACT for the same entity and hand.
+            if (action == InteractAction.INTERACT_AT && player.getClientVersion().isOlderThan(ClientVersion.V_26_1))
+                player.checkManager.dispatchEarlyReceive(new PacketReceiveEvent<>(
+                        fixture.user,
+                        ConnectionPhase.PLAY,
+                        ServerboundPackets.INTERACT,
+                        new ServerboundInteract(id, InteractAction.INTERACT, Hand.MAIN_HAND, Optional.empty(), false)));
             return event;
         }
 

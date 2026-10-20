@@ -393,7 +393,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             }
             entity.onMovement(player, tickingReliably);
         };
-        if (!player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
+        if (!player.isBedrockMovement()) {
             player.compensatedEntities.tickClientEntities(tick);
         } else {
             player.compensatedEntities.forEachTrackedEntity(tick);
