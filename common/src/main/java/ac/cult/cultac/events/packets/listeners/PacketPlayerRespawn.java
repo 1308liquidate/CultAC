@@ -288,6 +288,8 @@ public class PacketPlayerRespawn {
             // TODO: Perhaps make this an event, make this more OOP
             final SimulationProcessor simulation = player.checkManager.getListener(SimulationProcessor.class);
             simulation.handleRespawn();
+            // ClientPacketListener#handleRespawn copies the old delta movement only with KEEP_ENTITY_DATA.
+            if (!keepEntityData && !player.isBedrockMovement()) simulation.seedStartingVelocity(Vec3.ZERO);
             final BadPacketsE badPacketsE = player.checkManager.getListener(BadPacketsE.class);
             badPacketsE.handleRespawn(); // Reminder ticks reset
             player.checkManager.getListener(BadPacketsG.class).handleRespawn();
