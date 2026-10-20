@@ -572,7 +572,10 @@ public final class CompensatedVehicleState implements Debuggable {
         for (PacketEntity passenger : List.copyOf(vehicle.passengers)) passenger.eject();
         for (int passengerId : passengerIds) {
             PacketEntity passenger = entities.getEntity(passengerId);
-            if (passenger != null && passenger != vehicle) passenger.mount(vehicle);
+            if (passenger == null || passenger == vehicle) continue;
+            passenger.mount(vehicle);
+            // The seat is placed before the client's next ride tick confirms it.
+            passenger.markPositionInexact();
         }
         entities.updatePassengerPositions();
         seedStartingVelocityIfRootChanged(previousRoot);

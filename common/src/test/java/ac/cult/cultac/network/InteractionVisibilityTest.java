@@ -355,9 +355,9 @@ class InteractionVisibilityTest {
                 player.compensatedEntities.addEntity(42, type, new Vec3(halfWidth + .01, 64, halfWidth + .01), 0, 0, 0);
                 var entity = player.compensatedEntities.getEntity(42);
                 assertTrue(setup.visibility.entityHidden(entity.getPossibleMovementCollisionBoxes(), 0));
-                assertFalse(
+                assertTrue(
                         setup.visibility.entityHidden(entity.getPossibleCollisionBoxes(), 0),
-                        "The reach-only expansion invents an exposed corner of the target");
+                        "A Java client's reach box is its physical hitbox");
                 for (double error : new double[] {0, .0002, .03}) {
                     assertTrue(
                             setup.visibility.entityHidden(entity, error), "Native selection uses the physical hitbox");

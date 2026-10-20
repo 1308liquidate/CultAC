@@ -33,6 +33,9 @@ public class Collisions {
     private static final Vec3 WEAVING_COBWEB_STUCK_SPEED = new Vec3(0.5, 0.25, 0.5);
     private static final Vec3 SWEET_BERRY_BUSH_STUCK_SPEED = new Vec3(0.800000011920929, 0.75, 0.800000011920929);
     private static final Vec3 POWDER_SNOW_STUCK_SPEED = new Vec3(0.8999999761581421, 1.5, 0.8999999761581421);
+    /** Every Entity#stuckSpeedMultiplier a block's entityInside gives the local player. */
+    public static final List<Vec3> PLAYER_STUCK_SPEEDS = List.of(
+            COBWEB_STUCK_SPEED, WEAVING_COBWEB_STUCK_SPEED, SWEET_BERRY_BUSH_STUCK_SPEED, POWDER_SNOW_STUCK_SPEED);
 
     private static final boolean IS_FOURTEEN = true; // Current runtime is newer than 1.14.
 

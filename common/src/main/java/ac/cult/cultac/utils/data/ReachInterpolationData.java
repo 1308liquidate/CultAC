@@ -36,6 +36,8 @@ import java.util.function.UnaryOperator;
 // You may not copy the check unless you are licensed under GPL
 public class ReachInterpolationData {
     private static final double REACH_PACKET_POSITION_UNCERTAINTY = 0.03125D;
+    /** A start extent within this of the new size is that size; the size change rounds by less. */
+    private static final double SIZE_EPSILON = 1.0E-7D;
     /** Queue length past which the two oldest steps fold into one. */
     static final int MAX_QUEUED_STEPS = 128;
 
@@ -59,6 +61,8 @@ public class ReachInterpolationData {
     private int interpolationStepsHighBound = 0;
     private int interpolationSteps = 1;
     private final boolean reachesUsePacketPositionUncertainty;
+    // Reach judges a Java snapshot without the margin until a queue fold or an uncertain receipt clears this.
+    private boolean positionExact;
     // getPossibleMovementLocationCombined while boundsValid; every write to its inputs clears boundsValid.
     private boolean boundsValid;
     private double boundsMinX, boundsMinY, boundsMinZ, boundsMaxX, boundsMaxY, boundsMaxZ;
@@ -85,6 +89,7 @@ public class ReachInterpolationData {
         this.interpolationStepsHighBound = other.interpolationStepsHighBound;
         this.interpolationSteps = other.interpolationSteps;
         this.reachesUsePacketPositionUncertainty = other.reachesUsePacketPositionUncertainty;
+        this.positionExact = other.positionExact;
     }
 
     public ReachInterpolationData copy() {
@@ -147,6 +152,7 @@ public class ReachInterpolationData {
         this.targetYaw = targetYaw;
         this.targetPitch = targetPitch;
         this.reachesUsePacketPositionUncertainty = true;
+        this.positionExact = !player.isBedrockMovement();
         this.interpolationSteps = vanillaInterpolationStepsFor(entity);
 
         if (!player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
@@ -171,6 +177,15 @@ public class ReachInterpolationData {
 
     public boolean usesSteppedInterpolation() {
         return interpolationQueue != null;
+    }
+
+    /** Whether reach judges this snapshot without the packet-position margin. */
+    public boolean hasExactPosition() {
+        return positionExact;
+    }
+
+    public void markPositionInexact() {
+        positionExact = false;
     }
 
     public void setPhysicalBeforePathAppend(
@@ -235,6 +250,7 @@ public class ReachInterpolationData {
             Step oldest = interpolationQueue.removeFirst();
             Step next = interpolationQueue.removeFirst();
             interpolationQueue.addFirst(new Step(next.transform(), oldest.ticks() + next.ticks()));
+            positionExact = false;
         }
         interpolationQueue.addLast(new Step(transform, ticks));
         remainingTicks += ticks;
@@ -376,6 +392,7 @@ public class ReachInterpolationData {
         this.startingLocation = finishedLoc.copy();
         this.targetLocation = finishedLoc.copy();
         this.reachesUsePacketPositionUncertainty = false;
+        this.positionExact = true;
     }
 
     private int getInterpolationSteps() {
@@ -401,7 +418,7 @@ public class ReachInterpolationData {
 
     public SimpleCollisionBox getPossibleLocationCombined(SimpleCollisionBox out) {
         SimpleCollisionBox box = getPossibleMovementLocationCombined(out);
-        if (reachesUsePacketPositionUncertainty) {
+        if (reachesUsePacketPositionUncertainty && !positionExact) {
             // Packet-position uncertainty applies to reach queries only: vanilla
             // EntityGetter#getEntityCollisions uses the concrete bounding box, so
             // movement physics must never see this expansion.
@@ -678,7 +695,29 @@ public class ReachInterpolationData {
     /** {@code Entity#reapplyPosition}: every box keeps its position and takes the new dimensions. */
     public void resize(float width, float height) {
         boundsValid = false;
-        startingLocation = resized(startingLocation, width, height);
+        // A pending second transaction leaves the start a union of boxes the target's size; each keeps its feet.
+        double widthChange = width - (targetLocation.maxX - targetLocation.minX);
+        double heightChange = height - (targetLocation.maxY - targetLocation.minY);
+        SimpleCollisionBox start = new SimpleCollisionBox(
+                startingLocation.minX - widthChange / 2.0D,
+                startingLocation.minY,
+                startingLocation.minZ - widthChange / 2.0D,
+                startingLocation.maxX + widthChange / 2.0D,
+                startingLocation.maxY + heightChange,
+                startingLocation.maxZ + widthChange / 2.0D);
+        // A start smaller than the target never shrinks below the new size; the box constructor does not sort.
+        if (start.maxX - start.minX < width - SIZE_EPSILON) {
+            double centerX = (startingLocation.minX + startingLocation.maxX) / 2.0D;
+            start.minX = centerX - width / 2.0D;
+            start.maxX = centerX + width / 2.0D;
+        }
+        if (start.maxZ - start.minZ < width - SIZE_EPSILON) {
+            double centerZ = (startingLocation.minZ + startingLocation.maxZ) / 2.0D;
+            start.minZ = centerZ - width / 2.0D;
+            start.maxZ = centerZ + width / 2.0D;
+        }
+        if (start.maxY - start.minY < height - SIZE_EPSILON) start.maxY = start.minY + height;
+        startingLocation = start;
         targetLocation = resized(targetLocation, width, height);
     }
 

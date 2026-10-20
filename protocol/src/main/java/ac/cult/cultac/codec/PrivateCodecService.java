@@ -442,8 +442,7 @@ public final class PrivateCodecService implements WireValueDecoder {
                     value = new int[] {position.x(), position.y(), position.z()};
                 }
             }
-            result.add(new MetadataValue(
-                    index, kind, value, ByteBufUtil.getBytes(input, start, input.readerIndex() - start)));
+            result.add(new MetadataValue(index, kind, value, start, input.readerIndex() - start));
         }
         return List.copyOf(result);
     }

@@ -64,6 +64,31 @@ class PerfWindowTest {
     }
 
     @Test
+    void partnerModeNamesPartnerAllocationClassesOther() {
+        PerfRecorder.Window window = new PerfRecorder.Window(-1);
+        window.alloc(OWN, OWN_GROUP, -1, "[B", 100);
+        window.alloc(OWN, OWN_GROUP, -1, "[Ljava.lang.String;", 50);
+        window.alloc(OWN, OWN_GROUP, -1, "partner.Secret", 30);
+        window.alloc(OWN, OWN_GROUP, -1, "[Lpartner.Secret;", 20);
+        window.alloc(OWN, OWN_GROUP, -1, null, 5);
+        window.alloc(FOREIGN, OWN_GROUP, -1, "partner.Elsewhere", 1_000);
+
+        Map<String, Long> partner = window.topClasses(false).stream()
+                .collect(Collectors.toMap(PerfClassAlloc::getClassName, PerfClassAlloc::getBytes));
+
+        assertEquals(Map.of("[B", 100L, "[Ljava.lang.String;", 50L, "(other)", 55L), partner);
+        assertEquals(
+                Map.of(
+                        "[B", 100L,
+                        "[Ljava.lang.String;", 50L,
+                        "partner.Secret", 30L,
+                        "[Lpartner.Secret;", 20L,
+                        "(other)", 5L,
+                        "partner.Elsewhere", 1_000L),
+                classBytes(window));
+    }
+
+    @Test
     void aGroupWithoutExactBytesIsLeftUncalibrated() {
         PerfRecorder.Window window = sampledWindow();
         window.alloc(FOREIGN, Attribution.NETTY, 7, "Foo", 9_999);

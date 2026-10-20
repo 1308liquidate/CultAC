@@ -44,7 +44,9 @@ public class BoundingBoxSize {
         if (packetEntity instanceof PacketEntitySizeable sizeable) {
             int size = size(sizeable, bedrock);
             if ((packetEntity.type == EntityTypeIds.MAGMA_CUBE) || (packetEntity.type == EntityTypeIds.SLIME)) {
-                return 2.04f * (0.255f * (float) size);
+                return scalesCubeMobType(version, bedrock)
+                        ? baseDimensions(packetEntity).width() * size
+                        : 2.04f * (0.255f * (float) size);
             }
             if ((packetEntity.type == EntityTypeIds.PHANTOM)) {
                 // Phantom#getDefaultDimensions scales by 1 + 0.15 * size from 1.20.2; Bedrock keeps the older width.
@@ -196,7 +198,9 @@ public class BoundingBoxSize {
         if (packetEntity instanceof PacketEntitySizeable sizeable) {
             int size = size(sizeable, bedrock);
             if ((packetEntity.type == EntityTypeIds.MAGMA_CUBE) || (packetEntity.type == EntityTypeIds.SLIME)) {
-                return 2.04f * (0.255f * (float) size);
+                return scalesCubeMobType(version, bedrock)
+                        ? baseDimensions(packetEntity).height() * size
+                        : 2.04f * (0.255f * (float) size);
             }
             if (packetEntity.type == EntityTypeIds.PHANTOM
                     && !bedrock
@@ -230,6 +234,11 @@ public class BoundingBoxSize {
     public static boolean spansBelowPosition(CultPlayer player, PacketEntity entity) {
         return (entity instanceof PacketEntityInteraction || entity instanceof PacketEntitySizeable)
                 && getHeightMinusBaby(entity, player.getClientVersion(), player.isBedrockMovement()) < 0;
+    }
+
+    /** From 1.20.5 AbstractCubeMob#getDefaultDimensions scales the type's 0.52 by the size. */
+    private static boolean scalesCubeMobType(ClientVersion version, boolean bedrock) {
+        return !bedrock && version.isNewerThanOrEquals(ClientVersion.V_1_20_5);
     }
 
     /** The size {@code getDefaultDimensions} scales by. Bedrock sizing keeps a floor of 1. */

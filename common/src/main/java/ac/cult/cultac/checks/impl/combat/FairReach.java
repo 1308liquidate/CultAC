@@ -84,12 +84,31 @@ public class FairReach extends Check implements CheckListener {
     }
 
     public void handleEntityMove(int entityId, double x, double y, double z) {
-        AtomicBoolean hasAppliedChanges = new AtomicBoolean(false);
+        PendingMove move = new PendingMove(entityId, x, y, z);
 
         // Ensure the client has received this before MAX_PING_TIME, or apply them sooner if client responds in time
-        player.latencyUtils.addRealTimeTaskNext(() -> applyChanges(entityId, x, y, z, hasAppliedChanges));
-        player.nettyScheduler.runTaskInMs(
-                () -> applyChanges(entityId, x, y, z, hasAppliedChanges), max_ping_compensation);
+        player.latencyUtils.addRealTimeTaskNext(move);
+        player.nettyScheduler.runTaskInMs(move, max_ping_compensation);
+    }
+
+    /** One entity move, applied by whichever of its transaction or its deadline comes first. */
+    private final class PendingMove extends AtomicBoolean implements Runnable {
+        private final int entityId;
+        private final double x;
+        private final double y;
+        private final double z;
+
+        private PendingMove(int entityId, double x, double y, double z) {
+            this.entityId = entityId;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+        }
+
+        @Override
+        public void run() {
+            applyChanges(entityId, x, y, z, this);
+        }
     }
 
     private void addEntity(int entityId, Vec3 spawnPosition) {

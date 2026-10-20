@@ -66,7 +66,8 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object message) {
-        if (!(message instanceof ByteBuf frame)) {
+        // An empty frame is a packet a handler ahead of cultac cancelled (PacketEvents leaves one); vanilla skips it.
+        if (!(message instanceof ByteBuf frame) || !frame.isReadable()) {
             ctx.fireChannelRead(message);
             return;
         }

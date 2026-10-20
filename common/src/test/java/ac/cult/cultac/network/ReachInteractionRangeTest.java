@@ -20,6 +20,7 @@ import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.EntityMetadata;
+import ac.cult.cultac.network.packet.EntityPositionPath;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.player.PlayerObserver;
@@ -30,6 +31,7 @@ import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityPositionSync;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundExplode;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
@@ -45,6 +47,7 @@ import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.protocol.value.PlayerSpawnInfo;
+import ac.cult.cultac.protocol.value.PositionPath;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityPlayer;
@@ -56,6 +59,7 @@ import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -728,6 +732,233 @@ class ReachInteractionRangeTest {
         }
     }
 
+    // A Java client holds a target moved only by proven movements exactly where the server tracks it.
+    @Test
+    void aTargetMovedOnlyByBundledMovementsIsJudgedWithoutAMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertFalse(setup.attack(2.99));
+            assertTrue(setup.attack(3.01));
+            assertEquals(List.of(), setup.attackAfter(2.99, entity -> setup.moveAwayAndBack(entity, 4, true)));
+            assertEquals(
+                    List.of("EntityReach"), setup.attackAfter(3.01, entity -> setup.moveAwayAndBack(entity, 4, true)));
+        }
+    }
+
+    // The client may have received an unbundled movement before any tick between its proofs.
+    @Test
+    void aTargetMovedByAnUnbundledMovementKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackAfter(3.01, entity -> setup.moveAwayAndBack(entity, 2, false)));
+            assertEquals(
+                    List.of("EntityReach"), setup.attackAfter(3.10, entity -> setup.moveAwayAndBack(entity, 2, false)));
+        }
+    }
+
+    // A folded queue samples the client's interpolation only approximately.
+    @Test
+    void aTargetWhoseQueueFoldedKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackAfter(3.01, entity -> setup.moveAwayAndBack(entity, 200, true)));
+            assertEquals(
+                    List.of("EntityReach"),
+                    setup.attackAfter(3.10, entity -> setup.moveAwayAndBack(entity, 200, true)));
+        }
+    }
+
+    // A snap assigns a position without proving that every feasible client took it.
+    @Test
+    void aSnapOntoAFarPositionSyncKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackAfter(3.01, entity -> snapAwayAndBack(setup, entity)));
+            assertEquals(List.of("EntityReach"), setup.attackAfter(3.10, entity -> snapAwayAndBack(setup, entity)));
+        }
+    }
+
+    private static void snapAwayAndBack(Setup setup, PacketEntity entity) {
+        setup.moveAwayAndBack(entity, 2, false);
+        Vec3 at = entity.newPacketLocation.targetPosition();
+        setup.positionSync(entity.getEntityId(), at.add(100, 0, 0));
+        setup.positionSync(entity.getEntityId(), at);
+        setup.moveAwayAndBack(entity, 2, true);
+    }
+
+    // The client sets a far teleport's position at once, where the model interpolates toward it.
+    @Test
+    void aTargetTeleportedAwayAndBackKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.bind();
+            int id = 101;
+            double z = 3.01 - 1.2;
+            setup.player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, z), 0, 0, 0);
+            setup.teleport(id, new Vec3(.5, 64, z + 100));
+            setup.teleport(id, new Vec3(.5, 64, z - .02));
+            assertEquals(List.of(), setup.attackEntity(id, EntityTypeIds.ZOMBIE, () -> {}));
+        }
+    }
+
+    // A legacy client snaps onto a far position sync, where the model interpolates toward it.
+    @Test
+    void aLegacyTargetSyncedAwayAndBackKeepsTheMargin() throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (ProtocolVersion version : ProtocolVersion.values()) {
+            if (version == ProtocolVersion.V26_3) continue;
+            try (var setup = new Setup(version)) {
+                setup.bind();
+                int id = 101;
+                double z = 3.01 - 1.2;
+                setup.player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, z), 0, 0, 0);
+                setup.bundledPositionSync(id, new Vec3(.5, 64, z + 100));
+                setup.bundledPositionSync(id, new Vec3(.5, 64, z - .02));
+                List<String> flags = setup.attackEntity(id, EntityTypeIds.ZOMBIE, () -> {});
+                if (!flags.isEmpty()) failures.add(version + ":" + flags);
+            }
+        }
+        assertEquals(List.of(), failures);
+    }
+
+    // A client that received an earlier movement late can be within 64 blocks of a sync the model snaps to.
+    @Test
+    void aFarSyncDoesNotProveASnap() throws Exception {
+        try (var setup = new Setup()) {
+            int id = 101;
+            setup.player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity entity = setup.player.compensatedEntities.getEntity(id);
+            entity.onPositionPath(
+                    EntityPositionPath.linear(new Vec3(1.5, 64, 1)), true, null, null, setup.player, false);
+            entity.onMovement(setup.player, true);
+            setup.positionSync(id, new Vec3(-63.3, 64, 1));
+            assertFalse(entity.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // Answering the ping before an unbundled sync does not prove the client handled it.
+    @Test
+    void anUnbundledFarSyncAtItsFirstBoundaryKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            int id = 101;
+            setup.player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity entity = setup.player.compensatedEntities.getEntity(id);
+            setup.pongThrough(setup.sendUnbundledPositionSync(id, new Vec3(100.5, 64, 1)));
+            assertFalse(entity.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // A seat derived from a vehicle whose position is uncertain is uncertain too.
+    @Test
+    void aRiderSettledAtAnUncertainSeatKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.player.compensatedEntities.addEntity(101, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1), 0, 0, 0);
+            setup.player.compensatedEntities.addEntity(102, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity boat = setup.player.compensatedEntities.getEntity(101);
+            PacketEntity rider = setup.player.compensatedEntities.getEntity(102);
+            rider.mount(boat);
+            boat.onFirstTransaction(false, true, .56, 64, 1, setup.player);
+            assertFalse(boat.newPacketLocation.hasExactPosition());
+            setup.player.compensatedEntities.settleIfUntrackedRider(rider);
+            rider.eject();
+            assertFalse(rider.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // A passenger attached to a vehicle whose position is uncertain is uncertain too.
+    @Test
+    void aPassengerOfAnUncertainVehicleKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.player.compensatedEntities.addEntity(101, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1), 0, 0, 0);
+            setup.player.compensatedEntities.addEntity(102, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity boat = setup.player.compensatedEntities.getEntity(101);
+            PacketEntity passenger = setup.player.compensatedEntities.getEntity(102);
+            passenger.mount(boat);
+            setup.player.compensatedEntities.positionPassenger(boat, passenger);
+            assertTrue(passenger.newPacketLocation.hasExactPosition());
+            boat.onFirstTransaction(false, true, .56, 64, 1, setup.player);
+            setup.player.compensatedEntities.positionPassenger(boat, passenger);
+            passenger.eject();
+            assertFalse(passenger.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // A late receipt of the root's move leaves the client's rider 2.98 away at any chain depth.
+    @Test
+    void aSeatAtTheEndOfAVehicleChainKeepsTheMargin() throws Exception {
+        for (int depth : new int[] {1, 65, 66, 80}) {
+            try (var setup = new Setup()) {
+                var entities = setup.player.compensatedEntities;
+                entities.addEntity(200, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1.78), 0, 0, 0);
+                PacketEntity root = entities.getEntity(200);
+                PacketEntity rider = root;
+                for (int i = 1; i <= depth; i++) {
+                    entities.addEntity(200 + i, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1.78), 0, 0, 0);
+                    PacketEntity child = entities.getEntity(200 + i);
+                    child.mount(rider);
+                    rider = child;
+                }
+                setup.tickEnd();
+                root.onFirstTransaction(false, true, .5, 64, 1.84, setup.player);
+                entities.settleIfUntrackedRider(rider);
+                rider.eject();
+                Vec3 seat = rider.clientPhysicalPosition;
+                rider.onPositionPath(EntityPositionPath.linear(seat), true, 1F, 0F, setup.player, true);
+                setup.player.y = seat.y;
+                setup.player.lastY = seat.y;
+                assertEquals(
+                        List.of(),
+                        setup.attackEntity(rider.getEntityId(), EntityTypeIds.ZOMBIE, () -> {}),
+                        "depth " + depth);
+            }
+        }
+    }
+
+    // A rider whose vehicle chain has no root gets no seat and no proof.
+    @Test
+    void aRiderOfAVehicleCycleKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            var entities = setup.player.compensatedEntities;
+            entities.addEntity(101, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            entities.addEntity(102, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity rider = entities.getEntity(101);
+            PacketEntity vehicle = entities.getEntity(102);
+            rider.mount(vehicle);
+            vehicle.mount(rider);
+            assertTrue(rider.newPacketLocation.hasExactPosition());
+            entities.settleIfUntrackedRider(rider);
+            assertFalse(rider.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // Mounting and dismounting before any ride tick leaves the client's rider at its spawn, 2.99 away.
+    @Test
+    void aRiderMountedAndDismountedBeforeItsRideTickKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.bind();
+            var entities = setup.player.compensatedEntities;
+            entities.addEntity(301, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1.81), 0, 0, 0);
+            entities.addEntity(302, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1.79), 0, 0, 0);
+            PacketEntity rider = entities.getEntity(302);
+            setup.setPassengers(301, List.of(302));
+            setup.setPassengers(301, List.of());
+            Vec3 seat = rider.clientPhysicalPosition;
+            setup.bundledPositionSync(302, seat);
+            setup.player.y = seat.y;
+            setup.player.lastY = seat.y;
+            assertEquals(List.of(), setup.attackEntity(302, EntityTypeIds.ZOMBIE, () -> {}));
+        }
+    }
+
+    // A rider seated before its ride tick is still at its spawn on the client, 2.99 away.
+    @Test
+    void aRiderMountedBeforeItsRideTickKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.bind();
+            var entities = setup.player.compensatedEntities;
+            entities.addEntity(301, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1.81), 0, 0, 0);
+            entities.addEntity(302, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1.79), 0, 0, 0);
+            PacketEntity rider = entities.getEntity(302);
+            setup.setPassengers(301, List.of(302));
+            assertFalse(rider.newPacketLocation.hasExactPosition());
+        }
+    }
+
     private static final class Setup implements AutoCloseable {
         final RecordConsumerServices services = new RecordConsumerServices();
         final RecordReceiveFixture fixture;
@@ -738,7 +969,18 @@ class ReachInteractionRangeTest {
         int nextEntity = 100;
 
         Setup() throws Exception {
-            fixture = new RecordReceiveFixture(ProtocolVersion.V26_3, false);
+            this(ProtocolVersion.V26_3, false);
+        }
+
+        // A client that joined with this version, not one Via translates from 26.3.
+        Setup(ProtocolVersion version) throws Exception {
+            this(version, true);
+        }
+
+        private Setup(ProtocolVersion version, boolean originalClient) throws Exception {
+            fixture = new RecordReceiveFixture(version, false);
+            if (originalClient)
+                Mockito.when(fixture.connection.platform().getClientProtocol()).thenReturn(version);
             services.useNetwork(fixture.manager);
             CultAPI.INSTANCE.getPlayerDataManager().addUser(fixture.user);
             player = fixture.user.getCultPlayer();
@@ -1539,6 +1781,92 @@ class ReachInteractionRangeTest {
                     flagged.add(checks.get(i).getCheckName());
             }
             return flagged;
+        }
+
+        // Attacks a zombie whose hitbox face is this far down the look once this history of tracked movements, ending
+        // where it spawned, has finished interpolating; returns the checks that flagged.
+        List<String> attackAfter(double distance, Consumer<PacketEntity> history) {
+            int id = nextEntity++;
+            player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, distance - 1.2), 0, 0, 0);
+            PacketEntity entity = player.compensatedEntities.getEntity(id);
+            history.accept(entity);
+            for (int tick = 0; tick < 1_000 && entity.newPacketLocation.hasActiveInterpolationTarget(); tick++)
+                tickEnd();
+            assertFalse(entity.newPacketLocation.hasActiveInterpolationTarget());
+            assertTrue(entity.newPacketLocation.usesSteppedInterpolation());
+            return attackEntity(id, EntityTypeIds.ZOMBIE, () -> {});
+        }
+
+        // This many movements half a block along +z and back, each proven by its bundle or by its second transaction.
+        void moveAwayAndBack(PacketEntity entity, int moves, boolean bundled) {
+            Vec3 at = entity.desyncClientPos;
+            for (int move = 1; move <= moves; move++) {
+                Vec3 to = move % 2 == 0 ? at : at.add(0, 0, .5);
+                entity.onPositionPath(EntityPositionPath.linear(to), true, null, null, player, bundled);
+                if (!bundled) entity.onSecondTransaction();
+            }
+        }
+
+        // A position sync outside any bundle, its first and second transactions answered.
+        void positionSync(int id, Vec3 to) {
+            pongThrough(sendUnbundledPositionSync(id, to) + 1);
+        }
+
+        // Sends a position sync outside any bundle; returns its first transaction, unanswered.
+        int sendUnbundledPositionSync(int id, Vec3 to) {
+            bind();
+            useBundleDelimiter(false);
+            try {
+                sendPositionSync(id, to);
+                return player.lastTransactionSent.get();
+            } finally {
+                useBundleDelimiter(true);
+            }
+        }
+
+        void setPassengers(int vehicle, List<Integer> passengers) {
+            var packet = new ClientboundSetPassengers(vehicle, passengers);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.SET_PASSENGERS, packet, false);
+            player.packetEntityReplication.onSetPassengers(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // A position sync in its own bundle, its proof answered.
+        void bundledPositionSync(int id, Vec3 to) {
+            sendPositionSync(id, to);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        private void sendPositionSync(int id, Vec3 to) {
+            var packet = new ClientboundEntityPositionSync(
+                    id, new PositionPath.Linear(new Vec3d(to.x, to.y, to.z)), 0, 0, false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_POSITION_SYNC, packet, false);
+            player.packetEntityReplication.onEntityPositionSync(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+        }
+
+        // An absolute entity teleport in its own bundle, its proof answered.
+        void teleport(int id, Vec3 to) {
+            var packet =
+                    new ClientboundTeleportEntity(id, new Vec3d(to.x, to.y, to.z), Vec3d.ZERO, 0, 0, Set.of(), false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.TELEPORT_ENTITY, packet, false);
+            player.packetEntityReplication.onTeleportEntity(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        private void useBundleDelimiter(boolean use) {
+            try {
+                Field field = player.packetEntityReplication.getClass().getDeclaredField("useReachBundleDelimiter");
+                field.setAccessible(true);
+                field.setBoolean(player.packetEntityReplication, use);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException(e);
+            }
         }
 
         // The attack reached ReachCheck's measurement, so no exemption in ReachCheck#handleInteract dropped it.
