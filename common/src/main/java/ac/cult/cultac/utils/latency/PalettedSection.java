@@ -22,6 +22,7 @@ public final class PalettedSection {
     private static final int[] VALUES_PER_WORD = new int[33];
     private static final long[] WORD_RECIPROCALS = new long[33];
     private static final long ABSENT_CODE_WEIGHT = 1L << 50;
+    private static final long[] NO_WORDS = new long[0];
 
     static {
         for (int bits = 1; bits <= 32; bits++) {
@@ -38,13 +39,26 @@ public final class PalettedSection {
     private long[] words;
 
     private PalettedSection(int size, int minimumBits, int maximumLocalBits, int registrySize, int initial) {
+        this(size, minimumBits, maximumLocalBits, registrySize, 0, new int[] {initial}, 1, NO_WORDS);
+    }
+
+    private PalettedSection(
+            int size,
+            int minimumBits,
+            int maximumLocalBits,
+            int registrySize,
+            int bits,
+            int[] palette,
+            int paletteSize,
+            long[] words) {
         this.size = size;
         this.minimumBits = minimumBits;
         this.maximumLocalBits = maximumLocalBits;
         this.registrySize = registrySize;
-        palette = new int[] {initial};
-        paletteSize = 1;
-        words = new long[0];
+        this.bits = bits;
+        this.palette = palette;
+        this.paletteSize = paletteSize;
+        this.words = words;
     }
 
     public static PalettedSection blocks() {
@@ -74,7 +88,7 @@ public final class PalettedSection {
 
     private static PalettedSection read(
             ByteBuf input, int size, int minimumBits, int maximumLocalBits, int registrySize, boolean lengthPrefixed) {
-        var section = new PalettedSection(size, minimumBits, maximumLocalBits, registrySize, 0);
+        var section = new PalettedSection(size, minimumBits, maximumLocalBits, registrySize, 0, null, 0, NO_WORDS);
         int wireBits = input.readByte();
         section.configure(wireBits);
         if (section.bits == 0 && !section.isGlobal()) {
@@ -98,7 +112,7 @@ public final class PalettedSection {
         }
         // Since 1.21.5 arrays have a fixed length derived from the configuration.
         int bytes = section.words.length * Long.BYTES;
-        if (input.readableBytes() >= bytes && input.nioBufferCount() == 1) {
+        if (bytes > 0 && input.readableBytes() >= bytes && input.nioBufferCount() == 1) {
             input.nioBuffer(input.readerIndex(), bytes)
                     .order(ByteOrder.BIG_ENDIAN)
                     .asLongBuffer()
@@ -145,12 +159,16 @@ public final class PalettedSection {
             }
             return result;
         }
-        var result = new PalettedSection(size, minimumBits, maximumLocalBits, targetRegistrySize, 0);
-        result.bits = bits;
-        result.paletteSize = paletteSize;
-        result.palette = palette.clone();
+        var result = new PalettedSection(
+                size,
+                minimumBits,
+                maximumLocalBits,
+                targetRegistrySize,
+                bits,
+                palette.clone(),
+                paletteSize,
+                words.clone());
         for (int i = 0; i < paletteSize; i++) result.palette[i] = mapped(mapper, palette[i], targetRegistrySize);
-        result.words = words.clone();
         result.indexPalette();
         return result;
     }
@@ -178,7 +196,7 @@ public final class PalettedSection {
         palette = global ? null : new int[1 << bits];
         paletteSize = 0;
         indices = null;
-        words = bits == 0 ? new long[0] : new long[(size + 64 / bits - 1) / (64 / bits)];
+        words = bits == 0 ? NO_WORDS : new long[(size + 64 / bits - 1) / (64 / bits)];
     }
 
     private boolean isGlobal() {
@@ -262,11 +280,15 @@ public final class PalettedSection {
     }
 
     public PalettedSection copy() {
-        var result = new PalettedSection(size, minimumBits, maximumLocalBits, registrySize, 0);
-        result.bits = bits;
-        result.palette = palette == null ? null : palette.clone();
-        result.paletteSize = paletteSize;
-        result.words = words.clone();
+        var result = new PalettedSection(
+                size,
+                minimumBits,
+                maximumLocalBits,
+                registrySize,
+                bits,
+                palette == null ? null : palette.clone(),
+                paletteSize,
+                words.clone());
         result.indexPalette();
         return result;
     }
