@@ -75,7 +75,7 @@ class EntityScanCpuBenchTest {
             Tick passengers = () -> {
                 for (int i = 0; i < ENTITIES; i++) entities.updatePassengerPositions();
             };
-            Tick pushers = () -> WorldStageBuilder.recountCollidingTickingAfterPlayer(prediction);
+            Tick pushers = () -> WorldStageBuilder.recountCollidingTickingAfterPlayer(player, prediction);
             Tick pose = () -> noEntityCollision.invoke(player, poseBox);
             Tick blocks = () -> {
                 for (int i = 0; i < 20; i++) {

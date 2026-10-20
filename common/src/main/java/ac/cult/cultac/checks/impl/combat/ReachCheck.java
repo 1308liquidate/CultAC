@@ -309,7 +309,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                     reachEntity.desyncClientPos.subtract(1, 0, 1), reachEntity.desyncClientPos.add(1, 2, 1));
         }
 
-        SimpleCollisionBox movementBox = reachEntity.getPossibleCollisionBoxes();
+        SimpleCollisionBox movementBox = reachEntity.toBoundingBox(player, reachEntity.getPossibleCollisionBoxes());
         float movementWidth = BoundingBoxSize.getWidth(player, reachEntity);
         float movementHeight = BoundingBoxSize.getHeight(player, reachEntity);
         float reachWidth = BoundingBoxSize.getReachWidth(player, reachEntity);

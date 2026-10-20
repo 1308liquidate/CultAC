@@ -9,6 +9,7 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityInteraction;
 import ac.cult.cultac.utils.data.packetentity.PacketEntitySizeable;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityTrackXRot;
@@ -30,20 +31,26 @@ public class BoundingBoxSize {
         if (bedrock && BedrockHorseProperties.supports(packetEntity.type)) {
             return 1.3965F * ((packetEntity.isBaby ? 0.5F : 1.0F) * packetEntity.scale);
         }
-        return getWidth(packetEntity, version);
+        return width(packetEntity, version, bedrock);
     }
 
     public static float getReachWidth(CultPlayer player, PacketEntity packetEntity) {
         return getWidth(player, packetEntity);
     }
 
-    private static float getWidthMinusBaby(PacketEntity packetEntity, ClientVersion version) {
+    private static float getWidthMinusBaby(PacketEntity packetEntity, ClientVersion version, boolean bedrock) {
+        // Interaction#getDimensions: EntityDimensions.scalable(DATA_WIDTH_ID, DATA_HEIGHT_ID).
+        if (packetEntity instanceof PacketEntityInteraction interaction) return interaction.actionWidth;
         if (packetEntity instanceof PacketEntitySizeable sizeable) {
+            int size = size(sizeable, bedrock);
             if ((packetEntity.type == EntityTypeIds.MAGMA_CUBE) || (packetEntity.type == EntityTypeIds.SLIME)) {
-                return 2.04f * (0.255f * (float) sizeable.size);
+                return 2.04f * (0.255f * (float) size);
             }
             if ((packetEntity.type == EntityTypeIds.PHANTOM)) {
-                return 0.9f + sizeable.size * 0.2f;
+                // Phantom#getDefaultDimensions scales by 1 + 0.15 * size from 1.20.2; Bedrock keeps the older width.
+                return !bedrock && version.isNewerThanOrEquals(ClientVersion.V_1_20_2)
+                        ? 0.9f * (1.0f + 0.15f * size)
+                        : 0.9f + size * 0.2f;
             }
         }
 
@@ -56,12 +63,17 @@ public class BoundingBoxSize {
     }
 
     public static float getWidth(PacketEntity entity, ClientVersion version) {
-        float width = getWidthMinusBaby(entity, version);
+        return width(entity, version, false);
+    }
+
+    private static float width(PacketEntity entity, ClientVersion version, boolean bedrock) {
+        float width = getWidthMinusBaby(entity, version, bedrock);
         if (entity.isBaby) {
             Float independent = independentBabyWidth(entity, version);
             width = independent == null ? width * getBabyScale(entity, version) : independent;
         }
-        return width * entity.scale;
+        // AABB orders the corners, so a negative width spans the same box.
+        return Math.abs(width) * entity.scale;
     }
 
     public static Vec3 getRidingOffsetFromVehicle(PacketEntity entity, CultPlayer player) {
@@ -168,7 +180,7 @@ public class BoundingBoxSize {
         if (bedrock && BedrockHorseProperties.supports(packetEntity.type)) {
             return 1.6F * ((packetEntity.isBaby ? 0.5F : 1.0F) * packetEntity.scale);
         }
-        return getHeight(packetEntity, version);
+        return height(packetEntity, version, bedrock);
     }
 
     public static float getReachHeight(CultPlayer player, PacketEntity packetEntity) {
@@ -179,10 +191,17 @@ public class BoundingBoxSize {
         return getHeight(packetEntity, ClientVersion.V_26_2);
     }
 
-    private static float getHeightMinusBaby(PacketEntity packetEntity, ClientVersion version) {
+    private static float getHeightMinusBaby(PacketEntity packetEntity, ClientVersion version, boolean bedrock) {
+        if (packetEntity instanceof PacketEntityInteraction interaction) return interaction.actionHeight;
         if (packetEntity instanceof PacketEntitySizeable sizeable) {
+            int size = size(sizeable, bedrock);
             if ((packetEntity.type == EntityTypeIds.MAGMA_CUBE) || (packetEntity.type == EntityTypeIds.SLIME)) {
-                return 2.04f * (0.255f * (float) sizeable.size);
+                return 2.04f * (0.255f * (float) size);
+            }
+            if (packetEntity.type == EntityTypeIds.PHANTOM
+                    && !bedrock
+                    && version.isNewerThanOrEquals(ClientVersion.V_1_20_2)) {
+                return 0.5f * (1.0f + 0.15f * size);
             }
         }
 
@@ -195,12 +214,27 @@ public class BoundingBoxSize {
     }
 
     public static float getHeight(PacketEntity entity, ClientVersion version) {
-        float height = getHeightMinusBaby(entity, version);
+        return height(entity, version, false);
+    }
+
+    private static float height(PacketEntity entity, ClientVersion version, boolean bedrock) {
+        float height = getHeightMinusBaby(entity, version, bedrock);
         if (entity.isBaby) {
             Float independent = independentBabyHeight(entity, version);
             height = independent == null ? height * getBabyScale(entity, version) : independent;
         }
-        return height * entity.scale;
+        return Math.abs(height) * entity.scale;
+    }
+
+    /** Whether the entity's height is negative, which {@code AABB} spans below its position. */
+    public static boolean spansBelowPosition(CultPlayer player, PacketEntity entity) {
+        return (entity instanceof PacketEntityInteraction || entity instanceof PacketEntitySizeable)
+                && getHeightMinusBaby(entity, player.getClientVersion(), player.isBedrockMovement()) < 0;
+    }
+
+    /** The size {@code getDefaultDimensions} scales by. Bedrock sizing keeps a floor of 1. */
+    private static int size(PacketEntitySizeable sizeable, boolean bedrock) {
+        return bedrock ? Math.max(sizeable.size, 1) : sizeable.size;
     }
 
     private static float getBabyScale(PacketEntity entity, ClientVersion version) {

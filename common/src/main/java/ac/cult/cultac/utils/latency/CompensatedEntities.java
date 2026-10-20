@@ -687,6 +687,9 @@ public class CompensatedEntities {
         if ((entityType == EntityTypeIds.FISHING_BOBBER)) {
             return new PacketEntityHook(player, entityID, entityType, position.x, position.y, position.z, data);
         }
+        if (PacketEntityHurtingProjectile.isHurtingProjectile(entityType)) {
+            return new PacketEntityHurtingProjectile(player, entityID, entityType, position);
+        }
         return new PacketEntity(player, entityID, entityType, position.x, position.y, position.z);
     }
 
@@ -829,6 +832,8 @@ public class CompensatedEntities {
             var height = WatchableIndexUtil.getIndex(watchableObjects, 9);
             if (width != null && width.value() instanceof Float value) interaction.actionWidth = value;
             if (height != null && height.value() instanceof Float value) interaction.actionHeight = value;
+            // Interaction#onSyncedDataUpdated refreshes its dimensions on either field.
+            if (width != null || height != null) interaction.refreshDimensions(player);
         }
         var modelType = EntityTypeUtil.modelType(entity.type);
         if (modelType != null && modelType.has(ac.cult.blocksim.entity.EntityTypes.ARROW)) {
@@ -903,10 +908,12 @@ public class CompensatedEntities {
 
         Object value = sizeData.value();
         if (value instanceof Integer) {
-            ((PacketEntitySizeable) entity).size = Math.max((int) value, 1);
+            ((PacketEntitySizeable) entity).size = (int) value;
         } else if (value instanceof Byte) {
-            ((PacketEntitySizeable) entity).size = Math.max((byte) value, 1);
+            ((PacketEntitySizeable) entity).size = (byte) value;
         }
+        // AbstractCubeMob#onSyncedDataUpdated and Phantom#onSyncedDataUpdated refresh dimensions on ID_SIZE.
+        entity.refreshDimensions(player);
     }
 
     private void applyShulkerMetadata(PacketEntity entity, List<EntityMetadata.Entry> watchableObjects) {
