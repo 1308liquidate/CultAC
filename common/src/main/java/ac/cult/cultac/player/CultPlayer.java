@@ -208,8 +208,6 @@ public class CultPlayer implements GrimUser {
      * gets no ping until play traffic starts one, so the timeout runs from no earlier than this.
      */
     private long pingsHeldAt = playerClockAtLeast;
-    /** When the last client_tick_end was received, or the last poll outside Java play. */
-    private volatile long clientTickEndedAt = playerClockAtLeast;
 
     public int powderSnowFrozenTicks = 0;
     public double x;
@@ -1088,10 +1086,6 @@ public class CultPlayer implements GrimUser {
 
     private final AtomicBoolean hasDisconnected = new AtomicBoolean(false);
 
-    public void clientTickEnded() {
-        clientTickEndedAt = System.nanoTime();
-    }
-
     public void disconnect(Component reason) {
         if (!hasDisconnected.compareAndSet(false, true)) {
             return;
@@ -1140,15 +1134,6 @@ public class CultPlayer implements GrimUser {
             pingsHeldAt = now;
         } else if (now - Math.max(getPlayerClockAtLeast(), pingsHeldAt) > maxTransactionTime * 1e9) {
             timedOut();
-        }
-        // Minecraft#runTick ticks after each drain of its packet queue, at least once a second (TickRateManager
-        // keeps the rate at or above 1), and sends client_tick_end every tick it has a level: from the play login
-        // on, never paused off singleplayer. Only a drain stalls it: a freeze, which the timeout above ends past
-        // max-transaction-time, and the packets queued meanwhile. Twice that plus the slowest tick allows both.
-        if (isBedrockMovement() || user.getConnectionState() != ConnectionPhase.PLAY) {
-            clientTickEndedAt = now;
-        } else if (playerClockAtLeast - clientTickEndedAt > TimeUnit.SECONDS.toNanos(2L * maxTransactionTime + 1)) {
-            withheld("ended no client tick in " + (2 * maxTransactionTime + 1) + " s of its clock");
         }
 
         if (!CultAPI.INSTANCE.getPlayerDataManager().shouldCheck(user)) {

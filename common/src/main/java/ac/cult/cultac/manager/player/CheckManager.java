@@ -924,7 +924,6 @@ public class CheckManager {
             // both finished. Tick-end handlers that simulate the completed client
             // tick therefore must see the post-block-entity piston phase and the
             // post-entity interpolation state, not the stale pre-tick-end cache.
-            player.clientTickEnded();
             player.compensatedWorld.onClientTickEnd();
             dispatchingTickEnd = true;
             try {
