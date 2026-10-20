@@ -126,6 +126,8 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
     // We fix this by blocking serverbound movements until the player is out of the loading screen.
     // TODO: Inspect the join packets to ensure that the player has sent player loaded packet
     public boolean hasFullyLoaded = false;
+    /** ClientPacketListener#handleRespawn: until the Java client reads a respawn, its old LocalPlayer ticks and moves. */
+    public boolean respawnUnread = false;
     // Was there a ghost block that forces us to block offsets until the player accepts their teleport?
     public boolean blockOffsets = false;
     // This required setback data is the head of the teleport.
@@ -309,6 +311,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
     public void levelLeft() {
         lastKnownGoodPosition = null;
         hasFullyLoaded = false;
+        respawnUnread = false;
         requiredSetBack = null;
         blockOffsets = false;
         player.checkManager.getSimulationProcessor().getLastMovementTime().clear();
@@ -321,6 +324,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
     public void respawnSent() {
         lastKnownGoodPosition = null;
         hasFullyLoaded = false;
+        respawnUnread = !player.isBedrockMovement();
         blockOffsets = false;
         // Latency is measured from the next movement of the placed player, not the last one before it died.
         player.checkManager.getSimulationProcessor().getLastMovementTime().clear();
@@ -1490,9 +1494,14 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         return shouldBlockMovement(false);
     }
 
+    /** After reading a respawn, LocalPlayer#tick sends nothing until the placement teleport is accepted. */
+    private boolean awaitingSpawn() {
+        return !hasFullyLoaded && !respawnUnread;
+    }
+
     /** A corrected vehicle must still be checked before its pending setback can complete. */
     public boolean shouldBlockMovement(boolean validatingVehicleCorrection) {
-        boolean block = (!hasFullyLoaded || (!validatingVehicleCorrection && (blockOffsets || isPendingSetback())))
+        boolean block = (awaitingSpawn() || (!validatingVehicleCorrection && (blockOffsets || isPendingSetback())))
                 && !insideUnloadedChunk();
         return tooFarFromUnloadedChunk() || block;
     }
@@ -1519,7 +1528,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
 
         // Vehicle packets move the controlled root entity, not the player body. SetbackBlocker has
         // already proved current server mount/control and active Cult vehicle setbacks separately.
-        return !hasFullyLoaded || (!simulatedCorrection && isPendingSetback());
+        return awaitingSpawn() || (!simulatedCorrection && isPendingSetback());
     }
 
     public boolean hasUnacknowledgedSetbackVehicleTeleport() {

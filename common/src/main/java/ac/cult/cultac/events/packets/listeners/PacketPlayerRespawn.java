@@ -261,6 +261,7 @@ public class PacketPlayerRespawn {
         // A later login replaces this level; its respawn must not touch the new one.
         int level = player.compensatedWorld.level();
         final Runnable applyRespawnState = () -> {
+            setbacks.respawnUnread = false;
             if (level != player.compensatedWorld.level()) return;
             player.isSneaking = false;
             // ClientPacketListener#handleRespawn starts the new LocalPlayer from Input.EMPTY unless KEEP_ENTITY_DATA.
