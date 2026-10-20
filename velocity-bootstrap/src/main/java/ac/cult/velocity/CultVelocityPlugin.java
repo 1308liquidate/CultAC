@@ -5,7 +5,6 @@ import ac.cult.reload.host.BuildUpdates;
 import ac.cult.reload.host.CommandRouting;
 import ac.cult.reload.host.GenerationManager;
 import ac.cult.reload.host.UpdateSettings;
-import ac.cult.reload.host.UpdateState;
 import ac.cult.reload.host.UpdateWebhook;
 import ac.grim.grimac.api.GrimAPIProvider;
 import ac.grim.grimac.api.GrimAbstractAPI;
@@ -57,6 +56,8 @@ public final class CultVelocityPlugin {
     /** The proxy does not listen before initialization ends, so this is all a slow download can delay startup. */
     private static final Duration BOOT_UPDATE_LIMIT = Duration.ofSeconds(10);
 
+    private static final Executor UPDATE_WORKER =
+            task -> Thread.ofPlatform().daemon().name("cult-update").start(task);
     private static final String UPDATE_USAGE = " update <build> | latest [channel] | builds [channel] | <filename.jar>";
 
     private final ProxyServer proxy;
@@ -146,10 +147,8 @@ public final class CultVelocityPlugin {
                                     "Usage: /" + primaryRoot() + (devSwap ? " devswap" : " update <filename.jar>")));
                             return;
                         }
-                        engine.update(devSwap ? "CultAC-velocity.jar" : args[1])
-                                .whenComplete((message, failure) ->
-                                        source.sendMessage(net.kyori.adventure.text.Component.text(
-                                                failure == null ? message : "Update failed: " + failure.getMessage())));
+                        BuildUpdates.installFile(engine, "CultAC-velocity.jar", null, UPDATE_WORKER)
+                                .thenAccept(line -> tell(source, line, updateColor(line)));
                     } else if (args.length > 0 && args[0].equalsIgnoreCase("runtimes")) {
                         if (!source.hasPermission("cult.runtimes")) {
                             source.sendMessage(net.kyori.adventure.text.Component.text("You do not have permission."));
@@ -263,19 +262,17 @@ public final class CultVelocityPlugin {
     private void update(CommandSource source, String[] args) {
         String target = args.length > 1 ? args[1] : "";
         if (args.length == 2 && target.endsWith(".jar")) {
-            engine.update(target).whenComplete((message, failure) -> {
-                if (failure == null) {
-                    try {
-                        UpdateState.clear(updateSettings().stateFile());
-                    } catch (IOException | RuntimeException cleanup) {
-                        logger.warn("The next boot may start the last installed build instead: " + cleanup);
-                    }
-                }
-                tell(
-                        source,
-                        failure == null ? message : "Update failed: " + failure.getMessage(),
-                        failure == null ? NamedTextColor.GREEN : NamedTextColor.RED);
-            });
+            Path stateFile = null;
+            String unusable = "";
+            try {
+                stateFile = updateSettings().stateFile();
+            } catch (RuntimeException failure) {
+                unusable = "; the next boot may start the last installed build instead: " + failure;
+            }
+            String note = unusable;
+            BuildUpdates.installFile(engine, target, stateFile, UPDATE_WORKER)
+                    .thenApply(line -> line.startsWith("Activated") ? line + note : line)
+                    .thenAccept(line -> tell(source, line, updateColor(line)));
             return;
         }
         UpdateSettings settings;
@@ -287,19 +284,17 @@ public final class CultVelocityPlugin {
             return;
         }
         var updates = new BuildUpdates(settings, bundledVersion);
-        Executor worker =
-                task -> Thread.ofPlatform().daemon().name("cult-update").start(task);
         if (args.length == 2 && target.matches("[0-9]{1,18}")) {
             tell(source, "Updating this proxy to b" + target + ": downloading and verifying...", NamedTextColor.GRAY);
-            report(source, settings, updates.install(engine, Long.parseLong(target), worker));
+            report(source, settings, updates.install(engine, Long.parseLong(target), UPDATE_WORKER));
         } else if ((args.length == 2 || args.length == 3) && target.equalsIgnoreCase("latest")) {
             tell(source, "Updating this proxy to the latest build: downloading and verifying...", NamedTextColor.GRAY);
             report(
                     source,
                     settings,
-                    updates.latest(engine, args.length == 3 ? args[2] : CultBuildVersion.BRANCH, worker));
+                    updates.latest(engine, args.length == 3 ? args[2] : CultBuildVersion.BRANCH, UPDATE_WORKER));
         } else if ((args.length == 2 || args.length == 3) && target.equalsIgnoreCase("builds")) {
-            updates.builds(args.length == 3 ? args[2] : null, engine.currentBuild(), worker)
+            updates.builds(args.length == 3 ? args[2] : null, engine.currentBuild(), UPDATE_WORKER)
                     .thenAccept(lines -> lines.forEach(line -> tell(source, line, NamedTextColor.WHITE)));
         } else {
             tell(source, "Usage: /" + primaryRoot() + UPDATE_USAGE, NamedTextColor.RED);
@@ -324,6 +319,11 @@ public final class CultVelocityPlugin {
                         NamedTextColor.GRAY);
             webhook.post(settings.webhook(), line, logger::warn);
         });
+    }
+
+    private static NamedTextColor updateColor(String line) {
+        if (line.startsWith("Activated")) return NamedTextColor.GREEN;
+        return line.startsWith("Already running") ? NamedTextColor.YELLOW : NamedTextColor.RED;
     }
 
     private static void tell(CommandSource source, String line, NamedTextColor color) {

@@ -204,8 +204,8 @@ public class CultPlayer implements GrimUser {
     @Getter
     private long playerClockAtLeast = System.nanoTime();
     /**
-     * The last poll outside play or during a protocol switch; a server may hold a client in configuration for any
-     * length of time, so the timeout runs from no earlier than this.
+     * The last poll before the first ping or during a protocol switch. A client attached in configuration
+     * gets no ping until play traffic starts one, so the timeout runs from no earlier than this.
      */
     private long pingsHeldAt = playerClockAtLeast;
 
@@ -845,6 +845,15 @@ public class CultPlayer implements GrimUser {
         foreignPings.remove(id);
     }
 
+    /** Whether {@code id} is a ping CultAC created whose response has not arrived yet. */
+    public synchronized boolean awaitsTransactionResponse(int id) {
+        if (transactionsPendingSend.containsKey(id)) return true;
+        for (SentTransaction sent : transactionsSent) {
+            if (sent.id() == id) return true;
+        }
+        return false;
+    }
+
     private int nextTransactionId() {
         return nextTransactionId(nextWireWord);
     }
@@ -1102,7 +1111,9 @@ public class CultPlayer implements GrimUser {
             sendTransaction(true); // send on netty thread
         }
         long now = System.nanoTime();
-        if (protocolSwitchPending() || !canSendPlayPackets()) {
+        // Pings flow in configuration as in play (ConfigurationProtocols registers ping and pong), so the
+        // timeout runs there too.
+        if (protocolSwitchPending() || lastTransSent == 0) {
             pingsHeldAt = now;
         } else if (now - Math.max(getPlayerClockAtLeast(), pingsHeldAt) > maxTransactionTime * 1e9) {
             timedOut();
@@ -1117,8 +1128,8 @@ public class CultPlayer implements GrimUser {
             packetTracker = connection != null ? connection.getPacketTracker() : null;
         }
 
-        if (this.platformPlayer == null) {
-            this.platformPlayer = CultAPI.INSTANCE.getPlatformPlayerFactory().getFromUUID(playerUUID);
+        if (this.platformPlayer == null && user.getPlayer() != null) {
+            this.platformPlayer = user.getPlayer();
             updatePermissions();
         }
 

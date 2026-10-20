@@ -266,6 +266,7 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
         private volatile long nextAttemptAt;
         private volatile int failures;
         private volatile boolean failing;
+        private volatile boolean stopped;
 
         WebhookQueue(Transport transport, LongSupplier clock, Supplier<Logger> logger) {
             this.transport = transport;
@@ -296,7 +297,7 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
         }
 
         void tick() {
-            if (clock.getAsLong() < nextAttemptAt || (inFlight == null && queue.isEmpty())) return;
+            if (stopped || clock.getAsLong() < nextAttemptAt || (inFlight == null && queue.isEmpty())) return;
             if (!sending.compareAndSet(false, true)) return;
             List<Alert> batch = inFlight;
             if (batch == null) {
@@ -326,16 +327,19 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
                 }
                 return;
             }
-            response.whenComplete(RuntimeEnvironment.completion((result, throwable) -> {
+            // The runtime's tracked HTTP client is closed when the runtime stops, failing any pending request.
+            response.whenComplete((result, throwable) -> {
                 try {
-                    complete(request, result, throwable);
+                    // stop() already settled this batch; a late answer must not retry it.
+                    if (!stopped) complete(request, result, throwable);
                 } finally {
                     sending.set(false);
                 }
-            }));
+            });
         }
 
         void stop() {
+            stopped = true;
             List<Alert> unsent = new ArrayList<>();
             List<Alert> batch = inFlight;
             inFlight = null;

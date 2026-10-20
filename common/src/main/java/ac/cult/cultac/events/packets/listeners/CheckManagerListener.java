@@ -560,7 +560,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                 && (player.compensatedEntities.getSelf().inVehicle()
                         || player.compensatedEntities.vehicles
                                 .canCurrentPlayerControlServerVehicleForClientTickMovement()
-                        || player.compensatedEntities.vehicles.hasPlayerPassengerState()
+                        || player.compensatedEntities.vehicles.hasClientPlayerPassengerState()
                         || hasBufferedServerVehiclePassengerRotation(player));
         if (!passengerRotationTickPacket && player.packetStateData.isAwaitingVehicleMoveAfterPassengerRotation()) {
             // LocalPlayer#tick sends the mounted Rot and vehicle move consecutively.
@@ -688,7 +688,8 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                     && player.compensatedEntities.vehicles.isServerPlayerPassengerOf(serverVehicle);
             boolean blocked = authorizedVehicleMove
                     ? player.getSetbackTeleportUtil().shouldBlockVehicleMovement(true)
-                            || controlledVehicle.isDead
+                            // A vehicle with health still moves under its rider; the dead flag can outlive it.
+                            || !controlledVehicle.actionAlive
                             || player.isInBed
                     : shouldBlockVehicleMovementForSetback(player, teleportData);
             if (!teleportData.isTeleport() && (!hasCurrentServerPassengerAuthority || blocked)) {
@@ -717,7 +718,8 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                 packetRoot == null ? player.compensatedEntities.vehicles.getVelocityMovementVehicle() : packetRoot;
         if (pairedRiddenTick
                 && riddenRoot instanceof PacketEntityRideable rideable
-                && !rideable.isDead
+                // Pig#tickRidden and Strider#tickRidden tick the boost inside travelRidden, gated on isAlive().
+                && rideable.actionAlive
                 && rideable.hasSaddle
                 && player.compensatedEntities.vehicles.passengerIndex(rideable) == 0) {
             // Count even if a real tick happens to match a pending teleport's

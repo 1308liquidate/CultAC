@@ -360,6 +360,34 @@ class GenerationManagerTest {
     }
 
     @Test
+    void hungSupersededDoesNotBlockLaterDeploymentsOrCloseUnderItsCallback() throws Exception {
+        var manager = start();
+        var release = new CompletableFuture<Void>();
+        var entered = new CompletableFuture<Void>();
+        try {
+            manager.lifecycleTimeout(java.time.Duration.ofMillis(300));
+            controls.put("superseded:initial", release);
+            controls.put("entered:superseded:initial", entered);
+            artifact("next.jar", "2", "next", "paper");
+            var updating = manager.update("next.jar");
+            entered.get(10, TimeUnit.SECONDS);
+            assertTrue(updating.toCompletableFuture().get(2, TimeUnit.SECONDS).startsWith("Activated"));
+            artifact("later.jar", "3", "later", "paper");
+            await(manager.update("later.jar"));
+            manager.attach("player", null);
+            assertTrue(events.contains("later:attach:player"));
+            assertFalse(events.contains("initial:close"));
+            assertTrue(reports.stream().anyMatch(line -> line.contains("did not finish supersede")));
+            release.complete(null);
+            eventually(() -> events.contains("initial:close"));
+            eventually(() -> manager.status().size() == 1);
+        } finally {
+            release.complete(null);
+            await(manager.stop());
+        }
+    }
+
+    @Test
     void hungStopKeepsLoaderOpenUntilItFinishes() throws Exception {
         var manager = start();
         try {

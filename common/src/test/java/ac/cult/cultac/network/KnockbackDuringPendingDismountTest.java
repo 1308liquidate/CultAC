@@ -11,13 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.events.packets.listeners.PacketServerTeleport;
-import ac.cult.cultac.network.event.PacketSendEvent;
-import ac.cult.cultac.protocol.ConnectionPhase;
-import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
-import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundAcceptTeleportation;
-import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.data.TeleportData;
@@ -65,14 +60,14 @@ class KnockbackDuringPendingDismountTest {
     private static void dismountThenKnockback(JavaTickFixture f) {
         f.place(SEAT, Vec3.ZERO);
         f.player.compensatedEntities.addEntity(VEHICLE, EntityTypeIds.ARMOR_STAND, SEAT, 0, 0, 0);
-        setPassengers(f, List.of(f.player.entityID));
+        f.setPassengers(VEHICLE, List.of(f.player.entityID));
         f.pongThrough(f.player.lastTransactionSent.get());
         f.input(NONE);
-        rideTick(f);
-        rideTick(f);
+        f.rideTick();
+        f.rideTick();
 
         List<Integer> before = teleportIds(f);
-        setPassengers(f, List.of());
+        f.setPassengers(VEHICLE, List.of());
         assertTrue(f.player.compensatedEntities.vehicles.hasPendingServerDismount());
         int proof = f.velocity(KNOCKBACK);
         assertNotEquals(-1, proof, "the velocity was taken for the vehicle's");
@@ -99,20 +94,5 @@ class KnockbackDuringPendingDismountTest {
             ids.add(teleport.getTeleportId());
         }
         return ids;
-    }
-
-    private static void setPassengers(JavaTickFixture f, List<Integer> passengers) {
-        var packet = new ClientboundSetPassengers(VEHICLE, passengers);
-        var event = new PacketSendEvent<>(
-                f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.SET_PASSENGERS, packet, false);
-        f.player.packetEntityReplication.onSetPassengers(event, f.player, packet);
-        event.tasksAfter().forEach(Runnable::run);
-    }
-
-    /** A passenger tick on a vehicle the client does not control: LocalPlayer#sendPosition's Rot and the tick end. */
-    private static void rideTick(JavaTickFixture f) {
-        var rot = new ServerboundMovePlayer(0, 0, 0, f.player.xRot, f.player.yRot, true, false, false, true);
-        f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
-        f.tickEnd();
     }
 }

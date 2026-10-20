@@ -165,11 +165,11 @@ public class VelocityTransformer {
 
     private List<PredVector> applyRideableInput(CultPlayer player, List<PredVector> input) {
         PacketEntity vehicle = simulationContext.getVehicle();
-        // LivingEntity#aiStep runs travelRidden only while the root isAlive(); a dead root travels on its
-        // immobile self input (LivingEntity#isImmobile, AbstractHorse#isImmobile), which is zero.
+        // LivingEntity#aiStep runs travelRidden only while the root isAlive() (health > 0, not the dead
+        // flag); otherwise it travels on its immobile self input (LivingEntity#isImmobile), which is zero.
         if (vehicle == null
                 || input.isEmpty()
-                || vehicle.isDead
+                || !vehicle.actionAlive
                 || !player.packetStateData.isVehicleMovementFromClientTick()
                 || !canUseItemControlledMovement(player, vehicle)
                 || EntityTypeUtil.isBoat(vehicle.type)) {
@@ -547,13 +547,14 @@ public class VelocityTransformer {
 
     private List<PredVector> applyJumps(CultPlayer player, List<PredVector> velocities) {
         boolean canPlayerJump = simulationContext.getWorldData().isCanJump();
-        // AbstractHorse#tickRidden and AbstractNautilus#tickRidden run the rider's jump inside travelRidden.
+        // AbstractHorse#tickRidden and AbstractNautilus#tickRidden run the rider's jump inside travelRidden,
+        // which LivingEntity#aiStep gates on isAlive().
         boolean canHorseJump = simulationContext.getVehicle() instanceof PacketEntityHorse horse
-                && !horse.isDead
+                && horse.actionAlive
                 && horse.horseJump > 0.0F
                 && simulationContext.getLastOnGround().determineOptimistically();
         boolean canNautilusDash = simulationContext.getVehicle() instanceof PacketEntityNautilus nautilus
-                && !nautilus.isDead
+                && nautilus.actionAlive
                 && nautilus.pendingJumpScale > 0.0D;
         if (!canPlayerJump && !canHorseJump && !canNautilusDash) return velocities;
 
@@ -660,7 +661,7 @@ public class VelocityTransformer {
             for (boolean isSprinting : simulationContext.getIsSprinting().getStates()) {
                 // To keep shit clean, we'll just do horse jumping separately
                 final PacketEntity vehicle = simulationContext.getVehicle();
-                if (vehicle instanceof PacketEntityHorse && vehicle.isDead) continue;
+                if (vehicle instanceof PacketEntityHorse && !vehicle.actionAlive) continue;
                 if (vehicle instanceof PacketEntityCamel) {
                     final PredVector dashed = applyCamelDash(player, vector, onHoney ? 0.5 : 1);
                     if (dashed != vector) outputs.add(dashed);

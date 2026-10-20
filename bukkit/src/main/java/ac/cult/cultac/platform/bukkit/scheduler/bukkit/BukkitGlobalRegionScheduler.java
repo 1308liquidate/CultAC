@@ -39,7 +39,7 @@ public class BukkitGlobalRegionScheduler implements GlobalRegionScheduler {
             @NotNull GrimPlugin plugin, @NotNull Runnable task, long initialDelayTicks, long periodTicks) {
         final Runnable guarded_task = RuntimeEnvironment.guard(task);
 
-        return new BukkitTaskHandle(bukkitScheduler.runTaskTimer(
+        return BukkitTaskHandle.repeating(bukkitScheduler.runTaskTimer(
                 CultACBukkitLoaderPlugin.LOADER, guarded_task, initialDelayTicks, periodTicks));
     }
 

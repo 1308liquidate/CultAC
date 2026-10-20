@@ -66,7 +66,26 @@ class CreativeFlightTest {
             f.input(JUMP);
             f.pongThrough(f.velocity(KNOCKBACK));
 
-            assertPredicted(f.tick(HOVER.add(KNOCKBACK.x, KNOCKBACK.y + IMPULSE, KNOCKBACK.z), false));
+            Vec3 at = HOVER.add(KNOCKBACK.x, KNOCKBACK.y + IMPULSE, KNOCKBACK.z);
+            assertPredicted(f.tick(at, false));
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+
+            // LivingEntity#travelInAir's 0.91 horizontally, Player#travel's 0.6 vertically.
+            f.input(NONE);
+            Vec3 next = new Vec3(KNOCKBACK.x * 0.91F, (KNOCKBACK.y + IMPULSE) * 0.6, KNOCKBACK.z * 0.91F);
+            assertPredicted(f.tick(at.add(next), false));
+        }
+    }
+
+    /** -0.1523530489 + 0.15F is under LivingEntity#aiStep's 0.003 cutoff, so the client holds its Y. */
+    @Test
+    void theImpulseAppliesBeforeTheMovementThreshold() throws Exception {
+        Vec3 knockback = new Vec3(-0.2834035280473661, -0.1523530488921443, -0.3631813465177318);
+        try (var f = flying()) {
+            f.input(JUMP);
+            f.pongThrough(f.velocity(knockback));
+
+            assertPredicted(f.tick(HOVER.add(knockback.x, 0, knockback.z), false));
             assertEquals(0.0, antiKb(f), "the client took the knockback");
         }
     }
@@ -104,6 +123,17 @@ class CreativeFlightTest {
             f.pongThrough(f.velocity(new Vec3(0, 2, 0)));
 
             f.tick(HOVER.add(0, 2 + IMPULSE, 0), false);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** A client that never sent player_input holds no keys: LocalPlayer#lastSentInput starts at Input.EMPTY. */
+    @Test
+    void anImpulseBeforeAnyPlayerInputFlags() throws Exception {
+        try (var f = flying()) {
+            f.pongThrough(f.velocity(KNOCKBACK));
+
+            f.tick(HOVER.add(KNOCKBACK.x, KNOCKBACK.y + IMPULSE, KNOCKBACK.z), false);
             assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
         }
     }

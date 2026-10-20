@@ -63,7 +63,7 @@ public class BukkitEntityScheduler implements EntityScheduler {
         final Runnable guarded_task = RuntimeEnvironment.guard(task);
         final Runnable guarded_retired = RuntimeEnvironment.guard(retired);
 
-        return new BukkitTaskHandle(
+        return BukkitTaskHandle.repeating(
                 scheduler.runTaskTimer(CultACBukkitLoaderPlugin.LOADER, guarded_task, initialDelayTicks, periodTicks));
     }
 }
