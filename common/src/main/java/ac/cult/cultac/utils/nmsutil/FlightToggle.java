@@ -44,7 +44,9 @@ public final class FlightToggle {
         data.jumpTriggerTimes = (times >>> 1) | (times & UNARMED);
         data.lastTickJump = data.knownInput.jump();
         data.autoJumpPossible = autoJumpCanFire(player);
-        data.eyeInWaterBeforeTick = player.wasEyeInWater;
+        PredictionResult prediction = player.checkManager.getSimulationProcessor().getLastPrediction();
+        data.eyeInWaterBeforeTick =
+                prediction != null && prediction.getSimulationContext().getWorldData().isEyeInWater();
     }
 
     /**
