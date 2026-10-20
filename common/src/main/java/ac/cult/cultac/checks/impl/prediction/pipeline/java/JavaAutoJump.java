@@ -39,13 +39,14 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
     public boolean canFireIn(int clientTick) {
         if (movedClientTick == clientTick) return possible;
         PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
+        Vec3 position = new Vec3(player.x, player.y, player.z);
         // LocalPlayer#sendPosition withholds only a position within the threshold of the last one it sent, and
-        // sends StatusOnly when onGround changes.
+        // sends StatusOnly when onGround changes. A teleport since the last move leaves its supporting block behind.
         return canStandOnGround(player.getMovementThreshold())
                 && canFire(
                         Vec3.ZERO,
                         player.compensatedEntities.getJumpAmplifier(),
-                        last == null
+                        last == null || !position.equals(last.getSimulationContext().getEnd())
                                 ? new MainSupportingBlockData(null, false)
                                 : last.getSimulationContext().getWorldData().getMainSupportingBlockPos());
     }
