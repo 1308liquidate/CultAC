@@ -959,6 +959,39 @@ class ReachInteractionRangeTest {
         }
     }
 
+    // ServerGamePacketListenerImpl#handleAttack accepts attacks up to 3 past entity_interaction_range.
+    @Test
+    void boatsAreBoundedByTheEntityInteractionRange() throws Exception {
+        try (var setup = new Setup()) {
+            for (String key : List.of("oak_boat", "oak_chest_boat", "bamboo_raft", "bamboo_chest_raft")) {
+                int type = EntityTypes.defaults().byKey(key).id();
+                assertEquals(List.of(), setup.attackBoat(type, 2.9, 0), key);
+                assertEquals(List.of("EntityReach"), setup.attackBoat(type, 3.1, 0), key);
+                assertEquals(List.of("EntityReach"), setup.attackBoat(type, 5.5, 0), key);
+            }
+        }
+    }
+
+    // AbstractBoat interpolates linearly to the last position the client may have received.
+    @Test
+    void aMovingBoatIsJudgedWhereverItsInterpolationMayHaveIt() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackBoat(EntityTypeIds.OAK_BOAT, 3.5, -1));
+            assertEquals(List.of(), setup.attackBoat(EntityTypeIds.OAK_BOAT, 2.9, 1));
+            assertEquals(List.of("EntityReach"), setup.attackBoat(EntityTypeIds.OAK_BOAT, 3.1, 1));
+        }
+    }
+
+    @Test
+    void aRiderAttackingItsOwnBoatIsInRange() throws Exception {
+        try (var setup = new Setup()) {
+            setup.board(0);
+            setup.rotate(0, 90);
+            setup.tickEnd();
+            assertEquals(List.of(), setup.attackEntity(Setup.BOAT, EntityTypeIds.OAK_BOAT, () -> setup.rotate(0, 90)));
+        }
+    }
+
     private static final class Setup implements AutoCloseable {
         final RecordConsumerServices services = new RecordConsumerServices();
         final RecordReceiveFixture fixture;
@@ -1655,6 +1688,13 @@ class ReachInteractionRangeTest {
                     .filter(type -> type.recordClass() == EntityMetadata.class)
                     .findFirst()
                     .orElseThrow();
+        }
+
+        // One client tick attacking a boat of this type straight ahead at the eye's height whose near face is this far
+        // from the eye, its relative move this much further ahead sent but not yet proven.
+        List<String> attackBoat(int type, double distance, double moved) {
+            Vec3 position = new Vec3(player.x, player.y + 1.62 - .3, player.z + distance + 1.375 / 2);
+            return attackAt(type, position, new Vec3(0, 0, moved), () -> {}, () -> rotate(0, 0));
         }
 
         // One client tick attacking a player whose hitbox face is this far along a look of this yaw from the seat.
