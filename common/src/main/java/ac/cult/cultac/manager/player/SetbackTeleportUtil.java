@@ -998,6 +998,9 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             this.hasFullyLoaded = true;
             this.hasFullyJoined = true;
         }
+        if (!player.isBedrockMovement() && !teleport.isPositionOnly() && teleport.getBedrockTransportRevision() < 0L) {
+            player.compensatedWorld.onClientTeleport();
+        }
         accepted.setTeleportData(teleport.copyWithLocation(location));
         accepted.setTeleport(true);
         return accepted;

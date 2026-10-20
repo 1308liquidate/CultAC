@@ -9,22 +9,29 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.movement.timer.DumbTimer;
 import ac.cult.cultac.checks.impl.prediction.OffsetHandler;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
+import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityEvent;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Relative;
+import ac.cult.cultac.utils.latency.CompensatedWorld;
 import ac.cult.cultac.utils.math.Vec3;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class JavaClientTickTest {
     private static final ServerboundPlayerInput NONE =
@@ -241,6 +248,44 @@ class JavaClientTickTest {
 
             assertExact(f.tick(high.add(velocity), false));
             assertEquals(0, f.player.checkManager.getKnockbackHandler().violations);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ClientVersion.class,
+            names = {"V_26_1", "V_26_2", "V_26_3"})
+    void aBlockAckAfterATeleportLeavesA26_1ClientWhereItIs(ClientVersion version) throws Exception {
+        assertEquals(3.5, xAfterABlockAckFollowingATeleport(version), 0);
+    }
+
+    @Test
+    void aBlockAckAfterATeleportSnapsBackA1_21_11Client() throws Exception {
+        assertEquals(STANDING.x, xAfterABlockAckFollowingATeleport(ClientVersion.V_1_21_11), 0);
+    }
+
+    private static double xAfterABlockAckFollowingATeleport(ClientVersion version) throws Exception {
+        try (var f = new JavaTickFixture()) {
+            JavaTickFixture.setField(CultPlayer.class, f.player, "resolvedClientVersion", version);
+            f.place(STANDING, Vec3.ZERO);
+            f.input(NONE);
+            f.tick(STANDING, true);
+            CompensatedWorld world = f.player.compensatedWorld;
+            BlockPos broken = new BlockPos(3, FLOOR_Y, 0);
+            world.updateBlock(broken, BlockIds.STONE.defaultState());
+
+            world.advanceClientPredictionSequence();
+            world.startPredicting();
+            world.updateBlock(broken, BlockIds.AIR.defaultState());
+            world.stopPredicting(1);
+            // BlockStatePredictionHandler#onTeleport records the sequence; the ack for it restores no position.
+            Vec3 inside = new Vec3(3.5, FLOOR_Y, 0.5);
+            f.teleport(inside, new RelativeFlag(0));
+            world.handlePredictionConfirmation(1);
+            f.pongThrough(f.player.lastTransactionSent.get());
+
+            assertEquals(BlockIds.STONE.defaultState(), world.getBlockStateIdAt(broken));
+            return f.player.x;
         }
     }
 
