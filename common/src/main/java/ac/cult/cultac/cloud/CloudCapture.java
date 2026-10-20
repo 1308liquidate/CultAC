@@ -251,8 +251,8 @@ public final class CloudCapture implements PlayerObserver {
     }
 
     /**
-     * Makes {@code player}'s capture when the upload is on and they have none, then installs it, or takes it out when
-     * the upload is off. Any thread.
+     * Makes {@code player}'s capture when it is {@linkplain #wanted wanted} and they have none, then installs it, or
+     * takes it out when it is not. Any thread.
      */
     static void reconfigure(CultPlayer player) {
         if (!(player.user.getChannel() instanceof Channel found)) return;
@@ -260,7 +260,7 @@ public final class CloudCapture implements PlayerObserver {
             found.eventLoop().execute(() -> {
                 CloudCapture capture = of(player);
                 if (capture == null) {
-                    if (!uplinks.enabled()) return;
+                    if (!wanted(player)) return;
                     capture = new CloudCapture(player);
                     player.observer = capture;
                 }
@@ -405,8 +405,8 @@ public final class CloudCapture implements PlayerObserver {
     }
 
     /**
-     * Installs the capture on the player's channel when the upload is on, and takes it out when it is off; segments
-     * whose socket the settings moved end there and go on on the new one. Any thread.
+     * Installs the capture on the player's channel when it is {@linkplain #wanted wanted}, and takes it out when it is
+     * not; segments whose socket the settings moved end there and go on on the new one. Any thread.
      */
     void reconfigure() {
         if (!(player.user.getChannel() instanceof Channel found)) return;
@@ -451,8 +451,17 @@ public final class CloudCapture implements PlayerObserver {
         else capture.detach();
     }
 
+    /**
+     * A capture belongs on {@code player}'s channel while the upload is on and this runtime still tracks them. A
+     * hand-off stops tracking them on the channel's loop, so work queued before it finds them gone and stays out of
+     * the pipeline the newer runtime's capture takes.
+     */
+    private static boolean wanted(CultPlayer player) {
+        return uplinks.enabled() && player.user.getCultPlayer() == player;
+    }
+
     private void reconfigureOnLoop(Channel found) {
-        if (!uplinks.enabled()) {
+        if (!wanted(player)) {
             if (channel != null) detachOnLoop(channel);
             leave();
             return;
