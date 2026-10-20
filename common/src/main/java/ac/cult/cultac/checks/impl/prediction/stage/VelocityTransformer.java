@@ -97,12 +97,8 @@ public class VelocityTransformer {
         for (PredVector velocity : velocities) {
             outputs.addAll(applyPossibleJumpStates(player, velocity));
         }
-        // An unarmed timer leaves a jumpless start; LivingEntity#jumpFromGround does nothing at or below 1.0E-5F.
-        if (onGroundStates.contains(false)
-                || FlightToggle.unarmedPossible(player.packetStateData)
-                || jumpFromGroundCanDoNothing(player)) {
-            outputs.addAll(velocities);
-        }
+        // LivingEntity#jumpFromGround leaves the velocity unchanged at or below 1.0E-5F.
+        if (onGroundStates.contains(false) || jumpFromGroundCanDoNothing(player)) outputs.addAll(velocities);
         return outputs;
     }
 

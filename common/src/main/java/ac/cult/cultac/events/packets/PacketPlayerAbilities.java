@@ -25,10 +25,10 @@ public class PacketPlayerAbilities extends CultProcessor implements CheckListene
             CultPlayer player,
             ServerboundPlayerAbilities packet) {
         if (player.isBedrockMovement()) return;
-        player.packetStateData.abilitiesThisClientTick = true;
         boolean flying = packet.flying() && player.canFly;
         if (flying && !player.isFlying) player.packetStateData.flyingStartBeforeTravel = true;
         player.packetStateData.flyingStopAfterTravel = !flying && player.isFlying;
+        if (player.packetStateData.flyingStopAfterTravel) player.packetStateData.flightStopThisClientTick = true;
         if (!player.packetStateData.flyingStopAfterTravel) player.isFlying = flying;
     }
 

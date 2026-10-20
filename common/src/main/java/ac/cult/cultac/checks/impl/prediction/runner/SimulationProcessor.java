@@ -2051,6 +2051,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     }
 
     @Generated
+    public DesyncStatus getLastOnGround() {
+        return this.lastOnGround;
+    }
+
     public void setLastOnGround(DesyncStatus lastOnGround) {
         this.lastOnGround = lastOnGround;
     }

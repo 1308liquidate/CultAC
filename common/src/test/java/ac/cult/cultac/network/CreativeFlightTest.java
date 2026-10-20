@@ -214,6 +214,40 @@ class CreativeFlightTest {
         }
     }
 
+    /** Only the toggle sends a flight start on an armed grounded press, and it always runs jumpFromGround. */
+    @Test
+    void omittingTheTakeoffJumpOfAnArmedGroundedToggleFlags() throws Exception {
+        try (var f = armedOnTheGround(true)) {
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            f.input(JUMP);
+
+            f.tick(GROUND.add(KNOCKBACK.x, KNOCKBACK.y + IMPULSE, KNOCKBACK.z), false);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** The toggle resets Player#jumpTriggerTime, so the next takeoff needs a new arming press. */
+    @Test
+    void aSecondTakeoffJumpWithoutANewArmingPressFlags() throws Exception {
+        try (var f = armedOnTheGround(true)) {
+            f.abilities(true);
+            f.input(JUMP);
+            assertPredicted(f.tick(GROUND.add(0, JUMP_POWER + IMPULSE, 0), false));
+
+            grantFlight(f, false);
+            f.place(GROUND, Vec3.ZERO);
+            f.input(NONE);
+            assertPredicted(f.tick(GROUND, true));
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            f.input(JUMP);
+
+            f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
     /** The first press only arms Player#jumpTriggerTime, so flight turned on with it has no takeoff jump. */
     @Test
     void aTakeoffJumpOnAnUnarmedFirstPressFlags() throws Exception {

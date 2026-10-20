@@ -19,8 +19,10 @@ public class PacketStateData {
     public boolean flyingStopAfterTravel = false;
     // A flight start LocalPlayer#aiStep sent this client tick, ahead of its player_input and move.
     public boolean flyingStartBeforeTravel = false;
-    // A serverbound player_abilities arrived this client tick.
-    public boolean abilitiesThisClientTick = false;
+    // A flight stop this client tick's player_abilities sent.
+    public boolean flightStopThisClientTick = false;
+    // LocalPlayer#updateAutoJump can have set autoJumpTime for the next client tick.
+    public boolean autoJumpPossible = false;
     // The jump key of the last client tick LocalPlayer#aiStep ran.
     public boolean lastTickJump = false;
     // Bit t: Player#jumpTriggerTime can be t at the next LocalPlayer#aiStep flight toggle check.
