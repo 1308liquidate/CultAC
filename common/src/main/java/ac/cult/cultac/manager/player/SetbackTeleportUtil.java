@@ -50,10 +50,12 @@ import ac.cult.cultac.utils.lists.EvictingQueue;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.VectorUtils;
+import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.Friction;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.IsUsingItem;
+import ac.cult.cultac.utils.nmsutil.VelocityCandidates;
 import ac.grim.grimac.api.event.events.GrimPlayerSetbackEvent;
 import ac.grim.grimac.api.event.events.GrimTeleportEvent;
 import java.util.Collections;
@@ -214,6 +216,10 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 speed = 0.0f;
             }
             initialVel = UncertaintyHelper.handleCircular(initialVel, context.getTarget(), speed);
+            if (VelocityCandidates.collidedVertically(result)) {
+                initialVel = initialVel.withY(
+                        VelocityCandidates.afterVerticalCollision(result, initialVel.y), "vertical restitution");
+            }
 
             afterTickFriction = simulateFriction(
                     initialVel,
@@ -501,7 +507,23 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 }
 
                 if (clientVel.x != collide.x) clientVel = new Vec3(0, clientVel.y, clientVel.z);
-                if (clientVel.y != collide.y) clientVel = new Vec3(clientVel.x, 0, clientVel.z);
+                if (clientVel.y != collide.y) {
+                    boolean landed = clientVel.y < 0.0D;
+                    MainSupportingBlockData support = player.checkManager
+                            .getSimulationProcessor()
+                            .mainSupportingBlockAfter(
+                                    GetBoundingBox.getPlayerBoundingBox(player, position.x, position.y, position.z),
+                                    collide,
+                                    landed);
+                    double restitutedY = VelocityCandidates.afterVerticalCollision(
+                            player,
+                            BlockProperties.getOnPos(player, support, position),
+                            context.isSneaking(),
+                            true,
+                            clientVel.y,
+                            collide.y);
+                    clientVel = new Vec3(clientVel.x, restitutedY, clientVel.z);
+                }
                 if (clientVel.z != collide.z) clientVel = new Vec3(clientVel.x, clientVel.y, 0);
 
                 clientVel = simulateFriction(

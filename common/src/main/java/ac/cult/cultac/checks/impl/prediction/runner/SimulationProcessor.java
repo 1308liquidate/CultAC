@@ -149,6 +149,17 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         return this.velocityScratch;
     }
 
+    /** Entity#checkSupportingBlock after a move of {@code movement} that ended with the box {@code box}. */
+    public MainSupportingBlockData mainSupportingBlockAfter(SimpleCollisionBox box, Vec3 movement, boolean onGround) {
+        return this.worldStageBuilder.findMainSupportingBlockPos(
+                player,
+                this.lastPrediction == null ? null : this.lastPrediction.getSimulationContext(),
+                movement.x,
+                movement.z,
+                box,
+                onGround);
+    }
+
     public Set<Vec3> getValidPlayerStartingVels() {
         return this.validPlayerStartingVels;
     }

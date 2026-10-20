@@ -919,7 +919,7 @@ public class WorldStageBuilder {
         return fishingRodPulls;
     }
 
-    private MainSupportingBlockData findMainSupportingBlockPos(
+    public MainSupportingBlockData findMainSupportingBlockPos(
             CultPlayer player,
             SimulationContext lastContext,
             double lastMovementX,
