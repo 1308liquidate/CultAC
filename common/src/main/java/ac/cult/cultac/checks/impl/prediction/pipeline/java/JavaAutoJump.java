@@ -14,6 +14,9 @@ import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 
 /** Source-proven automatic input: LocalPlayer#move/updateAutoJump, then next tick's aiStep/makeJump. */
 public final class JavaAutoJump extends CultProcessor implements PostPredictionListener {
+    // Entity#move keeps the position for a collided movement whose squared length is within 1.0E-7.
+    private static final double KEPT_MOVEMENT = Math.sqrt(1.0E-7);
+
     private boolean queued;
     private boolean jumpedThisTick;
     private boolean possible;
@@ -34,15 +37,14 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
     /**
      * Whether LocalPlayer#updateAutoJump can have set autoJumpTime in the client tick {@code clientTick}. A judged
      * move gives its outcome; an unjudged one runs the geometry on its reported movement from wherever the player
-     * can be on the ground; a tick that sent no position runs it on the input from the last position.
+     * can have landed; a tick that sent no position runs it on the input from the last position.
      */
     public boolean canFireIn(int clientTick) {
         if (movedClientTick == clientTick) return possible;
         PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
         Vec3 position = new Vec3(player.x, player.y, player.z);
-        // LocalPlayer#sendPosition withholds only a position within the threshold of the last one it sent, and
-        // sends StatusOnly when onGround changes. A teleport since the last move leaves its supporting block behind.
-        return canStandOnGround(player.getMovementThreshold())
+        // A teleport since the last move leaves its supporting block behind.
+        return landedWithoutPosition(clientTick == movedClientTick + 1)
                 && canFire(
                         Vec3.ZERO,
                         player.compensatedEntities.getJumpAmplifier(),
@@ -63,12 +65,11 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
         boolean judged = !complete.isExempt() && !complete.getPredictionResult().hasEffectiveFlags();
         queued = judged && schedulesJump(complete.getPredictionResult());
         movedClientTick = player.packetStateData.acceptedClientTick;
-        // An unjudged move's candidate collisions are unproven; a clipped descent leaves the player resting on a
-        // surface, and the attempted vertical movement is what the engine doesn't know.
+        // An unjudged move's attempted movement is unknown; its reported movement is the collided one.
         PredictionResult result = complete.getPredictionResult();
         possible = judged
                 ? queued
-                : canStandOnGround(1.0E-7)
+                : landed(result.getSimulationContext().getStart(), result.getTarget())
                         && canFire(
                                 result.getTarget(),
                                 result.getSimulationContext().getJumpAmplifier(),
@@ -86,10 +87,70 @@ public final class JavaAutoJump extends CultProcessor implements PostPredictionL
                         result.getSimulationContext().getWorldData().getMainSupportingBlockPos());
     }
 
-    // A surface within depth below the player's box.
-    private boolean canStandOnGround(double depth) {
-        SimpleCollisionBox box = GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z);
-        return Collisions.collide(player, box, 0, -depth, 0).y != -depth;
+    /**
+     * Whether Entity#move can set onGround for a collided movement of {@code movement} from {@code start}: a downward
+     * movement that collided. Direction#axisStepOrder collides Y first, at the start's XZ; a movement left in place
+     * collided within {@link #KEPT_MOVEMENT}; Entity#collide's step lands on a candidate height.
+     */
+    private boolean landed(Vec3 start, Vec3 movement) {
+        SimpleCollisionBox from = GetBoundingBox.getPlayerBoundingBox(player, start.x, start.y, start.z);
+        if (movement.equals(Vec3.ZERO)) return surfaceWithin(from, KEPT_MOVEMENT);
+        if (movement.y <= 0
+                && Math.abs(Collisions.collide(player, from.copy(), 0, movement.y - KEPT_MOVEMENT, 0).y - movement.y)
+                        <= 1.0E-7) return true;
+        return stepsOnto(from, movement);
+    }
+
+    /**
+     * Whether Entity#move can have set onGround on a tick that sent no position. LocalPlayer#sendPosition withholds a
+     * position within the threshold of the last one it sent and sends StatusOnly when onGround changes, so the
+     * movement collided within the threshold or was left in place. A tick after one the engine committed starts at
+     * the player's position; after a withheld tick the client is anywhere within the threshold of the sent position.
+     */
+    private boolean landedWithoutPosition(boolean startKnown) {
+        double threshold = player.getMovementThreshold();
+        if (startKnown) {
+            return surfaceWithin(
+                    GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z),
+                    Math.max(threshold, KEPT_MOVEMENT));
+        }
+        Vec3 sent = player.packetStateData.lastSentTickPosition;
+        if (sent == null) sent = new Vec3(player.x, player.y, player.z);
+        SimpleCollisionBox drift = GetBoundingBox.getPlayerBoundingBox(player, sent.x, sent.y + threshold, sent.z)
+                .expand(threshold, 0, threshold);
+        return surfaceWithin(drift, 2 * threshold + KEPT_MOVEMENT);
+    }
+
+    // A surface within depth below the box.
+    private boolean surfaceWithin(SimpleCollisionBox box, double depth) {
+        return Collisions.collide(player, box.copy(), 0, -depth, 0).y != -depth;
+    }
+
+    /**
+     * Entity#collide's step: from the start box, or from its downward collision, the box rises to a collider's Y
+     * coordinate within maxUpStep above it (collectCandidateStepUpHeights) and moves on horizontally.
+     */
+    private boolean stepsOnto(SimpleCollisionBox from, Vec3 movement) {
+        float step = player.getMaxUpStep();
+        if (step <= 0 || movement.x == 0 && movement.z == 0) return false;
+        double clip = Collisions.collide(player, from.copy(), 0, -step, 0).y;
+        double endMinY = from.minY + movement.y;
+        double[] grounds = clip == -step ? new double[] {from.minY} : new double[] {from.minY, from.minY + clip};
+        for (double ground : grounds) {
+            double rise = endMinY - ground;
+            if (rise < 0 || rise > step) continue;
+            SimpleCollisionBox region = new SimpleCollisionBox(
+                            from.minX, ground, from.minZ, from.maxX, ground + (from.maxY - from.minY), from.maxZ)
+                    .expandToCoordinate(movement.x, step, movement.z)
+                    .expandToCoordinate(0, ground == from.minY ? -1.0E-5F : 0, 0);
+            for (var box : JavaAutoJumpGeometry.collisions(player, region)) {
+                for (double y : new double[] {box.minY, box.maxY}) {
+                    float candidate = (float) (y - ground);
+                    if (candidate >= 0 && candidate <= step && Math.abs(candidate - rise) <= 1.0E-7) return true;
+                }
+            }
+        }
+        return false;
     }
 
     // LocalPlayer#canAutoJump's remaining prerequisites and updateAutoJump's geometry for a move of {@code move}

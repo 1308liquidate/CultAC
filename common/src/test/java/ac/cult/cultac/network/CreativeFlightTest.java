@@ -514,6 +514,96 @@ class CreativeFlightTest {
         }
     }
 
+    /** Entity#move collides Y before the horizontal axes, so a walk off a ledge's edge ends on the ground. */
+    @Test
+    void aWalkOffALedgeWhereAnAutoJumpCanFireAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            for (int z = 0; z <= 8; z++) block(f, 0, FLOOR_Y - 1, z, BlockIds.AIR.defaultState());
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            assertTrue(
+                    unarmedAfterAWalkingPressAfterFlight(f, new Vec3(0.5, FLOOR_Y, 0.299), new Vec3(0, 0, 0.1), JUMP_POWER),
+                    "the walk off the ledge was not grounded");
+
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /** A walk that starts past a ledge's edge has no downward collision to end on the ground. */
+    @Test
+    void aTakeoffRenewedByAnAutoJumpPastALedgeAfterFlightFlags() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            for (int z = 0; z <= 8; z++) block(f, 0, FLOOR_Y - 1, z, BlockIds.AIR.defaultState());
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            assertFalse(
+                    unarmedAfterAWalkingPressAfterFlight(f, new Vec3(0.5, FLOOR_Y, 0.301), new Vec3(0, 0, 0.1), JUMP_POWER),
+                    "an auto-jump past the ledge was kept");
+
+            pressInTheAirThenTakeOff(f);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
+    /** Entity#collide's step up onto a half slab ends on the ground, with a step up ahead for updateAutoJump. */
+    @Test
+    void aStepUpWhereAnAutoJumpCanFireAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            int slab = DataTables.defaults().registry().block("minecraft:stone_slab").defaultState();
+            block(f, 0, FLOOR_Y, 1, slab);
+            block(f, 0, FLOOR_Y, 2, BlockIds.STONE.defaultState());
+            block(f, 0, FLOOR_Y + 1, 2, slab);
+            assertTrue(
+                    unarmedAfterAWalkingPressAfterFlight(f, GROUND, new Vec3(0, 0.5, 0.5), JUMP_POWER),
+                    "the step up was not grounded");
+
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /**
+     * Entity#move keeps the position of a movement within 1.0E-7 squared that collided, and still lands it, so a
+     * player resting within that distance above the floor sends only StatusOnly.
+     */
+    @Test
+    void aClippedLandingJustAboveTheFloorAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            assertTrue(unarmedAfterAClippedLandingAfterFlight(f, 0.0003, false), "the clipped landing was dropped");
+
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /** LocalPlayer#sendPosition's 20th-tick position repeats a landing that Entity#move kept in place. */
+    @Test
+    void aClippedLandingJustAboveTheFloorSentAsAPositionAfterFlightMayLeaveTheToggleUnarmed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            assertTrue(unarmedAfterAClippedLandingAfterFlight(f, 0.0003, true), "the clipped landing was dropped");
+
+            PredictionResult takeoff = pressInTheAirThenTakeOff(f);
+            assertPredicted(takeoff);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /** A collided movement beyond 1.0E-7 squared moves the player, so a landing that far above the floor flags. */
+    @Test
+    void aTakeoffRenewedByAnAutoJumpOverAGapAboveTheFloorAfterFlightFlags() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            block(f, 0, FLOOR_Y, 1, BlockIds.STONE.defaultState());
+            assertFalse(unarmedAfterAClippedLandingAfterFlight(f, 0.0004, false), "a landing above the gap was kept");
+
+            pressInTheAirThenTakeOff(f);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
     /** LocalPlayer#updateAutoJump needs a rise above 0.5, so a half slab ahead doesn't fire it. */
     @Test
     void aTakeoffRenewedByAnAutoJumpOntoAHalfSlabFlags() throws Exception {
@@ -726,18 +816,49 @@ class CreativeFlightTest {
      * simulation exempts the walk.
      */
     private static boolean unarmedAfterAWalkingPressAfterFlight(JavaTickFixture f, double rise) {
-        f.place(GROUND.add(0, 0.3, 0), Vec3.ZERO);
+        return unarmedAfterAWalkingPressAfterFlight(f, GROUND, new Vec3(0, 0, WALK_STEP), rise);
+    }
+
+    /** As {@link #unarmedAfterAWalkingPressAfterFlight(JavaTickFixture, double)}, walking {@code walk} from {@code from}. */
+    private static boolean unarmedAfterAWalkingPressAfterFlight(
+            JavaTickFixture f, Vec3 from, Vec3 walk, double rise) {
+        f.place(from.add(0, 0.3, 0), Vec3.ZERO);
         grantFlight(f, true);
         f.input(NONE);
-        assertTrue(f.tick(GROUND.add(0, 0.3, 0), false).isExempt(), "the flight was judged");
+        assertTrue(f.tick(from.add(0, 0.3, 0), false).isExempt(), "the flight was judged");
         grantFlight(f, false);
-        f.tick(GROUND, true);
+        f.tick(from, true);
         f.input(FORWARD);
-        assertTrue(f.tick(GROUND.add(0, 0, WALK_STEP), true).isExempt(), "the walk was judged");
+        assertTrue(f.tick(from.add(walk), true).isExempt(), "the walk was judged");
         f.input(JUMP);
-        f.tick(GROUND.add(0, rise, WALK_STEP + WALK_STEP * (0.6F * 0.91F)), false);
+        f.tick(from.add(walk).add(0, rise, walk.z * (0.6F * 0.91F)), false);
         return (f.player.packetStateData.jumpTriggerTimes & 1) != 0;
     }
+
+    /**
+     * On the ticks after the server ends the player's flight, a fall to {@code gap} above the floor against a wall
+     * ahead, a tick walking into the wall that the client reports as StatusOnly, or as an unchanged position when
+     * {@code sendPosition}, then a press; whether Player#jumpTriggerTime can still be unarmed after the press.
+     */
+    private static boolean unarmedAfterAClippedLandingAfterFlight(JavaTickFixture f, double gap, boolean sendPosition) {
+        Vec3 rest = new Vec3(0.5, FLOOR_Y + gap, 0.7);
+        f.place(rest.add(0, 0.3, 0), Vec3.ZERO);
+        grantFlight(f, true);
+        f.input(NONE);
+        assertTrue(f.tick(rest.add(0, 0.3, 0), false).isExempt(), "the flight was judged");
+        grantFlight(f, false);
+        f.tick(rest, false);
+        f.input(FORWARD);
+        if (sendPosition) {
+            assertTrue(f.tick(rest, true).isExempt(), "the landing was judged");
+        } else {
+            f.statusTick(true, true);
+        }
+        f.input(JUMP);
+        f.tick(rest.add(0, JUMP_POWER, 0), false);
+        return (f.player.packetStateData.jumpTriggerTimes & 1) != 0;
+    }
+
 
     /**
      * A release and a press in the air without player_abilities, the landing, and a grounded double-tap under a
