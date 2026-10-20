@@ -139,6 +139,12 @@ public final class ClientBlockGeometry {
                 pickFluid);
     }
 
+    /** {@code BlockGetter#clip} with {@code ClipContext.Fluid.NONE} and {@code blocks} as the block shape. */
+    public BlockHit clipBlocks(
+            ac.cult.cultac.utils.math.Vec3 from, ac.cult.cultac.utils.math.Vec3 to, BlockRaycast.ShapeQuery blocks) {
+        return clip(from, to, blocks, state -> false);
+    }
+
     public BlockHit clipResetting(
             ac.cult.cultac.utils.math.Vec3 from,
             ac.cult.cultac.utils.math.Vec3 to,

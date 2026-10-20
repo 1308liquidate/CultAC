@@ -371,7 +371,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         if (player.isBedrockMovement()) return;
         PredictionResult lastPrediction =
                 player.checkManager.getSimulationProcessor().getLastPrediction();
-        if (lastPrediction != null) WorldStageBuilder.recountCollidingTickingAfterPlayer(lastPrediction);
+        if (lastPrediction != null) WorldStageBuilder.recountCollidingTickingAfterPlayer(player, lastPrediction);
     }
 
     private void tickEntityInterpolationAtClientTickEnd() {
@@ -561,7 +561,14 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 packet.pitch(),
                 packet.data(),
                 transaction,
-                packet.uuid());
+                packet.uuid(),
+                PacketCodecUtil.clientVelocityFromObserved(
+                        event.getDecodedProtocol(),
+                        player.getClientVersion(),
+                        new Vec3(
+                                packet.velocity().x(),
+                                packet.velocity().y(),
+                                packet.velocity().z())));
     }
 
     private void handleSetEntityMotion(PacketSendEvent<ClientboundEntityMotion> event, ClientboundEntityMotion packet) {
@@ -1963,7 +1970,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
 
     public void addEntity(
             int entityID, int type, Vec3 position, float xRot, float yRot, int extraData, int transaction) {
-        addEntity(entityID, type, position, xRot, yRot, extraData, transaction, null);
+        addEntity(entityID, type, position, xRot, yRot, extraData, transaction, null, Vec3.ZERO);
     }
 
     private void addEntity(
@@ -1974,7 +1981,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             float yRot,
             int extraData,
             int transaction,
-            java.util.UUID uuid) {
+            java.util.UUID uuid,
+            Vec3 velocity) {
         int spawnTransaction = transaction >= 0 ? transaction : player.lastTransactionSent.get();
         player.compensatedEntities.serverPositionsMap.put(
                 entityID, new TrackerData(position.x, position.y, position.z, xRot, yRot, type, spawnTransaction));
@@ -1983,6 +1991,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         Runnable addTask = () -> {
             if (!player.isBedrockMovement() && level != player.compensatedWorld.level()) return;
             int replayedProof = player.compensatedEntities.addEntity(entityID, type, position, xRot, yRot, extraData);
+            // Entity#recreateFromPacket sets the spawn's delta movement.
+            PacketEntity spawned = player.compensatedEntities.getEntity(entityID);
+            if (spawned != null) spawned.deltaMovement = velocity;
             // A merged held update may carry a proof no retirement awaits.
             if (replayedProof > player.lastTransactionReceived.get()) retireSizeAt(entityID, replayedProof);
             if (uuid != null

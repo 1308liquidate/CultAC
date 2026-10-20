@@ -20,6 +20,8 @@ public final class ClientSprintState {
     private boolean modifier;
     private boolean sprintResetThisTick;
     private boolean flagUncertain;
+    private boolean flagBeforeAiStep;
+    private boolean aiStepReconciled;
 
     /** Whether Player#attack's causeExtraKnockback reached setSprinting(false). */
     public enum AttackReset {
@@ -64,6 +66,10 @@ public final class ClientSprintState {
      * LivingEntity#setSprinting, which resynchronized the modifier to the flag.
      */
     public void onClientTick(boolean wasSprinting) {
+        if (!aiStepReconciled) {
+            flagBeforeAiStep = flag;
+            aiStepReconciled = true;
+        }
         // Unmodeled: wall-sprinting start->stop in one aiStep can clear the modifier early; this only errs lenient.
         // An attack reset that aiStep re-sprinted re-added the modifier.
         if (flag != wasSprinting || sprintResetThisTick && wasSprinting) {
@@ -72,6 +78,24 @@ public final class ClientSprintState {
         flag = wasSprinting;
         sprintResetThisTick = false;
         flagUncertain = false;
+    }
+
+    /** A LocalPlayer#tick movement packet opens its tick; the next {@link #onClientTick} reconciles its aiStep. */
+    public void onClientMove() {
+        aiStepReconciled = false;
+    }
+
+    /** The client's tick ended; the next {@link #onClientTick} reconciles the next tick's aiStep. */
+    public void onClientTickEnd() {
+        aiStepReconciled = false;
+    }
+
+    /**
+     * Entity#isSprinting as Entity#baseTick read it this tick, before LocalPlayer#aiStep: the previous tick's flag, or
+     * the server's flag the client applied since.
+     */
+    public boolean flagBeforeAiStep() {
+        return aiStepReconciled ? flagBeforeAiStep : flag;
     }
 
     /**
@@ -91,6 +115,8 @@ public final class ClientSprintState {
     public void reset() {
         flag = false;
         modifier = false;
+        flagBeforeAiStep = false;
+        aiStepReconciled = false;
         sprintResetThisTick = false;
         flagUncertain = false;
     }

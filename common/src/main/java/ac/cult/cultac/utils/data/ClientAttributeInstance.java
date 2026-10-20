@@ -3,6 +3,8 @@ package ac.cult.cultac.utils.data;
 import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
@@ -66,6 +68,17 @@ public final class ClientAttributeInstance {
     /** AttributeInstance#getValue, recalculated only when the base or modifiers change. */
     public double value() {
         return value;
+    }
+
+    /** AttributeInstance#getValue once AttributeInstance#addTransientModifier has added {@code modifier}. */
+    public double valueWith(AttributeModifier modifier) {
+        LinkedHashMap<String, AttributeModifier> with = new LinkedHashMap<>(modifiers);
+        with.put(modifier.id(), modifier);
+        Set<String> excluded = new HashSet<>(excludedModifierIds);
+        excluded.remove(modifier.id());
+        double value = CompensatedEntities.calculateAttributeValue(
+                new AttributeSnapshot("", base, new ArrayList<>(with.values())), excluded);
+        return Double.isNaN(value) ? minValue : Math.min(Math.max(value, minValue), maxValue);
     }
 
     // AttributeInstance#calculateValue, then RangedAttribute#sanitizeValue

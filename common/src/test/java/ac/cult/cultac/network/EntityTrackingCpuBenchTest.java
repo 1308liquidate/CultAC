@@ -82,7 +82,7 @@ class EntityTrackingCpuBenchTest {
 
             Tick order = () -> entities.tickClientEntities(entity -> sink[0] = entity);
             Tick interpolation = () -> entities.tickClientEntities(entity -> entity.onMovement(player, true));
-            Tick pushers = () -> WorldStageBuilder.recountCollidingTickingAfterPlayer(prediction);
+            Tick pushers = () -> WorldStageBuilder.recountCollidingTickingAfterPlayer(player, prediction);
             Tick paths = () -> {
                 for (int i = 0; i < 10; i++) sink[0] = EntityPositionPath.fromProtocol(protocolPath);
             };
