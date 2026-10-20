@@ -6,10 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.sun.management.ThreadMXBean;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
+import java.lang.management.ManagementFactory;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -155,5 +160,109 @@ class CapturePacketCopiesTest {
             pools.forEach(CapturePacketCopies::release);
         }
         assertEquals(0, budget.bytes());
+    }
+
+    @Test
+    void anEmptyPoolIsChargedExactlyTheBytesItAllocates() {
+        var platformBean = ManagementFactory.getThreadMXBean();
+        assumeTrue(platformBean instanceof ThreadMXBean);
+        ThreadMXBean bean = (ThreadMXBean) platformBean;
+        assumeTrue(bean.isThreadAllocatedMemorySupported());
+        bean.setThreadAllocatedMemoryEnabled(true);
+        CapturePacketCopies.Budget budget = new CapturePacketCopies.Budget();
+        long thread = Thread.currentThread().getId();
+        for (int i = 0; i < 20_000; i++) (kept = CapturePacketCopies.of(budget, 0)).release();
+        long before = bean.getThreadAllocatedBytes(thread);
+        for (int i = 0; i < 1_000; i++) (kept = CapturePacketCopies.of(budget, 0)).release();
+        double perPool = (bean.getThreadAllocatedBytes(thread) - before) / 1_000.0;
+        assertEquals(CapturePacketCopies.POOL_BYTES, perPool, 1, "allocated per empty pool");
+        assertEquals(0, budget.bytes());
+    }
+
+    @Test
+    void aSecondReleaseGivesNothingBack() {
+        CapturePacketCopies.Budget budget = new CapturePacketCopies.Budget();
+        long process = CapturePacketCopies.processBytes();
+        CapturePacketCopies copies = CapturePacketCopies.of(budget, 0);
+        ByteBuf source = Unpooled.buffer(4).writeInt(7);
+        try {
+            copies.copy(source, 0);
+        } finally {
+            source.release();
+        }
+        copies.release();
+        copies.release();
+        assertEquals(0, budget.bytes());
+        assertEquals(process, CapturePacketCopies.processBytes());
+    }
+
+    @Test
+    void anAllocationFailureLeavesBothBudgetsAsTheyWere() throws Exception {
+        String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        Process child = new ProcessBuilder(
+                        java,
+                        "-Xmx24m",
+                        "-XX:+UseSerialGC",
+                        "-cp",
+                        System.getProperty("java.class.path"),
+                        AllocationFailure.class.getName())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(child.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(child.waitFor(60, TimeUnit.SECONDS), output);
+        assertEquals(0, child.exitValue(), output);
+        assertTrue(output.contains("constructed=false grown=false"), output);
+    }
+
+    private static CapturePacketCopies kept;
+
+    /** Exhausts its own heap, then fails a pool construction and a bucket growth. */
+    static final class AllocationFailure {
+        private static Object[] pressure;
+
+        public static void main(String[] args) {
+            CapturePacketCopies.Budget budget = new CapturePacketCopies.Budget();
+            ByteBuf source = Unpooled.buffer(200).writeZero(200);
+            CapturePacketCopies pool = CapturePacketCopies.of(budget, 0);
+            pool.copy(source, 0);
+            pool.clear(TimeUnit.SECONDS.toNanos(60));
+            long player = budget.bytes();
+            long process = CapturePacketCopies.processBytes();
+            boolean constructed = true;
+            boolean grown = true;
+            fill();
+            try {
+                CapturePacketCopies.of(budget, 0);
+            } catch (OutOfMemoryError expected) {
+                constructed = false;
+            }
+            fill();
+            try {
+                pool.copy(source, 0);
+            } catch (OutOfMemoryError expected) {
+                grown = false;
+            }
+            pressure = null;
+            System.gc();
+            System.out.println("constructed=" + constructed + " grown=" + grown);
+            boolean restored = budget.bytes() == player
+                    && CapturePacketCopies.processBytes() == process
+                    && pool.retainedBytes() == 0;
+            System.out.println("player " + budget.bytes() + " of " + player + ", process "
+                    + CapturePacketCopies.processBytes() + " of " + process + ", retained " + pool.retainedBytes());
+            pool.copy(source, 0);
+            pool.release();
+            restored &= budget.bytes() == 0 && CapturePacketCopies.processBytes() == 0;
+            System.exit(restored ? 0 : 1);
+        }
+
+        private static void fill() {
+            for (int size : new int[] {1 << 20, 1 << 14, 1 << 10, 64, 0}) {
+                try {
+                    while (true) pressure = new Object[] {pressure, new byte[size]};
+                } catch (OutOfMemoryError full) {
+                }
+            }
+        }
     }
 }

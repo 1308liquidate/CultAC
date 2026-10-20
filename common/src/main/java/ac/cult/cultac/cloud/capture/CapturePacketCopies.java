@@ -22,8 +22,13 @@ final class CapturePacketCopies {
     static final long PROCESS_BYTES = 64L * 1024 * 1024;
     /** A size unused this long gives its capacity back when its frame is released. */
     static final long IDLE_NANOS = TimeUnit.SECONDS.toNanos(30);
-    /** A pool's own bookkeeping: the object and its three per-size index arrays. */
-    static final int POOL_BYTES = 32 + 3 * referencesBytes(MAX_PACKET_BYTES + 1);
+    /** Object layout the accounting assumes: compressed headers and references, the default below a 32 GiB heap. */
+    private static final int HEADER_BYTES = 12;
+
+    private static final int REFERENCE_BYTES = 4;
+    /** A pool's own bookkeeping: its fields and its three per-size index arrays. */
+    static final int POOL_BYTES = align(HEADER_BYTES + 4 * REFERENCE_BYTES + 2 * Integer.BYTES + Long.BYTES + 1)
+            + 3 * referencesBytes(MAX_PACKET_BYTES + 1);
 
     /** A size's last use is kept in units of 2^20 ns, which wrap only after about 25 days. */
     private static final int STAMP_SHIFT = 20;
@@ -38,15 +43,21 @@ final class CapturePacketCopies {
     private int retainedBytes;
     private int retainedCopies;
     private long lastUse;
+    private boolean released;
 
     private CapturePacketCopies(Budget budget, long nanos) {
         this.budget = budget;
         this.lastUse = nanos;
     }
 
-    /** A pool whose bookkeeping {@code budget} pays for; null when it has no room. */
+    /**
+     * A pool whose bookkeeping {@code budget} pays for; null when it has no room. It is charged only once it exists,
+     * so a failed allocation leaves both budgets as they were.
+     */
     static CapturePacketCopies of(Budget budget, long nanos) {
-        return budget.take(POOL_BYTES) ? new CapturePacketCopies(budget, nanos) : null;
+        if (!budget.fits(POOL_BYTES)) return null;
+        CapturePacketCopies pool = new CapturePacketCopies(budget, nanos);
+        return budget.take(POOL_BYTES) ? pool : null;
     }
 
     byte[] copy(ByteBuf source, long nanos) {
@@ -62,11 +73,17 @@ final class CapturePacketCopies {
             int slots = bucket == null ? 4 : index == bucket.length ? bucket.length * 2 : bucket.length;
             int cost =
                     arrayBytes(length) + referencesBytes(slots) - (bucket == null ? 0 : referencesBytes(bucket.length));
-            if (retainedCopies == MAX_COPIES || retainedBytes + cost > MAX_RETAINED_BYTES || !budget.take(cost))
+            if (retainedCopies == MAX_COPIES || retainedBytes + cost > MAX_RETAINED_BYTES || !budget.fits(cost))
                 return FrameCopies.bytes(source);
-            if (bucket == null) sizes[length] = bucket = new byte[slots][];
-            else if (slots != bucket.length) sizes[length] = bucket = Arrays.copyOf(bucket, slots);
-            bucket[index] = bytes = new byte[length];
+            bytes = new byte[length];
+            byte[][] grown =
+                    bucket == null ? new byte[slots][] : slots != bucket.length ? Arrays.copyOf(bucket, slots) : bucket;
+            if (!budget.take(cost)) {
+                FrameCopies.copyInto(source, bytes);
+                return bytes;
+            }
+            sizes[length] = grown;
+            grown[index] = bytes;
             retainedBytes += cost;
             retainedCopies++;
         }
@@ -99,8 +116,10 @@ final class CapturePacketCopies {
         }
     }
 
-    /** Gives every byte of the pool back; the frame that owned it is gone, and the pool is not used again. */
+    /** Gives every byte of the pool back, once; the frame that owned it is gone, and the pool is not used again. */
     void release() {
+        if (released) return;
+        released = true;
         Arrays.fill(sizes, null);
         budget.give(retainedBytes + (long) POOL_BYTES);
         retainedBytes = 0;
@@ -139,8 +158,12 @@ final class CapturePacketCopies {
     static final class Budget {
         private long bytes;
 
+        boolean fits(long amount) {
+            return bytes + amount <= PLAYER_BYTES;
+        }
+
         boolean take(long amount) {
-            if (bytes + amount > PLAYER_BYTES) return false;
+            if (!fits(amount)) return false;
             if (processBytes.addAndGet(amount) > PROCESS_BYTES) {
                 processBytes.addAndGet(-amount);
                 return false;

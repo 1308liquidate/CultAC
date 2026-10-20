@@ -1364,10 +1364,12 @@ public final class CaptureStream {
         for (Tick tick : awaiting) {
             lose(tick.actions);
             if (tick.copies != null) tick.copies.release();
+            tick.copies = null;
         }
         for (Tick tick : held) {
             lose(tick.actions);
             if (tick.copies != null) tick.copies.release();
+            tick.copies = null;
         }
         outcomesDropped.addAndGet(outcomes.size());
         outcomes.clear();
