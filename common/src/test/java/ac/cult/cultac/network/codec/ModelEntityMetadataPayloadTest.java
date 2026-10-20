@@ -14,6 +14,7 @@ import ac.cult.cultac.protocol.wire.Wire;
 import com.sun.management.ThreadMXBean;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
@@ -33,16 +34,27 @@ class ModelEntityMetadataPayloadTest {
             name -> null);
 
     @Test
-    void entriesReEncodeTheirExactWireBytes() {
-        ByteBuf input = packet();
-        try {
-            byte[] original = ByteBufUtil.getBytes(input);
+    void entriesKeepTheirValuesAndExactWireBytesAfterTheSourceIsOverwrittenAndReleased() {
+        ByteBuf template = packet();
+        byte[] original = ByteBufUtil.getBytes(template);
+        template.release();
+        for (boolean direct : new boolean[] {false, true}) {
+            ByteBuf input = direct
+                    ? PooledByteBufAllocator.DEFAULT.directBuffer(original.length + 3)
+                    : Unpooled.buffer(original.length + 3);
+            input.writeBytes(new byte[] {7, 7, 7}).writeBytes(original).readerIndex(3);
             EntityMetadata metadata = values.read(input);
             assertFalse(input.isReadable());
+            input.setBytes(0, new byte[input.capacity()]);
+            input.release();
+
+            assertEquals(42, metadata.id());
             assertEquals(ENTRIES, metadata.packedItems().size());
             assertEquals((byte) 2, metadata.packedItems().get(0).value());
             assertEquals(1.5F, metadata.packedItems().get(1).value());
             assertEquals(EntityPose.CROUCHING, metadata.packedItems().get(2).value());
+            for (int i = 3; i < ENTRIES; i++)
+                assertEquals(300 + 7 + i, metadata.packedItems().get(i).value());
 
             ByteBuffer first = metadata.packedItems().get(1).bytes();
             assertTrue(first.isReadOnly());
@@ -56,12 +68,10 @@ class ModelEntityMetadataPayloadTest {
                 Wire.writeVarInt(output, metadata.id());
                 metadata.packedItems().forEach(entry -> output.writeBytes(entry.bytes()));
                 output.writeByte(255);
-                assertArrayEquals(original, ByteBufUtil.getBytes(output));
+                assertArrayEquals(original, ByteBufUtil.getBytes(output), direct ? "direct" : "heap");
             } finally {
                 output.release();
             }
-        } finally {
-            input.release();
         }
     }
 
