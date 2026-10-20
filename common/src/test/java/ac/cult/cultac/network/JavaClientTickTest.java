@@ -229,6 +229,22 @@ class JavaClientTickTest {
     }
 
     @Test
+    void aConfirmedVelocityStartsTheTickBeforeACandidateWithoutIt() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 high = new Vec3(0.5, FLOOR_Y + 10, 0.5);
+            f.place(high, new Vec3(0, -0.1, 0));
+            f.input(NONE);
+
+            // The velocity is within the offset Simulation tolerates of the motion the client held.
+            f.pongThrough(f.velocity(new Vec3(0, -0.1005, 0)));
+            Vec3 velocity = f.player.checkManager.getKnockbackHandler().lastSent.getVel();
+
+            assertExact(f.tick(high.add(velocity), false));
+            assertEquals(0, f.player.checkManager.getKnockbackHandler().violations);
+        }
+    }
+
+    @Test
     void aDoubleJumpThatLandsTheSameTickTravelsFlying() throws Exception {
         try (var f = flying(FLOOR_Y + 0.4, new Vec3(0, -0.6, 0), false)) {
             f.input(FORWARD_JUMP);
