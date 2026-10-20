@@ -1078,19 +1078,43 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         }
     }
 
-    /** Keeps the sprint modifiers the accepted travel candidates moved with. */
+    /**
+     * Keeps the sprint modifiers of the movement this commit carries on; a setback this tick returns to its anchor's
+     * instead.
+     */
     private void commitSprintOutcomes(PredictionResult result) {
         if (!this.player.sprintState.outcomeOpen()) return;
-        boolean canonical = false, held = false;
-        for (PredictionResult reality : result.getRealities()) {
-            if (reality.getFlagSeverity() != 0.0 || reality.getInitialStartingVel() == null) continue;
-            switch (reality.getSimulationContext().getSprintOutcome(this.player, reality.getInitialStartingVel())) {
-                case CANONICAL -> canonical = true;
-                case HELD -> held = true;
-                default -> canonical = held = true;
-            }
+        SetbackTeleportUtil setbacks = this.player.getSetbackTeleportUtil();
+        if (setbacks.isPendingSetback() && setbacks.lastKnownGoodPosition != null) {
+            this.player.sprintState.restore(setbacks.lastKnownGoodPosition.getSprintOutcomes());
+            return;
         }
-        this.player.sprintState.onOutcomesAccepted(canonical, held);
+        this.player.sprintState.restore(sprintOutcomesAfter(this.player, result));
+    }
+
+    /**
+     * The sprint modifier state after committing {@code result}: the modifiers its accepted candidates moved with, or,
+     * when none was accepted, the one the committed candidate moved with.
+     */
+    public static ClientSprintState.Outcomes sprintOutcomesAfter(CultPlayer player, PredictionResult result) {
+        ClientSprintState state = player.sprintState;
+        if (result == null || !state.outcomeOpen()) return state.outcomes();
+        boolean[] used = new boolean[2];
+        for (PredictionResult reality : result.getRealities()) {
+            if (reality.getFlagSeverity() == 0.0) addSprintOutcome(player, reality, used);
+        }
+        if (!used[0] && !used[1]) addSprintOutcome(player, result, used);
+        if (!used[0] && !used[1]) return state.outcomes();
+        return state.outcomesAfter(used[0], used[1]);
+    }
+
+    private static void addSprintOutcome(CultPlayer player, PredictionResult candidate, boolean[] used) {
+        if (candidate.getInitialStartingVel() == null || candidate.getSimulationContext() == null) return;
+        switch (candidate.getSimulationContext().getSprintOutcome(player, candidate.getInitialStartingVel())) {
+            case CANONICAL -> used[0] = true;
+            case HELD -> used[1] = true;
+            default -> used[0] = used[1] = true;
+        }
     }
 
     /** Each candidate once per sprint modifier it can travel with while a possible attack reset leaves it open. */

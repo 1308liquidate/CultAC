@@ -83,6 +83,30 @@ class ClientSprintStateTest {
     }
 
     @Test
+    void restoringAnEarlierStateDropsLaterOutcomesButNotCertainEvents() {
+        ClientSprintState state = sprinting();
+        var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+        state.onServerModifier(server);
+        state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
+        state.onClientTick(true);
+        state.onOutcomesAccepted(true, true);
+        ClientSprintState.Outcomes tie = state.outcomes();
+        // A move the engine later sets back from resolved the tie.
+        state.onClientTick(true);
+        state.onOutcomesAccepted(true, false);
+        assertFalse(state.outcomeOpen());
+        state.restore(tie);
+        assertSame(server, state.heldModifier());
+        assertTrue(state.canonicalPossible());
+
+        // A server snapshot after the earlier state is certain and survives the restore.
+        state.onServerModifier(CompensatedEntities.SPRINTING_SPEED_MODIFIER);
+        state.restore(tie);
+        assertSame(CompensatedEntities.SPRINTING_SPEED_MODIFIER, state.heldModifier());
+        assertFalse(state.canonicalPossible());
+    }
+
+    @Test
     void possibleAttackResetOutcomesCollapseOnCertainEvents() {
         ClientSprintState state = sprinting();
         var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
