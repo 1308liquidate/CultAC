@@ -58,8 +58,11 @@ final class ReportedKeyInput {
         System.arraycopy(sprint, 0, speeds, 1, sprint.length);
         double best = Double.MAX_VALUE;
         for (float speed : speeds) {
-            // LocalPlayer#modifyInput's item multiplier is the legal one, or the required one of a use the client owes.
-            for (float itemUse : new float[] {use.legalMultiplier(), use.requiredMultiplier()}) {
+            // LocalPlayer#modifyInput's item multiplier is the legal one, the required one of a use the client owes, or
+            // that of a use it may have started: Minecraft#tick runs handleKeybinds, whose startUseItem precedes the
+            // tick's LocalPlayer#aiStep, so a use slows the tick that sends its USE_ITEM.
+            for (float itemUse :
+                    new float[] {use.legalMultiplier(), use.requiredMultiplier(), use.slowestMultiplier()}) {
                 Vec3 input = ClientKeyInput.travelInput(player, context, keys, itemUse, slow, speed);
                 if (input == null) return 0.0D;
                 best = Math.min(best, offset(player, result, extents, input));

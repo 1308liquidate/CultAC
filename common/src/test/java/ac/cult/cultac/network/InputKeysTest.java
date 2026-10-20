@@ -201,6 +201,31 @@ class InputKeysTest {
         }
     }
 
+    @Test
+    void walkingSlowedByAnItemUseThatMayHaveStartedIsNotFlagged() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            var food = ItemUtil.modelItems().stack("minecraft:golden_apple", 1);
+            f.player.getInventory().inventory.getInventoryStorage().setItem(Inventory.SLOT_OFFHAND, food);
+            f.place(new Vec3(0.5, FLOOR_Y, 4.5), GROUNDED);
+            f.input(BACK);
+            assertExact(f.tick(new Vec3(0.5, FLOOR_Y, 4.5 - WALK), true));
+            double velocity = -WALK * FRICTION;
+
+            // Minecraft#tick runs handleKeybinds, which starts the use, before LocalPlayer#aiStep reads the keys, so
+            // LocalPlayer#modifyInput already scales this tick by 0.2F. A possibly refused start leaves it uncertain.
+            f.player.clientItemUse.start(Hand.OFF_HAND, food, ClientItemUseState.duration(food), false);
+            double slowed = (double) (0.98F * 0.2F) * (double) 0.1F;
+            double z = 4.5 - WALK;
+            for (int tick = 0; tick < 3; tick++) {
+                z += velocity - slowed;
+                assertExact(f.tick(new Vec3(0.5, FLOOR_Y, z), true));
+                velocity = (velocity - slowed) * FRICTION;
+            }
+
+            assertNoFlags(f);
+        }
+    }
+
     private static double keyFlags(JavaTickFixture f) {
         return f.player.checkManager.getListener(InputKeys.class).violations;
     }

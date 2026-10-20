@@ -87,7 +87,7 @@ class ClientItemUseStateTest {
         for (int tick = 0; tick < 3; tick++) {
             var snapshot =
                     state.prepare(tick, 3, ClientVersion.V_1_21_2, hotbar.getFirst(), SimItemStack.EMPTY, hotbar);
-            assertEquals(new ClientItemUseState.Snapshot(1, tick, 3, 0.2F, 0.2F, false, true, true), snapshot);
+            assertEquals(new ClientItemUseState.Snapshot(1, tick, 3, 0.2F, 0.2F, 0.2F, false, true, true), snapshot);
             assertEquals(
                     new ClientItemUseState.Completions(expected, false), state.completions(hotbar, SimItemStack.EMPTY));
             assertEquals(Hand.MAIN_HAND, state.hand());
