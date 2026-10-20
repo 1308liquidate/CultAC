@@ -56,6 +56,10 @@ public class PacketStateData {
     // starts LocalPlayer#yRotLast and xRotLast at zero.
     public float lastSentTickYaw = Float.NaN;
     public float lastSentTickPitch = Float.NaN;
+    // LocalPlayer#yRotLast and xRotLast, written only by sendPosition: the rotation of the last tick movement packet
+    // that carried one outside passenger Rot, NaN while unknown.
+    public float lastSendPositionYaw = Float.NaN;
+    public float lastSendPositionPitch = Float.NaN;
     // LocalPlayer#tick emits passenger Rot immediately before MoveVehicle; packet-handler echoes send MoveVehicle
     // alone.
     private boolean awaitingVehicleMoveAfterPassengerRotation = false;

@@ -76,8 +76,14 @@ public class BadPacketsJ extends Check implements DecodedPacketReceiveListener {
         if (this.rotations > 0) {
             // The client sends no tick movement, so no rotation, until ClientPacketListener#hasClientLoaded
             if (CheckManagerListener.localPlayerTicked(player)) {
-                // LocalPlayer#sendPosition sends no rotation while the player's equals the last one it sent
-                onTickPacket(player.packetStateData.lastSentTickYaw, player.packetStateData.lastSentTickPitch);
+                // LocalPlayer#sendChanges sends Rot every riding tick, so a tick without movement ran sendPosition,
+                // which sends no rotation while the player's equals the last one it sent
+                if (player.packetStateData.receivedMovementThisClientTick) {
+                    onTickPacket(player.packetStateData.lastSentTickYaw, player.packetStateData.lastSentTickPitch);
+                } else {
+                    onTickPacket(
+                            player.packetStateData.lastSendPositionYaw, player.packetStateData.lastSendPositionPitch);
+                }
             } else {
                 this.rotations = 0;
             }

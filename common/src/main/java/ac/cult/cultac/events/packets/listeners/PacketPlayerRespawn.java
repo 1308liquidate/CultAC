@@ -111,6 +111,8 @@ public class PacketPlayerRespawn {
         player.packetStateData.lastSentTickPosition = null;
         player.packetStateData.lastSentTickYaw = Float.NaN;
         player.packetStateData.lastSentTickPitch = Float.NaN;
+        player.packetStateData.lastSendPositionYaw = Float.NaN;
+        player.packetStateData.lastSendPositionPitch = Float.NaN;
         if (!player.isBedrockMovement()) player.onLocalPlayerCreated();
         if (!player.isBedrockMovement()) {
             // Minecraft#clearClientLevel discards the LocalPlayer before a reconfiguration login.
@@ -341,6 +343,8 @@ public class PacketPlayerRespawn {
             player.packetStateData.lastSentTickPosition = null;
             player.packetStateData.lastSentTickYaw = Float.NaN;
             player.packetStateData.lastSentTickPitch = Float.NaN;
+            player.packetStateData.lastSendPositionYaw = Float.NaN;
+            player.packetStateData.lastSendPositionPitch = Float.NaN;
             if (!player.isBedrockMovement()) player.onLocalPlayerCreated();
             player.sprintState.onRespawn(keepEntityData, keepAttributeModifiers);
             player.attackStrength.reset();
