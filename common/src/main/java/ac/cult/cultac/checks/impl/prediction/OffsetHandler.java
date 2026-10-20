@@ -3,6 +3,7 @@ package ac.cult.cultac.checks.impl.prediction;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckInfo;
+import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.Speed;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.Strafe;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.VehicleOffset;
@@ -82,7 +83,10 @@ public class OffsetHandler extends Check implements PostPredictionListener {
         double offset = predictionResult.getOffset();
         for (PredictionResult.Flag flag : predictionResult.getFlags()) {
             Check check = flag.getCheck();
-            if (check instanceof Speed || check instanceof Strafe || check instanceof VehicleOffset) {
+            if (check instanceof Speed
+                    || check instanceof Strafe
+                    || check instanceof VehicleOffset
+                    || check instanceof InputKeys) {
                 offset = Math.max(offset, flag.getSeverity());
             }
         }
