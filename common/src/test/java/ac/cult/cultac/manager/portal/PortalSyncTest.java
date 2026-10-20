@@ -18,8 +18,10 @@ import ac.cult.cultac.manager.portal.PortalSync.Role;
 import com.google.protobuf.InvalidProtocolBufferException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -57,6 +59,7 @@ class PortalSyncTest {
         final String id;
         final List<List<TeamRole>> sent = new ArrayList<>();
         boolean takes = true;
+        @Nullable Runnable onSend;
 
         FakeSocket(String id) {
             this.id = id;
@@ -64,6 +67,7 @@ class PortalSyncTest {
 
         @Override
         public boolean send(byte[] record) {
+            if (onSend != null) onSend.run();
             if (!takes) return false;
             try {
                 sent.add(Intake.parseFrom(record).getMessages(0).getTeam().getPlayersList());
@@ -330,12 +334,32 @@ class PortalSyncTest {
     }
 
     @Test
-    void theQueueHoldsAtMostFiveHundred() {
+    void joinsPastTheQueueCapAreSentOnceThereIsRoom() {
         sync.opened(a, true);
         for (int n = 1; n <= 600; n++) join(n, Role.VIEWER);
         for (int i = 0; i < 10; i++) sync.tick();
 
-        assertEquals(PortalSync.MAX_QUEUED, a.sent.stream().mapToInt(List::size).sum());
+        Set<UUID> sent = new HashSet<>();
+        for (int i = 0; i < a.sent.size(); i++) sent.addAll(a.players(i));
+        assertEquals(600, sent.size());
+    }
+
+    @Test
+    void aRefusedBatchIsKeptWhenTheQueueFilledMeanwhile() {
+        sync.opened(a, true);
+        for (int n = 1; n <= PortalSync.MAX_QUEUED; n++) join(n, Role.VIEWER);
+        a.takes = false;
+        a.onSend = () -> {
+            for (int n = 501; n <= 600; n++) join(n, Role.VIEWER);
+        };
+        sync.tick();
+        a.takes = true;
+        a.onSend = null;
+        for (int i = 0; i < 10; i++) sync.tick();
+
+        Set<UUID> sent = new HashSet<>();
+        for (int i = 0; i < a.sent.size(); i++) sent.addAll(a.players(i));
+        assertEquals(600, sent.size());
     }
 
     @Test

@@ -298,9 +298,7 @@ public final class PortalSync {
             } else if (sent) {
                 if (enabled()) reportEveryoneAgain();
             } else if (enabled()) {
-                for (Report report : batch) {
-                    if (!queue.containsKey(report.uuid())) enqueue(report);
-                }
+                for (Report report : batch) queue.putIfAbsent(report.uuid(), report);
             }
         }
         debug.accept("Team sync " + (sent ? "sent " : "could not send ") + batch.size() + " reports on "
@@ -359,7 +357,10 @@ public final class PortalSync {
 
     private void apply(UUID uuid, Online online) {
         if (!validName(online.name())) return;
-        if (!enqueue(new Report(uuid, online.name(), online.role(), false))) return;
+        if (!enqueue(new Report(uuid, online.name(), online.role(), false))) {
+            if (enabled()) changed.add(uuid);
+            return;
+        }
         if (online.role() != null) reported.put(uuid, online.role());
         else reported.remove(uuid);
     }
