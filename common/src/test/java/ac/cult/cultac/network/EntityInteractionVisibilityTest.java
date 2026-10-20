@@ -26,12 +26,18 @@ import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityPositionSync;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPing;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundProjectilePower;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundTeleportEntity;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
+import ac.cult.cultac.protocol.value.EntityDelta;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.InteractAction;
+import ac.cult.cultac.protocol.value.PositionPath;
+import ac.cult.cultac.protocol.value.Relative;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.protocol.wire.Wire;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -50,13 +56,16 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 class EntityInteractionVisibilityTest {
@@ -521,6 +530,92 @@ class EntityInteractionVisibilityTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(doubles = {-1, 6})
+    void aFireballPastAMobItMayHaveHitStopsAtNoLaterOne(double eyeX) throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
+            setup.player.x = eyeX;
+            setup.player.z = 1.5;
+            setup.player.boundingBox = GetBoundingBox.getCollisionBoxForPlayer(setup.player, eyeX, 64, 1.5);
+            setup.player.compensatedWorld.ensureValidationChunkLoaded(-1, 0);
+            // The 129th rotation folds the first two, so the engine can't place the cow the first step reaches.
+            setup.cow(41, new Vec3(1, 64, .5));
+            var first = setup.player.compensatedEntities.getEntity(41);
+            for (int step = 0; step < 129; step++) {
+                first.onPositionPath(
+                        EntityPositionPath.linear(new Vec3(1, 64, .5)),
+                        false,
+                        step % 2 == 0 ? 90F : 0F,
+                        0F,
+                        setup.player,
+                        true);
+            }
+            var fireball =
+                    setup.projectile(42, "minecraft:fireball", new Vec3d(-1, 64.5, .5), new Vec3d(6, 0, 0), NO_OWNER);
+            setup.clientTick();
+            setup.cow(43, new Vec3(3.5, 64, .5));
+            setup.motion(42, new Vec3d(-4, 0, 0));
+            setup.clientTick();
+            // Vanilla stops at the first cow and ends at x -3.345; neither step stops here, as on dev. Both are in
+            // reach of x -1 and out of reach of x 6.
+            assertEquals(-1 + (6 + .1) * .95F - (4 + .1) * .95F, fireball.clientPhysicalPosition.x, 1.0E-6);
+            assertEquals(eyeX == 6, setup.route(42, InteractAction.INTERACT_AT).isCancelled());
+        }
+    }
+
+    @Test
+    void anAbsoluteServerPositionLetsAWindChargeStopAtAMobAgain() throws Exception {
+        // The cow at z 1.5 spans z 1.05 to 1.95; a charge synced to z 3 would move on to .8.
+        assertEquals(1.95, pastAnUnplacedMob("minecraft:wind_charge", setup -> setup.positionSync(42, 3)), 1.0E-6);
+        assertEquals(
+                1.95, pastAnUnplacedMob("minecraft:wind_charge", setup -> setup.teleport(42, 3, Set.of())), 1.0E-6);
+        assertEquals(
+                1.95,
+                pastAnUnplacedMob("minecraft:wind_charge", setup -> {
+                    setup.positionSync(42, 3);
+                    setup.moveEntity(42);
+                }),
+                1.0E-6);
+        assertEquals(.6, pastAnUnplacedMob("minecraft:wind_charge", setup -> {}), 1.0E-6);
+        // The engine decodes the move against the teleport, z 3; the client against its last move or sync, z 5.
+        assertEquals(
+                3 - 2.2,
+                pastAnUnplacedMob("minecraft:wind_charge", setup -> {
+                    setup.teleport(42, 3, Set.of());
+                    setup.moveEntity(42);
+                }),
+                1.0E-6);
+        var relative = Set.of(Relative.X, Relative.Y, Relative.Z, Relative.DELTA_X, Relative.DELTA_Y, Relative.DELTA_Z);
+        assertEquals(.6, pastAnUnplacedMob("minecraft:wind_charge", setup -> setup.teleport(42, 0, relative)), 1.0E-6);
+        // A fireball's next inertia follows the water state of its last client tick, which a position leaves alone.
+        assertEquals(
+                3 - (2.185 + .1) * .95,
+                pastAnUnplacedMob("minecraft:fireball", setup -> setup.positionSync(42, 3)),
+                1.0E-6);
+    }
+
+    /**
+     * The z after a projectile from z 5 at -2.2 passes a cow the engine can't place, {@code server} positions it, and
+     * it takes one more step towards a cow at z 1.5.
+     */
+    private static double pastAnUnplacedMob(String type, Consumer<Setup> server) throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
+            setup.cow(41, new Vec3(.5, 64, 3.7));
+            var cow = setup.player.compensatedEntities.getEntity(41);
+            for (int step = 0; step < 129; step++) {
+                var destination = new Vec3(step % 2 == 0 ? 12.5 : .5, 64, 3.7);
+                cow.onPositionPath(EntityPositionPath.linear(destination), true, null, null, setup.player, true);
+            }
+            var projectile = setup.projectile(42, type, 5, -2.2, NO_OWNER);
+            setup.clientTick();
+            setup.player.compensatedEntities.removeEntity(41);
+            setup.cow(43, new Vec3(.5, 64, 1.5));
+            server.accept(setup);
+            setup.clientTick();
+            return projectile.clientPhysicalPosition.z;
+        }
+    }
+
     @Test
     void anOwnerPastAFoldedInterpolationStepKeepsItsProjectileOnIt() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
@@ -978,6 +1073,42 @@ class EntityInteractionVisibilityTest {
             var event = new PacketSendEvent<>(
                     fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_MOTION, packet, false);
             player.packetEntityReplication.onSetEntityMotion(event, player, packet);
+            acknowledge(event);
+        }
+
+        void positionSync(int id, double z) {
+            var packet =
+                    new ClientboundEntityPositionSync(id, new PositionPath.Linear(new Vec3d(.5, 64.5, z)), 0, 0, false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_POSITION_SYNC, packet, false);
+            player.packetEntityReplication.onEntityPositionSync(event, player, packet);
+            acknowledge(event);
+        }
+
+        /** A {@code move_entity} by nothing. */
+        void moveEntity(int id) {
+            var packet = new ClientboundMoveEntity(
+                    id, new EntityDelta.Linear((short) 0, (short) 0, (short) 0), 0, 0, false, true, false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.MOVE_ENTITY, packet, false);
+            player.packetEntityReplication.onMoveEntity(event, player, packet);
+            acknowledge(event);
+        }
+
+        /** A teleport to x .5, y 64.5, z {@code z} at -2.2 along z, or by {@code z} keeping the delta if relative. */
+        void teleport(int id, double z, Set<Relative> relatives) {
+            boolean relative = relatives.contains(Relative.Z);
+            var packet = new ClientboundTeleportEntity(
+                    id,
+                    relative ? new Vec3d(0, 0, z) : new Vec3d(.5, 64.5, z),
+                    relative ? Vec3d.ZERO : new Vec3d(0, 0, -2.2),
+                    0,
+                    0,
+                    relatives,
+                    false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.TELEPORT_ENTITY, packet, false);
+            player.packetEntityReplication.onTeleportEntity(event, player, packet);
             acknowledge(event);
         }
 
