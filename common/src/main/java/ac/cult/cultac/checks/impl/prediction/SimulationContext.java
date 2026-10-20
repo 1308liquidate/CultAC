@@ -376,12 +376,9 @@ public class SimulationContext {
         return allowance;
     }
 
-    /** The outcome of this tick's possible attack reset that {@code candidate}'s attack damping commits it to. */
+    /** The sprint modifier outcome {@code candidate} moves with. */
     public ClientSprintState.Outcome getSprintOutcome(CultPlayer player, PredVector candidate) {
-        if (candidate == null || vehicle != null || !player.sprintState.resetOutcomePending()) {
-            return ClientSprintState.Outcome.ANY;
-        }
-        return candidate.getAttackSlows() > 0 ? ClientSprintState.Outcome.RESET : ClientSprintState.Outcome.KEPT;
+        return candidate == null || vehicle != null ? ClientSprintState.Outcome.ANY : candidate.getSprintOutcome();
     }
 
     /**

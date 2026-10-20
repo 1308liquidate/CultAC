@@ -34,7 +34,7 @@ class ClientSprintStateTest {
     }
 
     @Test
-    void possibleAttackResetFollowsTheOutcomesTheAcceptedMoveProves() {
+    void possibleAttackResetFollowsTheOutcomesTheAcceptedMovesProve() {
         ClientSprintState state = sprinting();
         var server = new AttributeModifier("minecraft:sprinting", 3.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
         state.onServerModifier(server);
@@ -44,7 +44,7 @@ class ClientSprintStateTest {
         assertTrue(state.resetOutcomePending());
         assertTrue(state.modifier());
         // Only undamped candidates were accepted: the reset did not happen.
-        state.onAttackOutcome(false, true);
+        state.onOutcomesAccepted(false, true);
         assertSame(server, state.heldModifier());
         assertFalse(state.canonicalPossible());
         assertFalse(state.resetOutcomePending());
@@ -52,19 +52,32 @@ class ClientSprintStateTest {
         state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
         state.onClientTick(true);
         // Candidates of both outcomes were accepted: either modifier stays possible.
-        state.onAttackOutcome(true, true);
+        state.onOutcomesAccepted(true, true);
         assertSame(server, state.heldModifier());
         assertTrue(state.canonicalPossible());
-        // A later tick's undamped candidates do not resolve an earlier tie.
+        // A later tick whose accepted candidates all moved at the held speed resolves the tie.
+        state.onClientTick(true);
+        assertTrue(state.outcomeOpen());
+        state.onOutcomesAccepted(false, true);
+        assertSame(server, state.heldModifier());
+        assertFalse(state.outcomeOpen());
+        // Ticks after a tie that accept both speeds keep it, and one that accepts only vanilla's resolves it.
         state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
         state.onClientTick(true);
-        state.onAttackOutcome(false, true);
+        state.onOutcomesAccepted(true, true);
+        state.onClientTick(true);
+        state.onOutcomesAccepted(true, true);
         assertTrue(state.canonicalPossible());
+        state.onClientTick(true);
+        state.onOutcomesAccepted(true, false);
+        assertSame(CompensatedEntities.SPRINTING_SPEED_MODIFIER, state.heldModifier());
+        assertFalse(state.outcomeOpen());
+        state.onServerModifier(server);
 
         // Only damped candidates were accepted: aiStep re-sprinted with vanilla's modifier.
         state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
         state.onClientTick(true);
-        state.onAttackOutcome(true, false);
+        state.onOutcomesAccepted(true, false);
         assertSame(CompensatedEntities.SPRINTING_SPEED_MODIFIER, state.heldModifier());
         assertFalse(state.canonicalPossible());
     }
@@ -76,7 +89,7 @@ class ClientSprintStateTest {
         state.onServerModifier(server);
         state.onAttack(ClientSprintState.AttackReset.POSSIBLE);
         state.onClientTick(true);
-        state.onAttackOutcome(false, false);
+        state.onOutcomesAccepted(false, false);
         assertTrue(state.canonicalPossible());
         // The server's next movement_speed snapshot is certain.
         state.onServerModifier(server);
@@ -88,7 +101,7 @@ class ClientSprintStateTest {
         state.onClientTick(false);
         assertNull(state.heldModifier());
         assertFalse(state.resetOutcomePending());
-        state.onAttackOutcome(true, false);
+        state.onOutcomesAccepted(true, false);
         assertNull(state.heldModifier());
         assertFalse(state.canonicalPossible());
     }

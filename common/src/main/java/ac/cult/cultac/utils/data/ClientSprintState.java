@@ -25,7 +25,7 @@ public final class ClientSprintState {
     private @Nullable AttributeModifier modifier;
     // An earlier possible attack reset that aiStep silently re-sprinted may also have replaced it with vanilla's.
     private boolean canonicalPossible;
-    // This tick's possible attack reset: travel carries vanilla's modifier exactly when Player#attack damped it.
+    // This tick's possible attack reset: travel carries vanilla's modifier when Player#attack damped it.
     private boolean resetOutcomePending;
     private boolean sprintResetThisTick;
     private boolean flagUncertain;
@@ -40,14 +40,19 @@ public final class ClientSprintState {
     }
 
     /**
-     * Which outcome of this tick's possible attack reset a travel candidate follows. Player#causeExtraKnockback damps
-     * deltaMovement by 0.6 and calls setSprinting(false) together, so a damped candidate travels with the modifier
-     * aiStep's re-sprint adds and an undamped one with the modifier held before the attack.
+     * The minecraft:sprinting modifier a travel candidate moves with while a possible attack reset leaves it open.
+     * Player#causeExtraKnockback damps deltaMovement by 0.6 and calls setSprinting(false) together, so a candidate
+     * damped this tick moves with the modifier aiStep's re-sprint adds; any other candidate moves with either.
      */
     public enum Outcome {
+        /** Every modifier the client may hold now. */
         ANY,
-        KEPT,
-        RESET
+        /** The modifiers the client may have held before this tick's attack. */
+        PRIOR,
+        /** The modifier held unless a possible reset replaced it, or none. */
+        HELD,
+        /** Vanilla's modifier, which aiStep's re-sprint adds. */
+        CANONICAL
     }
 
     /** Entity shared flag 3 from self entity data, applied by its bundled proof. */
@@ -110,18 +115,18 @@ public final class ClientSprintState {
     }
 
     /**
-     * The move after this tick's possible attack reset is committed. {@code reset} and {@code kept} say whether an
-     * accepted travel candidate followed {@link Outcome#RESET} or {@link Outcome#KEPT}; the modifier is the one the
-     * accepted candidates prove, or either while candidates of both outcomes, or none, are accepted.
+     * A move is committed while {@link #outcomeOpen}. {@code canonical} and {@code held} say whether an accepted travel
+     * candidate moved with {@link Outcome#CANONICAL} or {@link Outcome#HELD}; the modifier becomes the one the accepted
+     * candidates prove, and stays open while candidates of both, or none, are accepted.
      */
-    public void onAttackOutcome(boolean reset, boolean kept) {
-        if (!resetOutcomePending) return;
+    public void onOutcomesAccepted(boolean canonical, boolean held) {
+        if (!outcomeOpen()) return;
         resetOutcomePending = false;
-        if (reset && !kept) {
+        if (canonical && !held) {
             modifier = CompensatedEntities.SPRINTING_SPEED_MODIFIER;
             canonicalPossible = false;
-        } else if (reset || !kept) {
-            canonicalPossible = true;
+        } else {
+            canonicalPossible = canonical || !held;
         }
     }
 
@@ -193,8 +198,23 @@ public final class ClientSprintState {
         return canonicalPossible;
     }
 
-    /** Whether this tick's travel follows a possible attack reset's {@link Outcome}s until its move is committed. */
+    /** Whether this tick's possible attack reset decides each travel candidate's {@link Outcome}. */
     public boolean resetOutcomePending() {
         return resetOutcomePending;
+    }
+
+    /** Whether the next committed move may still tell the {@link Outcome#HELD} and canonical modifiers apart. */
+    public boolean outcomeOpen() {
+        return resetOutcomePending || canonicalPossible;
+    }
+
+    /**
+     * The outcomes a candidate with {@code attackSlows} dampings can move with while {@link #outcomeOpen}: vanilla's
+     * modifier when this tick's possible reset damped it, else the held modifier or, after an earlier possible reset,
+     * either.
+     */
+    public Outcome[] outcomesFor(int attackSlows) {
+        if (resetOutcomePending && attackSlows > 0) return new Outcome[] {Outcome.CANONICAL};
+        return canonicalPossible ? new Outcome[] {Outcome.HELD, Outcome.CANONICAL} : new Outcome[] {Outcome.HELD};
     }
 }

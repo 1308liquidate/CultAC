@@ -63,6 +63,7 @@ import ac.cult.cultac.utils.anticheat.update.PredictionComplete;
 import ac.cult.cultac.utils.anticheat.update.RotationUpdate;
 import ac.cult.cultac.utils.anticheat.update.VehiclePositionUpdate;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.data.HeadRotation;
 import ac.cult.cultac.utils.data.LastInstance;
@@ -1053,7 +1054,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.ticksWhileLoadingLevel = 0;
             this.lastXRot = xRot;
             this.lastYRot = yRot;
-            this.commitAttackOutcome(result);
+            this.commitSprintOutcomes(result);
             this.player.minPlayerAttackSlow = 0;
             this.player.maxPlayerAttackSlow = 0;
             if (this.player.isFlying) {
@@ -1072,19 +1073,32 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         }
     }
 
-    /** Keeps the sprint modifiers of the attack outcomes the accepted travel candidates followed. */
-    private void commitAttackOutcome(PredictionResult result) {
-        if (!this.player.sprintState.resetOutcomePending()) return;
-        boolean reset = false, kept = false;
+    /** Keeps the sprint modifiers the accepted travel candidates moved with. */
+    private void commitSprintOutcomes(PredictionResult result) {
+        if (!this.player.sprintState.outcomeOpen()) return;
+        boolean canonical = false, held = false;
         for (PredictionResult reality : result.getRealities()) {
             if (reality.getFlagSeverity() != 0.0 || reality.getInitialStartingVel() == null) continue;
-            if (reality.getInitialStartingVel().getAttackSlows() > 0) {
-                reset = true;
-            } else {
-                kept = true;
+            switch (reality.getSimulationContext().getSprintOutcome(this.player, reality.getInitialStartingVel())) {
+                case CANONICAL -> canonical = true;
+                case HELD -> held = true;
+                default -> canonical = held = true;
             }
         }
-        this.player.sprintState.onAttackOutcome(reset, kept);
+        this.player.sprintState.onOutcomesAccepted(canonical, held);
+    }
+
+    /** Each candidate once per sprint modifier it can travel with while a possible attack reset leaves it open. */
+    private static List<PredVector> withSprintOutcomes(
+            CultPlayer player, SimulationContext context, List<PredVector> candidates) {
+        if (context.getVehicle() != null || !player.sprintState.outcomeOpen()) return candidates;
+        List<PredVector> split = new ArrayList<>(candidates.size() * 2);
+        for (PredVector candidate : candidates) {
+            for (ClientSprintState.Outcome outcome : player.sprintState.outcomesFor(candidate.getAttackSlows())) {
+                split.add(candidate.withSprintOutcome(outcome));
+            }
+        }
+        return split;
     }
 
     private void applyProfileCommit(PredictionCommit commit) {
@@ -1452,8 +1466,14 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                     curSimulationContext,
                     lastPrediction,
                     this.couldPotentiallyTickSkip);
-            List<PredVector> validInitialVelocities = engine.startingVelocities(
-                    new VelocityTransformer(curSimulationContext), player, contextPacketStart, curSimulationContext);
+            List<PredVector> validInitialVelocities = withSprintOutcomes(
+                    player,
+                    curSimulationContext,
+                    engine.startingVelocities(
+                            new VelocityTransformer(curSimulationContext),
+                            player,
+                            contextPacketStart,
+                            curSimulationContext));
             SimulationContext sortContext = curSimulationContext;
             // Empty or single-candidate lists need no ordering and may be immutable.
             if (validInitialVelocities.size() > 1)

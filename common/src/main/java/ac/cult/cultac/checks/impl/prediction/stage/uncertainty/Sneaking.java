@@ -41,7 +41,7 @@ public class Sneaking implements UncertaintyHandler {
             result.getSimulationContext().getWorldData().setLastOnGround(DesyncStatus.UNKNOWN);
             // Get the speed when the player is on the ground
             // The hidden velocity built up before this tick's attack, under the modifier held then.
-            double maxSpeed = context.getHorizontalInputAllowance(player, ClientSprintState.Outcome.KEPT);
+            double maxSpeed = context.getHorizontalInputAllowance(player, ClientSprintState.Outcome.PRIOR);
             result.getSimulationContext().getWorldData().setLastOnGround(lastOnGround);
 
             Vec3 from = result.getSimulationContext().getStart();

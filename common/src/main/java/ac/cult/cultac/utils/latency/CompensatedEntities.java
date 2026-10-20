@@ -319,14 +319,15 @@ public class CompensatedEntities {
     public double[] getPossiblePlayerMovementSpeeds(boolean canonical, ClientSprintState.Outcome outcome) {
         ClientSprintState state = player.sprintState;
         double canonicalSpeed = sprintingSpeed(SPRINTING_SPEED_MODIFIER);
-        if (outcome == ClientSprintState.Outcome.RESET && state.resetOutcomePending()) {
-            return new double[] {canonicalSpeed};
-        }
+        if (outcome == ClientSprintState.Outcome.CANONICAL) return new double[] {canonicalSpeed};
         AttributeModifier held = state.heldModifier();
         double current = held == null ? getPlayerMovementSpeed() : sprintingSpeed(held);
         boolean withCanonical = canonical
-                || state.canonicalPossible()
-                || outcome == ClientSprintState.Outcome.ANY && state.resetOutcomePending();
+                || switch (outcome) {
+                    case ANY -> state.outcomeOpen();
+                    case PRIOR -> state.canonicalPossible();
+                    default -> false;
+                };
         if (!withCanonical || SPRINTING_SPEED_MODIFIER.equals(held)) {
             return new double[] {current};
         }
