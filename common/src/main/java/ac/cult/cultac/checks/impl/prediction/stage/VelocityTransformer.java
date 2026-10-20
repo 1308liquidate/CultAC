@@ -5,6 +5,7 @@ import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHappyGhast;
@@ -72,8 +73,41 @@ public class VelocityTransformer {
         // utils.nmsutil.NextTickVelocityDeriver.findVelocitiesForNextTick(...), which derives
         // the carried delta from the accepted packet movement after the move.
 
+        input = applyCreativeFlightInput(player, input);
         input = applyMovementThreshold(input, simulationContext.getVersion(), simulationContext.getVehicle() == null);
         return applyJumps(player, input);
+    }
+
+    /**
+     * LocalPlayer#aiStep adds {@code inputYa * abilities.getFlyingSpeed() * 3.0F} while flying, before
+     * LivingEntity#aiStep's 0.003 cutoff; inputYa is +1 for jump and -1 for shift. From 1.21.2 the keys are the last
+     * PLAYER_INPUT sent (none sent means no keys: LocalPlayer#lastSentInput starts at Input.EMPTY). Older clients send
+     * no jump key, only shift (PRESS/RELEASE_SHIFT_KEY from LocalPlayer#sendPosition before the move), so jump can
+     * hold or not.
+     */
+    private List<PredVector> applyCreativeFlightInput(CultPlayer player, List<PredVector> input) {
+        if (simulationContext.getVehicle() != null || !player.isFlying) return input;
+        int[] inputs;
+        KnownInput keys = player.packetStateData.knownInput;
+        if (simulationContext.getVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)) {
+            int inputYa = (keys.jump() ? 1 : 0) - (keys.shift() ? 1 : 0);
+            if (inputYa == 0) return input;
+            inputs = new int[] {inputYa};
+        } else {
+            inputs = keys.shift() ? new int[] {-1, 0} : new int[] {0, 1};
+        }
+        List<PredVector> outputs = new ArrayList<>(input.size() * inputs.length);
+        for (PredVector vector : input) {
+            for (int inputYa : inputs) {
+                if (inputYa == 0) {
+                    outputs.add(vector);
+                    continue;
+                }
+                double impulse = (float) inputYa * player.flySpeed * 3.0F;
+                outputs.add(vector.add(0.0, impulse, 0.0, "Creative flight input"));
+            }
+        }
+        return outputs;
     }
 
     private boolean shouldThresholdBeforeItemControlledRiddenInput(CultPlayer player) {

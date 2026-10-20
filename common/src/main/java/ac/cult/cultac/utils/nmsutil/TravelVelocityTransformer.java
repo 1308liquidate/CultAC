@@ -76,6 +76,15 @@ public final class TravelVelocityTransformer {
             }
         }
 
+        if (result.getSimulationContext().getVehicle() == null && player.isFlying) {
+            // Player#travel replaces the travelled Y with the Y deltaMovement had before LivingEntity#travel, times 0.6.
+            double carriedY = preTravelVelocityY(result, playerVelocity) * 0.6;
+            for (int i = 0; i < frictions.size(); i++) {
+                Vec3 friction = frictions.get(i);
+                frictions.set(i, new Vec3(friction.x, carriedY, friction.z));
+            }
+        }
+
         // MCP-Reborn Strider#floatStrider only rewrites deltaMovement from the
         // post-travel Strider#tick path while the strider is actually in lava.
         if (!JavaMovementEngine.contextUsesExactEffects(result.getSimulationContext())
@@ -99,5 +108,12 @@ public final class TravelVelocityTransformer {
         }
 
         return frictions;
+    }
+
+    private static double preTravelVelocityY(PredictionResult result, Vec3 fallback) {
+        if (result.getValidMovements() == null || result.getValidMovements().getClosestTrace() == null) {
+            return fallback.y;
+        }
+        return result.getValidMovements().getClosestTrace().preCollisionVelocity().y;
     }
 }
