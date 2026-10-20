@@ -20,6 +20,7 @@ public final class PalettedSection {
     private static final int BLOCK_STATES = DataTables.defaults().registry().stateCount();
     private static final int[] VALUES_PER_WORD = new int[33];
     private static final long[] WORD_RECIPROCALS = new long[33];
+    private static final long ABSENT_CODE_WEIGHT = 1L << 50;
 
     static {
         for (int bits = 1; bits <= 32; bits++) {
@@ -331,6 +332,67 @@ public final class PalettedSection {
             }
         }
         for (int code = 0; code < entries; code++) if (counts[code] != 0) consumer.accept(palette[code], counts[code]);
+    }
+
+    /**
+     * The sum of {@code weightByState} over every stored state, when the palette is local with every entry inside the
+     * table, every stored code has an entry and every weight is in [0, 2^38); -1 for any other section.
+     */
+    public long weightSumWithin(long[] weightByState) {
+        int perWord = bits == 0 ? 0 : 64 / bits;
+        if (paletteSize == 1
+                || bits == 0
+                || !localPaletteWithin(weightByState.length)
+                || words.length != (size + perWord - 1) / perWord) return -1;
+        long[] weights = new long[1 << bits];
+        Arrays.fill(weights, ABSENT_CODE_WEIGHT);
+        for (int code = 0, entries = Math.min(paletteSize, weights.length); code < entries; code++) {
+            long weight = weightByState[palette[code]];
+            if (weight < 0 || weight >= ABSENT_CODE_WEIGHT / 4096) return -1;
+            weights[code] = weight;
+        }
+        long sum;
+        if (size != words.length * perWord) sum = packedSum(weights, perWord);
+        else if (bits == 4) sum = nibbleSum(weights);
+        else if (bits == 8) sum = byteSum(weights);
+        else sum = packedSum(weights, perWord);
+        return sum >= ABSENT_CODE_WEIGHT ? -1 : sum;
+    }
+
+    private long nibbleSum(long[] weights) {
+        long even = 0, odd = 0;
+        for (long word : words) {
+            for (int shift = 0; shift < 64; shift += 8) {
+                even += weights[(int) (word >>> shift) & 15];
+                odd += weights[(int) (word >>> (shift + 4)) & 15];
+            }
+        }
+        return even + odd;
+    }
+
+    private long byteSum(long[] weights) {
+        long even = 0, odd = 0;
+        for (long word : words) {
+            for (int shift = 0; shift < 64; shift += 16) {
+                even += weights[(int) (word >>> shift) & 255];
+                odd += weights[(int) (word >>> (shift + 8)) & 255];
+            }
+        }
+        return even + odd;
+    }
+
+    private long packedSum(long[] weights, int perWord) {
+        long mask = (1L << bits) - 1, sum = 0;
+        int full = size / perWord;
+        for (int index = 0; index < full; index++) {
+            long word = words[index];
+            for (int slot = 0; slot < perWord; slot++, word >>>= bits) sum += weights[(int) (word & mask)];
+        }
+        if (full < words.length) {
+            long word = words[full];
+            for (int slot = full * perWord; slot < size; slot++, word >>>= bits) sum += weights[(int) (word & mask)];
+        }
+        return sum;
     }
 
     boolean isUniform() {

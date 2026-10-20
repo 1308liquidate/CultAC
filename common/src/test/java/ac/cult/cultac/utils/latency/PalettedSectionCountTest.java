@@ -1,6 +1,7 @@
 package ac.cult.cultac.utils.latency;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.cultac.protocol.ProtocolVersion;
@@ -19,7 +20,7 @@ class PalettedSectionCountTest {
     @Test
     void paletteOrderCountsEqualHashCountsAndMalformedSectionsFailIdentically() {
         var random = new SplittableRandom(0x5EC7L);
-        int succeeded = 0, failed = 0, reordered = 0, mismatched = 0, mutated = 0;
+        int succeeded = 0, failed = 0, reordered = 0, mismatched = 0, mutated = 0, summed = 0;
         for (int round = 0; round < 6000; round++) {
             boolean blocks = random.nextBoolean();
             int size = blocks ? 4096 : 64;
@@ -70,6 +71,12 @@ class PalettedSectionCountTest {
                 var expected = outcome(section, -1);
                 var actual = outcome(section, limit);
                 assertEquals(expected.failure, actual.failure, "round " + round);
+                long sum = section.weightSumWithin(limit == REGISTRY ? WEIGHTS : HALF_WEIGHTS);
+                if (sum >= 0) {
+                    assertNull(expected.failure, "round " + round);
+                    assertEquals(weighted(totals(expected.calls)), sum, "round " + round);
+                    summed++;
+                }
                 if (expected.failure == null) {
                     assertEquals(totals(expected.calls), totals(actual.calls), "round " + round);
                     assertEquals(expected.calls.size(), actual.calls.size(), "round " + round);
@@ -88,6 +95,22 @@ class PalettedSectionCountTest {
         assertTrue(reordered > 1000, "reordered " + reordered);
         assertTrue(mismatched > 500, "mismatched " + mismatched);
         assertTrue(mutated > 1000, "mutated " + mutated);
+        assertTrue(summed > 2000, "summed " + summed);
+    }
+
+    private static final long[] WEIGHTS = weights(REGISTRY), HALF_WEIGHTS = weights(REGISTRY / 2);
+
+    private static long[] weights(int states) {
+        long[] weights = new long[states];
+        for (int state = 0; state < states; state++)
+            weights[state] = state % 3 == 0 ? 0 : state % 3 == 1 ? 1 : 1 | 1L << 32;
+        return weights;
+    }
+
+    private static long weighted(TreeMap<Integer, Integer> totals) {
+        long sum = 0;
+        for (var entry : totals.entrySet()) sum += WEIGHTS[entry.getKey()] * entry.getValue();
+        return sum;
     }
 
     /** Writes through getAndSet until it rejects a stored code, growing the palette across bit widths. */

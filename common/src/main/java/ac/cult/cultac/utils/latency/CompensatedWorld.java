@@ -3,6 +3,7 @@ package ac.cult.cultac.utils.latency;
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.FluidTags;
+import ac.cult.blocksim.data.StateFacts;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.network.packet.WorldPackets.SectionBlocksUpdate;
@@ -259,6 +260,7 @@ public class CompensatedWorld {
     public static final class CachedSection {
         public static final java.util.concurrent.atomic.AtomicLong mutableCopyCounter =
                 new java.util.concurrent.atomic.AtomicLong(0);
+        private static final long[] COUNT_WEIGHTS = countWeights();
 
         private final PalettedSection states;
         private int nonEmptyBlockCount;
@@ -385,7 +387,24 @@ public class CompensatedWorld {
             return ac.cult.blocksim.data.DataTables.defaults().registry().facts(state);
         }
 
+        private static long[] countWeights() {
+            int states = DataTables.defaults().registry().stateCount();
+            long[] weights = new long[states];
+            for (int state = 0; state < states; state++) {
+                StateFacts facts = facts(state);
+                if (!facts.has(StateFacts.AIR))
+                    weights[state] = facts.fluid().equals("minecraft:empty") ? 1 : 1 | 1L << 32;
+            }
+            return weights;
+        }
+
         private void recalcCounts() {
+            long counts = states.weightSumWithin(COUNT_WEIGHTS);
+            if (counts >= 0) {
+                nonEmptyBlockCount = (int) counts;
+                fluidCount = (int) (counts >>> 32);
+                return;
+            }
             nonEmptyBlockCount = 0;
             fluidCount = 0;
             states.forEachCountWithin(DataTables.defaults().registry().stateCount(), (state, count) -> {
