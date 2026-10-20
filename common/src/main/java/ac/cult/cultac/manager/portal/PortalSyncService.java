@@ -3,6 +3,7 @@ package ac.cult.cultac.manager.portal;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.cloud.CloudModule;
 import ac.cult.cultac.cloud.CloudSettings;
+import ac.cult.cultac.cloud.transport.TeamSocket;
 import ac.cult.cultac.manager.init.start.StartableInitable;
 import ac.cult.cultac.manager.init.stop.StoppableInitable;
 import ac.cult.cultac.manager.portal.PortalSync.OfflineLookup;
@@ -11,23 +12,18 @@ import ac.cult.cultac.manager.portal.PortalSync.Role;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.platform.api.scheduler.TaskHandle;
 import ac.cult.cultac.utils.anticheat.LogUtil;
-import ac.grim.grimac.api.config.ConfigManager;
-import java.util.Locale;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
-import java.util.function.Supplier;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Runs {@link PortalSync} on the async scheduler: the join check and every tick run there, never on the main thread
- * or a connection's event loop. Off unless {@code cloud.team-sync} (or {@value #ENV}) turns it on, and while the cloud
- * upload has no address or key.
+ * Runs {@link PortalSync} on the async scheduler: the join check, every tick and every sweep run there, never on the
+ * main thread or a connection's event loop. The intake sockets offer team sync while {@code cloud.team-sync} (or
+ * {@code CULTAC_CLOUD_TEAM_SYNC}) is on; without an answering socket nothing is sent.
  */
 public final class PortalSyncService implements StartableInitable, StoppableInitable {
-    static final String ENV = "CULTAC_CLOUD_TEAM_SYNC";
-
     private volatile @Nullable PortalSync sync;
     private volatile @Nullable OfflineLookup offline;
     private @Nullable TaskHandle tick;
@@ -35,14 +31,15 @@ public final class PortalSyncService implements StartableInitable, StoppableInit
 
     @Override
     public void start() {
-        PortalSync started = new PortalSync(new Players(), System::currentTimeMillis, () -> offline, LogUtil::debug);
+        PortalSync started =
+                new PortalSync(new Players(), System::currentTimeMillis, () -> offline, LogUtil::info, LogUtil::debug);
         sync = started;
         tick = CultAPI.INSTANCE
                 .getScheduler()
                 .getAsyncScheduler()
                 .runAtFixedRate(
                         CultAPI.INSTANCE.getGrimPlugin(),
-                        () -> tick(started),
+                        started::tick,
                         PortalSync.TICK_SECONDS,
                         PortalSync.TICK_SECONDS,
                         TimeUnit.SECONDS);
@@ -69,7 +66,7 @@ public final class PortalSyncService implements StartableInitable, StoppableInit
             CultAPI.INSTANCE.getScheduler().getAsyncScheduler().runNow(CultAPI.INSTANCE.getGrimPlugin(), once);
         PortalSync current = sync;
         UUID uuid = player.getUniqueId();
-        if (current == null || !PortalSync.accepts(uuid) || configured() == null) return;
+        if (current == null || !PortalSync.accepts(uuid) || !configured(CloudModule.settings())) return;
         CultAPI.INSTANCE
                 .getScheduler()
                 .getAsyncScheduler()
@@ -87,41 +84,50 @@ public final class PortalSyncService implements StartableInitable, StoppableInit
         if (current != null) current.permissionsChanged(uuid);
     }
 
-    /** The permission plugin's store for players who are not online; null turns the offline sweep off. */
+    /** The permission plugin's store for players who are not online; null makes sweeps ignored. */
     public void offlineLookup(@Nullable OfflineLookup lookup) {
         offline = lookup;
     }
 
-    private void tick(PortalSync current) {
-        PortalSyncClient client = configured();
-        if (client != null) current.tick(client);
+    /** Whether the upload runs and offers team sync; {@code settings} is null until a config names the upload. */
+    static boolean configured(@Nullable CloudSettings settings) {
+        return settings != null && settings.enabled() && settings.team();
     }
 
-    private static @Nullable PortalSyncClient configured() {
-        return client(CultAPI.INSTANCE.getConfigManager().getConfig(), System::getenv, CloudModule::settings);
+    /** Hears the team sockets for whichever {@link PortalSync} runs; built only once the upload loads. */
+    public Team teamListener() {
+        return new Team();
     }
 
-    /**
-     * The client for the cloud's team sync; null while team sync is off, and while the upload has no address or key.
-     * {@code settings} answers null until the upload is configured, and is read only while team sync is on.
-     */
-    static @Nullable PortalSyncClient client(
-            ConfigManager config, Function<String, String> env, Supplier<CloudSettings> settings) {
-        if (!enabled(config, env)) return null;
-        CloudSettings cloud = settings.get();
-        if (cloud == null || cloud.url().isEmpty() || cloud.apiKey().isEmpty()) return null;
-        return new PortalSyncClient(cloud.url(), cloud.apiKey());
-    }
+    /** Returned as itself: widening it to {@link TeamSocket.Listener} here would load that cloud class with the upload off. */
+    public final class Team implements TeamSocket.Listener {
+        @Override
+        public void opened(TeamSocket socket, @Nullable Boolean enabled) {
+            PortalSync current = sync;
+            if (current != null) current.opened(socket, enabled);
+        }
 
-    /** {@value #ENV} when it is true/1/yes or false/0/no, else {@code cloud.team-sync}, off by default. */
-    static boolean enabled(ConfigManager config, Function<String, String> env) {
-        String value = env.apply(ENV);
-        String normalized = value == null ? "" : value.strip().toLowerCase(Locale.ROOT);
-        return switch (normalized) {
-            case "true", "1", "yes" -> true;
-            case "false", "0", "no" -> false;
-            default -> config.getBooleanElse("cloud.team-sync", false);
-        };
+        @Override
+        public void state(TeamSocket socket, boolean enabled) {
+            PortalSync current = sync;
+            if (current != null) current.state(socket, enabled);
+        }
+
+        @Override
+        public void sweep(TeamSocket socket, List<UUID> players) {
+            PortalSync current = sync;
+            if (current == null) return;
+            CultAPI.INSTANCE
+                    .getScheduler()
+                    .getAsyncScheduler()
+                    .runNow(CultAPI.INSTANCE.getGrimPlugin(), () -> current.sweep(socket, players));
+        }
+
+        @Override
+        public void closed(TeamSocket socket) {
+            PortalSync current = sync;
+            if (current != null) current.closed(socket);
+        }
     }
 
     private static final class Players implements PortalSync.Players {

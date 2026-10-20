@@ -1,20 +1,21 @@
 package ac.cult.cultac.manager.portal;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.cultac.cloud.intake.v3.Intake;
+import ac.cult.cultac.cloud.intake.v3.PortalRole;
+import ac.cult.cultac.cloud.intake.v3.TeamRole;
+import ac.cult.cultac.cloud.transport.TeamSocket;
+import ac.cult.cultac.cloud.wire.IntakeWire;
 import ac.cult.cultac.manager.portal.PortalSync.Offline;
 import ac.cult.cultac.manager.portal.PortalSync.OfflineLookup;
 import ac.cult.cultac.manager.portal.PortalSync.Online;
-import ac.cult.cultac.manager.portal.PortalSync.Reply;
+import ac.cult.cultac.manager.portal.PortalSync.Report;
 import ac.cult.cultac.manager.portal.PortalSync.Role;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import com.google.protobuf.InvalidProtocolBufferException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -28,19 +29,14 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 class PortalSyncTest {
-    private static final UUID SPEC = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
-    private static final String APPROVE = "{\"mode\": \"approve\", \"paused\": false, \"applied\": 1}";
-    private static final String OFF = "{\"mode\": \"off\", \"paused\": false, \"applied\": 0}";
-    private static final String NODES = "\"nodes\":{\"viewer\":\"cult.portal.viewer\","
-            + "\"moderator\":\"cult.portal.moderator\",\"admin\":\"cult.portal.admin\"}";
+    private static final UUID GOLDEN = UUID.fromString("7445efd5-b580-47d0-b669-bf621fe82396");
 
     private long now = 1_000_000L;
     private final Map<UUID, Online> online = new HashMap<>();
     private final Map<UUID, Offline> stored = new HashMap<>();
     private final List<UUID> lookedUp = new ArrayList<>();
-    private OfflineLookup lookup;
-    private final List<String> debug = new ArrayList<>();
-    private final FakeTransport api = new FakeTransport();
+    private @Nullable OfflineLookup lookup;
+    private final List<String> info = new ArrayList<>();
 
     private final PortalSync sync = new PortalSync(
             new PortalSync.Players() {
@@ -56,44 +52,45 @@ class PortalSyncTest {
             },
             () -> now,
             () -> lookup,
-            debug::add);
+            info::add,
+            line -> {});
 
-    private static final class FakeTransport implements PortalSync.Transport {
-        final List<JsonObject> posts = new ArrayList<>();
-        final List<String> calls = new ArrayList<>();
-        final List<CompletableFuture<Reply>> pending = new ArrayList<>();
+    private static final class FakeSocket implements TeamSocket {
+        final String id;
+        final List<List<TeamRole>> sent = new ArrayList<>();
+        boolean takes = true;
+        @Nullable Runnable onSend;
 
-        @Override
-        public CompletableFuture<Reply> post(JsonObject body) {
-            posts.add(body);
-            calls.add("POST");
-            return next();
+        FakeSocket(String id) {
+            this.id = id;
         }
 
         @Override
-        public CompletableFuture<Reply> get() {
-            calls.add("GET");
-            return next();
+        public boolean send(byte[] record) {
+            if (onSend != null) onSend.run();
+            if (!takes) return false;
+            try {
+                sent.add(Intake.parseFrom(record).getMessages(0).getTeam().getPlayersList());
+            } catch (InvalidProtocolBufferException e) {
+                throw new AssertionError(e);
+            }
+            return true;
         }
 
-        private CompletableFuture<Reply> next() {
-            CompletableFuture<Reply> call = new CompletableFuture<>();
-            pending.add(call);
-            return call;
+        @Override
+        public String serverId() {
+            return id;
         }
 
-        void answer(int status, String body) {
-            pending.remove(0).complete(new Reply(status, body));
-        }
-
-        void fail() {
-            pending.remove(0).completeExceptionally(new IOException("down"));
-        }
-
-        JsonObject lastPost() {
-            return posts.get(posts.size() - 1);
+        List<UUID> players(int message) {
+            return sent.get(message).stream()
+                    .map(role -> IntakeWire.uuid(role.getPlayer()))
+                    .toList();
         }
     }
+
+    private final FakeSocket a = new FakeSocket("proxy.a");
+    private final FakeSocket b = new FakeSocket("proxy.b");
 
     private static UUID v4(int n) {
         return UUID.fromString(String.format("00000000-0000-4000-8000-%012d", n));
@@ -106,418 +103,397 @@ class PortalSyncTest {
         return uuid;
     }
 
-    private static List<String> uuids(JsonObject body) {
-        List<String> uuids = new ArrayList<>();
-        for (JsonElement player : body.getAsJsonArray("players")) {
-            uuids.add(player.getAsJsonObject().get("uuid").getAsString());
-        }
-        return uuids;
-    }
-
-    @Test
-    void aHolderStillOnlineIsReportedInTheSpecsShape() {
-        online.put(SPEC, new Online("SpecPlayer", Role.MODERATOR));
-        sync.checkJoined(SPEC);
-        sync.tick(api);
-
-        assertEquals(List.of("POST"), api.calls);
-        assertEquals(
-                JsonParser.parseString("{ \"players\": [ { \"uuid\": \"0f8fad5b-d9cb-469f-a165-70867728950e\","
-                        + " \"name\": \"SpecPlayer\", \"role\": \"moderator\", \"source\": \"online\" } ] }"),
-                api.lastPost());
-        assertEquals(
-                "{\"players\":[{\"uuid\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"name\":\"SpecPlayer\","
-                        + "\"role\":\"moderator\",\"source\":\"online\"}]}",
-                api.lastPost().toString());
-    }
-
-    @Test
-    void theHighestHeldNodeWins() {
-        assertEquals("cult.portal.viewer", Role.VIEWER.node());
-        assertEquals("cult.portal.moderator", Role.MODERATOR.node());
-        assertEquals("cult.portal.admin", Role.ADMIN.node());
-        assertEquals(Role.ADMIN, Role.highest(Set.of("cult.portal.viewer", "cult.portal.admin")::contains));
-        assertEquals(Role.MODERATOR, Role.highest(Set.of("cult.portal.viewer", "cult.portal.moderator")::contains));
-        assertEquals(Role.VIEWER, Role.highest(Set.of("cult.portal.viewer")::contains));
-        assertNull(Role.highest(Set.of("cult.portal", "cult.portal.owner")::contains));
-
-        Set<String> held = Set.of("cult.portal.viewer", "cult.portal.moderator", "cult.portal.admin");
-        join(1, Role.highest(held::contains));
-        sync.tick(api);
-        assertTrue(api.lastPost().toString().contains("\"role\":\"admin\""));
-    }
-
-    @Test
-    void nonHoldersLeaversSpoofedUuidsAndOddNamesAreNotReported() {
-        join(1, null);
-        sync.checkJoined(v4(2));
-        UUID offlineMode = UUID.nameUUIDFromBytes("OfflinePlayer:Steve".getBytes(StandardCharsets.UTF_8));
-        online.put(offlineMode, new Online("Steve", Role.MODERATOR));
-        sync.checkJoined(offlineMode);
-        UUID floodgate = UUID.fromString("00000000-0000-0000-0009-01f0a1b2c3d4");
-        online.put(floodgate, new Online("Bedrock", Role.ADMIN));
-        sync.checkJoined(floodgate);
-        UUID oddName = v4(3);
-        online.put(oddName, new Online(".Bedrock Name", Role.VIEWER));
-        sync.checkJoined(oddName);
-
-        sync.tick(api);
-
-        assertFalse(PortalSync.accepts(offlineMode));
-        assertFalse(PortalSync.accepts(floodgate));
-        assertTrue(api.calls.isEmpty());
-    }
-
-    @Test
-    void aReportedPlayerIsNotReportedAgainOnTheSameSession() {
-        UUID uuid = join(1, Role.MODERATOR);
-        sync.tick(api);
-        api.answer(200, APPROVE);
-        sync.checkJoined(uuid);
-        sync.tick(api);
-
-        assertEquals(1, api.calls.size());
-    }
-
-    @Test
-    void oneCallPerTickOfAtMostAHundredPlayers() {
-        for (int i = 0; i < 250; i++) join(i, Role.MODERATOR);
-
-        sync.tick(api);
-        sync.tick(api);
-        assertEquals(1, api.calls.size(), "no second call while one is in flight");
-        assertEquals(100, uuids(api.lastPost()).size());
-
-        api.answer(200, APPROVE);
-        sync.tick(api);
-        assertEquals(100, uuids(api.lastPost()).size());
-        api.answer(200, APPROVE);
-        sync.tick(api);
-        assertEquals(50, uuids(api.lastPost()).size());
-        api.answer(200, APPROVE);
-        sync.tick(api);
-
-        assertEquals(3, api.calls.size());
-        Set<String> sent = new HashSet<>();
-        for (JsonObject post : api.posts) sent.addAll(uuids(post));
-        assertEquals(250, sent.size());
-    }
-
-    @Test
-    void theQueueHoldsAtMostFiveHundred() {
-        for (int i = 0; i < 600; i++) join(i, Role.MODERATOR);
-
-        int sent = 0;
-        for (int i = 0; i < 10; i++) {
-            sync.tick(api);
-            if (!api.pending.isEmpty()) {
-                api.answer(200, APPROVE);
-            }
-        }
-        for (JsonObject post : api.posts) sent += uuids(post).size();
-
-        assertEquals(PortalSync.MAX_QUEUED, sent);
-    }
-
-    @Test
-    void aFailedReportIsRetriedOnceOnTheNextTick() {
-        UUID uuid = join(1, Role.MODERATOR);
-        sync.tick(api);
-        api.fail();
-        sync.tick(api);
-        assertEquals(List.of(uuid.toString()), uuids(api.lastPost()));
-        api.answer(503, "");
-        sync.tick(api);
-
-        assertEquals(2, api.calls.size());
-    }
-
-    @Test
-    void aReportThatNeverLandedIsSentAgainOnTheNextPermissionChange() {
-        UUID uuid = join(1, Role.MODERATOR);
-        sync.tick(api);
-        api.fail();
-        sync.tick(api);
-        api.answer(503, "");
-
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertEquals(3, api.calls.size());
-        assertEquals(List.of(uuid.toString()), uuids(api.lastPost()));
-        assertTrue(api.lastPost().toString().contains("\"role\":\"moderator\""));
-    }
-
-    @Test
-    void aDroppedReportLeavesANewerQueuedOneOwningTheReportedRole() {
-        UUID uuid = join(1, Role.MODERATOR);
-        sync.tick(api);
-        online.put(uuid, new Online("Player1", Role.VIEWER));
-        sync.checkJoined(uuid);
-        api.fail();
-        sync.tick(api);
-        assertTrue(api.lastPost().toString().contains("\"role\":\"viewer\""));
-        api.answer(200, APPROVE);
-
-        online.put(uuid, new Online("Player1", null));
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertEquals(3, api.calls.size());
-        assertTrue(api.lastPost().toString().contains("\"role\":null"));
-    }
-
-    @Test
-    void afterAPauseEveryWatchedPlayersStateIsSentAgain() {
-        UUID kept = join(1, Role.MODERATOR);
-        UUID lost = join(2, Role.ADMIN);
-        sync.tick(api);
-        api.answer(200, APPROVE);
-        join(3, Role.VIEWER);
-        sync.tick(api);
-        api.answer(200, "{\"mode\":\"approve\",\"paused\":true,\"applied\":0}");
-
-        online.put(lost, new Online("Player2", null));
-        sync.permissionsChanged(lost);
-        now += PortalSync.BACK_OFF_MS;
-        sync.tick(api);
-        api.answer(200, "{\"mode\":\"approve\",\"paused\":false," + NODES + ",\"synced\":[]}");
-        sync.tick(api);
-
-        assertEquals(List.of("POST", "POST", "GET", "POST"), api.calls);
-        Map<String, String> sent = new HashMap<>();
-        for (JsonElement player : api.lastPost().getAsJsonArray("players")) {
-            JsonObject p = player.getAsJsonObject();
-            sent.put(p.get("uuid").getAsString(), p.get("role").toString());
-        }
-        assertEquals(
-                Map.of(kept.toString(), "\"moderator\"", lost.toString(), "null", v4(3).toString(), "\"viewer\""),
-                sent);
-    }
-
-    @Test
-    void aMalformedReportIsNotRetried() {
-        join(1, Role.MODERATOR);
-        sync.tick(api);
-        api.answer(400, "{\"detail\":\"bad\"}");
-        sync.tick(api);
-
-        assertEquals(1, api.calls.size());
-    }
-
-    @Test
-    void modeOffBacksOffSixHoursThenOneGetResumes() {
-        UUID first = join(1, Role.MODERATOR);
-        sync.tick(api);
-        api.answer(200, OFF);
-
-        join(2, Role.MODERATOR);
-        now += TimeUnit.HOURS.toMillis(1);
-        sync.tick(api);
-        now += PortalSync.BACK_OFF_MS - TimeUnit.HOURS.toMillis(1) - 1;
-        sync.tick(api);
-        assertEquals(List.of("POST"), api.calls);
-
-        now += 1;
-        sync.tick(api);
-        sync.tick(api);
-        assertEquals(List.of("POST", "GET"), api.calls);
-        api.answer(200, "{\"mode\":\"approve\",\"paused\":false," + NODES + ",\"synced\":[]}");
-
-        sync.tick(api);
-        assertEquals(List.of("POST", "GET", "POST"), api.calls);
-        Set<String> resumed = new HashSet<>(uuids(api.lastPost()));
-        assertEquals(Set.of(first.toString(), v4(2).toString()), resumed);
-    }
-
-    @Test
-    void pausedOrARefusedKeyBacksOffAndTheRecheckCanBackOffAgain() {
-        join(1, Role.MODERATOR);
-        sync.tick(api);
-        api.answer(200, "{\"mode\":\"approve\",\"paused\":true,\"applied\":0}");
-        now += PortalSync.BACK_OFF_MS;
-        sync.tick(api);
-        api.answer(200, "{\"mode\":\"auto\",\"paused\":true}");
-        now += PortalSync.BACK_OFF_MS - 1;
-        sync.tick(api);
-        assertEquals(List.of("POST", "GET"), api.calls);
-
-        now += 1;
-        sync.tick(api);
-        api.answer(200, "{\"mode\":\"auto\",\"paused\":false}");
-        sync.tick(api);
-        api.answer(403, "{\"detail\":\"no organization\"}");
-        join(2, Role.MODERATOR);
-        sync.tick(api);
-
-        assertEquals(List.of("POST", "GET", "GET", "POST"), api.calls);
-    }
-
-    @Test
-    void aPermissionChangeReportsTheNewStateOnce() {
-        UUID uuid = join(1, Role.MODERATOR);
-        sync.tick(api);
-        api.answer(200, APPROVE);
-
-        online.put(uuid, new Online("Player1", null));
-        sync.permissionsChanged(uuid);
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertEquals(
-                JsonParser.parseString("{\"players\":[{\"uuid\":\"" + uuid
-                        + "\",\"name\":\"Player1\",\"role\":null,\"source\":\"online\"}]}"),
-                api.lastPost());
-        api.answer(200, APPROVE);
-
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertEquals(2, api.calls.size(), "an unchanged state is not reported again");
-
-        online.put(uuid, new Online("Player1", Role.MODERATOR));
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertEquals(3, api.calls.size());
-        assertTrue(api.lastPost().toString().contains("\"role\":\"moderator\""));
-    }
-
-    @Test
-    void aRoleChangeFromModeratorToViewerReportsViewer() {
-        UUID uuid = join(1, Role.MODERATOR);
-        sync.tick(api);
-        api.answer(200, APPROVE);
-
-        online.put(uuid, new Online("Player1", Role.VIEWER));
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertEquals(
-                JsonParser.parseString("{\"players\":[{\"uuid\":\"" + uuid
-                        + "\",\"name\":\"Player1\",\"role\":\"viewer\",\"source\":\"online\"}]}"),
-                api.lastPost());
-        api.answer(200, APPROVE);
-
-        online.put(uuid, new Online("Player1", Role.ADMIN));
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertEquals(3, api.calls.size());
-        assertTrue(api.lastPost().toString().contains("\"role\":\"admin\""));
-    }
-
-    @Test
-    void losingEveryNodeReportsNull() {
-        UUID uuid = join(1, Role.ADMIN);
-        sync.tick(api);
-        api.answer(200, APPROVE);
-
-        online.put(uuid, new Online("Player1", null));
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertEquals(
-                "{\"players\":[{\"uuid\":\"" + uuid + "\",\"name\":\"Player1\",\"role\":null,\"source\":\"online\"}]}",
-                api.lastPost().toString());
-        api.answer(200, APPROVE);
-
-        sync.permissionsChanged(uuid);
-        sync.checkJoined(uuid);
-        sync.tick(api);
-        assertEquals(2, api.calls.size(), "a player holding no role is reported only when losing one");
-    }
-
-    @Test
-    void aPermissionChangeBeforeTheJoinCheckWaitsForIt() {
-        UUID uuid = v4(1);
-        online.put(uuid, new Online("Player1", Role.MODERATOR));
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertTrue(api.calls.isEmpty());
-
-        UUID later = join(2, null);
-        online.put(later, new Online("Player2", Role.MODERATOR));
-        sync.permissionsChanged(later);
-        sync.tick(api);
-        assertEquals(List.of(later.toString()), uuids(api.lastPost()));
-    }
-
-    @Test
-    void aPlayerWhoLeftIsForgottenAndReportedAgainOnTheirNextJoin() {
-        UUID uuid = join(1, Role.MODERATOR);
-        sync.tick(api);
-        api.answer(200, APPROVE);
-        online.remove(uuid);
-        sync.tick(api);
-        sync.permissionsChanged(uuid);
-        sync.tick(api);
-        assertEquals(1, api.calls.size());
-
-        join(1, Role.MODERATOR);
-        sync.tick(api);
-        assertEquals(2, api.calls.size());
-    }
-
-    @Test
-    void theSweepReportsTheStoredRoleOfSyncedOfflinePlayers() {
+    private void useLookup() {
         lookup = uuid -> {
             lookedUp.add(uuid);
             return CompletableFuture.completedFuture(stored.get(uuid));
         };
-        UUID lost = v4(1);
-        stored.put(lost, new Offline("LostMod", null));
-        UUID kept = v4(2);
-        stored.put(kept, new Offline("KeptMod", Role.VIEWER));
-        UUID nameless = v4(3);
-        stored.put(nameless, new Offline(null, null));
-        UUID unknown = v4(4);
-        UUID here = join(5, null);
-        UUID offlineMode = UUID.nameUUIDFromBytes("OfflinePlayer:Alex".getBytes(StandardCharsets.UTF_8));
-
-        sync.tick(api);
-        assertTrue(api.calls.isEmpty(), "the first sweep waits");
-
-        now += PortalSync.FIRST_SWEEP_MS;
-        sync.tick(api);
-        assertEquals(List.of("GET"), api.calls);
-        api.answer(
-                200,
-                "{\"mode\":\"approve\",\"paused\":false," + NODES + ",\"synced\":[\"" + lost + "\",\"" + kept
-                        + "\",\"" + nameless + "\",\"" + unknown + "\",\"" + here + "\",\"" + offlineMode
-                        + "\",\"not-a-uuid\"]}");
-        assertEquals(List.of(lost, kept, nameless, unknown), lookedUp);
-
-        sync.tick(api);
-        assertEquals(
-                JsonParser.parseString("{\"players\":[{\"uuid\":\"" + lost
-                        + "\",\"name\":\"LostMod\",\"role\":null,\"source\":\"offline\"},{\"uuid\":\""
-                        + kept + "\",\"name\":\"KeptMod\",\"role\":\"viewer\",\"source\":\"offline\"},{\"uuid\":\""
-                        + nameless + "\",\"name\":null,\"role\":null,\"source\":\"offline\"}]}"),
-                api.lastPost());
-        api.answer(200, APPROVE);
-
-        now += PortalSync.SWEEP_EVERY_MS - 1;
-        sync.tick(api);
-        assertEquals(2, api.calls.size());
-        now += 1;
-        sync.tick(api);
-        assertEquals(List.of("GET", "POST", "GET"), api.calls);
     }
 
     @Test
-    void theSweepBacksOffWhenSyncIsOff() {
-        lookup = uuid -> {
-            lookedUp.add(uuid);
-            return CompletableFuture.completedFuture(new Offline("Gone", null));
+    void oneReportEncodesAsTheGoldenBytes() {
+        byte[] golden = {
+            0x0a, 0x24, 0x3a, 0x22, 0x0a, 0x20, 0x0a, 0x10, 0x74, 0x45, (byte) 0xef, (byte) 0xd5, (byte) 0xb5,
+            (byte) 0x80, 0x47, (byte) 0xd0, (byte) 0xb6, 0x69, (byte) 0xbf, 0x62, 0x1f, (byte) 0xe8, 0x23,
+            (byte) 0x96, 0x12, 0x0a, 0x44, 0x69, 0x73, 0x72, 0x65, 0x67, 0x61, 0x72, 0x64, 0x31, 0x18, 0x03
         };
-        now += PortalSync.FIRST_SWEEP_MS;
-        sync.tick(api);
-        api.answer(200, "{\"mode\":\"off\",\"paused\":false," + NODES + ",\"synced\":[\"" + v4(1) + "\"]}");
-        join(2, Role.MODERATOR);
-        sync.tick(api);
+        assertArrayEquals(
+                golden, PortalSync.message(List.of(new Report(GOLDEN, "Disregard1", Role.MODERATOR, false))));
+    }
+
+    @Test
+    void nothingIsSentWithoutASocketThatAnsweredTeam() {
+        join(1, Role.ADMIN);
+        sync.opened(a, null);
+        sync.tick();
+
+        assertTrue(a.sent.isEmpty());
+        assertEquals(List.of("Team sync: the cloud does not take it from this key"), info);
+    }
+
+    @Test
+    void aHolderIsReportedOnceTheSocketAnswersEnabled() {
+        sync.opened(a, true);
+        UUID admin = join(1, Role.ADMIN);
+        join(2, null);
+        sync.tick();
+
+        assertEquals(1, a.sent.size());
+        TeamRole role = a.sent.get(0).get(0);
+        assertEquals(admin, IntakeWire.uuid(role.getPlayer()));
+        assertEquals("Player1", role.getName());
+        assertEquals(PortalRole.PORTAL_ROLE_ADMIN, role.getRole());
+        assertFalse(role.getOffline());
+        assertEquals(1, a.sent.get(0).size());
+        assertEquals(List.of("Team sync on: reporting portal roles to the cloud"), info);
+    }
+
+    @Test
+    void playersCheckedWhileOffAreReportedWhenTheStateTurnsEnabled() {
+        sync.opened(a, false);
+        UUID admin = join(1, Role.ADMIN);
+        sync.tick();
+        assertTrue(a.sent.isEmpty());
+
+        sync.state(a, true);
+        sync.tick();
+
+        assertEquals(List.of(admin), a.players(0));
+        assertEquals(
+                List.of("Team sync off: the organization has it off", "Team sync on: reporting portal roles to the cloud"),
+                info);
+    }
+
+    @Test
+    void turningDisabledDropsTheQueue() {
+        sync.opened(a, true);
+        join(1, Role.ADMIN);
+        sync.state(a, false);
+        sync.tick();
+
+        assertTrue(a.sent.isEmpty());
+    }
+
+    @Test
+    void aReconnectThatAnswersEnabledReportsEveryWatchedPlayerAgain() {
+        sync.opened(a, true);
+        UUID admin = join(1, Role.ADMIN);
+        join(2, null);
+        sync.tick();
+        sync.closed(a);
+
+        FakeSocket again = new FakeSocket("proxy.a");
+        sync.opened(again, true);
+        sync.tick();
+
+        assertEquals(List.of(admin), again.players(0));
+        assertEquals(
+                List.of(
+                        "Team sync on: reporting portal roles to the cloud",
+                        "Team sync on: reporting portal roles to the cloud"),
+                info);
+    }
+
+    @Test
+    void aStateThatRepeatsTheAnswerChangesNothing() {
+        sync.opened(a, true);
+        join(1, Role.ADMIN);
+        sync.tick();
+        sync.state(a, true);
+        sync.tick();
+        sync.opened(b, false);
+        sync.state(b, false);
+
+        assertEquals(1, a.sent.size());
+        assertEquals(List.of("Team sync on: reporting portal roles to the cloud"), info);
+    }
+
+    @Test
+    void aSecondEnabledSocketLogsNothingNew() {
+        sync.opened(a, true);
+        sync.opened(b, true);
+        sync.closed(a);
+        sync.state(b, true);
+
+        assertEquals(List.of("Team sync on: reporting portal roles to the cloud"), info);
+    }
+
+    @Test
+    void losingTheLastEnabledSocketWhileADisabledOneStaysLogsOff() {
+        sync.opened(a, true);
+        sync.opened(b, false);
+        sync.closed(a);
+        sync.state(b, true);
+
+        assertEquals(
+                List.of(
+                        "Team sync on: reporting portal roles to the cloud",
+                        "Team sync off: the organization has it off",
+                        "Team sync on: reporting portal roles to the cloud"),
+                info);
+    }
+
+    @Test
+    void anOffAlreadyLoggedIsNotLoggedAgainWhenTheEnabledSocketCloses() {
+        sync.opened(a, true);
+        sync.state(a, false);
+        sync.opened(b, false);
+        sync.closed(a);
+
+        assertEquals(
+                List.of(
+                        "Team sync on: reporting portal roles to the cloud",
+                        "Team sync off: the organization has it off"),
+                info);
+    }
+
+    @Test
+    void aLostRoleIsReportedAsNoneAfterAResync() {
+        sync.opened(a, true);
+        UUID admin = join(1, Role.ADMIN);
+        sync.tick();
+        sync.closed(a);
+        online.put(admin, new Online("Player1", null));
+
+        sync.opened(b, true);
+        sync.tick();
+
+        assertEquals(PortalRole.PORTAL_ROLE_NONE, b.sent.get(0).get(0).getRole());
+    }
+
+    @Test
+    void aDemotionCarriedOnAClosedSocketIsSentAgain() {
+        sync.opened(a, true);
+        sync.opened(b, true);
+        UUID demoted = join(1, Role.MODERATOR);
+        sync.tick();
+        online.put(demoted, new Online("Player1", null));
+        sync.permissionsChanged(demoted);
+        sync.tick();
+        assertEquals(PortalRole.PORTAL_ROLE_NONE, a.sent.get(1).get(0).getRole());
+
+        sync.closed(a);
+        sync.tick();
+
+        assertEquals(List.of(demoted), b.players(0));
+        assertEquals(PortalRole.PORTAL_ROLE_NONE, b.sent.get(0).get(0).getRole());
+    }
+
+    @Test
+    void aQueuedDemotionDroppedWhileOffIsSentWhenSyncComesBack() {
+        sync.opened(a, true);
+        UUID demoted = join(1, Role.MODERATOR);
+        sync.tick();
+        online.put(demoted, new Online("Player1", null));
+        sync.permissionsChanged(demoted);
+        a.takes = false;
+        a.onSend = () -> sync.state(a, false);
+        sync.tick();
+
+        a.takes = true;
+        a.onSend = null;
+        sync.state(a, true);
+        sync.tick();
+
+        assertEquals(List.of(demoted), a.players(1));
+        assertEquals(PortalRole.PORTAL_ROLE_NONE, a.sent.get(1).get(0).getRole());
+    }
+
+    @Test
+    void aResyncTheFullQueueTurnedAwayIsSentOnceThereIsRoom() {
+        sync.opened(a, true);
+        sync.opened(b, true);
+        UUID staff = join(0, Role.MODERATOR);
+        sync.tick();
+        for (int n = 1; n <= PortalSync.MAX_QUEUED; n++) join(n, Role.VIEWER);
+        sync.closed(a);
+        for (int i = 0; i < 10; i++) sync.tick();
+
+        boolean resent = false;
+        for (int i = 0; i < b.sent.size(); i++) resent |= b.players(i).contains(staff);
+        assertTrue(resent);
+    }
+
+    @Test
+    void reportsGoOnTheLongestOpenEnabledSocket() {
+        sync.opened(a, false);
+        sync.opened(b, true);
+        FakeSocket c = new FakeSocket("proxy.c");
+        sync.opened(c, true);
+        join(1, Role.VIEWER);
+        sync.tick();
+        assertEquals(1, b.sent.size());
+
+        sync.state(a, true);
+        join(2, Role.VIEWER);
+        sync.tick();
+
+        assertEquals(1, a.sent.size());
+        assertTrue(c.sent.isEmpty());
+    }
+
+    @Test
+    void losingTheSocketThatCarriedReportsResyncsOnAnother() {
+        sync.opened(a, true);
+        sync.opened(b, true);
+        UUID admin = join(1, Role.ADMIN);
+        sync.tick();
+        assertEquals(1, a.sent.size());
+
+        sync.closed(a);
+        sync.tick();
+
+        assertEquals(List.of(admin), b.players(0));
+    }
+
+    @Test
+    void losingASocketThatCarriedNothingResyncsNothing() {
+        sync.opened(a, true);
+        sync.opened(b, true);
+        join(1, Role.ADMIN);
+        sync.tick();
+
+        sync.closed(b);
+        sync.tick();
+
+        assertEquals(1, a.sent.size());
+    }
+
+    @Test
+    void aBatchTheSocketRefusedIsQueuedAgain() {
+        sync.opened(a, true);
+        UUID admin = join(1, Role.ADMIN);
+        a.takes = false;
+        sync.tick();
+        a.takes = true;
+        sync.tick();
+
+        assertEquals(List.of(admin), a.players(0));
+    }
+
+    @Test
+    void eachTickSendsAtMostOneMessageOfAHundred() {
+        sync.opened(a, true);
+        for (int n = 1; n <= 250; n++) join(n, Role.VIEWER);
+
+        sync.tick();
+        assertEquals(1, a.sent.size());
+        assertEquals(PortalSync.MAX_PER_MESSAGE, a.sent.get(0).size());
+        sync.tick();
+        sync.tick();
+        sync.tick();
+
+        assertEquals(List.of(100, 100, 50), a.sent.stream().map(List::size).toList());
+    }
+
+    @Test
+    void joinsPastTheQueueCapAreSentOnceThereIsRoom() {
+        sync.opened(a, true);
+        for (int n = 1; n <= 600; n++) join(n, Role.VIEWER);
+        for (int i = 0; i < 10; i++) sync.tick();
+
+        Set<UUID> sent = new HashSet<>();
+        for (int i = 0; i < a.sent.size(); i++) sent.addAll(a.players(i));
+        assertEquals(600, sent.size());
+    }
+
+    @Test
+    void aRefusedBatchIsKeptWhenTheQueueFilledMeanwhile() {
+        sync.opened(a, true);
+        for (int n = 1; n <= PortalSync.MAX_QUEUED; n++) join(n, Role.VIEWER);
+        a.takes = false;
+        a.onSend = () -> {
+            for (int n = 501; n <= 600; n++) join(n, Role.VIEWER);
+        };
+        sync.tick();
+        a.takes = true;
+        a.onSend = null;
+        for (int i = 0; i < 10; i++) sync.tick();
+
+        Set<UUID> sent = new HashSet<>();
+        for (int i = 0; i < a.sent.size(); i++) sent.addAll(a.players(i));
+        assertEquals(600, sent.size());
+    }
+
+    @Test
+    void aPermissionChangeReportsTheNewRole() {
+        sync.opened(a, true);
+        UUID player = join(1, Role.VIEWER);
+        sync.tick();
+        online.put(player, new Online("Player1", Role.ADMIN));
+        sync.permissionsChanged(player);
+        sync.tick();
+
+        assertEquals(PortalRole.PORTAL_ROLE_ADMIN, a.sent.get(1).get(0).getRole());
+    }
+
+    @Test
+    void aSweepReportsStoredRolesOfPlayersNotOnline() {
+        useLookup();
+        sync.opened(a, true);
+        UUID here = join(1, Role.ADMIN);
+        UUID away = v4(2);
+        UUID unnamed = v4(3);
+        stored.put(away, new Offline("Away", null));
+        stored.put(unnamed, new Offline("not a name!", Role.VIEWER));
+        UUID notV4 = UUID.fromString("00000000-0000-3000-8000-000000000004");
+
+        sync.sweep(a, List.of(here, away, unnamed, notV4));
+        sync.tick();
+
+        assertEquals(List.of(away, unnamed), lookedUp);
+        List<TeamRole> roles = a.sent.get(0);
+        assertEquals(3, roles.size());
+        TeamRole awayRole = roles.get(1);
+        assertTrue(awayRole.getOffline());
+        assertEquals("Away", awayRole.getName());
+        assertEquals(PortalRole.PORTAL_ROLE_NONE, awayRole.getRole());
+        TeamRole unnamedRole = roles.get(2);
+        assertFalse(unnamedRole.hasName());
+        assertEquals(PortalRole.PORTAL_ROLE_VIEWER, unnamedRole.getRole());
+    }
+
+    @Test
+    void withoutALookupASweepIsIgnored() {
+        sync.opened(a, true);
+        stored.put(v4(2), new Offline("Away", Role.ADMIN));
+
+        sync.sweep(a, List.of(v4(2)));
+        sync.tick();
+
+        assertTrue(a.sent.isEmpty());
+    }
+
+    @Test
+    void oneSweepAnHourIsActedOnWithItsParts() {
+        useLookup();
+        sync.opened(a, true);
+        sync.opened(b, true);
+
+        sync.sweep(a, List.of(v4(1)));
+        now += TimeUnit.SECONDS.toMillis(30);
+        sync.sweep(a, List.of(v4(2)));
+        now += TimeUnit.SECONDS.toMillis(30);
+        sync.sweep(b, List.of(v4(3)));
+        now += 1;
+        sync.sweep(a, List.of(v4(4)));
+        now += TimeUnit.MINUTES.toMillis(30);
+        sync.sweep(a, List.of(v4(5)));
+        assertEquals(List.of(v4(1), v4(2), v4(3)), lookedUp);
+
+        now += TimeUnit.MINUTES.toMillis(29);
+        sync.sweep(b, List.of(v4(6)));
+
+        assertEquals(List.of(v4(1), v4(2), v4(3), v4(6)), lookedUp);
+    }
+
+    @Test
+    void aSweepOnADisabledSocketIsIgnored() {
+        useLookup();
+        sync.opened(a, false);
+
+        sync.sweep(a, List.of(v4(1)));
 
         assertTrue(lookedUp.isEmpty());
-        assertEquals(List.of("GET"), api.calls);
-    }
-
-    @Test
-    void withoutLuckPermsThereIsNoSweep() {
-        now += PortalSync.FIRST_SWEEP_MS + PortalSync.SWEEP_EVERY_MS;
-        sync.tick(api);
-
-        assertTrue(api.calls.isEmpty());
     }
 }

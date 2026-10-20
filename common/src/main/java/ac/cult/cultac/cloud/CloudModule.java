@@ -33,6 +33,7 @@ public final class CloudModule {
             if (setting(config, System::getenv, "cloud.url", "CULTAC_CLOUD_URL", "")
                             .isEmpty()
                     && apiKey(config, System::getenv).isEmpty()) return;
+            CloudService.listenForTeam();
             loaded = true;
         }
         CloudService.configReloaded();

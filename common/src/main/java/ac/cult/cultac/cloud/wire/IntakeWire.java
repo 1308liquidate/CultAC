@@ -11,8 +11,11 @@ import ac.cult.cultac.cloud.intake.v3.Join;
 import ac.cult.cultac.cloud.intake.v3.Leave;
 import ac.cult.cultac.cloud.intake.v3.Meta;
 import ac.cult.cultac.cloud.intake.v3.PerfLimits;
+import ac.cult.cultac.cloud.intake.v3.PortalRole;
 import ac.cult.cultac.cloud.intake.v3.Registry;
 import ac.cult.cultac.cloud.intake.v3.Replies;
+import ac.cult.cultac.cloud.intake.v3.TeamRole;
+import ac.cult.cultac.cloud.intake.v3.TeamRoles;
 import ac.cult.cultac.cloud.intake.v3.Unstreamed;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.LogThrottle;
@@ -170,7 +173,7 @@ public final class IntakeWire {
     // Field numbers of intake.proto: Replies.replies; Reply's kinds, capture first; Capture's three id lists.
     private static final int REPLIES_REPLY = 1;
     private static final int REPLY_CAPTURE = 1;
-    private static final int REPLY_LAST_KIND = 8;
+    private static final int REPLY_LAST_KIND = 10;
     private static final int CAPTURE_FIRST_IDS = 2;
 
     private IntakeWire() {}
@@ -255,6 +258,23 @@ public final class IntakeWire {
         return entry(IntakeMessage.newBuilder()
                 .setLeave(Leave.newBuilder().setPlayer(ByteString.copyFrom(uuid(player))))
                 .build());
+    }
+
+    /** Team sync: one {@code TeamRoles} message of {@code roles}, at most 100. */
+    public static byte[] team(List<TeamRole> roles) {
+        return entry(IntakeMessage.newBuilder()
+                .setTeam(TeamRoles.newBuilder().addAllPlayers(roles))
+                .build());
+    }
+
+    /** Team sync: one player's entry; {@code name} null leaves it out. */
+    public static TeamRole teamRole(UUID player, String name, PortalRole role, boolean offline) {
+        TeamRole.Builder entry = TeamRole.newBuilder()
+                .setPlayer(ByteString.copyFrom(uuid(player)))
+                .setRole(role)
+                .setOffline(offline);
+        if (name != null) entry.setName(name);
+        return entry.build();
     }
 
     /** An {@code Intake} holding one message: a queued record, which concatenates with others into one. */
@@ -948,7 +968,9 @@ public final class IntakeWire {
                     DiagWatchReply,
                     DiagCutReply,
                     PerfLimitsReply,
-                    PerfStartReply {
+                    PerfStartReply,
+                    TeamStateReply,
+                    TeamSweepReply {
         /** The player it is for; null for a reply to the whole socket. */
         UUID player();
     }
@@ -984,6 +1006,22 @@ public final class IntakeWire {
 
     /** Perf: record a profile of {@code seconds} under {@code profile}. */
     public record PerfStartReply(UUID profile, int seconds) implements Reply {
+        @Override
+        public UUID player() {
+            return null;
+        }
+    }
+
+    /** Team sync: whether the organization takes portal roles now; replaces the last state. */
+    public record TeamStateReply(boolean enabled) implements Reply {
+        @Override
+        public UUID player() {
+            return null;
+        }
+    }
+
+    /** Team sync: the accounts to look up while they are offline; a player not 16 bytes long is left out. */
+    public record TeamSweepReply(List<UUID> players) implements Reply {
         @Override
         public UUID player() {
             return null;
@@ -1059,6 +1097,14 @@ public final class IntakeWire {
                         replies.add(new PerfStartReply(uuid(start.getProfile()), (int)
                                 Math.min(Integer.MAX_VALUE, Integer.toUnsignedLong(start.getSeconds()))));
                     }
+                }
+                case TEAM_STATE -> replies.add(new TeamStateReply(reply.getTeamState().getEnabled()));
+                case TEAM_SWEEP -> {
+                    List<UUID> players = new ArrayList<>(reply.getTeamSweep().getPlayersCount());
+                    for (ByteString player : reply.getTeamSweep().getPlayersList()) {
+                        if (player.size() == 16) players.add(uuid(player));
+                    }
+                    replies.add(new TeamSweepReply(List.copyOf(players)));
                 }
                 default -> {}
             }
