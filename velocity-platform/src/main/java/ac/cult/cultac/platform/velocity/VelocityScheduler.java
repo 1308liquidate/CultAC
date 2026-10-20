@@ -79,7 +79,8 @@ final class VelocityScheduler
         if (host == null) future.addListener(ignored -> owned.remove(future));
         else {
             future.addListener(Callbacks.future(host.resources(), () -> owned.remove(future)));
-            host.resources().track(future, () -> future.cancel(false));
+            // A one-shot needs no entry: its guard disarms it at close, and Netty lets go of it once it has run.
+            if (period > 0) host.resources().track(future, () -> future.cancel(false));
         }
         return new TaskHandle() {
             @Override
