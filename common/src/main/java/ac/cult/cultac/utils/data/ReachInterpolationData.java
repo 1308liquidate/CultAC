@@ -399,6 +399,12 @@ public class ReachInterpolationData {
         return out.set(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
+    /** {@code box} grown by the packet-position uncertainty this location adds for reach queries. */
+    public SimpleCollisionBox expandForReach(SimpleCollisionBox box) {
+        if (reachesUsePacketPositionUncertainty) box.expand(REACH_PACKET_POSITION_UNCERTAINTY);
+        return box;
+    }
+
     public SimpleCollisionBox getPossibleLocationCombined(SimpleCollisionBox out) {
         SimpleCollisionBox box = getPossibleMovementLocationCombined(out);
         if (reachesUsePacketPositionUncertainty) {

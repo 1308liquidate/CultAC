@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.BiPredicate;
 import java.util.function.Predicate;
+import org.jetbrains.annotations.Nullable;
 
 /** Action queries use the existing exact entity candidates, without widening their boxes. */
 public final class ClientEntityQueries {
@@ -143,13 +144,22 @@ public final class ClientEntityQueries {
         return false;
     }
 
-    /** An entity and its box at each of its candidate positions; a null box selects nothing at that position. */
-    public record PickCandidates(PacketEntity entity, List<Box> boxes) {}
+    /**
+     * An entity and its box at each of its candidate positions; a null box selects nothing at that position. An
+     * unplaced entity may also be at a position the engine does not bound; a null entity is an ender dragon part.
+     */
+    public record PickCandidates(@Nullable PacketEntity entity, List<Box> boxes, boolean unplaced) {
+        public PickCandidates(PacketEntity entity, List<Box> boxes) {
+            this(entity, boxes, false);
+        }
+    }
 
     /**
      * The entities {@code ProjectileUtil#getEntityHitResult} can select for {@code source} before its owner rule:
      * {@code Entity#canBeHitByProjectile} (alive and pickable) without {@code noPhysics}, the local player first. A
-     * wind charge also skips wind charges and end crystals ({@code AbstractWindCharge#canHitEntity}).
+     * wind charge also skips wind charges and end crystals ({@code AbstractWindCharge#canHitEntity}). Riders outside
+     * the local player's own riding tree are unplaced, and each ender dragon adds its parts ({@code Level#getEntities}),
+     * which the client positions from its unsynced flight history.
      */
     public List<PickCandidates> projectileTargets(PacketEntity source) {
         var result = new ArrayList<PickCandidates>();
@@ -158,26 +168,48 @@ public final class ClientEntityQueries {
             result.add(new PickCandidates(self, List.of(localBox())));
         boolean windCharge = isWindCharge(source.type);
         for (var entity : player.compensatedEntities.entityMap.values()) {
+            if (modelType(entity).key().equals("minecraft:ender_dragon"))
+                result.add(new PickCandidates(null, List.of(), true));
             if (entity == source
-                    || !present(entity)
+                    || !actionPresent(entity)
                     || !pickable(entity)
                     || entity.isLivingEntity() && !entity.actionAlive
                     || noPhysics(entity)
                     || windCharge && (isWindCharge(entity.type) || entity.type == EntityTypeIds.END_CRYSTAL)) continue;
-            result.add(new PickCandidates(entity, candidateBoxes(entity)));
+            result.add(candidates(entity));
         }
         return result;
     }
 
-    /** {@code EntitySelector.CAN_BE_PICKED}: the pickable entities that are not spectators, the local player first. */
+    /**
+     * {@code EntitySelector.CAN_BE_PICKED}: the pickable entities that are not spectators, the local player first.
+     * Riders outside the local player's own riding tree are unplaced.
+     */
     public List<PickCandidates> pickableEntities() {
         var result = new ArrayList<PickCandidates>();
         if (player.gamemode != GameMode.SPECTATOR)
             result.add(new PickCandidates(player.compensatedEntities.getSelf(), List.of(localBox())));
         for (var entity : player.compensatedEntities.entityMap.values())
-            if (present(entity) && !spectator(entity) && pickable(entity))
-                result.add(new PickCandidates(entity, candidateBoxes(entity)));
+            if (actionPresent(entity) && !spectator(entity) && pickable(entity)) result.add(candidates(entity));
         return result;
+    }
+
+    /** Whether {@code Entity#deflection} is not {@code NONE} for {@code projectile} hitting {@code target}. */
+    public boolean deflects(PacketEntity target, PacketEntity projectile) {
+        if (modelType(target).key().equals("minecraft:breeze") && isWindCharge(projectile.type)) return false;
+        return members("entity_type:minecraft:deflects_projectiles")
+                .contains(modelType(target).key());
+    }
+
+    /** Whether {@code entity} is in {@code #redirectable_projectile}, which {@code Projectile#onHit} aims. */
+    public boolean redirectable(PacketEntity entity) {
+        return members("entity_type:minecraft:redirectable_projectile")
+                .contains(modelType(entity).key());
+    }
+
+    private PickCandidates candidates(PacketEntity entity) {
+        if (player.compensatedEntities.isUntrackedRider(entity)) return new PickCandidates(entity, List.of(), true);
+        return new PickCandidates(entity, candidateBoxes(entity), entity.hasUnboundedPosition());
     }
 
     private static boolean isWindCharge(int type) {
@@ -295,6 +327,11 @@ public final class ClientEntityQueries {
 
     /** Null means that the existing packet/tick ordering has not proved one query outcome. */
     private Boolean test(PacketEntity entity, Predicate<Box> query) {
+        // Every query is an overlap: a box spanning all of the entity's positions that misses it rules them all out.
+        if (entity.hasUnboundedPosition()) {
+            var span = entity.toBoundingBox(player, entity.getPossibleMovementCollisionBoxes());
+            return query.test(new Box(span.minX, span.minY, span.minZ, span.maxX, span.maxY, span.maxZ)) ? null : false;
+        }
         Boolean result = null;
         for (var box : candidateBoxes(entity)) {
             boolean matched = box != null && query.test(box);
@@ -342,8 +379,11 @@ public final class ClientEntityQueries {
 
     // Riders outside the local player's own riding tree have no simulated position.
     private boolean present(PacketEntity entity) {
-        return (!(entity instanceof PacketEntityPlayer remote) || remote.actionPresent)
-                && !player.compensatedEntities.isUntrackedRider(entity);
+        return actionPresent(entity) && !player.compensatedEntities.isUntrackedRider(entity);
+    }
+
+    private static boolean actionPresent(PacketEntity entity) {
+        return !(entity instanceof PacketEntityPlayer remote) || remote.actionPresent;
     }
 
     private boolean spectator(PacketEntity entity) {
