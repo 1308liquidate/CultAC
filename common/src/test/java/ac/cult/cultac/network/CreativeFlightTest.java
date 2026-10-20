@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.events.packets.PacketChangeGameState;
 import ac.cult.cultac.events.packets.PacketPlayerAbilities;
 import ac.cult.cultac.events.packets.PacketServerRegistries;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -13,8 +14,10 @@ import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.Opaque;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundGameEvent;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerAbilities;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.GameEventType;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Relative;
 import ac.cult.cultac.utils.math.Vec3;
@@ -248,6 +251,29 @@ class CreativeFlightTest {
         }
     }
 
+    /**
+     * MultiPlayerGameMode#setLocalMode lets a creative player fly at the game event, so a press before the
+     * player_abilities that follows it already arms the toggle.
+     */
+    @Test
+    void aPressAfterACreativeGameModeArmsTheToggleBeforeItsAbilities() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.place(GROUND.add(0, 0.3, 0), new Vec3(0, -0.2, 0));
+            gameMode(f, 1);
+            f.input(JUMP);
+            assertPredicted(f.tick(GROUND.add(0, 0.1, 0), false));
+            f.input(NONE);
+            assertPredicted(f.tick(GROUND, true));
+            grantFlight(f, false);
+
+            f.pongThrough(f.velocity(KNOCKBACK));
+            f.abilities(true);
+            f.input(JUMP);
+            assertPredicted(f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false));
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
     /** The first press only arms Player#jumpTriggerTime, so flight turned on with it has no takeoff jump. */
     @Test
     void aTakeoffJumpOnAnUnarmedFirstPressFlags() throws Exception {
@@ -355,6 +381,16 @@ class CreativeFlightTest {
         if (releaseOnLanding) f.input(NONE);
         assertPredicted(f.tick(GROUND, true));
         return f;
+    }
+
+    /** A CHANGE_GAME_MODE game event, answered through its ping. */
+    private static void gameMode(JavaTickFixture f, int mode) {
+        var packet = new ClientboundGameEvent(GameEventType.CHANGE_GAME_MODE, mode);
+        var event = new PacketSendEvent<>(
+                f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.GAME_EVENT, packet, false);
+        f.player.checkManager.getListener(PacketChangeGameState.class).onGameEvent(event, f.player, packet);
+        event.getTasksAfterSend().forEach(Runnable::run);
+        f.pongThrough(f.player.lastTransactionSent.get());
     }
 
     /** A player_abilities letting the player fly and setting it flying, answered through its ping. */

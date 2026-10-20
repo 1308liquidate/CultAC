@@ -41,6 +41,9 @@ public class PacketChangeGameState extends CultProcessor implements CheckListene
         player.latencyUtils.addRealTimeTaskNow(() -> {
             GameMode previous = player.gamemode;
             player.gamemode = next;
+            // GameType#updatePlayerAbilities; creative keeps the flying state.
+            if (next != GameMode.CREATIVE) player.isFlying = next == GameMode.SPECTATOR;
+            player.canFly = next == GameMode.CREATIVE || next == GameMode.SPECTATOR;
             player.compensatedEntities.getSelf().onGameModeChange(player.gamemode == GameMode.CREATIVE);
 
             if (previous == GameMode.SPECTATOR && player.gamemode != GameMode.SPECTATOR) {
