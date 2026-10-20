@@ -297,6 +297,24 @@ class EntityInteractionVisibilityTest {
 
     @ParameterizedTest
     @MethodSource("clients")
+    void aNegativeProjectilePowerSlowsAndCanReverseAFireball(ProtocolVersion version) throws Exception {
+        // AbstractHurtingProjectile#applyInertia adds the power along the normalized motion, unclamped.
+        try (var setup = new Setup(version).asClient()) {
+            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
+            setup.power(42, -.1);
+            setup.clientTick();
+            assertStops(fireball, 5 - (2.2 - .1) * .95);
+        }
+        try (var setup = new Setup(version).asClient()) {
+            var fireball = setup.fireball(42, 5, -.05, NO_OWNER);
+            setup.power(42, -.1);
+            setup.clientTick();
+            assertStops(fireball, 5 + (.1 - .05) * .95);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("clients")
     void aFireballThePlayerPunchesTurnsToItsLookOnClientsBefore26_3(ProtocolVersion version) throws Exception {
         try (var setup = new Setup(version).asClient()) {
             // Player#attack aims it along the look, (0, 0, 1) at yaw and pitch 0; its next tick moves it 1.045.
