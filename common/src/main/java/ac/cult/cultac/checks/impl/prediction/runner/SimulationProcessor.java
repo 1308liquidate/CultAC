@@ -91,6 +91,7 @@ import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.NextTickVelocityDeriver;
 import ac.cult.cultac.utils.nmsutil.PassengerRideTick;
 import ac.cult.cultac.utils.nmsutil.ReusableVelocitySet;
+import ac.cult.cultac.utils.nmsutil.RideTickStuckContact;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -133,9 +134,14 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     private JavaPredictionCarry carryWithChangedStuckBlock;
     /** Whether the last client tick ended with the local player a passenger. */
     private boolean rideTicked;
+    /** The multipliers that ride tick can have left, as RideTickStuckContact bits. */
+    private int rideTickStuckSpeeds;
     /** Whether a dismount after a passenger tick precedes the next prediction. */
     private boolean rideTicksSinceLastPrediction;
+    /** The multipliers the first move after that dismount can take, as RideTickStuckContact bits. */
+    private int dismountStuckSpeeds = RideTickStuckContact.ANY;
 
+    private final RideTickStuckContact rideTickStuckContact = new RideTickStuckContact();
     private final PassengerRideTick passengerRideTick = new PassengerRideTick();
 
     private boolean bedrockSleepingStateObserved;
@@ -1186,13 +1192,22 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     public void recordRideTick() {
         this.rideTicked =
                 !this.player.isBedrockMovement() && this.player.compensatedEntities.playerEntity.getRiding() != null;
-        if (!this.rideTicked) return;
+        if (!this.rideTicked) {
+            this.rideTickStuckSpeeds = 0;
+            return;
+        }
         Vec3 seat = this.player.compensatedEntities.lastRideTickSeat();
         if (seat == null) {
-            this.passengerRideTick.record(this.player, this.player.x, this.player.y, this.player.z);
+            this.passengerRideTick.record(this.player, this.player.x, this.player.y, this.player.z, true);
         } else {
-            this.passengerRideTick.record(this.player, seat.x, seat.y, seat.z);
+            this.passengerRideTick.record(
+                    this.player, seat.x, seat.y, seat.z, this.rideTickStuckContact.touchedPowderSnow());
         }
+        this.rideTickStuckSpeeds = this.rideTickStuckContact.scan(
+                this.player,
+                this.player.compensatedEntities.playerEntity.getRiding(),
+                seat,
+                this.passengerRideTick.inFluid());
     }
 
     /** A set_entity_motion of the local passenger after its last Entity#rideTick sets the delta a dismount keeps. */
@@ -1214,14 +1229,18 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         if (!this.rideTicked) return;
         this.rideTicked = false;
         this.rideTicksSinceLastPrediction = true;
+        this.dismountStuckSpeeds = this.rideTickStuckSpeeds;
         if (this.profileCarry instanceof JavaPredictionCarry carry) {
             // LivingEntity#rideTick resets the fall distance after every passenger tick.
             List<JavaPredictionCarry.State> states = new ArrayList<>();
             if (!carry.states().isEmpty()) {
                 for (Vec3 velocity : this.validPlayerStartingVels) {
                     states.add(new JavaPredictionCarry.State(velocity, 0.0D, null));
-                    for (Vec3 stuckSpeed : Collisions.PLAYER_STUCK_SPEEDS)
-                        states.add(new JavaPredictionCarry.State(velocity, 0.0D, stuckSpeed));
+                    for (int i = 0; i < Collisions.PLAYER_STUCK_SPEEDS.size(); i++) {
+                        if ((this.dismountStuckSpeeds & (1 << i)) == 0) continue;
+                        states.add(
+                                new JavaPredictionCarry.State(velocity, 0.0D, Collisions.PLAYER_STUCK_SPEEDS.get(i)));
+                    }
                 }
             }
             this.profileCarry = new JavaPredictionCarry(this.player.compensatedEntities.getSelf(), 0.0D, states);
@@ -1911,11 +1930,13 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 carryLastRequiredStuckSpeed);
         if (!this.rideTicksSinceLastPrediction || !movementProfile.usesJavaEntityMoveStuckSpeed(player))
             return List.of(primary);
-        // The first move after a dismount consumes no multiplier or any one a block gives.
+        // The first move after a dismount consumes no multiplier or one the last ride tick's blocks can have given.
         List<SimulationContext> contexts = new ArrayList<>(1 + Collisions.PLAYER_STUCK_SPEEDS.size());
         contexts.add(primary);
         CarryWorld world = CarryWorld.of(primary);
-        for (Vec3 stuckSpeed : Collisions.PLAYER_STUCK_SPEEDS) {
+        for (int i = 0; i < Collisions.PLAYER_STUCK_SPEEDS.size(); i++) {
+            if ((this.dismountStuckSpeeds & (1 << i)) == 0) continue;
+            Vec3 stuckSpeed = Collisions.PLAYER_STUCK_SPEEDS.get(i);
             SimulationContext context = this.createSimulationContext(
                     player,
                     lastPrediction,

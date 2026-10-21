@@ -59,8 +59,11 @@ public final class PassengerRideTick {
     /** The lowest top the ridden boat's possible boxes allow, from {@link #boatMayBeUnderWater}. */
     private double boatTop;
 
-    /** Records the velocities the ride tick that started at {@code x, y, z} can leave. */
-    public void record(CultPlayer player, double x, double y, double z) {
+    /**
+     * Records the velocities the ride tick that started at {@code x, y, z} can leave; {@code touchedPowderSnow} tells
+     * whether the previous tick's box can have touched powder snow.
+     */
+    public void record(CultPlayer player, double x, double y, double z, boolean touchedPowderSnow) {
         this.count = 0;
         this.fromTravel = true;
         PacketEntitySelf self = player.compensatedEntities.playerEntity;
@@ -112,8 +115,8 @@ public final class PassengerRideTick {
         int feetState = player.compensatedWorld.getBlockStateIdAt(blockX, CultMath.floor(y), blockZ);
         int belowState = player.compensatedWorld.getBlockStateIdAt(blockX, CultMath.floor(y - 0.500001D), blockZ);
         boolean climbable = Collisions.onClimbable(player, x, y, z);
-        // LivingEntity#handleRelativeFrictionAndCalculateMovement climbs powder snow with leather boots.
-        boolean climbs = climbable || BlockIds.is(feetState, BlockIds.POWDER_SNOW);
+        // LivingEntity#handleRelativeFrictionAndCalculateMovement climbs with leather boots after powder snow.
+        boolean climbs = climbable || touchedPowderSnow;
         boolean chunkLoaded = player.compensatedWorld.isChunkLoaded(blockX >> 4, blockZ >> 4);
         boolean aboveMinY = y > player.compensatedWorld.getMinHeight();
         float jumpPower = (float) self.jumpStrength

@@ -294,6 +294,31 @@ class DismountRideTickVelocityTest {
         }
     }
 
+    /**
+     * Entity#baseTick keeps the previous tick's box-wide powder snow contact, and LivingEntity
+     * #handleRelativeFrictionAndCalculateMovement climbs 0.2 with it and the jump key while the feet are in air.
+     */
+    @ParameterizedTest
+    @MethodSource("endings")
+    void powderSnowBesideTheSeatLiftsAJumpingRider(ClientVersion version, boolean removeSeat) throws Exception {
+        try (var f = fixture(version);
+                var ignored = observeOnly(true)) {
+            ride(f, new Vec3(0.75, FLOOR_Y, 0.5), NONE);
+            Vec3 seat = rideTickSeat(f);
+            BlockPos beside = BlockPos.containing(seat.x + 0.5, seat.y, seat.z);
+            assertTrue(BlockPos.containing(seat.x, seat.y, seat.z).getX() != beside.getX());
+            f.player.compensatedWorld.updateBlock(beside, BlockIds.POWDER_SNOW.defaultState());
+            f.input(JUMP);
+            f.rideTick();
+            f.rideTick();
+            dismount(f, removeSeat);
+            f.input(NONE);
+            f.player.compensatedWorld.updateBlock(beside, BlockIds.AIR.defaultState());
+            PredictionResult move = f.tick(position(f).add(0, (0.2 - 0.08) * 0.98F, 0), false);
+            assertTrue(exact(move), describe(move));
+        }
+    }
+
     /** ClientPacketListener#handleSetEntityMotion sets a passenger's delta, which the dismount keeps. */
     @ParameterizedTest
     @MethodSource("endings")
@@ -372,17 +397,26 @@ class DismountRideTickVelocityTest {
 
     /** As {@link #ride(JavaTickFixture)}, with {@code input} held through the ride ticks. */
     private static void ride(JavaTickFixture f, ServerboundPlayerInput input) {
-        f.place(VEHICLE_AT, Vec3.ZERO);
-        PredictionResult standing = f.tick(VEHICLE_AT, true);
+        ride(f, VEHICLE_AT, input);
+    }
+
+    /** As {@link #ride(JavaTickFixture, ServerboundPlayerInput)}, with the vehicle at {@code at}. */
+    private static void ride(JavaTickFixture f, Vec3 at, ServerboundPlayerInput input) {
+        f.place(at, Vec3.ZERO);
+        PredictionResult standing = f.tick(at, true);
         assertTrue(exact(standing), describe(standing));
-        mount(f);
+        mount(f, at);
         f.input(input);
         f.rideTick();
         f.rideTick();
     }
 
     private static void mount(JavaTickFixture f) {
-        f.player.compensatedEntities.addEntity(VEHICLE, EntityTypeIds.ARMOR_STAND, VEHICLE_AT, 0, 0, 0);
+        mount(f, VEHICLE_AT);
+    }
+
+    private static void mount(JavaTickFixture f, Vec3 at) {
+        f.player.compensatedEntities.addEntity(VEHICLE, EntityTypeIds.ARMOR_STAND, at, 0, 0, 0);
         f.setPassengers(VEHICLE, List.of(f.player.entityID));
         f.pongThrough(f.player.lastTransactionSent.get());
         assertTrue(f.player.compensatedEntities.getSelf().inVehicle());
