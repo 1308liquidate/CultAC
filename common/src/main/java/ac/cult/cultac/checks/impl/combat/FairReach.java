@@ -7,6 +7,7 @@ import ac.cult.cultac.checks.type.CheckListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.Opaque;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
@@ -84,8 +85,24 @@ public class FairReach extends Check implements CheckListener {
     }
 
     public void handleEntityMove(int entityId, double x, double y, double z) {
-        PendingMove move = new PendingMove(entityId, x, y, z);
+        schedule(new PendingMove(entityId, x, y, z, false));
+    }
 
+    /**
+     * A rotation-only move restarts the client's position interpolation: toward the kept target before 1.21.5, and
+     * from 1.21.9 only when the rotation changed; 1.21.5 to 1.21.8 retarget it to the entity's shown position, and
+     * 26.3 appends a stationary step instead.
+     */
+    public void handleEntityRotation(int entityId, double x, double y, double z, boolean rotationChanged) {
+        ClientVersion version = player.getClientVersion();
+        if (version.isNewerThanOrEquals(ClientVersion.V_26_3)) return;
+        if (version.isNewerThanOrEquals(ClientVersion.V_1_21_9) && !rotationChanged) return;
+        boolean holdsShownPosition =
+                version.isNewerThanOrEquals(ClientVersion.V_1_21_5) && version.isOlderThan(ClientVersion.V_1_21_9);
+        schedule(new PendingMove(entityId, x, y, z, holdsShownPosition));
+    }
+
+    private void schedule(PendingMove move) {
         // Ensure the client has received this before MAX_PING_TIME, or apply them sooner if client responds in time
         player.latencyUtils.addRealTimeTaskNext(move);
         player.nettyScheduler.runTaskInMs(move, max_ping_compensation);
@@ -97,17 +114,19 @@ public class FairReach extends Check implements CheckListener {
         private final double x;
         private final double y;
         private final double z;
+        private final boolean holdsShownPosition;
 
-        private PendingMove(int entityId, double x, double y, double z) {
+        private PendingMove(int entityId, double x, double y, double z, boolean holdsShownPosition) {
             this.entityId = entityId;
             this.x = x;
             this.y = y;
             this.z = z;
+            this.holdsShownPosition = holdsShownPosition;
         }
 
         @Override
         public void run() {
-            applyChanges(entityId, x, y, z, this);
+            applyChanges(entityId, x, y, z, holdsShownPosition, this);
         }
     }
 
@@ -196,12 +215,18 @@ public class FairReach extends Check implements CheckListener {
         }
     }
 
-    private void applyChanges(int entityId, double x, double y, double z, AtomicBoolean hasAppliedChanges) {
+    private void applyChanges(
+            int entityId, double x, double y, double z, boolean holdsShownPosition, AtomicBoolean hasAppliedChanges) {
         if (hasAppliedChanges.getAndSet(true)) return;
 
         FairReachEntity target = targetPlayers.get(entityId);
         if (target == null) return;
-        target.setTarget(x, y, z);
+        if (holdsShownPosition) {
+            Vec3 shown = target.currentPosition;
+            target.setTarget(shown.x, shown.y, shown.z);
+        } else {
+            target.setTarget(x, y, z);
+        }
     }
 
     /** A replacement client level holds none of the old level's players. */

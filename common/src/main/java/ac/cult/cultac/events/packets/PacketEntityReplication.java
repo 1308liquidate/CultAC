@@ -1610,6 +1610,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         double absoluteX = position.x();
         double absoluteY = position.y();
         double absoluteZ = position.z();
+        boolean rotationChanged = false;
         if (data != null) {
             if (position.relative()) {
                 Vec3 decodedPosition = PacketCodecUtil.decodeRelativeEntityPosition(
@@ -1640,6 +1641,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 }
             }
             if (movement.hasRotation()) {
+                rotationChanged = Float.compare(data.getXRot(), movement.rotationYaw()) != 0
+                        || Float.compare(data.getYRot(), movement.rotationPitch()) != 0;
                 data.setXRot(movement.rotationYaw());
                 data.setYRot(movement.rotationPitch());
             }
@@ -1688,9 +1691,13 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         if (data != null) {
             data.setLastTransactionHung(firstTransaction);
             if (data.getEntityType() == EntityTypeIds.PLAYER) {
-                player.checkManager
-                        .getListener(FairReach.class)
-                        .handleEntityMove(movement.entityId(), data.getX(), data.getY(), data.getZ());
+                FairReach fairReach = player.checkManager.getListener(FairReach.class);
+                if (movement.hasPosition()) {
+                    fairReach.handleEntityMove(movement.entityId(), data.getX(), data.getY(), data.getZ());
+                } else if (movement.hasRotation()) {
+                    fairReach.handleEntityRotation(
+                            movement.entityId(), data.getX(), data.getY(), data.getZ(), rotationChanged);
+                }
             }
         }
 
