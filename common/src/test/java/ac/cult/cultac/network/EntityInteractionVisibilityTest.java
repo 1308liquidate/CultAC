@@ -212,7 +212,7 @@ class EntityInteractionVisibilityTest {
         try (var setup = new Setup(version)) {
             // A falling player's own throw, 4023 and 6028 nearer the origin. The sync after the second tick snaps the
             // charge back onto the owner's path once it has left the owner; the next three moves end in the owner's
-            // box grown by computeMargin, 1.15 along the delta instead of 3.
+            // box grown by computeMargin, 1.15 along the 3-block delta.
             setup.place(.769029067589, 73.47945019551581, .639208005881);
             setup.spawn(
                     42,
