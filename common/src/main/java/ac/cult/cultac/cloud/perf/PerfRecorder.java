@@ -139,7 +139,7 @@ public final class PerfRecorder {
         long ownCpu = ownCpuNanos();
         Map<Long, Long> ownAlloc = ownAllocatedBytes();
         Map<Long, ThreadBytes> threadAlloc = threadAllocatedBytes();
-        Window window = new Window(Thread.currentThread().threadId(), threadAlloc);
+        Window window = new Window(Thread.currentThread().threadId(), threadAlloc, PerfRecorder::threadAllocatedBytes);
         ProcCpu.Snapshot procStart = procCpu();
         load.players(platform, start);
         long dispatchCpu;
@@ -390,6 +390,14 @@ public final class PerfRecorder {
 
     record ThreadBytes(String name, long bytes) {}
 
+    /**
+     * Whether a thread may carry virtual threads, by name: the default scheduler's workers match, and so do the workers
+     * of other default-factory pools (not the common pool's), which can only raise the carriers' bound.
+     */
+    static boolean carrier(String name) {
+        return name != null && name.startsWith("ForkJoinPool-");
+    }
+
     /** Name and allocated bytes so far of every live thread, by thread id; null when the JVM cannot tell or fails. */
     static Map<Long, ThreadBytes> threadAllocatedBytes() {
         return ManagementFactory.getThreadMXBean() instanceof ThreadMXBean threads
@@ -465,6 +473,9 @@ public final class PerfRecorder {
         static final int ALLOC = 2;
         static final int CPU_TIME = 3;
 
+        /** Room over a carrier's bytes since the start: a sample's weight also counts the TLAB it held at the start. */
+        static final long ALLOC_SLACK = 64L << 20;
+
         /** {@code groups}: one per thread group with sampled or exact bytes. */
         record Calibration(boolean calibrated, List<PerfAllocCalibration> groups) {}
 
@@ -482,6 +493,10 @@ public final class PerfRecorder {
         private final Map<Long, HeldAlloc> earliestAlloc = new HashMap<>();
         /** The allocated bytes at the window start of each platform thread ThreadMXBean lists; null when unknown. */
         private final Map<Long, ThreadBytes> allocStart;
+        /** Every live thread's allocated bytes now, as {@link #threadAllocatedBytes()} reads them. */
+        private final Supplier<Map<Long, ThreadBytes>> allocNow;
+        /** The most a carrier has been seen to allocate since the window start. */
+        private long carrierBytes;
 
         int gcCount;
         long gcPauseNanos;
@@ -496,12 +511,13 @@ public final class PerfRecorder {
         private Throwable failure;
 
         Window(long recordingThread) {
-            this(recordingThread, null);
+            this(recordingThread, null, Map::of);
         }
 
-        Window(long recordingThread, Map<Long, ThreadBytes> allocStart) {
+        Window(long recordingThread, Map<Long, ThreadBytes> allocStart, Supplier<Map<Long, ThreadBytes>> allocNow) {
             this.recordingThread = recordingThread;
             this.allocStart = allocStart;
+            this.allocNow = allocNow;
         }
 
         synchronized void sample(RecordedEvent event, int kind) {
@@ -530,6 +546,7 @@ public final class PerfRecorder {
                             stack,
                             group,
                             thread == null ? -1 : thread.getJavaThreadId(),
+                            thread != null && thread.isVirtual(),
                             at.getEpochSecond() * 1_000_000_000L + at.getNano(),
                             allocated == null ? null : allocated.getName(),
                             Math.max(0, event.getLong("weight")));
@@ -542,11 +559,28 @@ public final class PerfRecorder {
          * by the bytes its thread allocated since that thread's previous sample, which for the first sample of a window
          * reaches back before it, and delivers samples out of order. Each thread's earliest sample is therefore held
          * back and dropped, unless the thread started after the window's start snapshot: its first sample is weighed
-         * from zero.
+         * from zero. {@code onCarrier} samples, of a virtual thread, are weighed from its carrier's previous sample
+         * under any thread's name; they are dropped instead when heavier than any carrier's bytes since the window
+         * start allow, kept when the carriers' live bytes are unknown, and held like the others without a start
+         * snapshot.
          */
         synchronized void alloc(
-                StackTrie.StackTraceView stack, int group, long threadId, long startNanos, String type, long bytes) {
-            if (threadId < 0 || allocStart != null && !allocStart.containsKey(threadId)) {
+                StackTrie.StackTraceView stack,
+                int group,
+                long threadId,
+                boolean onCarrier,
+                long startNanos,
+                String type,
+                long bytes) {
+            if (threadId < 0) {
+                add(stack, group, type, bytes);
+                return;
+            }
+            if (onCarrier && allocStart != null) {
+                if (!carriedOverByCarrier(bytes)) add(stack, group, type, bytes);
+                return;
+            }
+            if (allocStart != null && !allocStart.containsKey(threadId)) {
                 add(stack, group, type, bytes);
                 return;
             }
@@ -567,6 +601,23 @@ public final class PerfRecorder {
             int side = group != Attribution.PERF && Attribution.hasOwnFrame(stack) ? 0 : 1;
             classes.computeIfAbsent(type, ignored -> new long[2 * Attribution.GROUPS.size()])[2 * group + side] +=
                     bytes;
+        }
+
+        /**
+         * Whether a carrier-weighed sample is heavier than any carrier allocated since the window start, plus
+         * {@link #ALLOC_SLACK}: then it carries bytes from before the window. Live threads are read again before
+         * saying so, which counts the carriers started since.
+         */
+        private boolean carriedOverByCarrier(long bytes) {
+            if (bytes <= carrierBytes + ALLOC_SLACK) return false;
+            Map<Long, ThreadBytes> now = allocNow.get();
+            if (now == null) return false;
+            for (Map.Entry<Long, ThreadBytes> thread : now.entrySet()) {
+                if (!carrier(thread.getValue().name())) continue;
+                ThreadBytes start = allocStart.get(thread.getKey());
+                carrierBytes = Math.max(carrierBytes, thread.getValue().bytes() - (start == null ? 0 : start.bytes()));
+            }
+            return bytes > carrierBytes + ALLOC_SLACK;
         }
 
         /**

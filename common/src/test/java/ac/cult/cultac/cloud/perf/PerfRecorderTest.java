@@ -19,6 +19,8 @@ import ac.cult.cultac.platform.api.sender.Sender;
 import com.github.luben.zstd.Zstd;
 import com.sun.management.ThreadMXBean;
 import java.lang.management.ManagementFactory;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.util.Arrays;
 import java.util.List;
@@ -28,6 +30,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import jdk.jfr.FlightRecorder;
+import jdk.jfr.Recording;
+import jdk.jfr.consumer.RecordedEvent;
+import jdk.jfr.consumer.RecordingFile;
 import jdk.jfr.consumer.RecordingStream;
 import org.junit.jupiter.api.Test;
 
@@ -158,6 +163,68 @@ class PerfRecorderTest {
                 profile.getAllocCalibrationList().stream()
                         .anyMatch(group -> group.getThreadGroup() == Attribution.OWN && group.getExactBytes() > 0),
                 profile.getAllocCalibrationList().toString());
+    }
+
+    @Test
+    void onlyVirtualThreadsAllocationSamplesTakeTheCarrierBound() throws Exception {
+        Thread pool = Thread.ofPlatform()
+                .name("ForkJoinPool-9-worker-1")
+                .unstarted(() -> busyWork(TimeUnit.MILLISECONDS.toNanos(300)));
+        Thread virtual = Thread.ofVirtual().unstarted(() -> busyWork(TimeUnit.MILLISECONDS.toNanos(300)));
+        Path file = Files.createTempFile("perf-routing", ".jfr");
+        List<RecordedEvent> events;
+        try {
+            try (Recording recording = new Recording()) {
+                recording.enable("jdk.ObjectAllocationSample").with("throttle", "off");
+                recording.start();
+                pool.start();
+                virtual.start();
+                pool.join();
+                virtual.join();
+                recording.stop();
+                recording.dump(file);
+            }
+            events = RecordingFile.readAllEvents(file);
+        } finally {
+            Files.deleteIfExists(file);
+        }
+
+        List<RecordedEvent> poolSamples = allocSamples(events, pool);
+        List<RecordedEvent> virtualSamples = allocSamples(events, virtual);
+        RecordedEvent poolEarliest = earliest(poolSamples);
+        assertTrue(poolSamples.size() > 1 && poolEarliest.getLong("weight") > 0, poolSamples.toString());
+        assertTrue(virtualSamples.size() > 1 && earliest(virtualSamples).getLong("weight") > 0);
+        assertEquals(weight(poolSamples) - poolEarliest.getLong("weight"), kept(poolSamples, pool));
+        assertEquals(weight(virtualSamples), kept(virtualSamples, virtual));
+    }
+
+    private static List<RecordedEvent> allocSamples(List<RecordedEvent> events, Thread thread) {
+        return events.stream()
+                .filter(event -> event.getEventType().getName().equals("jdk.ObjectAllocationSample"))
+                .filter(event -> event.getThread() != null && event.getThread().getJavaThreadId() == thread.threadId())
+                .toList();
+    }
+
+    /** The first delivered of the samples with the earliest start time. */
+    private static RecordedEvent earliest(List<RecordedEvent> samples) {
+        RecordedEvent earliest = samples.getFirst();
+        for (RecordedEvent sample : samples) {
+            if (sample.getStartTime().isBefore(earliest.getStartTime())) earliest = sample;
+        }
+        return earliest;
+    }
+
+    private static long weight(List<RecordedEvent> samples) {
+        return samples.stream().mapToLong(sample -> sample.getLong("weight")).sum();
+    }
+
+    /** Sampled bytes a window keeps of {@code samples}, {@code thread} alive at its start and live threads unknown. */
+    private static long kept(List<RecordedEvent> samples, Thread thread) {
+        PerfRecorder.Window window = new PerfRecorder.Window(
+                -1, Map.of(thread.threadId(), new PerfRecorder.ThreadBytes(thread.getName(), 0)), () -> null);
+        for (RecordedEvent sample : samples) window.sample(sample, PerfRecorder.Window.ALLOC);
+        window.calibrate(null);
+        return window.trie.encode(true, 1 << 20).build().getAllocBytesTotal();
     }
 
     @Test
