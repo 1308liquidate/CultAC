@@ -99,7 +99,6 @@ public final class PalettedSection {
                     Wire.readLength(input, section.bits <= 4 ? section.palette.length : input.readableBytes());
             if (section.paletteSize > section.palette.length) section.palette = new int[section.paletteSize];
             for (int i = 0; i < section.paletteSize; i++) section.palette[i] = section.readId(input);
-            section.indexPalette();
         }
         if (lengthPrefixed) {
             // 1.21.2-1.21.4 PalettedContainer.read discards readLongArray's result when its
@@ -169,7 +168,6 @@ public final class PalettedSection {
                 paletteSize,
                 words.clone());
         for (int i = 0; i < paletteSize; i++) result.palette[i] = mapped(mapper, palette[i], targetRegistrySize);
-        result.indexPalette();
         return result;
     }
 
@@ -249,6 +247,7 @@ public final class PalettedSection {
 
     private int idFor(int state) {
         if (isGlobal()) return state;
+        if (indices == null) indexPalette();
         int existing = -1;
         if (indices != null) existing = indices.get(state);
         else
@@ -280,7 +279,7 @@ public final class PalettedSection {
     }
 
     public PalettedSection copy() {
-        var result = new PalettedSection(
+        return new PalettedSection(
                 size,
                 minimumBits,
                 maximumLocalBits,
@@ -289,8 +288,6 @@ public final class PalettedSection {
                 palette == null ? null : palette.clone(),
                 paletteSize,
                 words.clone());
-        result.indexPalette();
-        return result;
     }
 
     public PalettedSection translated(IntUnaryOperator mapper) {
