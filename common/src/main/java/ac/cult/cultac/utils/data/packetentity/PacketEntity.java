@@ -806,7 +806,11 @@ public class PacketEntity {
         if (!interpolationData.usesSteppedInterpolation()
                 && interpolationData == newPacketLocation
                 && interpolationData.hasActiveInterpolationTarget()) {
-            this.desyncClientPos = interpolationData.targetPosition();
+            this.desyncClientPos = position(
+                    interpolationData.targetCenterX(),
+                    interpolationData.targetMinY(),
+                    interpolationData.targetCenterZ(),
+                    desyncClientPos);
         }
     }
 
@@ -973,9 +977,11 @@ public class PacketEntity {
 
     /** {@link #positionFromCollisionBox(SimpleCollisionBox)}, returning {@code previous} when it holds those bits. */
     private static Vec3 positionFromCollisionBox(SimpleCollisionBox box, @Nullable Vec3 previous) {
-        double x = (box.maxX - box.minX) / 2 + box.minX;
-        double y = box.minY;
-        double z = (box.maxZ - box.minZ) / 2 + box.minZ;
+        return position((box.maxX - box.minX) / 2 + box.minX, box.minY, (box.maxZ - box.minZ) / 2 + box.minZ, previous);
+    }
+
+    /** A position with these coordinates: {@code previous} when it holds their bits. */
+    private static Vec3 position(double x, double y, double z, @Nullable Vec3 previous) {
         if (previous != null
                 && Double.doubleToRawLongBits(previous.x) == Double.doubleToRawLongBits(x)
                 && Double.doubleToRawLongBits(previous.y) == Double.doubleToRawLongBits(y)
