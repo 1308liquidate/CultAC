@@ -27,6 +27,9 @@ public class ValidMovements {
     private static final UncertaintyHandler[] MODIFIERS =
             UncertaintyPipeline.MODIFIERS.toArray(new UncertaintyHandler[0]);
 
+    // handleMovementTrace reads no probe state, so one instance serves every player.
+    private static final CollisionModifier SELECTED_MOVEMENT_COLLISIONS = new CollisionModifier();
+
     static {
         // ElytraTransform's skip holds only for the start trace, which only the first handler sees.
         if (!(MODIFIERS[0] instanceof ElytraTransform)) {
@@ -194,9 +197,8 @@ public class ValidMovements {
             movement = movement.withPosition(movement.position()
                     .with(movement.position().subtract(base), "external movement collision base removed"));
         }
-        setClosestTrace(new CollisionModifier()
-                .handleMovementTrace(
-                        player, this, result, result.getSimulationContext(), lastResult, movement, result.getTarget()));
+        setClosestTrace(SELECTED_MOVEMENT_COLLISIONS.handleMovementTrace(
+                player, this, result, result.getSimulationContext(), lastResult, movement, result.getTarget()));
     }
 
     public Vec3 getPositionOnlyDelta() {
