@@ -222,6 +222,34 @@ class EntityTrackingParityTest {
     }
 
     @Test
+    void theAddOrderIsRecheckedAfterEveryMapWrite() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            CompensatedEntities entities = f.player.compensatedEntities;
+            for (int id = 10; id < 14; id++)
+                entities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(id - 10, 64, 2), 0, 0, 0);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            PacketEntity kept = entities.getEntity(11);
+            entities.entityMap.put(11, new PacketEntity(EntityTypeIds.PIG, 40));
+            assertNull(rootsInAddOrder(entities));
+            assertNull(rootsInAddOrder(entities));
+            entities.entityMap.put(11, kept);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.removeEntity(12);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.addEntity(12, EntityTypeIds.PIG, new Vec3(3, 64, 5), 0, 0, 0);
+            entities.addEntity(13, EntityTypeIds.PIG, new Vec3(4, 64, 5), 0, 0, 0);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.removeEntity(99);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.clearEntityMap();
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.addEntity(20, EntityTypeIds.PIG, new Vec3(1, 64, 4), 0, 0, 0);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+        }
+    }
+
+    @Test
     void reusedTickOrdersTakeTheSort() throws Exception {
         try (var f = new JavaTickFixture()) {
             CompensatedEntities entities = f.player.compensatedEntities;

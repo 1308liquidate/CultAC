@@ -52,6 +52,10 @@ public class CompensatedEntities {
     private long nextClientEntityTickOrder = 1L;
     // The entityMap values in the order addEntity put them.
     private final ArrayList<PacketEntity> addOrder = new ArrayList<>();
+    // While addOrderMapped is set and entityMap.mutations equals addOrderMappedAt, every addOrder entry is the
+    // entityMap value at its id; every addOrder write unsets addOrderMapped.
+    private boolean addOrderMapped;
+    private int addOrderMappedAt;
     // The sum of passengers.size() over entityMap values.
     private int trackedPassengers;
     // Type-filtered entityMap values in entityMap iteration order, current while typeViewsAt matches the map.
@@ -108,6 +112,7 @@ public class CompensatedEntities {
         for (PacketEntity entity : entityMap.values()) untrack(entity);
         entityMap.clear();
         addOrder.clear();
+        addOrderMapped = false;
         player.compensatedFireworks.clearLevel();
     }
 
@@ -396,6 +401,7 @@ public class CompensatedEntities {
         if (entity == null) return;
         untrack(entity);
         addOrder.remove(entity);
+        addOrderMapped = false;
 
         boolean removedSelfVehicle = vehicles.serverPlayerVehicle != null && vehicles.serverPlayerVehicle == entityID;
         if (removedSelfVehicle) {
@@ -841,6 +847,7 @@ public class CompensatedEntities {
             addOrder.remove(replaced);
         }
         addOrder.add(packetEntity);
+        addOrderMapped = false;
         track(packetEntity);
         int replayedProof = Integer.MIN_VALUE;
         List<HeldAttributes> held = pendingAttributes.remove(entityID);
@@ -1309,6 +1316,7 @@ public class CompensatedEntities {
     private List<PacketEntity> rootsInAddOrder() {
         int size = addOrder.size();
         if (size != entityMap.size()) return null;
+        boolean mapped = addOrderMapped && addOrderMappedAt == entityMap.mutations;
         PacketEntity self = getSelf();
         long selfOrder = self.getClientTickOrder();
         boolean selfPending = self.getRiding() == null && isTicking(self);
@@ -1320,7 +1328,7 @@ public class CompensatedEntities {
             long order = entity.getClientTickOrder();
             if (i > 0 && order <= previous) return null;
             // Distinct orders make the entries distinct, so with equal sizes this proves the sets equal.
-            if (entityMap.get(entity.getEntityId()) != entity) return null;
+            if (!mapped && entityMap.get(entity.getEntityId()) != entity) return null;
             previous = order;
             // Self ticks after an entity sharing its order.
             if (selfPending && selfOrder < order) {
@@ -1330,6 +1338,8 @@ public class CompensatedEntities {
             if (entity.getRiding() == null && isTicking(entity)) roots.add(entity);
         }
         if (selfPending) roots.add(self);
+        addOrderMapped = true;
+        addOrderMappedAt = entityMap.mutations;
         return roots;
     }
 
