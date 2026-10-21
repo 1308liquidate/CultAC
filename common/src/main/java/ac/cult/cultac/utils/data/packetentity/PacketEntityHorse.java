@@ -36,6 +36,11 @@ public class PacketEntityHorse extends PacketEntityTrackXRot {
         if (player.isBedrockMovement()) jumpStrength = 0.5F;
     }
 
+    /** AbstractHorse#isTamed: FLAG_TAME of DATA_ID_FLAGS. */
+    public boolean isTamed() {
+        return isTame;
+    }
+
     @Override
     public void onMovement(CultPlayer player, boolean highBound) {
         super.onMovement(player, highBound);

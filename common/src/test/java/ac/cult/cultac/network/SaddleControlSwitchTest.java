@@ -5,6 +5,7 @@ import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.Components;
@@ -27,6 +28,7 @@ import ac.cult.cultac.protocol.packet.clientbound.ClientboundMountScreenOpen;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveEntity;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMoveVehicle;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.EntityDelta;
 import ac.cult.cultac.protocol.value.EquipmentSlot;
 import ac.cult.cultac.protocol.value.Vec3d;
@@ -226,6 +228,151 @@ class SaddleControlSwitchTest {
         }
     }
 
+    /** Camel#isTamed, which CamelHusk inherits, is always true: AbstractHorse#canUseSlot opens the slot untamed. */
+    @ParameterizedTest
+    @ValueSource(strings = {"minecraft:camel", "minecraft:camel_husk"})
+    void aCamelsSaddleSlotTakesTheSaddle(String type) throws Exception {
+        try (var f = ridden(type, false)) {
+            BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
+            openMountScreen(f, SimItemStack.EMPTY);
+            SaddleClick.SHIFT.perform(f);
+
+            for (int tick = 0; tick < 3; tick++) {
+                PredictionResult result = f.rideTick(START, true);
+                assertTrue(exact(result), "tick " + tick + ": " + describe(result));
+            }
+            assertEquals(0, badPackets.violations);
+        }
+    }
+
+    /** Entity#commonTick interpolates the root whether or not the server accepts the tick's MoveVehicle. */
+    @Test
+    void aRejectedTickStillStepsTheServerPath() throws Exception {
+        try (var f = ridden()) {
+            BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
+            move(f, STEP);
+            moveVehicle(f, START.add(PATH / 3, 0, 0));
+            assertEquals(1, badPackets.violations);
+            saddle(f);
+
+            assertFinishesPath(f, 2);
+            assertEquals(1, badPackets.violations);
+        }
+    }
+
+    /** The rider's forward key of the tick before walks the donkey while the path's last steps carry it along x. */
+    @Test
+    void aRiderWalksTheRootForwardWhileItFinishesTheServerPath() throws Exception {
+        try (var f = ridden()) {
+            BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
+            move(f, STEP);
+            f.input(new ServerboundPlayerInput(true, false, false, false, false, false, false));
+            f.rideTick();
+            saddle(f);
+
+            // AbstractHorse#getRiddenInput: the 0.98F forward input at the donkey's movement_speed of 0.175.
+            assertWalksForwardAlongPath(f, 0.98F, 0.175F);
+            assertEquals(0, badPackets.violations);
+        }
+    }
+
+    /** Pig#getControllingPassenger is a rider holding a carrot on a stick, and Pig#getRiddenInput always walks. */
+    @Test
+    void aPigTheRiderSteersWalksForwardWhileItFinishesTheServerPath() throws Exception {
+        try (var f = ridden("minecraft:pig", false)) {
+            BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
+            f.player
+                    .getInventory()
+                    .inventory
+                    .setHeldItem(ItemUtil.modelItems().stack("minecraft:carrot_on_a_stick", 1));
+            move(f, STEP);
+            f.rideTick();
+            saddle(f);
+
+            // Pig#getRiddenSpeed: its movement_speed of 0.25 times 0.225, unboosted.
+            assertWalksForwardAlongPath(f, 1.0, (float) (0.25 * 0.225));
+            assertEquals(0, badPackets.violations);
+        }
+    }
+
+    /**
+     * Controlled ticks from interpolation step 2 of 3 under {@code input} forward at {@code speed}, as
+     * LivingEntity#travelInAir moves them on stone. The passive root stood still, so its first move is horizontal only
+     * and Entity#move leaves it off the ground for the next tick.
+     */
+    private static void assertWalksForwardAlongPath(JavaTickFixture f, double input, float speed) {
+        float blockFriction = 0.6F;
+        double onGround = input * (speed * (0.21600002F / (blockFriction * blockFriction * blockFriction)));
+        double inAir = input * (speed * 0.1F);
+        float groundFriction = blockFriction * 0.91F;
+        float airFriction = 0.91F;
+
+        double velocity = onGround;
+        double z = START.z + velocity;
+        assertExactTick(f, new Vec3(START.x + PATH * 2 / 3, START.y, z), false, "tick 1");
+        velocity = velocity * groundFriction + inAir;
+        z += velocity;
+        assertExactTick(f, new Vec3(START.x + PATH, START.y, z), true, "tick 2");
+        velocity = velocity * airFriction + onGround;
+        z += velocity;
+        assertExactTick(f, new Vec3(START.x + PATH, START.y, z), true, "tick 3");
+        velocity = velocity * groundFriction + onGround;
+        z += velocity;
+        assertExactTick(f, new Vec3(START.x + PATH, START.y, z), true, "tick 4");
+    }
+
+    /** A controlled tick: the rider's Rot, then the root's MoveVehicle at {@code to} with its own on-ground bit. */
+    private static void assertExactTick(JavaTickFixture f, Vec3 to, boolean onGround, String tick) {
+        PredictionResult before = f.player.checkManager.getSimulationProcessor().getLastPrediction();
+        var rot = new ServerboundMovePlayer(0, 0, 0, f.player.xRot, f.player.yRot, true, false, false, true);
+        f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
+        var move =
+                new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), f.player.xRot, f.player.yRot, onGround, true);
+        f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, move), f.player, move);
+        f.tickEnd();
+        PredictionResult result = f.player.checkManager.getSimulationProcessor().getLastPrediction();
+        assertNotSame(before, result, tick + " committed no prediction");
+        assertTrue(exact(result), tick + ": " + describe(result));
+    }
+
+    /** ClientPacketListener#handleSetEquipment unsaddles the root, so the client controls it until it reads the packet. */
+    @Test
+    void aTickBeforeTheClientReadsTheUnsaddleStillControls() throws Exception {
+        try (var f = ridden()) {
+            BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
+            saddle(f);
+            PredictionResult controlled = f.rideTick(START, true);
+            assertTrue(exact(controlled), describe(controlled));
+
+            sendSaddle(f, SimItemStack.EMPTY);
+            PredictionResult unread = f.rideTick(START, true);
+            assertTrue(exact(unread), describe(unread));
+            assertEquals(0, badPackets.violations);
+
+            f.pongThrough(f.player.lastTransactionSent.get());
+            f.rideTick();
+            assertEquals(0, badPackets.violations);
+            moveVehicle(f, START);
+            assertEquals(1, badPackets.violations);
+        }
+    }
+
+    /** The saddle slot shows the mount's SADDLE, so a saddle equipped while the screen is open can be taken out. */
+    @Test
+    void aSaddleEquippedWhileTheScreenIsOpenCanBeTakenOut() throws Exception {
+        try (var f = ridden()) {
+            BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
+            openMountScreen(f, SimItemStack.EMPTY);
+            saddle(f);
+            click(f, 0, 0, WindowClickType.PICKUP, Map.of(0, SimItemStack.EMPTY), saddleItem());
+
+            f.rideTick();
+            assertEquals(0, badPackets.violations);
+            moveVehicle(f, START);
+            assertEquals(1, badPackets.violations);
+        }
+    }
+
     /** The menu slot of the first hotbar slot: saddle, body armor, then the 27 inventory slots. */
     private static final int HOTBAR_0 = 2 + 27;
 
@@ -335,14 +482,18 @@ class SaddleControlSwitchTest {
         return ridden(true);
     }
 
-    /** An unsaddled donkey under the rider, mounted through set_passengers, after a second of passive riding. */
     private static JavaTickFixture ridden(boolean tamed) throws Exception {
+        return ridden("minecraft:donkey", tamed);
+    }
+
+    /** An unsaddled {@code type} under the rider, mounted through set_passengers, after a second of passive riding. */
+    private static JavaTickFixture ridden(String type, boolean tamed) throws Exception {
         var f = new JavaTickFixture();
         f.place(START.add(0, 1, 0), Vec3.ZERO);
         send(
                 f,
                 ClientboundPackets.ADD_ENTITY,
-                new ClientboundAddEntity(DONKEY, "minecraft:donkey", new Vec3d(START.x, START.y, START.z), 0, 0, 0));
+                new ClientboundAddEntity(DONKEY, type, new Vec3d(START.x, START.y, START.z), 0, 0, 0));
         f.pongThrough(f.player.lastTransactionSent.get());
         if (tamed) {
             // AbstractHorse's DATA_ID_FLAGS with FLAG_TAME.
@@ -376,10 +527,13 @@ class SaddleControlSwitchTest {
                 .filter(definition -> definition.key().equals("minecraft:saddle"))
                 .findFirst()
                 .orElseThrow();
+        sendSaddle(f, new SimItemStack(item, 1, Components.EMPTY));
+    }
+
+    /** A set_equipment putting {@code saddle} in the mount's SADDLE slot. */
+    private static void sendSaddle(JavaTickFixture f, SimItemStack saddle) {
         var packet = new InventoryPackets.Equipment(
-                DONKEY,
-                List.of(new InventoryPackets.EquipmentEntry(
-                        EquipmentSlot.SADDLE, new SimItemStack(item, 1, Components.EMPTY))));
+                DONKEY, List.of(new InventoryPackets.EquipmentEntry(EquipmentSlot.SADDLE, saddle)));
         send(f, type(InventoryPackets.Equipment.class), packet);
     }
 

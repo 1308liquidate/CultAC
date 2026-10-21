@@ -893,6 +893,7 @@ public class CompensatedEntities {
             updateSelfEquipment(entityID, slot.slot(), slot.item());
 
             if (slot.slot() == EquipmentSlot.SADDLE) {
+                entity.saddleItem = slot.item();
                 boolean hasSaddle = !slot.item().isEmpty();
                 if (entity instanceof PacketEntityRideable rideable) {
                     rideable.hasSaddle = hasSaddle;

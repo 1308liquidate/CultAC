@@ -15,6 +15,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package ac.cult.cultac.utils.data.packetentity;
 
+import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.network.packet.EntityPositionPath;
 import ac.cult.cultac.network.packet.PacketCodecUtil;
@@ -78,6 +79,8 @@ public class PacketEntity {
     public boolean noAI = false;
     public EntityPose actionPose = EntityPose.STANDING;
     public boolean actionAlive = true;
+    // The EquipmentSlot.SADDLE item, which a mount's inventory menu shows in its saddle slot.
+    public SimItemStack saddleItem = SimItemStack.EMPTY;
     public byte actionSharedFlags;
     public boolean actionArrowInGround;
     public float scale = 1.0f;
@@ -666,9 +669,9 @@ public class PacketEntity {
     }
 
     /**
-     * Entity#commonTick for a root the client moves itself: InterpolationHandler#interpolate advances the server path
-     * it still follows before LivingEntity#aiStep reaches travelRidden. Only the 26.3 stepped interpolation keeps that
-     * path under local control.
+     * Entity#commonTick for the root of a client tick's ServerboundMoveVehiclePacket, whether or not the server accepts
+     * that packet: InterpolationHandler#interpolate advances the server path the root still follows before
+     * LivingEntity#aiStep reaches travelRidden. Covers the 26.3 stepped interpolation only.
      */
     public void interpolateBeforeLocalTravel(CultPlayer player) {
         if (!hasActiveSteppedInterpolation()) {

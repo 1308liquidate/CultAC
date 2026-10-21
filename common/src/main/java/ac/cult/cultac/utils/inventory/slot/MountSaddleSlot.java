@@ -16,25 +16,45 @@ import java.util.List;
 
 /**
  * Slot 0 of HorseInventoryMenu and NautilusInventoryMenu: an ArmorSlot over Mob#createEquipmentSlotContainer for
- * EquipmentSlot.SADDLE. Every set, whether from a click, a set_slot or a set_content, equips the client's mount.
+ * EquipmentSlot.SADDLE. Every set, whether from a click, a set_slot or a set_content, equips the client's mount, and
+ * the slot shows the mount's saddle whatever set it last.
  */
 public final class MountSaddleSlot extends Slot {
     private final CultPlayer player;
     private final PacketEntity mount;
 
     public MountSaddleSlot(CultPlayer player, PacketEntity mount) {
-        super(new InventoryStorage(1), 0);
+        super(new SaddleContainer(player, mount), 0);
         this.player = player;
         this.mount = mount;
     }
 
-    @Override
-    public void set(SimItemStack stack) {
-        super.set(stack);
-        int id = mount.getEntityId();
-        if (player.compensatedEntities.getEntity(id) == mount) {
-            player.compensatedEntities.updateEntityEquipment(
-                    id, List.of(new InventoryPackets.EquipmentEntry(EquipmentSlot.SADDLE, stack)));
+    /** Mob#createEquipmentSlotContainer: one slot reading and equipping the mount's EquipmentSlot.SADDLE. */
+    private static final class SaddleContainer extends InventoryStorage {
+        private final CultPlayer player;
+        private final PacketEntity mount;
+
+        SaddleContainer(CultPlayer player, PacketEntity mount) {
+            super(1);
+            this.player = player;
+            this.mount = mount;
+        }
+
+        @Override
+        public SimItemStack getItem(int index) {
+            return mount.saddleItem;
+        }
+
+        @Override
+        public void setItem(int index, SimItemStack stack) {
+            SimItemStack item = stack == null ? SimItemStack.EMPTY : stack;
+            int id = mount.getEntityId();
+            if (player.compensatedEntities.getEntity(id) == mount) {
+                player.compensatedEntities.updateEntityEquipment(
+                        id, List.of(new InventoryPackets.EquipmentEntry(EquipmentSlot.SADDLE, item)));
+            } else {
+                mount.saddleItem = item;
+            }
         }
     }
 
@@ -64,7 +84,7 @@ public final class MountSaddleSlot extends Slot {
             return true;
         }
         if (mount instanceof PacketEntityHorse horse) {
-            return horse.actionAlive && !horse.isBaby && horse.isTame;
+            return horse.actionAlive && !horse.isBaby && horse.isTamed();
         }
         if (mount instanceof PacketEntityNautilus nautilus) {
             return nautilus.actionAlive && !nautilus.isBaby && nautilus.isTame;

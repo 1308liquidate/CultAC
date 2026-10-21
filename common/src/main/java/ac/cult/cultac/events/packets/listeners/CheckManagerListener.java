@@ -805,6 +805,9 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                 player.checkManager.getCheck(BadPacketsVehicle.class).handleInvalidVehiclePacket(fromClientTick);
             }
             if (fromClientTick) {
+                if (packetRoot != null && player.packetStateData.clientTickVehicleMovePacketsThisClientTick == 0) {
+                    packetRoot.interpolateBeforeLocalTravel(player);
+                }
                 player.packetStateData.clientTickVehicleMovePacketsThisClientTick++;
                 player.packetStateData.receivedMovementThisClientTick = true;
             }
@@ -820,6 +823,8 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         // sends only the vehicle packet from the packet handler, so it must
         // snap state without advancing AbstractBoat#tick state.
         player.packetStateData.markVehicleMove(fromClientTick, checkableClientTick);
+        boolean firstClientTickVehicleMove =
+                fromClientTick && player.packetStateData.clientTickVehicleMovePacketsThisClientTick == 0;
         if (fromClientTick) {
             player.packetStateData.clientTickVehicleMovePacketsThisClientTick++;
         }
@@ -839,7 +844,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         player.packetStateData.vehicleMovementStartOnGround =
                 packetRoot == null ? vehiclePacket.onGround() : packetRoot.onGround;
         player.packetStateData.vehicleMovementOnGroundPresent = clientReportsOnGround;
-        if (checkableClientTick) {
+        if (checkableClientTick && firstClientTickVehicleMove) {
             packetRoot.interpolateBeforeLocalTravel(player);
         }
         Vec3 oldPosition = currentVehiclePhysicalPosition(player, packetRoot, new Vec3(player.x, player.y, player.z));
