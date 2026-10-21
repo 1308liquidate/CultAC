@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.DataTables;
+import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.OffsetHandler;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
@@ -170,6 +171,31 @@ class InputKeysTest {
             f.input(BACK);
             for (int tick = 0; tick < 5; tick++) f.tickEnd();
             assertExact(f.tick(new Vec3(0.5, FLOOR_Y, 0.3), true));
+
+            assertNoFlags(f);
+        }
+    }
+
+    @Test
+    void walkingAlongAWallsEndWhilePushedIsNotFlagged() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.player.compensatedWorld.updateBlock(new BlockPos(1, FLOOR_Y, -1), BlockIds.STONE.defaultState());
+            for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
+            // The box's side touches the wall, whose end lies 0.01 into the box's z range.
+            Vec3 start = new Vec3(1.0 - 0.3F, FLOOR_Y, 0.29);
+            f.place(start, GROUNDED);
+            // A zombie ticking before the player pushes it by 0.05 / sqrt(0.5) * 0.5 along -z this tick.
+            f.player.compensatedEntities.addEntity(100, EntityTypeIds.ZOMBIE, start.add(0, 0, 0.5), 0, 0, 0);
+            f.player.compensatedEntities.entityMap.get(100).setClientTickOrder(-1L);
+            float yaw = 310.0F;
+            f.player.xRot = yaw;
+            var keys = new ServerboundPlayerInput(true, false, false, false, false, false, false);
+            f.input(keys);
+            Vec3 input = ClientMoveInput.of(f, keys, 1.0F, 0.1F, yaw);
+            // Direction#axisStepOrder moves the longer x first, into the wall; the shorter z then clears its end.
+            double z = input.z - 0.05 * 0.5 / Math.sqrt(0.5);
+            assertTrue(Math.abs(input.x) > Math.abs(z) && z > 0.01);
+            assertExact(f.tick(start.add(0, 0, z), true));
 
             assertNoFlags(f);
         }
