@@ -305,6 +305,17 @@ public final class CompensatedVehicleState implements Debuggable {
         }
     }
 
+    /**
+     * Call after the saddle or harness of {@code vehicle} changes, with whether the local player controlled it before.
+     * The vehicle's getControllingPassenger reads that equipment, so the change moves control at the client's next
+     * tick, as a mount does.
+     */
+    public void markSaddleControlSwitch(PacketEntity vehicle, boolean controlledBefore) {
+        if (canClientAuthoritativelyMoveVisibleRoot(vehicle) != controlledBefore) {
+            markVehicleSwitchBufferWindow(vehicle);
+        }
+    }
+
     public void markVehicleSwitchMovementPacketBoundary() {
         markItemControlledVehicleMovementPacketBoundary();
     }

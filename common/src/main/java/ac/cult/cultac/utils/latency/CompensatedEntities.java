@@ -960,6 +960,7 @@ public class CompensatedEntities {
             return;
         }
 
+        boolean controlled = vehicles.canClientAuthoritativelyMoveVisibleRoot(entity);
         for (EquipmentEntry slot : slots) {
             updateSelfEquipment(entityID, slot.slot(), slot.item());
 
@@ -979,6 +980,7 @@ public class CompensatedEntities {
                 happyGhast.hasBodyArmor = !slot.item().isEmpty();
             }
         }
+        vehicles.markSaddleControlSwitch(entity, controlled);
     }
 
     private void updateSelfEquipment(int entityID, EquipmentSlot slot, ac.cult.blocksim.engine.SimItemStack stack) {
@@ -1205,7 +1207,9 @@ public class CompensatedEntities {
             // Through 1.21.4, AbstractHorse#isSaddled reads flag 0x04 from
             // DATA_ID_FLAGS. Newer clients read EquipmentSlot.SADDLE instead.
             if (!layout.saddleEquipment()) {
+                boolean controlled = vehicles.canClientAuthoritativelyMoveVisibleRoot(horse);
                 horse.hasSaddle = (flags & 0x04) != 0;
+                vehicles.markSaddleControlSwitch(horse, controlled);
             }
             horse.setRearingFromMetadata((flags & 0x20) != 0);
         }

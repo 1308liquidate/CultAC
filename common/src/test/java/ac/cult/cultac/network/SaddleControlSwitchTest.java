@@ -1,6 +1,7 @@
 package ac.cult.cultac.network;
 
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
+import static ac.cult.cultac.network.JavaTickFixture.assertRejected;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -11,9 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ac.cult.blocksim.data.Components;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.engine.SimItemStack;
+import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsVehicle;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.checks.psuedo.VehicleOffset;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerWindow;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -21,6 +24,7 @@ import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.network.packet.InventoryPackets;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketType;
+import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
@@ -32,11 +36,16 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.EntityDelta;
 import ac.cult.cultac.protocol.value.EquipmentSlot;
 import ac.cult.cultac.protocol.value.Vec3d;
+import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityNautilus;
 import ac.cult.cultac.utils.inventory.InventoryClick;
 import ac.cult.cultac.utils.inventory.ItemUtil;
 import ac.cult.cultac.utils.inventory.inventory.WindowClickType;
+import ac.cult.cultac.utils.latency.CompensatedEntities;
+import ac.cult.cultac.utils.latency.CompensatedVehicleState;
 import ac.cult.cultac.utils.math.Vec3;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -55,6 +64,11 @@ import org.junit.jupiter.params.provider.ValueSource;
 class SaddleControlSwitchTest {
     private static final int DONKEY = 100;
     private static final int NAUTILUS = 101;
+    private static final int OTHER_DONKEY = 102;
+    /** How far a first controlled move lands from where the model puts the root. */
+    private static final double NEAR = 0.025;
+
+    private static final double FAR = 0.5;
     private static final Vec3 START = new Vec3(0.5, FLOOR_Y, 0.5);
     /** 600/4096 blocks along x, interpolated over the donkey's three-tick update interval. */
     private static final short STEP = 600;
@@ -95,6 +109,7 @@ class SaddleControlSwitchTest {
     /** Controlled ticks from interpolation step {@code first} of 3: no ridden input, so the path alone moves it. */
     private static void assertFinishesPath(JavaTickFixture f, int first) {
         for (int step = first; step <= 3; step++) {
+            assertTrue(controls(f), "step " + step);
             PredictionResult result = f.rideTick(START.add(PATH * step / 3, 0, 0), true);
             assertTrue(exact(result), "step " + step + ": " + describe(result));
         }
@@ -107,6 +122,7 @@ class SaddleControlSwitchTest {
         try (var f = ridden()) {
             BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
             saddle(f);
+            assertTrue(controls(f));
 
             for (int tick = 0; tick < 3; tick++) {
                 PredictionResult result = f.rideTick(START, true);
@@ -127,6 +143,7 @@ class SaddleControlSwitchTest {
             BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
             openMountScreen(f, SimItemStack.EMPTY);
             click.perform(f);
+            assertTrue(controls(f));
 
             for (int tick = 0; tick < 3; tick++) {
                 PredictionResult result = f.rideTick(START, true);
@@ -163,9 +180,11 @@ class SaddleControlSwitchTest {
             assertTrue(exact(controlled), describe(controlled));
             openMountScreen(f, saddleItem());
             click(f, 0, 0, WindowClickType.PICKUP, Map.of(0, SimItemStack.EMPTY), saddleItem());
+            assertFalse(controls(f));
 
             f.rideTick();
             assertEquals(0, badPackets.violations);
+            rideOutSwitchWindow(f);
             moveVehicle(f, START);
             assertEquals(1, badPackets.violations);
         }
@@ -184,8 +203,10 @@ class SaddleControlSwitchTest {
             setSlot(f, 0, SimItemStack.EMPTY);
             setSlot(f, HOTBAR_0, saddleItem());
             f.pongThrough(f.player.lastTransactionSent.get());
+            assertFalse(controls(f));
             f.rideTick();
             assertEquals(0, badPackets.violations);
+            rideOutSwitchWindow(f);
             moveVehicle(f, START);
             assertEquals(1, badPackets.violations);
         }
@@ -236,6 +257,7 @@ class SaddleControlSwitchTest {
             BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
             openMountScreen(f, SimItemStack.EMPTY);
             SaddleClick.SHIFT.perform(f);
+            assertTrue(controls(f));
 
             for (int tick = 0; tick < 3; tick++) {
                 PredictionResult result = f.rideTick(START, true);
@@ -323,6 +345,7 @@ class SaddleControlSwitchTest {
 
     /** A controlled tick: the rider's Rot, then the root's MoveVehicle at {@code to} with its own on-ground bit. */
     private static void assertExactTick(JavaTickFixture f, Vec3 to, boolean onGround, String tick) {
+        assertTrue(controls(f), tick);
         PredictionResult before = f.player.checkManager.getSimulationProcessor().getLastPrediction();
         var rot = new ServerboundMovePlayer(0, 0, 0, f.player.xRot, f.player.yRot, true, false, false, true);
         f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
@@ -345,13 +368,16 @@ class SaddleControlSwitchTest {
             assertTrue(exact(controlled), describe(controlled));
 
             sendSaddle(f, SimItemStack.EMPTY);
+            assertTrue(controls(f));
             PredictionResult unread = f.rideTick(START, true);
             assertTrue(exact(unread), describe(unread));
             assertEquals(0, badPackets.violations);
 
             f.pongThrough(f.player.lastTransactionSent.get());
+            assertFalse(controls(f));
             f.rideTick();
             assertEquals(0, badPackets.violations);
+            rideOutSwitchWindow(f);
             moveVehicle(f, START);
             assertEquals(1, badPackets.violations);
         }
@@ -365,12 +391,249 @@ class SaddleControlSwitchTest {
             openMountScreen(f, SimItemStack.EMPTY);
             saddle(f);
             click(f, 0, 0, WindowClickType.PICKUP, Map.of(0, SimItemStack.EMPTY), saddleItem());
+            assertFalse(controls(f));
 
             f.rideTick();
             assertEquals(0, badPackets.violations);
+            rideOutSwitchWindow(f);
             moveVehicle(f, START);
             assertEquals(1, badPackets.violations);
         }
+    }
+
+    /** Each way the rider's donkey gets its saddle hands the rider control, a vehicle switch like a mount. */
+    @ParameterizedTest
+    @EnumSource(HandOver.class)
+    void aSaddleHandOverOpensTheVehicleSwitchWindow(HandOver handOver) throws Exception {
+        try (var f = ridden()) {
+            BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
+            handOver.prepare(f);
+            assertFalse(controls(f));
+            assertFalse(switchWindowOpen(f, DONKEY));
+
+            handOver.perform(f);
+            assertTrue(controls(f));
+            assertTrue(switchWindowOpen(f, DONKEY));
+            PredictionResult first = f.rideTick(START.add(0, 0, NEAR), true);
+            assertTrue(first.hasFlag(VehicleOffset.class), describe(first));
+            assertTrue(first.isExempt(), describe(first));
+            assertEquals(0, badPackets.violations);
+        }
+    }
+
+    /** Each way the rider's donkey loses its saddle hands control back to the server, a vehicle switch too. */
+    @ParameterizedTest
+    @EnumSource(HandBack.class)
+    void aSaddleHandBackOpensTheVehicleSwitchWindow(HandBack handBack) throws Exception {
+        try (var f = ridden()) {
+            BadPacketsVehicle badPackets = enabled(f, BadPacketsVehicle.class);
+            saddle(f);
+            for (int tick = 0; tick < switchWindowTicks(); tick++) {
+                PredictionResult result = f.rideTick(START, true);
+                assertTrue(exact(result), "tick " + tick + ": " + describe(result));
+            }
+            handBack.prepare(f);
+            assertTrue(controls(f));
+            assertFalse(switchWindowOpen(f, DONKEY));
+
+            handBack.perform(f);
+            assertFalse(controls(f));
+            assertTrue(switchWindowOpen(f, DONKEY));
+            moveVehicle(f, START);
+            assertEquals(0, badPackets.violations);
+            rideOutSwitchWindow(f);
+            moveVehicle(f, START);
+            assertEquals(1, badPackets.violations);
+        }
+    }
+
+    @Test
+    void theVehicleSwitchWindowOfASaddleCloses() throws Exception {
+        try (var f = ridden()) {
+            saddle(f);
+            for (int tick = 0; tick < switchWindowTicks(); tick++) {
+                assertTrue(switchWindowOpen(f, DONKEY), "tick " + tick);
+                PredictionResult result = f.rideTick(START, true);
+                assertTrue(exact(result), "tick " + tick + ": " + describe(result));
+            }
+
+            assertFalse(switchWindowOpen(f, DONKEY));
+            assertRejected(f.rideTick(START.add(0, 0, NEAR), true), "VehicleOffset");
+        }
+    }
+
+    @Test
+    void aFirstControlledMoveFarFromTheRootIsSetBack() throws Exception {
+        try (var f = ridden()) {
+            saddle(f);
+
+            assertTrue(switchWindowOpen(f, DONKEY));
+            PredictionResult far = f.rideTick(START.add(0, 0, FAR), true);
+            assertTrue(far.hasFlag(VehicleOffset.class), describe(far));
+            assertTrue(f.player.getSetbackTeleportUtil().isPendingSetback(), describe(far));
+        }
+    }
+
+    /** A saddle hands control only to the first passenger of the mount that wears it. */
+    @Test
+    void aSaddleOnAMountTheRiderIsNotOnSwitchesNothing() throws Exception {
+        try (var f = ridden()) {
+            send(
+                    f,
+                    ClientboundPackets.ADD_ENTITY,
+                    new ClientboundAddEntity(
+                            OTHER_DONKEY, "minecraft:donkey", new Vec3d(START.x + 3, START.y, START.z), 0, 0, 0));
+            f.pongThrough(f.player.lastTransactionSent.get());
+            sendSaddle(f, OTHER_DONKEY, saddleItem());
+            f.pongThrough(f.player.lastTransactionSent.get());
+
+            assertTrue(((PacketEntityHorse) f.player.compensatedEntities.getEntity(OTHER_DONKEY)).hasSaddle);
+            assertFalse(switchWindowOpen(f, OTHER_DONKEY));
+            assertFalse(switchWindowOpen(f, DONKEY));
+            saddle(f);
+            assertTrue(switchWindowOpen(f, DONKEY));
+            assertFalse(switchWindowOpen(f, OTHER_DONKEY));
+        }
+    }
+
+    /** Before 1.21.5, AbstractHorse#isSaddled reads FLAG_SADDLE from DATA_ID_FLAGS, which the server syncs. */
+    @Test
+    void aLegacySaddleFlagSwitchesControl() throws Exception {
+        try (var f = RecordReceiveFixture.olderHost(ProtocolVersion.V1_21_4)) {
+            CompensatedEntities entities = f.player.compensatedEntities;
+            entities.addEntity(DONKEY, EntityTypeIds.DONKEY, START, 0, 0, 0);
+            assertTrue(entities.vehicles.applyVehiclePassengers(DONKEY, new int[] {f.player.entityID}));
+            PacketEntity donkey = entities.getEntity(DONKEY);
+            f.player.packetStateData.acceptedClientTick += switchWindowTicks();
+            assertFalse(entities.vehicles.isVehicleSwitchBufferActiveFor(donkey));
+
+            // AbstractHorse's DATA_ID_FLAGS with FLAG_TAME, then with FLAG_SADDLE too.
+            entities.updateEntityMetadata(DONKEY, horseFlags(0x02));
+            assertFalse(entities.vehicles.isVehicleSwitchBufferActiveFor(donkey));
+            entities.updateEntityMetadata(DONKEY, horseFlags(0x06));
+            assertTrue(entities.vehicles.canClientAuthoritativelyMoveVisibleRoot(donkey));
+            assertTrue(entities.vehicles.isVehicleSwitchBufferActiveFor(donkey));
+
+            f.player.packetStateData.acceptedClientTick += switchWindowTicks();
+            entities.updateEntityMetadata(DONKEY, horseFlags(0x06));
+            assertFalse(entities.vehicles.isVehicleSwitchBufferActiveFor(donkey));
+            entities.updateEntityMetadata(DONKEY, horseFlags(0x02));
+            assertFalse(entities.vehicles.canClientAuthoritativelyMoveVisibleRoot(donkey));
+            assertTrue(entities.vehicles.isVehicleSwitchBufferActiveFor(donkey));
+        }
+    }
+
+    private static List<EntityMetadata.Entry> horseFlags(int flags) {
+        return List.of(new EntityMetadata.Entry(17, (byte) flags, ByteBuffer.allocate(0)));
+    }
+
+    enum HandOver {
+        /** set_equipment, which the client reads before the trailing ping. */
+        EQUIPMENT {
+            @Override
+            void perform(JavaTickFixture f) {
+                saddle(f);
+            }
+        },
+        /** A click into the mount screen's saddle slot. */
+        CLICK {
+            @Override
+            void prepare(JavaTickFixture f) {
+                openMountScreen(f, SimItemStack.EMPTY);
+            }
+
+            @Override
+            void perform(JavaTickFixture f) {
+                SaddleClick.SHIFT.perform(f);
+            }
+        },
+        /** A set_slot filling the open mount screen's saddle slot. */
+        SET_SLOT {
+            @Override
+            void prepare(JavaTickFixture f) {
+                openMountScreen(f, SimItemStack.EMPTY);
+            }
+
+            @Override
+            void perform(JavaTickFixture f) {
+                setSlot(f, 0, saddleItem());
+                f.pongThrough(f.player.lastTransactionSent.get());
+            }
+        },
+        /** The set_content of a mount screen whose saddle slot holds a saddle. */
+        SET_CONTENT {
+            @Override
+            void perform(JavaTickFixture f) {
+                openMountScreen(f, saddleItem());
+            }
+        };
+
+        void prepare(JavaTickFixture f) {}
+
+        abstract void perform(JavaTickFixture f);
+    }
+
+    enum HandBack {
+        /** set_equipment emptying the SADDLE slot. */
+        EQUIPMENT {
+            @Override
+            void perform(JavaTickFixture f) {
+                sendSaddle(f, SimItemStack.EMPTY);
+                f.pongThrough(f.player.lastTransactionSent.get());
+            }
+        },
+        /** The saddle picked up out of the mount screen's saddle slot. */
+        CLICK {
+            @Override
+            void prepare(JavaTickFixture f) {
+                openMountScreen(f, saddleItem());
+            }
+
+            @Override
+            void perform(JavaTickFixture f) {
+                click(f, 0, 0, WindowClickType.PICKUP, Map.of(0, SimItemStack.EMPTY), saddleItem());
+            }
+        },
+        /** A set_slot emptying the open mount screen's saddle slot. */
+        SET_SLOT {
+            @Override
+            void prepare(JavaTickFixture f) {
+                openMountScreen(f, saddleItem());
+            }
+
+            @Override
+            void perform(JavaTickFixture f) {
+                setSlot(f, 0, SimItemStack.EMPTY);
+                f.pongThrough(f.player.lastTransactionSent.get());
+            }
+        };
+
+        void prepare(JavaTickFixture f) {}
+
+        abstract void perform(JavaTickFixture f);
+    }
+
+    /** Whether the model's controlling passenger state alone lets a client-tick MoveVehicle move the root. */
+    private static boolean controls(JavaTickFixture f) {
+        return f.player.compensatedEntities.vehicles.canServerPlayerVehicleBeLocalAuthoritativeForMovementPacket(true);
+    }
+
+    private static boolean switchWindowOpen(JavaTickFixture f, int vehicle) {
+        return f.player.compensatedEntities.vehicles.isVehicleSwitchBufferActiveFor(
+                f.player.compensatedEntities.getEntity(vehicle));
+    }
+
+    private static int switchWindowTicks() throws Exception {
+        Field ticks = CompensatedVehicleState.class.getDeclaredField("VEHICLE_SWITCH_BUFFER_CLIENT_TICKS");
+        ticks.setAccessible(true);
+        return ticks.getInt(null);
+    }
+
+    /** Passive ticks through the vehicle switch window of a hand-over. */
+    private static void rideOutSwitchWindow(JavaTickFixture f) throws Exception {
+        assertTrue(switchWindowOpen(f, DONKEY));
+        for (int tick = 0; tick < switchWindowTicks(); tick++) f.rideTick();
+        assertFalse(switchWindowOpen(f, DONKEY));
     }
 
     /** The menu slot of the first hotbar slot: saddle, body armor, then the 27 inventory slots. */
@@ -530,10 +793,14 @@ class SaddleControlSwitchTest {
         sendSaddle(f, new SimItemStack(item, 1, Components.EMPTY));
     }
 
-    /** A set_equipment putting {@code saddle} in the mount's SADDLE slot. */
     private static void sendSaddle(JavaTickFixture f, SimItemStack saddle) {
+        sendSaddle(f, DONKEY, saddle);
+    }
+
+    /** A set_equipment putting {@code saddle} in {@code mount}'s SADDLE slot. */
+    private static void sendSaddle(JavaTickFixture f, int mount, SimItemStack saddle) {
         var packet = new InventoryPackets.Equipment(
-                DONKEY, List.of(new InventoryPackets.EquipmentEntry(EquipmentSlot.SADDLE, saddle)));
+                mount, List.of(new InventoryPackets.EquipmentEntry(EquipmentSlot.SADDLE, saddle)));
         send(f, type(InventoryPackets.Equipment.class), packet);
     }
 
