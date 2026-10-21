@@ -6,10 +6,8 @@ import ac.cult.cultac.protocol.wire.Wire;
 import io.netty.buffer.ByteBuf;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /** One eagerly validated runtime per exact server protocol. */
 public final class ProtocolRuntime {
@@ -22,7 +20,7 @@ public final class ProtocolRuntime {
     /** Each catalog type's slot by {@link PacketType#index()}; -1 for any other type. */
     private final int[] slots;
 
-    private final Set<PacketType<?>> supported;
+    private final boolean[] supported;
     private final int[][] encodeIds;
 
     private ProtocolRuntime(ProtocolData data, List<PacketType<?>> catalog, int commandInputLimit) {
@@ -40,7 +38,7 @@ public final class ProtocolRuntime {
         Map<String, PacketType<?>> keys = new HashMap<>();
         int[] slots = new int[catalog.stream().mapToInt(PacketType::index).max().orElse(-1) + 1];
         Arrays.fill(slots, -1);
-        Set<PacketType<?>> supported = new HashSet<>();
+        boolean[] supported = new boolean[catalog.size()];
         for (int slot = 0; slot < catalog.size(); slot++) {
             PacketType<?> type = catalog.get(slot);
             if (keys.put(type.key(), type) != null
@@ -81,12 +79,12 @@ public final class ProtocolRuntime {
                             slot);
                 }
             }
-            supported.add(type);
+            supported[slot] = true;
         }
         this.byRecord = Map.copyOf(records);
         this.byKey = Map.copyOf(keys);
         this.slots = slots;
-        this.supported = Set.copyOf(supported);
+        this.supported = supported;
         encodeIds = new int[ConnectionPhase.values().length][catalog.size()];
         for (ConnectionPhase phase : ConnectionPhase.values()) {
             for (int slot = 0; slot < catalog.size(); slot++) {
@@ -144,7 +142,8 @@ public final class ProtocolRuntime {
     }
 
     public boolean supports(PacketType<?> type) {
-        return supported.contains(type);
+        int slot = slotOrAbsent(type);
+        return slot >= 0 && supported[slot];
     }
 
     public boolean contains(PacketType<?> type) {
