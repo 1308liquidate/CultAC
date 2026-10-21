@@ -4,6 +4,7 @@ import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.collisions.datatypes.CollisionBoxPool;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.math.CultMath;
@@ -262,6 +263,40 @@ public class CollisionModifier implements UncertaintyHandler {
             JavaCollisionState actor,
             boolean followCandidateVerticalMovement,
             double horizontalInputReach) {
+        CollisionBoxPool pool = CollisionBoxPool.current();
+        int mark = pool.mark();
+        try {
+            return probeCollisions(
+                    player,
+                    context,
+                    minY,
+                    target,
+                    playerPos,
+                    attemptedMovementExtents,
+                    dimensions,
+                    actor,
+                    followCandidateVerticalMovement,
+                    horizontalInputReach,
+                    pool);
+        } finally {
+            probeCollisions.clear();
+            pool.release(mark);
+        }
+    }
+
+    /** Native colliders come from {@code pool}; none of them outlives this call. */
+    private CollideAxisData probeCollisions(
+            CultPlayer player,
+            SimulationContext context,
+            double minY,
+            Vec3 target,
+            Vec3 playerPos,
+            SimpleCollisionBox attemptedMovementExtents,
+            ProbeDimensions dimensions,
+            JavaCollisionState actor,
+            boolean followCandidateVerticalMovement,
+            double horizontalInputReach,
+            CollisionBoxPool pool) {
         // Start with player bounding box
         SimpleCollisionBox grabBoxesBB = context.getFromMaximumExtent();
 
@@ -289,7 +324,7 @@ public class CollisionModifier implements UncertaintyHandler {
 
         List<SimpleCollisionBox> collisions = probeCollisions;
         collisions.clear();
-        Collisions.getCollisionBoxes(player, blockQuery, collisions, false, playerPos.y, actor);
+        Collisions.getCollisionBoxes(player, blockQuery, collisions, false, playerPos.y, actor, pool);
 
         List<SimpleCollisionBox> found = probeUnknown;
         found.clear();

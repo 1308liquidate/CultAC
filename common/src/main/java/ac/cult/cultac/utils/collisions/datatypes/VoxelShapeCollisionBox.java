@@ -9,7 +9,7 @@ import java.util.List;
 /** A Java voxel collider retained through the existing axis/step runner. */
 public final class VoxelShapeCollisionBox extends SimpleCollisionBox {
     private VoxelShape shape;
-    private final boolean fullBlock;
+    private boolean fullBlock;
     private double offsetX, offsetY, offsetZ;
     private boolean translated;
 
@@ -18,6 +18,18 @@ public final class VoxelShapeCollisionBox extends SimpleCollisionBox {
     }
 
     public VoxelShapeCollisionBox(VoxelShape shape, boolean fullBlock) {
+        init(shape, fullBlock);
+    }
+
+    /** Leaves this box as {@code new VoxelShapeCollisionBox(shape, fullBlock)} leaves a new one. */
+    VoxelShapeCollisionBox reset(VoxelShape shape, boolean fullBlock) {
+        offsetX = offsetY = offsetZ = 0;
+        translated = false;
+        init(shape, fullBlock);
+        return this;
+    }
+
+    private void init(VoxelShape shape, boolean fullBlock) {
         this.shape = shape;
         this.fullBlock = fullBlock;
         if (shape.isEmpty()) throw new IllegalArgumentException("Empty voxel collider");

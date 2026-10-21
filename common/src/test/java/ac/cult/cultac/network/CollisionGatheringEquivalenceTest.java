@@ -13,6 +13,7 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.collisions.ReferenceCollisionGathering;
+import ac.cult.cultac.utils.collisions.datatypes.CollisionBoxPool;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
@@ -82,6 +83,23 @@ class CollisionGatheringEquivalenceTest {
                         clip(expected, query, new SplittableRandom(clipSeed)),
                         clip(actual, query, new SplittableRandom(clipSeed)),
                         context);
+                var pool = CollisionBoxPool.current();
+                int mark = pool.mark();
+                try {
+                    var pooled = new ArrayList<SimpleCollisionBox>();
+                    assertEquals(
+                            expectedOutcome,
+                            outcome(() -> Collisions.getCollisionBoxes(
+                                    player, query.copy(), pooled, false, entityBottom, actor, pool)),
+                            context);
+                    assertEquals(describe(expected, query), describe(pooled, query), context);
+                    assertEquals(
+                            clip(expected, query, new SplittableRandom(clipSeed)),
+                            clip(pooled, query, new SplittableRandom(clipSeed)),
+                            context);
+                } finally {
+                    pool.release(mark);
+                }
                 assertEquals(
                         outcome(() -> ReferenceCollisionGathering.getCollisionBoxes(
                                 player, query.copy(), null, true, entityBottom, actor)),
@@ -129,6 +147,7 @@ class CollisionGatheringEquivalenceTest {
                         player, box.copy(), dx, dy, dz, order, false, List.of(), onGround);
                 assertEquals(bits(expectedStepped), bits(comparison.movement()), context);
                 assertEquals(bits(expectedWithoutStep), bits(comparison.withoutStep()), context);
+                assertEquals(0, CollisionBoxPool.current().mark(), context);
                 if (!bits(expectedStepped).equals(bits(expectedWithoutStep))) stepped++;
             }
             assertTrue(stepped > 100, "too few queries stepped: " + stepped);
