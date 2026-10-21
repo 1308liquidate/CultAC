@@ -62,13 +62,18 @@ final class ReportedKeyInput {
         float[] speeds = new float[sprint.length + 1];
         speeds[0] = walk;
         System.arraycopy(sprint, 0, speeds, 1, sprint.length);
+        // LocalPlayer#modifyInput's item multiplier is the legal one, the required one of a use the client owes, or
+        // that of a use it may have started: Minecraft#tick runs handleKeybinds, whose startUseItem precedes the
+        // tick's LocalPlayer#aiStep, so a use slows the tick that sends its USE_ITEM.
+        float[] itemUses = {use.legalMultiplier(), use.requiredMultiplier(), use.slowestMultiplier()};
         double best = Double.MAX_VALUE;
-        for (float speed : speeds) {
-            // LocalPlayer#modifyInput's item multiplier is the legal one, the required one of a use the client owes, or
-            // that of a use it may have started: Minecraft#tick runs handleKeybinds, whose startUseItem precedes the
-            // tick's LocalPlayer#aiStep, so a use slows the tick that sends its USE_ITEM.
-            for (float itemUse :
-                    new float[] {use.legalMultiplier(), use.requiredMultiplier(), use.slowestMultiplier()}) {
+        for (int s = 0; s < speeds.length; s++) {
+            float speed = speeds[s];
+            // A repeated speed or multiplier gives the same input and offset as its first occurrence.
+            if (repeats(speeds, s)) continue;
+            for (int u = 0; u < itemUses.length; u++) {
+                float itemUse = itemUses[u];
+                if (repeats(itemUses, u)) continue;
                 Vec3 input = ClientKeyInput.travelInput(player, context, keys, itemUse, slow, speed);
                 if (input == null) return 0.0D;
                 best = Math.min(best, offset(player, result, extents, input));
@@ -76,6 +81,12 @@ final class ReportedKeyInput {
             }
         }
         return best;
+    }
+
+    private static boolean repeats(float[] values, int index) {
+        int bits = Float.floatToRawIntBits(values[index]);
+        for (int i = 0; i < index; i++) if (Float.floatToRawIntBits(values[i]) == bits) return true;
+        return false;
     }
 
     private static double offset(CultPlayer player, PredictionResult result, SimpleCollisionBox extents, Vec3 input) {
