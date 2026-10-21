@@ -721,9 +721,11 @@ public class PacketEntity {
     }
 
     protected void carryInterpolationTargetByLocalPhysics(CultPlayer player, ReachInterpolationData interpolationData) {
+        // Only an interpolating entity carries local movement into its target.
         if (interpolationData == null
                 || !interpolationData.hasActiveInterpolationTarget()
-                || !hasUsableMountedPhysicalPosition(player)) {
+                || !hasUsableMountedPhysicalPosition(player)
+                || placedAtPacketPosition(player)) {
             return;
         }
 
