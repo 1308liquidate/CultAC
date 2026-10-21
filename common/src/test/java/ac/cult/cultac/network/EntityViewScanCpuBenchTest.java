@@ -191,9 +191,29 @@ class EntityViewScanCpuBenchTest {
                 entities.removeEntity(churnId);
                 tick.run();
             };
-            String[] names = {"unknown", "numColliding", "recount", "pose", "vehiclePush", "tick", "tick+churn/2"};
-            Tick[] ticks = {unknown, numColliding, recount, pose, vehiclePush, tick, churnTick};
-            int[] perRun = {1, 1, 1, 1, 1, 1, 2};
+            int itemId = churnId + 1;
+            int itemType = EntityTypes.defaults().byKey("item").id();
+            // Items are never tracked, so their spawn and despawn leave entityMap as it was.
+            Tick itemTick = () -> {
+                entities.addEntity(itemId, itemType, churnPos, 0, 0, 0);
+                entities.removeEntity(itemId);
+                tick.run();
+            };
+            Object[] sink = new Object[1];
+            Tick trackedWalk = () -> entities.forEachTrackedEntity(entity -> sink[0] = entity);
+            String[] names = {
+                "unknown",
+                "numColliding",
+                "recount",
+                "pose",
+                "vehiclePush",
+                "tick",
+                "tick+churn/2",
+                "tick+item",
+                "trackedWalk"
+            };
+            Tick[] ticks = {unknown, numColliding, recount, pose, vehiclePush, tick, churnTick, itemTick, trackedWalk};
+            int[] perRun = {1, 1, 1, 1, 1, 1, 2, 1, 1};
             for (Tick t : ticks) for (int i = 0; i < WARMUP_TICKS; i++) t.run();
             ThreadMXBean bean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
             double[][] cpu = new double[ticks.length][REPS];
