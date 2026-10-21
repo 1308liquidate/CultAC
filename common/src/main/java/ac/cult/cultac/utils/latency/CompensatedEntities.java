@@ -252,7 +252,26 @@ public class CompensatedEntities {
         seat.minZ -= spreadZ;
         seat.maxZ += spreadZ;
         seat.maxY += spreadY;
+        seat.minY -= posedSeatDrop(rider);
         return seat;
+    }
+
+    // Avatar#POSES lowers a posed avatar's passenger point, which falls back to its current height.
+    private double posedSeatDrop(PacketEntity rider) {
+        double drop = 0.0D;
+        PacketEntity entity = rider;
+        for (int hops = 0; hops <= entityMap.size(); hops++) {
+            PacketEntity vehicle = entity.getRiding();
+            if (vehicle == null) break;
+            if (vehicle.isAvatar()) {
+                drop += Math.max(
+                        0.0F,
+                        PacketEntity.avatarHeight(EntityPose.STANDING, vehicle.scale) - vehicle.leastPoseHeight());
+            }
+            if (!isUntrackedRider(vehicle)) break;
+            entity = vehicle;
+        }
+        return drop;
     }
 
     // The seat box positionPassenger would give rider, with every untracked vehicle above it seated the same way.

@@ -20,6 +20,7 @@ import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRemoveEntities;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.EntityPose;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
@@ -520,6 +521,34 @@ class JavaEntityPushTest {
             PredictionResult next = f.tick(START.add(0, FIRST_FALL + SECOND_FALL, 2 * PUSH), false);
             assertEquals(2, next.getSimulationContext().getWorldData().getNumPushing());
             assertExact(next);
+        }
+    }
+
+    /** Avatar#POSES: a swimming player is 0.6 tall, so its hat sits 0.6 above its feet. */
+    @Test
+    void aLivingRiderOfASwimmingPlayerPushesFromItsLoweredSeat() throws Exception {
+        assertVehicleAndRiderPush(EntityPose.SWIMMING, 0.5);
+    }
+
+    /** Avatar#POSES: a crouching player is 1.5 tall, so its hat sits 1.5 above its feet. */
+    @Test
+    void aLivingRiderOfACrouchingPlayerPushesFromItsLoweredSeat() throws Exception {
+        assertVehicleAndRiderPush(EntityPose.CROUCHING, 0.29);
+    }
+
+    private static void assertVehicleAndRiderPush(EntityPose pose, double aboveContact) throws Exception {
+        try (var f = falling()) {
+            f.player.compensatedEntities.addEntity(
+                    100, EntityTypeIds.PLAYER, TOUCHING.add(0, CONTACT.y - TOUCHING.y + aboveContact, 0), 0, 0, 0);
+            PacketEntity vehicle = f.player.compensatedEntities.entityMap.get(100);
+            vehicle.onPose(pose, Integer.MIN_VALUE);
+            vehicle.onSizeHandled(Integer.MAX_VALUE);
+            seatSlime(f, vehicle);
+
+            PredictionResult contact = f.tick(CONTACT, false);
+            assertExact(contact);
+            assertEquals(2, contact.getSimulationContext().getWorldData().getNumCollidingTickingAfterPlayer());
+            assertExact(f.tick(START.add(0, FIRST_FALL + SECOND_FALL, 2 * PUSH), false));
         }
     }
 
