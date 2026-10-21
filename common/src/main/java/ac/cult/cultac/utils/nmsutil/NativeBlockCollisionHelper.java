@@ -79,6 +79,38 @@ public final class NativeBlockCollisionHelper {
                 result.add(SimpleCollisionBox.between(minX, minY, minZ, maxX, maxY, maxZ));
             return;
         }
+        var boxes = !player.isBedrockMovement()
+                        && query.getClass() == SimpleCollisionBox.class
+                        && shape.hasFiniteCoordinates()
+                ? ClientShapeBoxes.cached(shape)
+                : null;
+        if (boxes != null) {
+            // The boxes VoxelShapeCollisionBox.downCast emits for a translated cached shape.
+            for (int i = 0; i < boxes.size(); i++) {
+                var box = boxes.get(i);
+                double x1 = box.minX() + x, y1 = box.minY() + y, z1 = box.minZ() + z;
+                double x2 = box.maxX() + x, y2 = box.maxY() + y, z2 = box.maxZ() + z;
+                if (Math.max(x1, x2) - SimpleCollisionBox.COLLISION_EPSILON > query.minX
+                        && Math.min(x1, x2) + SimpleCollisionBox.COLLISION_EPSILON < query.maxX
+                        && Math.max(y1, y2) - SimpleCollisionBox.COLLISION_EPSILON > query.minY
+                        && Math.min(y1, y2) + SimpleCollisionBox.COLLISION_EPSILON < query.maxY
+                        && Math.max(z1, z2) - SimpleCollisionBox.COLLISION_EPSILON > query.minZ
+                        && Math.min(z1, z2) + SimpleCollisionBox.COLLISION_EPSILON < query.maxZ) {
+                    for (int j = 0; j < boxes.size(); j++) {
+                        var part = boxes.get(j);
+                        result.add(SimpleCollisionBox.between(
+                                part.minX() + x,
+                                part.minY() + y,
+                                part.minZ() + z,
+                                part.maxX() + x,
+                                part.maxY() + y,
+                                part.maxZ() + z));
+                    }
+                    return;
+                }
+            }
+            return;
+        }
         addIfAnyIntersects(collider(player, shape, x, y, z), query, scratch, result);
     }
 

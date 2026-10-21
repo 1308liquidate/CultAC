@@ -7,12 +7,14 @@ import ac.cult.blocksim.data.StateFacts;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.blockplace.ClientEntityQueries;
 import ac.cult.cultac.utils.collisions.ClientBlockShapes;
+import ac.cult.cultac.utils.collisions.datatypes.CollisionBox;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
 import ac.cult.cultac.utils.nmsutil.NativeBlockCollisionHelper;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /** LocalPlayer#updateAutoJump's ordered CollisionGetter/BlockCollisions look-ahead queries. */
 final class JavaAutoJumpGeometry {
@@ -72,12 +74,15 @@ final class JavaAutoJumpGeometry {
                         resolvedDirect = true;
                     }
                     var actor = BlockIds.is(state, BlockIds.POWDER_SNOW) ? JavaCollisionState.current(player) : null;
-                    if (direct)
+                    var alternative = direct
+                            ? Optional.<CollisionBox>empty()
+                            : ClientBlockShapes.movementAlternative(player, state, x, y, z, player.y);
+                    if (alternative.isEmpty())
                         NativeBlockCollisionHelper.addIfAnyIntersects(
                                 player, state, x, y, z, player.y, actor, query, boxes, result);
                     else
                         NativeBlockCollisionHelper.addIfAnyIntersects(
-                                ClientBlockShapes.movement(player, state, x, y, z, player.y, actor),
+                                ClientBlockShapes.movement(player, state, x, y, z, player.y, actor, alternative),
                                 query,
                                 boxes,
                                 result);
