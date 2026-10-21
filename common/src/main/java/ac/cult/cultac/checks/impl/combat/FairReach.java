@@ -315,8 +315,11 @@ public class FairReach extends Check implements CheckListener {
 
         private void tick() {
             if (lerpTicks > 0) {
-                currentPosition = currentPosition.add(
-                        targetPosition.subtract(currentPosition).scale(1d / lerpTicks));
+                double scale = 1d / lerpTicks;
+                currentPosition = new Vec3(
+                        currentPosition.x + (targetPosition.x - currentPosition.x) * scale,
+                        currentPosition.y + (targetPosition.y - currentPosition.y) * scale,
+                        currentPosition.z + (targetPosition.z - currentPosition.z) * scale);
                 lerpTicks--;
             }
         }
