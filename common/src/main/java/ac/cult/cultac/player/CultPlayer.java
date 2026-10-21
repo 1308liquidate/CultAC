@@ -59,7 +59,6 @@ import ac.cult.cultac.utils.latency.CompensatedInventory;
 import ac.cult.cultac.utils.latency.CompensatedWorld;
 import ac.cult.cultac.utils.latency.KeepAliveProcessor;
 import ac.cult.cultac.utils.latency.LatencyUtils;
-import ac.cult.cultac.utils.lists.EvictingQueue;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.TrigHandler;
 import ac.cult.cultac.utils.math.Vec3;
@@ -635,7 +634,6 @@ public class CultPlayer implements GrimUser {
             transactionIdsSent.remove(current.id());
             lastTransactionReceived.set(current.transaction());
             rawTransactionPing = System.nanoTime() - current.sentAt();
-            transPings.add(rawTransactionPing);
             playerClockAtLeast = current.sentAt();
             if (usesModernJavaItemUse()) itemUseBurst.acknowledge(current.transaction());
             if (current instanceof BedrockTransaction bedrock) {
@@ -659,9 +657,6 @@ public class CultPlayer implements GrimUser {
         lastCheckedFlying = now;
         compensatedWorld.removeInvalidPistonLikeStuff(lastTransactionReceived.get());
     }
-
-    @Getter
-    private final @NotNull EvictingQueue<@NotNull Long> transPings = new EvictingQueue<>(60);
 
     public float getMaxUpStep() {
         PacketEntity riding = compensatedEntities.getSelf().getRiding();
