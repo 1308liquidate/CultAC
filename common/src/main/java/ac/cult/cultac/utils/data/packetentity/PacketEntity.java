@@ -354,8 +354,12 @@ public class PacketEntity {
                             newPacketLocation.hasActiveInterpolationTarget()
                                     ? newPacketLocation.targetPosition()
                                     : clientPhysicalPosition);
-            oldPacketLocation = bundled ? null : newPacketLocation;
-            newPacketLocation = newPacketLocation.copy();
+            if (bundled) {
+                oldPacketLocation = null;
+            } else {
+                oldPacketLocation = newPacketLocation;
+                newPacketLocation = newPacketLocation.copy();
+            }
             // Starting/appending an interpolation records the entity's physical transform,
             // including its current passenger attachment, as the next delta reference.
             newPacketLocation.setPhysicalBeforePathAppend(
