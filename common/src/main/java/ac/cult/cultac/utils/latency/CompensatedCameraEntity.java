@@ -38,6 +38,7 @@ public class CompensatedCameraEntity extends Check {
 
     public boolean isSelf() {
         PacketEntity self = player.compensatedEntities.getSelf();
+        if (entities.size() == 1) return entities.peekFirst() == self;
         for (PacketEntity entity : entities) {
             if (entity != self) {
                 return false;
