@@ -7,10 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
+import ac.cult.blocksim.data.DataTables;
 import ac.cult.cultac.checks.impl.prediction.OffsetHandler;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
 import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
+import ac.cult.cultac.network.protocol.ClientVersion;
+import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
@@ -165,6 +168,33 @@ class InputKeysTest {
     }
 
     @Test
+    void knockedUpAgainstASlabUnderALedgeIsNotFlagged() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            var registry = DataTables.defaults().registry();
+            int slab = registry.with(registry.block("minecraft:stone_slab").defaultState(), "type", "bottom");
+            f.player.compensatedWorld.updateBlock(new BlockPos(1, FLOOR_Y, 0), slab);
+            // The cake's face, 1/16 past the slab's, stops the box once the step has lifted it onto the slab.
+            f.player.compensatedWorld.updateBlock(
+                    new BlockPos(1, FLOOR_Y + 1, 0),
+                    registry.block("minecraft:cake").defaultState());
+            for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
+            // The box's side touches the slab.
+            double x = 1.0 - 0.3F;
+            f.place(new Vec3(x, FLOOR_Y, 0.5), GROUNDED);
+            // Only a respawn writes the player's lastOnGround.
+            f.player.lastOnGround = false;
+            var keys = new ServerboundPlayerInput(true, false, true, false, false, false, false);
+            f.input(keys);
+            // Without the knockback the keys alone step to the same height; its z tells the two apart.
+            f.pongThrough(f.velocity(new Vec3(0, 0.4, 0.2)));
+            Vec3 input = ClientMoveInput.of(f, keys, 1.0F, 0.1F, 0.0F);
+            assertExact(f.tick(new Vec3(1.0625 - 0.3F, FLOOR_Y + 0.5, 0.5 + 0.2 + input.z), false));
+
+            assertNoFlags(f);
+        }
+    }
+
+    @Test
     void sprintingIsNotFlagged() throws Exception {
         try (var f = new JavaTickFixture()) {
             f.place(new Vec3(0.5, FLOOR_Y, -4.5), GROUNDED);
@@ -204,6 +234,32 @@ class InputKeysTest {
                 z += velocity - slowed;
                 assertExact(f.tick(new Vec3(0.5, FLOOR_Y, z), true));
                 velocity = (velocity - slowed) * FRICTION;
+            }
+
+            assertNoFlags(f);
+        }
+    }
+
+    @Test
+    void walkingAt1214IgnoresTheServersPowderSnowModifier() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            JavaTickFixture.setField(CultPlayer.class, f.player, "resolvedClientVersion", ClientVersion.V_1_21_4);
+            f.place(new Vec3(0.5, FLOOR_Y, 4.5), GROUNDED);
+            // Before 1.21.5 LivingEntity#aiStep runs removeFrost on the client, which drops the server's modifier.
+            f.player.compensatedEntities.updateAttributes(
+                    f.player.entityID,
+                    List.of(new AttributeSnapshot(
+                            "minecraft:movement_speed",
+                            0.1F,
+                            List.of(new AttributeModifier(
+                                    "minecraft:powder_snow", -0.02D, AttributeModifier.Operation.ADD_VALUE)))));
+            f.input(BACK);
+            double z = 4.5;
+            double velocity = 0.0;
+            for (int tick = 0; tick < 3; tick++) {
+                z += velocity - WALK;
+                assertExact(f.tick(new Vec3(0.5, FLOOR_Y, z), true));
+                velocity = (velocity - WALK) * FRICTION;
             }
 
             assertNoFlags(f);

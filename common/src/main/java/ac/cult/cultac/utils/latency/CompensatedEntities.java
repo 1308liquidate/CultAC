@@ -306,6 +306,15 @@ public class CompensatedEntities {
         return root;
     }
 
+    /** Whether {@code entity} rides {@code vehicle} directly or through other vehicles; a riding cycle ends the walk. */
+    public boolean ridesIndirectly(PacketEntity entity, PacketEntity vehicle) {
+        PacketEntity riding = entity.getRiding();
+        for (int hops = 0; riding != null && hops <= entityMap.size(); hops++, riding = riding.getRiding()) {
+            if (riding == vehicle) return true;
+        }
+        return false;
+    }
+
     // TODO: This doesn't belong here at all
     public double getPlayerMovementSpeed() {
         double speed = player.compensatedEntities.getSelf().playerSpeed;

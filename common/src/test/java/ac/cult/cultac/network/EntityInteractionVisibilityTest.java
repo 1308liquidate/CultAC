@@ -49,6 +49,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -469,6 +470,38 @@ class EntityInteractionVisibilityTest {
             assertEquals(0, setup.check.violations);
             assertEquals("InteractEntityVisibility", setup.check.getConfigName());
             assertEquals("cult.interact.entity.visibility", setup.check.getStableKey());
+        }
+    }
+
+    @Test
+    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void aPassengerListClosingARidingCycleIsRefused() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3)) {
+            // Entity#startRiding refuses a vehicle that rides the passenger, so boat 41 stays the root.
+            setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
+            setup.entity(43, EntityTypeIds.OAK_BOAT, 3.7);
+            var entities = setup.player.compensatedEntities;
+            assertTrue(entities.vehicles.applyVehiclePassengers(41, new int[] {43}));
+            assertTrue(entities.vehicles.applyVehiclePassengers(43, new int[] {41}));
+            assertSame(entities.getEntity(41), entities.getEntity(43).getRiding());
+            assertNull(entities.getEntity(41).getRiding());
+            assertTrue(entities.getEntity(43).passengers.isEmpty());
+        }
+    }
+
+    @Test
+    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void aRidingCycleAboveTheLocalPlayerEndsTheIndirectRidingWalk() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_3)) {
+            setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
+            setup.entity(43, EntityTypeIds.OAK_BOAT, 3.7);
+            setup.entity(44, EntityTypeIds.OAK_BOAT, 3.7);
+            var entities = setup.player.compensatedEntities;
+            entities.getSelf().mount(entities.getEntity(41));
+            entities.getEntity(43).mount(entities.getEntity(41));
+            entities.getEntity(41).mount(entities.getEntity(43));
+            assertTrue(entities.ridesIndirectly(entities.getSelf(), entities.getEntity(43)));
+            assertFalse(entities.ridesIndirectly(entities.getSelf(), entities.getEntity(44)));
         }
     }
 

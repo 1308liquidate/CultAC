@@ -1265,12 +1265,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
 
     // Entity#hasIndirectPassenger for the local player.
     private boolean ridesIndirectly(PacketEntity vehicle) {
-        for (PacketEntity riding = player.compensatedEntities.getSelf().getRiding();
-                riding != null;
-                riding = riding.getRiding()) {
-            if (riding == vehicle) return true;
-        }
-        return false;
+        return player.compensatedEntities.ridesIndirectly(player.compensatedEntities.getSelf(), vehicle);
     }
 
     private int transactionForSetPassengers(

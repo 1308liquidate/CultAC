@@ -92,7 +92,8 @@ final class ReportedKeyInput {
         SimulationContext context = result.getSimulationContext();
         PredVector start = result.getInitialStartingVel();
         SimpleCollisionBox box = context.getFromActualPose();
-        Vec3 movement = Collisions.collide(player, box, deltaX, start.y, deltaZ);
+        // Entity#collide steps from Entity#onGround, which appliesTo requires at the tick's start.
+        Vec3 movement = Collisions.collide(player, box, deltaX, start.y, deltaZ, true);
         offset = Math.min(offset, Math.hypot(movement.x - target.x, movement.z - target.z));
         if (offset <= HorizontalAnalyzer.HORIZONTAL_INPUT_UNCERTAINTY) return offset;
 
