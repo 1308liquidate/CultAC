@@ -84,8 +84,15 @@ public class FairReach extends Check implements CheckListener {
         }
     }
 
-    public void handleEntityMove(int entityId, double x, double y, double z) {
-        schedule(new PendingMove(entityId, x, y, z, false));
+    /** The packet that moved an entity; a teleport and a position sync snap past 64 blocks instead of lerping. */
+    public enum PositionUpdate {
+        RELATIVE,
+        TELEPORT,
+        POSITION_SYNC
+    }
+
+    public void handleEntityMove(int entityId, double x, double y, double z, PositionUpdate update) {
+        schedule(new PendingMove(entityId, x, y, z, update, false));
     }
 
     /**
@@ -99,7 +106,7 @@ public class FairReach extends Check implements CheckListener {
         if (version.isNewerThanOrEquals(ClientVersion.V_1_21_9) && !rotationChanged) return;
         boolean holdsShownPosition =
                 version.isNewerThanOrEquals(ClientVersion.V_1_21_5) && version.isOlderThan(ClientVersion.V_1_21_9);
-        schedule(new PendingMove(entityId, x, y, z, holdsShownPosition));
+        schedule(new PendingMove(entityId, x, y, z, PositionUpdate.RELATIVE, holdsShownPosition));
     }
 
     private void schedule(PendingMove move) {
@@ -114,19 +121,22 @@ public class FairReach extends Check implements CheckListener {
         private final double x;
         private final double y;
         private final double z;
+        private final PositionUpdate update;
         private final boolean holdsShownPosition;
 
-        private PendingMove(int entityId, double x, double y, double z, boolean holdsShownPosition) {
+        private PendingMove(
+                int entityId, double x, double y, double z, PositionUpdate update, boolean holdsShownPosition) {
             this.entityId = entityId;
             this.x = x;
             this.y = y;
             this.z = z;
+            this.update = update;
             this.holdsShownPosition = holdsShownPosition;
         }
 
         @Override
         public void run() {
-            applyChanges(entityId, x, y, z, holdsShownPosition, this);
+            applyChanges(entityId, x, y, z, update, holdsShownPosition, this);
         }
     }
 
@@ -216,7 +226,13 @@ public class FairReach extends Check implements CheckListener {
     }
 
     private void applyChanges(
-            int entityId, double x, double y, double z, boolean holdsShownPosition, AtomicBoolean hasAppliedChanges) {
+            int entityId,
+            double x,
+            double y,
+            double z,
+            PositionUpdate update,
+            boolean holdsShownPosition,
+            AtomicBoolean hasAppliedChanges) {
         if (hasAppliedChanges.getAndSet(true)) return;
 
         FairReachEntity target = targetPlayers.get(entityId);
@@ -224,9 +240,22 @@ public class FairReach extends Check implements CheckListener {
         if (holdsShownPosition) {
             Vec3 shown = target.currentPosition;
             target.setTarget(shown.x, shown.y, shown.z);
+        } else if (snaps(target, update, x, y, z)) {
+            target.snapTo(x, y, z);
         } else {
             target.setTarget(x, y, z);
         }
+    }
+
+    /**
+     * ClientPacketListener#setValuesFromPositionPacket measures a teleport from the lerp target while one is active,
+     * on every version; #handleEntityPositionSync measures from the shown position.
+     */
+    private boolean snaps(FairReachEntity target, PositionUpdate update, double x, double y, double z) {
+        if (update == PositionUpdate.RELATIVE) return false;
+        boolean fromLerpTarget = update == PositionUpdate.TELEPORT && target.lerpTicks > 0;
+        Vec3 from = fromLerpTarget ? target.targetPosition : target.currentPosition;
+        return from.distanceToSqr(x, y, z) > 4096.0;
     }
 
     /** A replacement client level holds none of the old level's players. */
@@ -276,6 +305,12 @@ public class FairReach extends Check implements CheckListener {
         private void setTarget(double x, double y, double z) {
             this.targetPosition = new Vec3(x, y, z);
             this.lerpTicks = 3;
+        }
+
+        private void snapTo(double x, double y, double z) {
+            this.currentPosition = new Vec3(x, y, z);
+            this.targetPosition = currentPosition;
+            this.lerpTicks = 0;
         }
 
         private void tick() {

@@ -2,6 +2,7 @@ package ac.cult.cultac.network;
 
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -265,6 +266,225 @@ class EntityCodecBaseTest {
             fairReach.onInteract(event, f.player, attack);
             assertEquals(expected == kept, event.isCancelled(), "attack cancelled at x " + expected);
         }
+    }
+
+    @ParameterizedTest
+    @EnumSource(Version.class)
+    void aRotationDuringATeleportLerpRetimesItLikeTheClient(Version version) throws Exception {
+        for (boolean delimiter : new boolean[] {false, true}) {
+            for (int before = 0; before <= 2; before++) {
+                for (boolean changed : new boolean[] {false, true}) {
+                    try (var f = fixture(version, new Vec3(0.5, FLOOR_Y, 0.5))) {
+                        JavaTickFixture.setField(
+                                PacketEntityReplication.class,
+                                f.player.packetEntityReplication,
+                                "useReachBundleDelimiter",
+                                delimiter);
+                        FairReach fairReach = spawnPlayer(f, new Vec3d(0.5, FLOOR_Y, 1.5));
+                        Object target = fairReachEntity(fairReach);
+                        teleport(f, new Vec3d(6, FLOOR_Y, 1.5));
+                        for (int i = 0; i < before; i++) tick(target);
+                        double shown = 0.5 + 5.5 * before / 3.0;
+                        assertEquals(shown, ((Vec3) field(target, "currentPosition")).x, 1e-12);
+
+                        rotate(f, changed ? 90 : 0, changed ? 30 : 0);
+                        TrackerData tracked = f.player.compensatedEntities.getTrackedEntity(ENTITY);
+                        assertEquals(6, tracked.getX(), 1e-12, "tracked x");
+                        assertEquals(0.5, tracked.getCodecBaseX(), 1e-12, "codec base x");
+                        boolean holds = switch (version) {
+                            case V_1_21_5, V_1_21_6, V_1_21_7 -> true;
+                            default -> false;
+                        };
+                        boolean restarts = switch (version) {
+                            case V_1_21_2, V_1_21_4 -> true;
+                            case V_1_21_9, V_1_21_11, V_26_1, V_26_2 -> changed;
+                            default -> false;
+                        };
+                        assertEquals(holds ? shown : 6, ((Vec3) field(target, "targetPosition")).x, 1e-12);
+                        tick(target);
+                        double expected = holds ? shown : shown + (6 - shown) / (restarts ? 3 : 3 - before);
+                        assertEquals(expected, ((Vec3) field(target, "currentPosition")).x, 1e-12, "shown x");
+                        if (version != Version.V_26_3) {
+                            assertEquals(expected > 3.8, attackCancelled(f, fairReach), "attack at x " + expected);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ClientPacketListener#setValuesFromPositionPacket: a teleport past 64 blocks sets the position outright.
+    @ParameterizedTest
+    @EnumSource(Version.class)
+    void aRotationAfterASnappingTeleportHoldsTheSnappedPosition(Version version) throws Exception {
+        try (var f = fixture(version, new Vec3(0.5, FLOOR_Y, 0.5))) {
+            FairReach fairReach = spawnPlayer(f, new Vec3d(100.5, FLOOR_Y, 1.5));
+            Object target = fairReachEntity(fairReach);
+            teleport(f, new Vec3d(0.5, FLOOR_Y, 1.5));
+            tick(target);
+            rotate(f, 90, 30);
+            for (int i = 0; i < 4; i++) tick(target);
+            assertEquals(0.5, ((Vec3) field(target, "currentPosition")).x, 1e-12, "shown x");
+            assertFalse(attackCancelled(f, fairReach), "attack on the snapped player");
+        }
+    }
+
+    // ClientPacketListener#handleEntityPositionSync: a sync past 64 blocks from the shown position snaps there.
+    @ParameterizedTest
+    @EnumSource(Version.class)
+    void rotationsAfterASnappingPositionSyncHoldTheSnappedPosition(Version version) throws Exception {
+        try (var f = fixture(version, new Vec3(0.5, FLOOR_Y, 0.5))) {
+            FairReach fairReach = spawnPlayer(f, new Vec3d(100.5, FLOOR_Y, 1.5));
+            Object target = fairReachEntity(fairReach);
+            positionSync(f, new Vec3d(0.5, FLOOR_Y, 1.5));
+            tick(target);
+            rotate(f, 90, 30);
+            for (int i = 0; i < 20; i++) {
+                tick(target);
+                rotate(f, 90 + i, 30);
+            }
+            assertEquals(0.5, ((Vec3) field(target, "currentPosition")).x, 1e-12, "shown x");
+            assertFalse(attackCancelled(f, fairReach), "attack on the snapped player");
+        }
+    }
+
+    // ServerEntity#sendChanges follows a long teleport with a position sync from its stale codec base.
+    @ParameterizedTest
+    @EnumSource(Version.class)
+    void aRotationAfterASnappingTeleportAndItsSyncHoldsTheSnappedPosition(Version version) throws Exception {
+        try (var f = fixture(version, new Vec3(0.5, FLOOR_Y, 0.5))) {
+            FairReach fairReach = spawnPlayer(f, new Vec3d(100.5, FLOOR_Y, 1.5));
+            Object target = fairReachEntity(fairReach);
+            teleport(f, new Vec3d(0.5, FLOOR_Y, 1.5));
+            tick(target);
+            tick(target);
+            positionSync(f, new Vec3d(0.5, FLOOR_Y, 1.5));
+            tick(target);
+            tick(target);
+            rotate(f, 90, 30);
+            for (int i = 0; i < 6; i++) tick(target);
+            assertEquals(0.5, ((Vec3) field(target, "currentPosition")).x, 1e-12, "shown x");
+            assertFalse(attackCancelled(f, fairReach), "attack on the snapped player");
+        }
+    }
+
+    // PositionMoveRotation#of and #ofEntityUsingLerpTarget: a teleport is measured from the active lerp target.
+    @ParameterizedTest
+    @EnumSource(Version.class)
+    void aTeleportFarFromTheLerpTargetSnaps(Version version) throws Exception {
+        try (var f = fixture(version, new Vec3(0.5, FLOOR_Y, 0.5))) {
+            FairReach fairReach = spawnPlayer(f, new Vec3d(64, FLOOR_Y, 1.5));
+            walkThenTeleport(f, fairReach);
+            assertEquals(0.5, ((Vec3) field(fairReachEntity(fairReach), "currentPosition")).x, 1e-9, "shown x");
+            assertFalse(attackCancelled(f, fairReach), "attack on the teleported player");
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(Version.class)
+    void aRotationAfterATeleportFarFromTheLerpTargetHoldsTheSnappedPosition(Version version) throws Exception {
+        try (var f = fixture(version, new Vec3(0.5, FLOOR_Y, 0.5))) {
+            FairReach fairReach = spawnPlayer(f, new Vec3d(64, FLOOR_Y, 1.5));
+            Object target = walkThenTeleport(f, fairReach);
+            tick(target);
+            rotate(f, 90, 30);
+            for (int i = 0; i < 6; i++) tick(target);
+            double x = ((Vec3) field(target, "currentPosition")).x;
+            assertTrue(Math.abs(x - 0.5) < 1.0, "shown x " + x);
+            assertFalse(attackCancelled(f, fairReach), "attack at x " + x);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(Version.class)
+    void aRotationAfterATeleportFarFromTheLerpTargetAndItsSyncHoldsTheSnappedPosition(Version version)
+            throws Exception {
+        try (var f = fixture(version, new Vec3(0.5, FLOOR_Y, 0.5))) {
+            FairReach fairReach = spawnPlayer(f, new Vec3d(64, FLOOR_Y, 1.5));
+            Object target = walkThenTeleport(f, fairReach);
+            tick(target);
+            positionSync(f, new Vec3d(0.5, FLOOR_Y, 1.5));
+            tick(target);
+            rotate(f, 90, 30);
+            for (int i = 0; i < 6; i++) tick(target);
+            double x = ((Vec3) field(target, "currentPosition")).x;
+            assertTrue(Math.abs(x - 0.5) < 1.0, "shown x " + x);
+            assertFalse(attackCancelled(f, fairReach), "attack at x " + x);
+        }
+    }
+
+    /**
+     * Walks 0.75 along x from x=64 (target 64.75, shown 64.25 after one tick), then teleports to x=0.5: 64.25 blocks
+     * from the lerp target and 63.75 from the shown position.
+     */
+    private static Object walkThenTeleport(JavaTickFixture f, FairReach fairReach) throws Exception {
+        Object target = fairReachEntity(fairReach);
+        sendAcknowledged(
+                f,
+                ClientboundPackets.MOVE_ENTITY,
+                new ClientboundMoveEntity(
+                        ENTITY, new EntityDelta.Linear((short) 3072, (short) 0, (short) 0), 0, 0, true, true, false),
+                (r, e) -> r.onMoveEntity(e, f.player, e.getPacket()));
+        assertEquals(64.75, ((Vec3) field(target, "targetPosition")).x, 1e-12, "walk target");
+        tick(target);
+        assertEquals(64.25, ((Vec3) field(target, "currentPosition")).x, 1e-12, "walk shown");
+        teleport(f, new Vec3d(0.5, FLOOR_Y, 1.5));
+        return target;
+    }
+
+    private static FairReach spawnPlayer(JavaTickFixture f, Vec3d at) {
+        spawn(f, "minecraft:player", at);
+        FairReach fairReach = f.player.checkManager.getListener(FairReach.class);
+        var spawn = new ClientboundAddEntity(ENTITY, "minecraft:player", at, 0, 0, 0);
+        fairReach.onAddEntity(
+                new PacketSendEvent<>(
+                        f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ADD_ENTITY, spawn, false),
+                f.player,
+                spawn);
+        return fairReach;
+    }
+
+    /** Sends a packet through replication and answers the transaction that carries FairReach's update. */
+    private static <T extends ClientboundPacket> void sendAcknowledged(
+            JavaTickFixture f,
+            PacketType<T> type,
+            T packet,
+            BiConsumer<PacketEntityReplication, PacketSendEvent<T>> handler) {
+        send(f, type, packet, handler);
+        f.player.sendTransaction();
+        f.pongThrough(f.player.lastTransactionSent.get());
+    }
+
+    private static void teleport(JavaTickFixture f, Vec3d to) {
+        sendAcknowledged(
+                f,
+                ClientboundPackets.TELEPORT_ENTITY,
+                new ClientboundTeleportEntity(ENTITY, to, Vec3d.ZERO, 0, 0, Set.of(), true),
+                (r, e) -> r.onTeleportEntity(e, f.player, e.getPacket()));
+    }
+
+    private static void positionSync(JavaTickFixture f, Vec3d to) {
+        sendAcknowledged(
+                f,
+                ClientboundPackets.ENTITY_POSITION_SYNC,
+                new ClientboundEntityPositionSync(ENTITY, new PositionPath.Linear(to), 0, 0, true),
+                (r, e) -> r.onEntityPositionSync(e, f.player, e.getPacket()));
+    }
+
+    private static void rotate(JavaTickFixture f, float yaw, float pitch) {
+        sendAcknowledged(
+                f,
+                ClientboundPackets.MOVE_ENTITY,
+                new ClientboundMoveEntity(
+                        ENTITY, new EntityDelta.Linear((short) 0, (short) 0, (short) 0), yaw, pitch, true, false, true),
+                (r, e) -> r.onMoveEntity(e, f.player, e.getPacket()));
+    }
+
+    private static boolean attackCancelled(JavaTickFixture f, FairReach fairReach) {
+        var attack = new ServerboundInteract(ENTITY, InteractAction.ATTACK, Hand.MAIN_HAND, Optional.empty(), false);
+        var event = new PacketReceiveEvent<>(f.fixture.user, ConnectionPhase.PLAY, ServerboundPackets.INTERACT, attack);
+        fairReach.onInteract(event, f.player, attack);
+        return event.isCancelled();
     }
 
     @ParameterizedTest

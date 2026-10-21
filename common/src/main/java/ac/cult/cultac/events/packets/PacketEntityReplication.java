@@ -1693,7 +1693,12 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             if (data.getEntityType() == EntityTypeIds.PLAYER) {
                 FairReach fairReach = player.checkManager.getListener(FairReach.class);
                 if (movement.hasPosition()) {
-                    fairReach.handleEntityMove(movement.entityId(), data.getX(), data.getY(), data.getZ());
+                    FairReach.PositionUpdate update = switch (movement.kind()) {
+                        case TELEPORT_ENTITY -> FairReach.PositionUpdate.TELEPORT;
+                        case POSITION_SYNC -> FairReach.PositionUpdate.POSITION_SYNC;
+                        case RELATIVE_ENTITY, MINECART -> FairReach.PositionUpdate.RELATIVE;
+                    };
+                    fairReach.handleEntityMove(movement.entityId(), data.getX(), data.getY(), data.getZ(), update);
                 } else if (movement.hasRotation()) {
                     fairReach.handleEntityRotation(
                             movement.entityId(), data.getX(), data.getY(), data.getZ(), rotationChanged);
