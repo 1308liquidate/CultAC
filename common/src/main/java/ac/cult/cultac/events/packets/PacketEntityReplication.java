@@ -1519,7 +1519,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private int appendTrailingProofTransactionId(PacketSendEvent<?> event) {
-        CultPlayer.TrackedTransaction proof = appendTrailingProofTransaction(event);
+        return transactionOf(appendTrailingProofTransaction(event));
+    }
+
+    private static int transactionOf(@Nullable CultPlayer.TrackedTransaction proof) {
         return proof == null ? -1 : proof.transaction();
     }
 
@@ -1639,14 +1642,14 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             return;
         }
 
-        // Only ordinary tracker movement is coalesced. Explicit teleports retain
+        // Only ordinary tracker movement shares the flush bundle's ping. Explicit teleports retain
         // their own proof because a controlled vehicle can reply inside the handler.
-        CultPlayer.TrackedTransaction proof = !useDelimiterProof
-                ? null
+        int proof = !useDelimiterProof
+                ? -1
                 : movement.kind() == MovementKind.TELEPORT_ENTITY
-                        ? appendTrailingProofTransaction(event, List.of(), true)
+                        ? transactionOf(appendTrailingProofTransaction(event, List.of(), true))
                         : player.appendFlushProofTransaction(event);
-        int firstTransaction = proof == null ? player.lastTransactionSent.get() : proof.transaction();
+        int firstTransaction = proof < 0 ? player.lastTransactionSent.get() : proof;
         if (data != null) {
             data.setLastTransactionHung(firstTransaction);
             if (data.getEntityType() == EntityTypeIds.PLAYER) {
@@ -1699,8 +1702,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     movement.rotation(),
                     movement.onGround());
         }
-        if (proof != null) {
-            scheduleBundledMovement(movement, proof.transaction());
+        if (proof >= 0) {
+            scheduleBundledMovement(movement, proof);
         } else {
             scheduleTransactionBoundMovement(movement, firstTransaction);
         }

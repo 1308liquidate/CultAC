@@ -646,26 +646,9 @@ public class CultPlayer implements GrimUser {
         return sendTransaction(false, PING_TRAILING, 0);
     }
 
-    /**
-     * The ping that ends server tick {@code serverTick}, allocated at its outbound position. The flush's
-     * reserved proof already follows the tick's packets, so it becomes this ping instead of a second one.
-     */
+    /** The ping that ends server tick {@code serverTick}, written after the tick's packets. */
     public void sendEndOfTickTransaction(int serverTick) {
-        user.executeAfterWrites(() -> {
-            TrackedTransaction pending = user.getCultConnection().pendingFlushProof();
-            if (pending == null) {
-                sendTransaction(false, PING_END_OF_TICK, serverTick);
-                return;
-            }
-            synchronized (this) {
-                int slot = Math.floorMod(pending.transaction(), RECENT_WIRE_IDS);
-                // Provenance may have been enabled after the proof was allocated.
-                if (recordProvenance && recentTransactions[slot] == pending.transaction()) {
-                    recentKinds[slot] = (byte) PING_END_OF_TICK;
-                    recentTicks[slot] = serverTick;
-                }
-            }
-        });
+        sendTransaction(false, PING_END_OF_TICK, serverTick);
     }
 
     private int sendTransaction(boolean async, int kind, int serverTick) {
@@ -720,23 +703,28 @@ public class CultPlayer implements GrimUser {
     }
 
     /**
-     * Use a single post-flush proof for ordinary Java entity/block updates. For native
-     * host bundles the existing self-contained proof remains authoritative.
+     * The transaction that proves an ordinary Java entity or block update, or -1 when none can be sent. The
+     * encoder keeps one flush bundle open from the first such update to the next Netty flush and starts it with
+     * a ping. ClientPacketListener#handleBundlePacket handles the whole bundle in one task and handlePing answers
+     * inside it, so the update shares the latest CultAC ping already in that bundle. Without one, a ping is
+     * written directly before the update and opens the bundle. Inside a host bundle, or for Bedrock, the update
+     * keeps its own trailing ping.
      */
-    @Nullable
-    public TrackedTransaction appendFlushProofTransaction(PacketSendEvent<?> event) {
+    public int appendFlushProofTransaction(PacketSendEvent<?> event) {
         var connection = user.getCultConnection();
         if (isBedrockMovement()
                 || !connection.isPreparingWrites()
                 || (event.isInsideBundle() && !connection.flushBundleOpen())) {
-            return appendTrailingProofTransaction(event);
+            TrackedTransaction proof = appendTrailingProofTransaction(event);
+            return proof == null ? -1 : proof.transaction();
         }
-        TrackedTransaction proof = connection.pendingFlushProof();
-        if (proof == null) {
-            proof = createTrackedTransactionPacketForDeferredSend();
-            if (proof != null) connection.reserveFlushProof(proof);
-        }
-        return proof;
+        int shared = event.flushPing();
+        if (shared > 0) return shared;
+        TrackedTransaction lead = createTrackedTransactionPacketForDeferredSend(PING_LEADING);
+        if (lead == null) return -1;
+        event.leadWith(lead.packet(), lead.transaction());
+        event.getTasksAfterSend().add(() -> markTrackedTransactionPacketSent(lead));
+        return lead.transaction();
     }
 
     @Nullable
@@ -857,10 +845,15 @@ public class CultPlayer implements GrimUser {
         return markTransactionPacketSent(((ClientboundPing) packet.packet()).id(), System.currentTimeMillis());
     }
 
-    public synchronized boolean markTransactionPacketSent(int id, long timestamp) {
+    public boolean markTransactionPacketSent(int id, long timestamp) {
+        return markTrackedPingSent(id, timestamp) > 0;
+    }
+
+    /** As {@link #markTransactionPacketSent(int, long)}; the transaction of CultAC's ping {@code id}, or -1. */
+    public synchronized int markTrackedPingSent(int id, long timestamp) {
         TrackedTransaction transaction = transactionsPendingSend.remove(id);
         if (transaction == null) {
-            return false;
+            return -1;
         }
 
         if (isBedrockMovement()) {
@@ -870,7 +863,7 @@ public class CultPlayer implements GrimUser {
         }
         TransactionChannels.SEND.fire(
                 ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(this), transaction.id(), timestamp);
-        return true;
+        return transaction.transaction();
     }
 
     /** Records a ping CultAC did not write, so no CultAC ping takes its id while it is in flight. */

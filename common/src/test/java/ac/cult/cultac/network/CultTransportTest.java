@@ -1300,89 +1300,163 @@ class CultTransportTest {
     }
 
     @Test
-    void flushWaveSharesOneTrailingProofUntilTheRealFlush() {
+    void theFlushBundleLeadsWithOnePingSharedUntilTheRealFlush() {
         try (var f = new Fixture(false)) {
-            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
-            f.connection.reserveFlushProof(
-                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(41), false)));
+            var proofs = proveCameras(f);
             f.channel.write(wireCamera(f, 1));
             f.channel.write(wireCamera(f, 2));
             f.channel.flush();
             f.pump();
-            assertEquals(List.of("D", "minecraft:set_camera", "minecraft:set_camera", "P41", "D"), f.output());
-            assertNull(f.connection.pendingFlushProof());
+            assertEquals(List.of("D", "P41", "minecraft:set_camera", "minecraft:set_camera", "D"), f.output());
+            assertFalse(f.connection.flushBundleOpen());
             f.channel.writeAndFlush(wireCamera(f, 3));
-            assertEquals(List.of("minecraft:set_camera"), f.output());
+            assertEquals(List.of("D", "P42", "minecraft:set_camera", "D"), f.output());
+            assertEquals(List.of(41, 41, 42), proofs);
         }
     }
 
     @Test
-    void anUnlistenedPacketStaysInsideTheFlushWave() {
+    void anUnlistenedPacketStaysInsideTheFlushBundle() {
         try (var f = new Fixture(false)) {
-            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
-            f.connection.reserveFlushProof(
-                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(45), false)));
+            var proofs = proveCameras(f);
             f.channel.write(wireCamera(f, 1));
             f.channel.write(f.frame(CLIENTBOUND, PLAY, "sound"));
             f.channel.write(wireCamera(f, 2));
             f.channel.flush();
             f.pump();
             assertEquals(
-                    List.of("D", "minecraft:set_camera", "minecraft:sound", "minecraft:set_camera", "P45", "D"),
+                    List.of("D", "P41", "minecraft:set_camera", "minecraft:sound", "minecraft:set_camera", "D"),
                     f.output());
+            assertEquals(List.of(41, 41), proofs);
         }
     }
 
     @Test
-    void nativeDelimiterClosesTheOutstandingFlushWaveWithoutNesting() {
+    void aNativeBundleClosesTheFlushBundleWithoutNesting() {
         try (var f = new Fixture(false)) {
-            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
-            f.connection.reserveFlushProof(
-                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(42), false)));
+            var proofs = proveCameras(f);
             f.channel.write(wireCamera(f, 1));
             f.channel.write(f.delimiter());
             f.channel.write(f.ping(PLAY, 7));
             f.channel.write(f.delimiter());
+            f.channel.write(wireCamera(f, 2));
             f.channel.flush();
             f.pump();
-            assertEquals(List.of("D", "minecraft:set_camera", "P42", "D", "D", "P7", "D"), f.output());
+            assertEquals(
+                    List.of(
+                            "D", "P41", "minecraft:set_camera", "D",
+                            "D", "P7", "D",
+                            "D", "P42", "minecraft:set_camera", "D"),
+                    f.output());
+            assertEquals(List.of(41, 42), proofs);
         }
     }
 
     @Test
-    void anIndependentPingIsAfterTheFlushProofAndNotInsideItsBundle() {
+    void aRespawnClosesTheFlushBundle() {
         try (var f = new Fixture(false)) {
-            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
-            f.connection.reserveFlushProof(
-                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(43), false)));
+            var proofs = proveCameras(f);
+            f.channel.write(wireCamera(f, 1));
+            // ClientPacketListener#handleRespawn renders a loading screen; vanilla never bundles it.
+            f.channel.write(f.frame(CLIENTBOUND, PLAY, "respawn"));
+            f.channel.write(wireCamera(f, 2));
+            f.channel.flush();
+            f.pump();
+            assertEquals(
+                    List.of(
+                            "D", "P41", "minecraft:set_camera", "D",
+                            "minecraft:respawn",
+                            "D", "P42", "minecraft:set_camera", "D"),
+                    f.output());
+            assertEquals(List.of(41, 42), proofs);
+        }
+    }
+
+    @Test
+    void aLaterCultPingInTheBundleBecomesTheSharedPing() {
+        try (var f = new Fixture(false)) {
+            var proofs = proveCameras(f);
+            // Stands in for PacketPingListener, which tags CultAC's own pings with their transaction.
+            f.routes.send(ClientboundPackets.PING, event -> {
+                if (event.getPacket().id() >= 100) event.trackedPing(event.getPacket().id());
+            });
             f.channel.write(wireCamera(f, 1));
             f.channel.write(f.ping(PLAY, 7));
+            f.channel.write(wireCamera(f, 2));
+            f.channel.write(f.ping(PLAY, 100));
+            f.channel.write(wireCamera(f, 3));
             f.channel.flush();
             f.pump();
-            assertEquals(List.of("D", "minecraft:set_camera", "P43", "D", "P7"), f.output());
+            assertEquals(
+                    List.of(
+                            "D", "P41", "minecraft:set_camera", "P7", "minecraft:set_camera",
+                            "P100", "minecraft:set_camera", "D"),
+                    f.output());
+            assertEquals(List.of(41, 41, 100), proofs);
         }
     }
 
     @Test
-    void oversizedFlushWaveSplitsBundlesButEmitsOnlyOneTrailingProof() {
+    void aBundledWriteGroupJoinsTheOpenFlushBundle() {
         try (var f = new Fixture(false)) {
-            f.routes.send(ClientboundPackets.SET_CAMERA, event -> {});
-            f.connection.reserveFlushProof(
-                    new CultPlayer.TrackedTransaction(1, new CultWrite(new ClientboundPing(44), false)));
+            proveCameras(f);
+            f.channel.write(wireCamera(f, 1));
+            f.pump();
+            var group = f.connection.write(List.of(new CultWrite(new ClientboundPing(9), false)), true);
+            f.pump();
+            f.channel.flush();
+            f.pump();
+            assertTrue(group.isSuccess());
+            assertEquals(List.of("D", "P41", "minecraft:set_camera", "P9", "D"), f.output());
+        }
+    }
+
+    @Test
+    void anOversizedFlushBundleSplitsWithAFreshLeadingPing() {
+        try (var f = new Fixture(false)) {
+            var proofs = proveCameras(f);
             for (int id = 0; id < 4096; id++) f.channel.write(wireCamera(f, id));
             f.channel.flush();
             f.pump();
             List<String> emitted = f.output();
-            assertEquals(4101, emitted.size());
-            assertEquals("D", emitted.get(0));
-            assertEquals("D", emitted.get(4096));
-            assertEquals("D", emitted.get(4097));
-            assertEquals("minecraft:set_camera", emitted.get(4098));
-            assertEquals("P44", emitted.get(4099));
-            assertEquals("D", emitted.get(4100));
-            assertEquals(1, emitted.stream().filter("P44"::equals).count());
-            assertNull(f.connection.pendingFlushProof());
+            // The lead and 3,839 cameras reach the sharing headroom; the next camera starts a new bundle.
+            assertEquals(4102, emitted.size());
+            assertEquals(List.of("D", "P41"), emitted.subList(0, 2));
+            assertEquals(List.of("D", "D", "P42"), emitted.subList(3841, 3844));
+            assertEquals("D", emitted.get(4101));
+            assertEquals(3839, proofs.stream().filter(proof -> proof == 41).count());
+            assertEquals(257, proofs.stream().filter(proof -> proof == 42).count());
         }
+    }
+
+    @Test
+    void removingTheEncoderClosesAnOpenFlushBundle() {
+        try (var f = new Fixture(false)) {
+            proveCameras(f);
+            f.channel.write(wireCamera(f, 1));
+            f.pump();
+            CultEncoder.uninstall(f.channel);
+            assertEquals(List.of("D", "P41", "minecraft:set_camera", "D"), f.output());
+            assertFalse(f.connection.flushBundleOpen());
+        }
+    }
+
+    /**
+     * Each camera is proven as CultPlayer#appendFlushProofTransaction proves an update: it shares the bundle's
+     * ping, or leads with a new one. Returns the transactions in packet order.
+     */
+    private static List<Integer> proveCameras(Fixture f) {
+        var proofs = new ArrayList<Integer>();
+        var next = new AtomicInteger(40);
+        f.routes.send(ClientboundPackets.SET_CAMERA, event -> {
+            int proof = event.flushPing();
+            if (proof == 0) {
+                proof = next.incrementAndGet();
+                event.leadWith(new CultWrite(new ClientboundPing(proof), false), proof);
+            }
+            proofs.add(proof);
+        });
+        return proofs;
     }
 
     private static ByteBuf wireCamera(Fixture f, int entityId) {

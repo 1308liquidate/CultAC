@@ -189,14 +189,14 @@ public class BasePacketWorldReader {
 
         BlockPos blockPosition = blockChange.position();
         int state = blockChange.state();
-        // MCP-Reborn ClientPacketListener handles packets in bundle order on the client
-        // thread. Put Cult's ping after the block update so the pong marks the point
-        // where the client has processed the new block state.
+        // ClientPacketListener#handleBundlePacket handles the flush bundle in one task, so the
+        // pong of a ping in it marks the point where the client has the new block state.
         if (isNearPlayer(player, blockPosition, range)) {
-            CultPlayer.TrackedTransaction transaction = player.appendFlushProofTransaction(event);
-            if (transaction != null) {
+            int transaction = player.appendFlushProofTransaction(event);
+            if (transaction > 0) {
                 if (blockChange != event.getOriginalPacket()) event.replace(blockChange);
-                player.compensatedWorld.handleServerBlockUpdate(blockPosition, state, transaction);
+                player.compensatedWorld.queueServerBlockUpdate(
+                        blockPosition.getX(), blockPosition.getY(), blockPosition.getZ(), state, transaction);
                 return;
             }
         }
@@ -218,10 +218,10 @@ public class BasePacketWorldReader {
                 blockEvent.position().z());
         String dimension = packetDimension(player);
         if (isNearPlayer(player, blockPosition, range)) {
-            // ClientPacketListener#handleBlockEvent runs Level#blockEvent in packet order, so the
-            // flush proof after it proves the event exactly as it does the block updates around it.
-            CultPlayer.TrackedTransaction transaction = player.appendFlushProofTransaction(event);
-            if (transaction != null) {
+            // ClientPacketListener#handleBlockEvent runs Level#blockEvent in the bundle's task, so
+            // the flush proof proves the event exactly as it does the block updates around it.
+            int transaction = player.appendFlushProofTransaction(event);
+            if (transaction > 0) {
                 if (blockEvent != event.getOriginalPacket()) event.replace(blockEvent);
                 event.getTasksAfterSend().add(() -> {
                     Runnable applyEvent = () -> {
@@ -231,9 +231,9 @@ public class BasePacketWorldReader {
                                 blockEvent.blockId(),
                                 blockEvent.action(),
                                 blockEvent.parameter(),
-                                transaction.transaction());
+                                transaction);
                     };
-                    player.latencyUtils.addRealTimeTask(transaction.transaction(), applyEvent);
+                    player.latencyUtils.addRealTimeTask(transaction, applyEvent);
                 });
                 return;
             }
@@ -268,10 +268,10 @@ public class BasePacketWorldReader {
         }
 
         if (nearPlayer) {
-            CultPlayer.TrackedTransaction transaction = player.appendFlushProofTransaction(event);
-            if (transaction != null) {
+            int transaction = player.appendFlushProofTransaction(event);
+            if (transaction > 0) {
                 multiBlockChange.runUpdates((x, y, z, state) ->
-                        player.compensatedWorld.queueServerBlockUpdate(x, y, z, state, transaction.transaction()));
+                        player.compensatedWorld.queueServerBlockUpdate(x, y, z, state, transaction));
                 return;
             }
         }

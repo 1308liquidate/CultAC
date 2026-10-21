@@ -54,35 +54,17 @@ public final class CultConnection implements CodecState {
 
     private volatile User user;
     private volatile CultPlayer player;
-    // Owned by the outbound connection executor. A proof is reserved when the first
-    // latency-sensitive update is modeled and placed at the next actual Netty flush.
-    // The encoder's flush bundle is open only while a proof is reserved; a proof is
-    // reserved before the bundle's opening delimiter is written.
-    private CultPlayer.TrackedTransaction pendingFlushProof;
+    // Owned by the outbound connection executor. The encoder opens a flush bundle with a
+    // leading ping and closes it at the next actual Netty flush.
     private boolean flushBundleOpen;
 
-    /** The encoder has written the opening delimiter of the bundle the reserved proof closes. */
+    /** The encoder has written the opening delimiter of a flush bundle and not yet closed it. */
     public boolean flushBundleOpen() {
         return flushBundleOpen;
     }
 
     public void flushBundleOpen(boolean open) {
         flushBundleOpen = open;
-    }
-
-    public CultPlayer.TrackedTransaction pendingFlushProof() {
-        return pendingFlushProof;
-    }
-
-    public void reserveFlushProof(CultPlayer.TrackedTransaction proof) {
-        if (pendingFlushProof != null) throw new IllegalStateException("Flush proof already reserved");
-        pendingFlushProof = Objects.requireNonNull(proof);
-    }
-
-    public CultPlayer.TrackedTransaction takeFlushProof() {
-        var result = pendingFlushProof;
-        pendingFlushProof = null;
-        return result;
     }
 
     private boolean ownerResolved, prepared;
