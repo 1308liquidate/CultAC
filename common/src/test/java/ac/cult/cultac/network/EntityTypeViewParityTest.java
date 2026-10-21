@@ -1,6 +1,7 @@
 package ac.cult.cultac.network;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
@@ -15,7 +16,10 @@ import java.util.Random;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
-/** Each type view holds exactly the entityMap values its predicate accepts, in entityMap iteration order. */
+/**
+ * Each type view holds exactly the entityMap values its predicate accepts, in entityMap iteration order, and removing
+ * an absent id keeps the views.
+ */
 class EntityTypeViewParityTest {
     private static List<PacketEntity> filtered(CompensatedEntities entities, Predicate<PacketEntity> accept) {
         List<PacketEntity> out = new ArrayList<>();
@@ -49,15 +53,21 @@ class EntityTypeViewParityTest {
             Random random = new Random(7);
             List<Integer> live = new ArrayList<>();
             int nonEmptyBoats = 0;
+            int absentRemoves = 0;
             for (int step = 0; step < 4000; step++) {
                 int op = random.nextInt(100);
                 if (op < 55 || live.isEmpty()) {
                     int id = 100 + random.nextInt(400);
                     int type = types.get(random.nextInt(types.size()));
-                    if (entities.addEntity(id, type, new Vec3(random.nextInt(64), 64, random.nextInt(64)), 0, 0, 0)
-                            != Integer.MIN_VALUE) live.add(id);
+                    entities.addEntity(id, type, new Vec3(random.nextInt(64), 64, random.nextInt(64)), 0, 0, 0);
+                    if (entities.getEntity(id) != null && !live.contains(id)) live.add(id);
                 } else if (op < 90) {
                     entities.removeEntity(live.remove(random.nextInt(live.size())));
+                } else if (op < 95) {
+                    List<PacketEntity> before = entities.pushOrCollideCandidates();
+                    entities.removeEntity(500 + random.nextInt(100));
+                    assertSame(before, entities.pushOrCollideCandidates(), "step " + step);
+                    absentRemoves++;
                 } else if (op < 99) {
                     int id = live.get(random.nextInt(live.size()));
                     entities.entityMap.put(id, new PacketEntity(types.get(random.nextInt(types.size())), id));
@@ -68,7 +78,9 @@ class EntityTypeViewParityTest {
                 assertViews(entities, "step " + step);
                 if (!entities.boats().isEmpty()) nonEmptyBoats++;
             }
-            assertTrue(nonEmptyBoats > 0);
+            assertTrue(
+                    nonEmptyBoats > 0 && absentRemoves > 0,
+                    "nonEmptyBoats=" + nonEmptyBoats + " absentRemoves=" + absentRemoves);
         }
     }
 }

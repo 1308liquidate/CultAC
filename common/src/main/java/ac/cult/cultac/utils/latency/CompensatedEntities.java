@@ -1400,7 +1400,10 @@ public class CompensatedEntities {
      */
     private record HeldAttributes(List<AttributeSnapshot> values, int provenAt, float leastScale) {}
 
-    /** The tracked entities by id; {@code mutations} advances on every put, remove and clear. */
+    /**
+     * The tracked entities by id; {@code mutations} advances on every put and clear, and on every remove of a present
+     * key: removing an absent key leaves the arrays untouched.
+     */
     public static final class EntityMap extends Int2ObjectOpenHashMap<PacketEntity> {
         private int mutations;
 
@@ -1416,8 +1419,10 @@ public class CompensatedEntities {
 
         @Override
         public PacketEntity remove(int key) {
-            mutations++;
-            return super.remove(key);
+            int before = size();
+            PacketEntity removed = super.remove(key);
+            if (size() != before) mutations++;
+            return removed;
         }
 
         @Override
