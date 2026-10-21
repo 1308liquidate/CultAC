@@ -375,12 +375,11 @@ public class CultPlayer implements GrimUser {
         if (boat == null || !boat.isBoat()) return;
         float boatYaw = boat.clientPhysicalYaw;
         boatYawBeforeTurn = boatYaw;
-        // AbstractBoat#deltaRotation only turns a boat its controlling passenger drives.
-        float turn = !boat.passengers.isEmpty() && boat.passengers.get(0) == self ? boatData.deltaRotation : 0;
+        float turn = boatTurn(boat);
         float yaw = before + turn;
-        float delta = CultMath.wrapDegrees(yaw - boatYaw);
-        float target = CultMath.clamp(delta, -105.0F, 105.0F);
-        if (target != delta && yaw + target - delta == xRot) unclampedHeadYaw = yaw;
+        if (Math.abs(CultMath.wrapDegrees(yaw - boatYaw)) > 105.0F && clampToBoat(yaw, boatYaw) == xRot) {
+            unclampedHeadYaw = yaw;
+        }
         if (Float.isNaN(boatYawBefore)) return;
         // The head lies more than 105 degrees to the sent yaw's side of the boat, and within 105 of the turned
         // reference, the boat yaw the mouse turn clamped against advanced by deltaRotation.
@@ -399,10 +398,47 @@ public class CultPlayer implements GrimUser {
         }
         if (far <= near) return;
         float edge = xRot + side * (far - 105.0F);
-        float edgeDelta = CultMath.wrapDegrees(edge - boatYaw);
-        if (edge + CultMath.clamp(edgeDelta, -105.0F, 105.0F) - edgeDelta != xRot) return;
+        if (clampToBoat(edge, boatYaw) != xRot) return;
         headArcFrom = xRot + (side > 0 ? near - 105.0F : 105.0F - far);
         headArcLength = far - near;
+    }
+
+    /**
+     * The yaw a client tick that began at {@code before} sends without a mouse turn: AbstractBoat#positionRider turns a
+     * rider by the deltaRotation of the boat it drives, and clampRotation holds the yaw within 105 degrees of the boat.
+     * Only valid once the tick's vehicle move is processed, which the client sends after the rider's Rot.
+     */
+    public float yawWithoutLook(float before) {
+        PacketEntity boat = compensatedEntities.getSelf().getRiding();
+        if (boat == null || !boat.isBoat()) return before;
+        return clampToBoat(before + boatTurn(boat), boat.clientPhysicalYaw);
+    }
+
+    /**
+     * Whether a boat the player drives reports the yaw AbstractBoat#controlBoat gives it: the last tick's yaw turned by
+     * deltaRotation. The client states that yaw in its vehicle move, so a yaw that differs says nothing about the turn
+     * it gave the rider.
+     */
+    public boolean boatYawFollowsTurn() {
+        PacketEntity boat = compensatedEntities.getSelf().getRiding();
+        if (boat == null || !boat.isBoat() || !drivesBoat(boat)) return true;
+        return boat.clientPhysicalYaw == boatYawBeforeTurn + boatData.deltaRotation;
+    }
+
+    // AbstractBoat#deltaRotation only turns a boat its controlling passenger drives.
+    private float boatTurn(PacketEntity boat) {
+        return drivesBoat(boat) ? boatData.deltaRotation : 0;
+    }
+
+    private boolean drivesBoat(PacketEntity boat) {
+        return !boat.passengers.isEmpty() && boat.passengers.get(0) == compensatedEntities.getSelf();
+    }
+
+    // AbstractBoat#clampRotation's yaw for a player passenger, in its float operations, which need not return an
+    // unclamped yaw unchanged.
+    private static float clampToBoat(float yaw, float boatYaw) {
+        float delta = CultMath.wrapDegrees(yaw - boatYaw);
+        return yaw + CultMath.clamp(delta, -105.0F, 105.0F) - delta;
     }
 
     public void onPacketCancel() {

@@ -631,6 +631,7 @@ public class CheckManager {
         registerTickEnd(positionCheck.get(CompensatedCooldown.class));
         registerTickEnd(packetChecks.get(MultiActionsH.class));
         registerTickEnd(postPredictionCheck.get(SprintH.class));
+        registerTickEnd(rotationCheck.get(MultiActionsO.class));
         registerTickEnd(player.openWindow);
 
         registerReceive(registrations, postPredictionCheck.get(Phase.class));
