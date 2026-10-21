@@ -31,6 +31,7 @@ public class CollisionModifier implements UncertaintyHandler {
     private final List<SimpleCollisionBox> probeUnknown = new ArrayList<>();
     private final SimpleCollisionBox probeBox = new SimpleCollisionBox();
     private final SimpleCollisionBox probeEntityBox = new SimpleCollisionBox();
+    private final SimpleCollisionBox probeBlockQuery = new SimpleCollisionBox();
     private final SimpleCollisionBox probeEntityScratch = new SimpleCollisionBox();
     private final AxisResult positiveResult = new AxisResult(0, false);
     private final AxisResult negativeResult = new AxisResult(0, false);
@@ -317,8 +318,8 @@ public class CollisionModifier implements UncertaintyHandler {
         grabBoxesBB.expand(maxEpsilon(dimensions.epsilon()));
         // Entity#collide gathers block shapes through expandTowards(movement), and that movement carries the input.
         SimpleCollisionBox blockQuery = horizontalInputReach > 0.0D
-                ? grabBoxesBB
-                        .copy()
+                ? probeBlockQuery
+                        .set(grabBoxesBB)
                         .expand(horizontalInputReach * stuckSpeed.x, 0.0D, horizontalInputReach * stuckSpeed.z)
                 : grabBoxesBB;
 
@@ -693,18 +694,18 @@ public class CollisionModifier implements UncertaintyHandler {
 
         // WHY CAN MOJANG NOT HANDLE THE SIMPLEST OF THINGS CORRECTLY
         // START HANDLING OF POTENTIALLY UNKNOWN CLIENT SIDED BLOCKS
-        float maximumWidth = context.getVehicle() == null ? dimensions.width() : context.getMaxWidth();
-        float maximumHeight = context.getVehicle() == null ? dimensions.maxHeight() : context.getMaxHeight();
-        SimpleCollisionBox biggestBoxPossible =
-                GetBoundingBox.getBoundingBoxFromPosAndSize(posX, posY, posZ, maximumWidth, maximumHeight);
-        biggestBoxPossible.expand(0.1); // For good measure.
-        for (SimpleCollisionBox box : unknown) {
-            if (box.isCollided(biggestBoxPossible)) {
-                return new AxisResult(0, true);
-            }
-        }
-        // We only care about finding the first collision
         if (!unknown.isEmpty()) {
+            float maximumWidth = context.getVehicle() == null ? dimensions.width() : context.getMaxWidth();
+            float maximumHeight = context.getVehicle() == null ? dimensions.maxHeight() : context.getMaxHeight();
+            SimpleCollisionBox biggestBoxPossible =
+                    GetBoundingBox.getBoundingBoxFromPosAndSize(posX, posY, posZ, maximumWidth, maximumHeight);
+            biggestBoxPossible.expand(0.1); // For good measure.
+            for (SimpleCollisionBox box : unknown) {
+                if (box.isCollided(biggestBoxPossible)) {
+                    return new AxisResult(0, true);
+                }
+            }
+            // We only care about finding the first collision
             collisions = new ArrayList<>(collisions);
             collisions.addAll(unknown);
         }
