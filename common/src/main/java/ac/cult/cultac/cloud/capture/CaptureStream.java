@@ -997,7 +997,7 @@ public final class CaptureStream {
             } else if (Policy.has(policy.clientbound(), raw.id())) {
                 limit = MAX_CLIENTBOUND_BYTES;
                 if (raw.id() == pingPacket) {
-                    probe = IntakeWire.bareId(payload, pingPacket, NO_WIRE_ID);
+                    probe = IntakeWire.bare(payload, pingPacket) ? framePings[pingAt] : NO_WIRE_ID;
                     if (probe != NO_WIRE_ID) {
                         kind = IntakeWire.PING_MARKER;
                         payload = NO_BODY;

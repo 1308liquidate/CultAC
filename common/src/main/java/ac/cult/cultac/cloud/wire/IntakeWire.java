@@ -696,8 +696,13 @@ public final class IntakeWire {
      * packet. Only such a probe goes out as a marker.
      */
     public static long bareId(byte[] packet, int id, long absent) {
-        if (id < 0 || packet.length != varLongBytes(id) + 4) return absent;
+        if (!bare(packet, id)) return absent;
         return pingId(packet, id, absent);
+    }
+
+    /** Whether a probe's packet is as long as its id and a 4-byte body, {@code id} being its packet id. */
+    public static boolean bare(byte[] packet, int id) {
+        return id >= 0 && packet.length == varLongBytes(id) + 4;
     }
 
     /** A clientbound ping's wire id from its packet bytes, {@code id} being the ping's packet id; null if not one. */
