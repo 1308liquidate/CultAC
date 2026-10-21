@@ -1855,7 +1855,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private boolean applyClientPath(PacketEntity entity, EntityMovement movement, boolean bundled) {
-        if (player.isBedrockMovement() || player.getClientVersion().isOlderThan(ClientVersion.V_26_3)) return false;
+        if (player.isBedrockMovement() || player.getClientVersion().isOlderThan(ClientVersion.V_1_21_2)) return false;
         PositionChange position = movement.position();
         EntityPositionPath path = position instanceof PathPositionChange p
                 ? p.path()
@@ -1874,6 +1874,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             entity.markPositionInexact();
             return true;
         }
+        if (player.getClientVersion().isOlderThan(ClientVersion.V_26_3)) return false;
         entity.onPositionPath(path, position.hasPosition(), movement.yaw(), movement.pitch(), player, bundled);
         return true;
     }
