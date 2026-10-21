@@ -377,7 +377,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 try {
                     var type = (PacketType<ClientboundPacket>) route.type();
                     var event = new PacketSendEvent<>(
-                            connection.user(), phase, type, (ClientboundPacket) value.packet(), batch.inside);
+                            connection.user(), phase, type, (ClientboundPacket) value, batch.inside);
                     if (authored) event.authored();
                     connection.dispatcher().send(event, route.send());
                     if (event.isCancelled()) {

@@ -77,18 +77,20 @@ public final class ProjectedPackets implements AutoCloseable {
             ByteBuf physical,
             CodecState state,
             Predicate<PacketType<?>> consumed) {
-        Value value = read(phase, direction, physical, state, consumed, false);
-        return value == null ? List.of() : List.of(value);
+        return values(phase, direction, physical, state, consumed, false);
     }
 
-    /** As {@link #read}, for the frame's one value; null where it has none. */
-    public Value readOne(
+    /**
+     * As {@link #read}, for the packet of the frame's one value, whose type is the one {@code consumed} accepted; null
+     * where it has none.
+     */
+    public Object readOne(
             ConnectionPhase phase,
             PacketDirection direction,
             ByteBuf physical,
             CodecState state,
             Predicate<PacketType<?>> consumed) {
-        return read(phase, direction, physical, state, consumed, false);
+        return packet(phase, direction, physical, state, consumed, false);
     }
 
     /** Borrows the frame and reads diagnostic values without committing adapter state. */
@@ -98,11 +100,32 @@ public final class ProjectedPackets implements AutoCloseable {
             ByteBuf physical,
             CodecState state,
             Predicate<PacketType<?>> consumed) {
-        Value value = read(phase, direction, physical, state, consumed, true);
-        return value == null ? List.of() : List.of(value);
+        return values(phase, direction, physical, state, consumed, true);
     }
 
-    private Value read(
+    private List<Value> values(
+            ConnectionPhase phase,
+            PacketDirection direction,
+            ByteBuf physical,
+            CodecState state,
+            Predicate<PacketType<?>> consumed,
+            boolean observation) {
+        PacketType<?>[] accepted = {null};
+        Object packet = packet(
+                phase,
+                direction,
+                physical,
+                state,
+                type -> {
+                    accepted[0] = type;
+                    return consumed.test(type);
+                },
+                observation);
+        return packet == null ? List.of() : List.of(new Value(accepted[0], packet));
+    }
+
+    /** At most one type is offered to {@code consumed}; a non-null packet is a value of that type. */
+    private Object packet(
             ConnectionPhase phase,
             PacketDirection direction,
             ByteBuf physical,
@@ -136,7 +159,7 @@ public final class ProjectedPackets implements AutoCloseable {
                     throw new MalformedPacketException("Trailing bytes on " + type);
             } else packet = observed.decode(phase, direction, id, input, state);
             if (packet == null) return unavailable(type, state);
-            return new Value(type, packet);
+            return packet;
         } finally {
             // Codec reads are synchronous and do not mutate bytes or index marks.
             // Restore even when the codec, adapter, or consumed predicate throws.
@@ -144,7 +167,7 @@ public final class ProjectedPackets implements AutoCloseable {
         }
     }
 
-    private static Value unavailable(PacketType<?> type, CodecState state) {
+    private static Object unavailable(PacketType<?> type, CodecState state) {
         if (state.requiresValues()) throw new ProtocolResolutionException("Unavailable value for " + type);
         return null;
     }

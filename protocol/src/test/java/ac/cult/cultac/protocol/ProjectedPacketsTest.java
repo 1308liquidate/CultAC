@@ -152,7 +152,7 @@ class ProjectedPacketsTest {
                                 var input = Unpooled.buffer();
                                 Wire.writeVarInt(input, id);
                                 input.writeZero(64);
-                                ProjectedPackets.Value value = null;
+                                Object value = null;
                                 int adaptedBefore = adapted.get();
                                 try {
                                     value = packets.readOne(phase, direction, input, CodecState.EMPTY, type -> {
@@ -172,8 +172,7 @@ class ProjectedPacketsTest {
                                 }
                                 if (value != null) {
                                     assertTrue(accept, where);
-                                    assertSame(tested.getFirst(), value.type(), where);
-                                    assertTrue(value.type().recordClass().isInstance(value.packet()), where);
+                                    assertTrue(tested.getFirst().recordClass().isInstance(value), where);
                                     values++;
                                     if (adapted.get() > adaptedBefore) translatedValues++;
                                 }

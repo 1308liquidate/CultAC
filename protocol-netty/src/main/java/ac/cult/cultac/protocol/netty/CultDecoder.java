@@ -28,10 +28,15 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
     private final Predicate<PacketType<?>> routed;
     /** The route {@link #routed} found during a readOne, read back on the owner loop before anything is dispatched. */
     private PacketDispatcher.Route probed;
+    /** The type {@link #routed} was offered during a readOne, read back like {@link #probed}. */
+    private PacketType<?> probedType;
 
     public CultDecoder(CultConnection connection) {
         this.connection = connection;
-        routed = type -> (probed = connection.dispatcher().get(type)) != null;
+        routed = type -> {
+            probedType = type;
+            return (probed = connection.dispatcher().get(type)) != null;
+        };
     }
 
     public static void install(CultConnection connection) {
@@ -123,8 +128,9 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
             var value = connection.packets().readOne(phase, PacketDirection.SERVERBOUND, frame, connection, routed);
             if (value != null) {
                 var route = probed;
+                var valueType = probedType;
                 var type = (PacketType<ServerboundPacket>) route.type();
-                var original = (ServerboundPacket) value.packet();
+                var original = (ServerboundPacket) value;
                 originalType = type;
                 originalPacket = original;
                 var pausing = connection.player();
@@ -153,7 +159,7 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
                 // Observe-only forwards what the client sent; a pong answering CultAC's own ping and a client
                 // payload on the companion's bridge channel keep their cancel.
                 if (observeOnly
-                        && !(value.type() == ServerboundPackets.PONG && event.isAcceptedTransactionResponse())
+                        && !(valueType == ServerboundPackets.PONG && event.isAcceptedTransactionResponse())
                         && !(original instanceof ServerboundCustomPayload payload
                                 && ClientboundPackets.BRIDGE_CHANNEL.equals(payload.channel()))) {
                     packet = original;
@@ -173,7 +179,7 @@ public final class CultDecoder extends ChannelInboundHandlerAdapter {
                 }
                 if (player != null) {
                     var setbacks = player.getSetbackTeleportUtil();
-                    if (value.type() == ServerboundPackets.CLIENT_TICK_END) setbacks.resetForwardedPositionThisTick();
+                    if (valueType == ServerboundPackets.CLIENT_TICK_END) setbacks.resetForwardedPositionThisTick();
                     else if (packet instanceof ServerboundMovePlayer move
                             && move.hasPosition()
                             && !event.isTeleportPositionResponse()) setbacks.markForwardedPositionThisTick();
