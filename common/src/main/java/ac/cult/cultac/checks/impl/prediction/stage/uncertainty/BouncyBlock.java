@@ -4,6 +4,7 @@ import ac.cult.blocksim.data.BlockIds;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaInsideBlockEffects;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -39,7 +40,9 @@ public class BouncyBlock implements UncertaintyHandler {
         //
         // Player velocity can multiply 0.4-0.45 (guess on max) when the player is on slime with
         // a Y velocity of 0 to 0.1.  Because 0.03 we don't know this so just give lenience here
-        if (BlockIds.is(onBlock, BlockIds.SLIME_BLOCK)) {
+        // A living vehicle's carried velocity already holds SlimeBlock#stepOn (JavaInsideBlockEffects#stepOn).
+        if (BlockIds.is(onBlock, BlockIds.SLIME_BLOCK)
+                && !JavaInsideBlockEffects.carriesStepOn(player, lastContext.getSimulationContext())) {
             SimpleCollisionBox expandToZero = new SimpleCollisionBox(start, start);
             expandToZero.unionX(0);
             expandToZero.unionZ(0);

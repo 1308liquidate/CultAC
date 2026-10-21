@@ -6,6 +6,7 @@ import ac.cult.blocksim.engine.shapes.Shapes;
 import ac.cult.blocksim.engine.shapes.VoxelShape;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.GameMode;
@@ -111,6 +112,31 @@ public final class JavaInsideBlockEffects {
                     });
         }
         return current[0];
+    }
+
+    /**
+     * SlimeBlock#stepOn, which Entity#applyEffectsFromBlocks runs before the inside-block callbacks when the actor
+     * ends its move on the ground: below 0.1 vertical speed it scales the carried horizontal velocity by
+     * 0.4 + |y| * 0.2, ahead of the next tick's LivingEntity#aiStep movement threshold and ridden input.
+     */
+    public static Vec3 stepOn(CultPlayer player, SimulationContext context, boolean onGround, Vec3 velocity) {
+        if (!onGround
+                || !carriesStepOn(player, context)
+                || !BlockIds.is(context.getWorldData().getOnBlock(), BlockIds.SLIME_BLOCK)
+                // Entity#isSteppingCarefully: the vehicle's shared crouching flag.
+                || (context.getVehicle().actionSharedFlags & 2) != 0) return velocity;
+        double absDeltaY = Math.abs(velocity.y);
+        if (absDeltaY >= 0.1) return velocity;
+        double scale = 0.4 + absDeltaY * 0.2;
+        return velocity.multiply(scale, 1.0, scale);
+    }
+
+    /** Whether the velocity carried out of {@code context}'s move holds {@link #stepOn}: a Java living vehicle's. */
+    public static boolean carriesStepOn(CultPlayer player, SimulationContext context) {
+        return !player.isBedrockMovement()
+                && JavaMovementEngine.contextUsesExactEffects(context)
+                && context.getVehicle() != null
+                && context.getVehicle().isLivingEntity();
     }
 
     /**
