@@ -18,8 +18,8 @@ import ac.cult.cultac.utils.math.Vec3;
  * collided movement under 1e-5 squared, is never minor. The collided movement is the reported delta, so only the
  * attempted delta is unknown. KeyboardInput's move vector only points in the eight key directions, which
  * LocalPlayer#modifyInput scales without turning, so each direction is tested with any input length up to the
- * accepted input allowance. LocalPlayer#sendChanges reports the keys of the tick's travel before its move, so a
- * reported direction that reaches the delta is the only one tested.
+ * accepted input allowance. LocalPlayer#sendChanges reports in PLAYER_INPUT the keys KeyboardInput#tick read for the
+ * tick's travel before it sends the move, and their direction alone decides whether the collision is minor.
  */
 public final class ClientHorizontalCollision {
     private static final double TOLERANCE = HorizontalAnalyzer.HORIZONTAL_INPUT_UNCERTAINTY;

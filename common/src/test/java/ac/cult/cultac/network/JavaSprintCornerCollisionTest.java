@@ -52,8 +52,14 @@ class JavaSprintCornerCollisionTest {
         }
     }
 
+    /**
+     * The real client's recorded moves from {@link #landingInACornerKeepsTheSprint}, replayed without the
+     * STOP_SPRINTING it sent after the jump. That test asserts the jump's collision is hard, on which
+     * LocalPlayer#shouldStopRunSprinting stops the sprint; SprintE adds one violation for each later move that still
+     * sprints.
+     */
     @Test
-    void sprintingOnAfterTheCornerJumpIsFlagged() throws Exception {
+    void sprintContinuingAfterAHardCollisionAddsViolations() throws Exception {
         try (var f = new JavaTickFixture()) {
             Client c = landInACorner(f);
             c.move(121.45130624068176, 73.41999998688698, 165.69999998807907, false);

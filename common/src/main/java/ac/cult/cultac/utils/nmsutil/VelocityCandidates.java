@@ -378,9 +378,12 @@ public final class VelocityCandidates {
         // before Entity#move, so the carried velocity holds the accepted input,
         // clamped while climbing. The travelFallFlying glide adds no input; its
         // carried velocity is the accepted glide movement.
-        Vec3 postMoveDelta = preCollisionVelocity(result);
+        Vec3 carried = preCollisionVelocity(result);
+        Vec3 postMoveDelta = carried;
+        Vec3 input = null;
         if (result.getValidMovements().getClosestTrace() != null && result.getAcceptedClosestToTarget() != null) {
-            postMoveDelta = postMoveDelta.add(acceptedInput(result));
+            input = acceptedInput(result);
+            postMoveDelta = postMoveDelta.add(input);
         }
         CultPlayer player = result.getPlayer();
         SimulationContext context = result.getSimulationContext();
@@ -390,10 +393,13 @@ public final class VelocityCandidates {
                     candidates, result, postMoveDelta, canZeroX, canZeroY, canZeroZ, clippedY, stepped);
         }
         if (climbing != DesyncStatus.FALSE) {
+            // On a climbable the accepted input extends Ladder's clamp of the carried velocity.
+            Vec3 climbingDelta = Ladder.handleOnClimbable(player, context, carried);
+            if (input != null) climbingDelta = climbingDelta.add(input);
             addPostMoveDeltaMovementCandidates(
                     candidates,
                     result,
-                    Ladder.handleOnClimbable(player, context, postMoveDelta),
+                    Ladder.handleOnClimbable(player, context, climbingDelta),
                     canZeroX,
                     canZeroY,
                     canZeroZ,
