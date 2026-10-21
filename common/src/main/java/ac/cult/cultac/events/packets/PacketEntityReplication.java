@@ -62,6 +62,7 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntityTrackXRot;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityUtil;
 import ac.cult.cultac.utils.inventory.Inventory;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import java.util.ArrayList;
@@ -1604,23 +1605,27 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                         position.x(),
                         position.y(),
                         position.z());
-                data.setX(decodedPosition.x);
-                data.setY(decodedPosition.y);
-                data.setZ(decodedPosition.z);
-                data.setCodecBaseX(decodedPosition.x);
-                data.setCodecBaseY(decodedPosition.y);
-                data.setCodecBaseZ(decodedPosition.z);
+                if (position.hasPosition()) {
+                    data.setX(decodedPosition.x);
+                    data.setY(decodedPosition.y);
+                    data.setZ(decodedPosition.z);
+                    data.setCodecBaseX(decodedPosition.x);
+                    data.setCodecBaseY(decodedPosition.y);
+                    data.setCodecBaseZ(decodedPosition.z);
+                }
                 absolutePositionKnown = true;
                 absoluteX = decodedPosition.x;
                 absoluteY = decodedPosition.y;
                 absoluteZ = decodedPosition.z;
-            } else {
+            } else if (position.hasPosition()) {
                 data.setX(position.x());
                 data.setY(position.y());
                 data.setZ(position.z());
-                data.setCodecBaseX(position.x());
-                data.setCodecBaseY(position.y());
-                data.setCodecBaseZ(position.z());
+                if (setsCodecBase(movement.kind(), data.getEntityType())) {
+                    data.setCodecBaseX(position.x());
+                    data.setCodecBaseY(position.y());
+                    data.setCodecBaseZ(position.z());
+                }
             }
             if (movement.hasRotation()) {
                 data.setXRot(movement.rotationYaw());
@@ -1708,9 +1713,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     movement.rotationPitch());
         }
 
-        if (position.relative()
-                && !player.isBedrockMovement()
-                && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
+        if (position.relative()) {
             if (!absolutePositionKnown) return; // Unknown entities are discarded by the client.
             // Decode against the packet-order codec base before queuing the proof.
             // Later relative packets may advance that base before this task runs.
@@ -1728,6 +1731,29 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         } else {
             scheduleTransactionBoundMovement(movement, firstTransaction);
         }
+    }
+
+    /**
+     * Whether the client's handler moves the relative-move codec base to this absolute position. 26.3
+     * ClientPacketListener#handleTeleportEntity and #handleMinecartAlongTrack place the entity and keep the base, which
+     * only #handleEntityPositionSync, #handleMoveEntity and Entity#recreateFromPacket set; ItemFrame#recalculateBoundingBox
+     * syncs it on every Entity#setPos. A client older than 1.21.2 receives every teleport as the 1.21 teleport_entity that
+     * ViaBackwards also maps entity_position_sync onto, so its teleports set the base; Geyser applies relative moves to
+     * its last position.
+     */
+    private boolean setsCodecBase(MovementKind kind, int entityType) {
+        return switch (kind) {
+            case RELATIVE_ENTITY, POSITION_SYNC -> true;
+            case TELEPORT_ENTITY ->
+                teleportsSetCodecBase()
+                        || EntityTypeUtil.isType(entityType, "item_frame")
+                        || EntityTypeUtil.isType(entityType, "glow_item_frame");
+            case MINECART -> teleportsSetCodecBase();
+        };
+    }
+
+    private boolean teleportsSetCodecBase() {
+        return player.isBedrockMovement() || player.getClientVersion().isOlderThan(ClientVersion.V_1_21_2);
     }
 
     private void scheduleBundledMovement(EntityMovement movement, int proofTransaction) {

@@ -36,6 +36,8 @@ import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityPositionSync;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundExplode;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveEntity;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveMinecart;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundTeleportEntity;
@@ -45,6 +47,7 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSetCarriedItem;
 import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
+import ac.cult.cultac.protocol.value.EntityDelta;
 import ac.cult.cultac.protocol.value.EntityPose;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
@@ -70,7 +73,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.function.Consumer;
+import java.util.function.ObjIntConsumer;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -942,6 +947,184 @@ class ReachInteractionRangeTest {
         }
     }
 
+    private static final List<ProtocolVersion> CODEC_BASE_VERSIONS =
+            List.of(ProtocolVersion.V26_3, ProtocolVersion.V1_21_4);
+
+    // ClientPacketListener#handleTeleportEntity places the entity and keeps the base relative moves decode from.
+    @Test
+    void aRelativeMoveAfterATeleportDecodesFromTheBaseTheTeleportKept() throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (ProtocolVersion version : CODEC_BASE_VERSIONS) {
+            for (boolean bundled : new boolean[] {true, false}) {
+                try (var setup = new Setup(version)) {
+                    int id = setup.spawn(new Vec3(.5, 64, 1));
+                    setup.inBundles(bundled, () -> {
+                        setup.teleport(id, new Vec3(10.5, 64, 1));
+                        setup.moveRelative(id, 0, 0, 1024);
+                    });
+                    PacketEntity entity = setup.player.compensatedEntities.getEntity(id);
+                    Vec3 target = entity.newPacketLocation.targetPosition();
+                    if (!target.equals(new Vec3(.5, 64, 1.25)))
+                        failures.add(version + " bundled=" + bundled + ": " + target);
+                }
+            }
+        }
+        assertEquals(List.of(), failures);
+    }
+
+    // The move lands a quarter block past the spawn the teleport left as the base, inside reach.
+    @Test
+    void aTargetMovedFromTheBaseATeleportKeptIsReachedWhereTheClientPutsIt() throws Exception {
+        assertEquals(
+                List.of(),
+                teleportThenMoveFlags(new Vec3(.5, 64, 1.3), (setup, id) -> {}, new Vec3(.5, 64, 11.3), List.of()));
+    }
+
+    // The move lands a quarter block past the spawn, half a block beyond reach, though the teleport placed it in reach.
+    @Test
+    void aTargetMovedFromTheBaseATeleportKeptFlagsWhereTheTeleportPlacedIt() throws Exception {
+        assertEquals(
+                List.of(),
+                teleportThenMoveFlags(
+                        new Vec3(.5, 64, 2.05), (setup, id) -> {}, new Vec3(.5, 64, .8), List.of("EntityReach")));
+    }
+
+    // ClientPacketListener#handleEntityPositionSync sets the base that later teleports keep.
+    @Test
+    void aPositionSyncAfterATeleportResetsTheBase() throws Exception {
+        assertEquals(
+                List.of(),
+                teleportThenMoveFlags(
+                        new Vec3(.5, 64, 21.3),
+                        (setup, id) -> {
+                            setup.teleport(id, new Vec3(.5, 64, 31.3));
+                            setup.sendPositionSync(id, new Vec3(.5, 64, 1.3));
+                            setup.pongThrough(setup.player.lastTransactionSent.get() + 1);
+                        },
+                        new Vec3(.5, 64, 11.3),
+                        List.of()));
+    }
+
+    // ClientPacketListener#handleMoveEntity leaves the position and the base of a rotation-only move.
+    @Test
+    void aRotationAfterATeleportKeepsThePositionAndTheBase() throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (ProtocolVersion version : CODEC_BASE_VERSIONS) {
+            for (boolean bundled : new boolean[] {true, false}) {
+                try (var setup = new Setup(version)) {
+                    int id = setup.spawn(new Vec3(.5, 64, 1));
+                    setup.inBundles(bundled, () -> {
+                        setup.teleport(id, new Vec3(.5, 64, 10.5));
+                        setup.turnEntity(id, 90);
+                    });
+                    var tracked = setup.player.compensatedEntities.getTrackedEntity(id);
+                    List<Double> state = List.of(
+                            tracked.getX(),
+                            tracked.getY(),
+                            tracked.getZ(),
+                            tracked.getCodecBaseX(),
+                            tracked.getCodecBaseY(),
+                            tracked.getCodecBaseZ());
+                    if (!state.equals(List.of(.5, 64.0, 10.5, .5, 64.0, 1.0)))
+                        failures.add(version + " bundled=" + bundled + ": " + state);
+                }
+            }
+        }
+        assertEquals(List.of(), failures);
+    }
+
+    // ViaBackwards 26.3->26.2 sums a stepped move into the one delta handleMoveEntity decodes from the kept base.
+    @Test
+    void aViaBackwardsSteppedMoveAfterATeleportDecodesFromTheBaseTheTeleportKept() throws Exception {
+        var steps = new EntityDelta.Stepped(List.of(
+                new EntityDelta.Step((short) 0, (short) 0, (short) 512, 1),
+                new EntityDelta.Step((short) 0, (short) 0, (short) 512, 1)));
+        assertEquals(
+                List.of(),
+                trackedAfterAMove(
+                        () -> new Setup(ProtocolVersion.V26_3, ProtocolVersion.V26_2),
+                        "minecraft:zombie",
+                        (setup, id) -> setup.teleport(id, new Vec3(.5, 64, 10)),
+                        steps,
+                        new Vec3(.5, 64, 1.25)));
+    }
+
+    // ItemFrame#recalculateBoundingBox syncs the base on the Entity#setPos a hanging entity's teleport reaches.
+    @Test
+    void aRelativeMoveAfterAnItemFrameTeleportDecodesFromTheTeleport() throws Exception {
+        assertEquals(
+                List.of(),
+                trackedAfterAMove(
+                        () -> new Setup(ProtocolVersion.V26_3),
+                        "minecraft:item_frame",
+                        (setup, id) -> setup.teleport(id, new Vec3(.5, 64, 10)),
+                        new EntityDelta.Linear((short) 0, (short) 0, (short) 1024),
+                        new Vec3(.5, 64, 10.25)));
+    }
+
+    // ClientPacketListener#handleMinecartAlongTrack only queues lerp steps.
+    @Test
+    void aRelativeMoveAfterAMinecartStepDecodesFromTheBaseTheStepKept() throws Exception {
+        assertEquals(
+                List.of(),
+                trackedAfterAMove(
+                        () -> new Setup(ProtocolVersion.V26_3),
+                        "minecraft:minecart",
+                        (setup, id) -> setup.moveMinecart(id, new Vec3(.5, 64, 10)),
+                        new EntityDelta.Linear((short) 0, (short) 0, (short) 1024),
+                        new Vec3(.5, 64, 1.25)));
+    }
+
+    /**
+     * Spawns this type at (.5, 64, 1), places it, then moves it by this delta; returns each bundling whose tracked
+     * position differs from expected.
+     */
+    private static List<String> trackedAfterAMove(
+            Callable<Setup> setups, String type, ObjIntConsumer<Setup> place, EntityDelta move, Vec3 expected)
+            throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (boolean bundled : new boolean[] {true, false}) {
+            try (var setup = setups.call()) {
+                int id = setup.spawn(type, new Vec3(.5, 64, 1));
+                setup.inBundles(bundled, () -> {
+                    place.accept(setup, id);
+                    setup.moveRelative(id, move);
+                });
+                var tracked = setup.player.compensatedEntities.getTrackedEntity(id);
+                Vec3 position = new Vec3(tracked.getX(), tracked.getY(), tracked.getZ());
+                if (!position.equals(expected)) failures.add("bundled=" + bundled + ": " + position);
+            }
+        }
+        return failures;
+    }
+
+    /**
+     * Spawns a zombie, runs before, teleports it and moves it a quarter block along the look, then attacks it once its
+     * interpolation finished; returns each version and bundling whose flags differ from expected.
+     */
+    private static List<String> teleportThenMoveFlags(
+            Vec3 spawn, ObjIntConsumer<Setup> before, Vec3 teleport, List<String> expected) throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (ProtocolVersion version : CODEC_BASE_VERSIONS) {
+            for (boolean bundled : new boolean[] {true, false}) {
+                try (var setup = new Setup(version)) {
+                    int id = setup.spawn(spawn);
+                    setup.inBundles(bundled, () -> {
+                        before.accept(setup, id);
+                        setup.teleport(id, teleport);
+                        setup.moveRelative(id, 0, 0, 1024);
+                    });
+                    PacketEntity entity = setup.player.compensatedEntities.getEntity(id);
+                    for (int tick = 0; tick < 100 && entity.newPacketLocation.hasActiveInterpolationTarget(); tick++)
+                        setup.tickEnd();
+                    List<String> flags = setup.attackEntity(id, EntityTypeIds.ZOMBIE, () -> {});
+                    if (!flags.equals(expected)) failures.add(version + " bundled=" + bundled + ": " + flags);
+                }
+            }
+        }
+        return failures;
+    }
+
     // A legacy client snaps onto a far position sync, where the model interpolates toward it.
     @Test
     void aLegacyTargetSyncedAwayAndBackKeepsTheMargin() throws Exception {
@@ -1154,6 +1337,12 @@ class ReachInteractionRangeTest {
         // A client that joined with this version, not one Via translates from 26.3.
         Setup(ProtocolVersion version) throws Exception {
             this(version, true);
+        }
+
+        // A client of this version that Via translates the server's packets for.
+        Setup(ProtocolVersion server, ProtocolVersion client) throws Exception {
+            this(server, false);
+            Mockito.when(fixture.connection.platform().getClientProtocol()).thenReturn(client);
         }
 
         private Setup(ProtocolVersion version, boolean originalClient) throws Exception {
@@ -2092,6 +2281,70 @@ class ReachInteractionRangeTest {
             player.packetEntityReplication.onTeleportEntity(event, player, packet);
             event.tasksAfter().forEach(Runnable::run);
             pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // A zombie spawned by add_entity, which gives the tracker its codec base, its proof answered.
+        int spawn(Vec3 at) {
+            return spawn("minecraft:zombie", at);
+        }
+
+        int spawn(String type, Vec3 at) {
+            bind();
+            int id = nextEntity++;
+            var packet = new ClientboundAddEntity(id, type, new Vec3d(at.x, at.y, at.z), 0, 0, 0);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ADD_ENTITY, packet, false);
+            player.packetEntityReplication.onAddEntity(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get());
+            assertNotNull(player.compensatedEntities.getEntity(id));
+            return id;
+        }
+
+        // A move_entity of these 1/4096 block deltas, its proof answered.
+        void moveRelative(int id, int xa, int ya, int za) {
+            moveRelative(id, new EntityDelta.Linear((short) xa, (short) ya, (short) za));
+        }
+
+        void moveRelative(int id, EntityDelta delta) {
+            var packet = new ClientboundMoveEntity(id, delta, 0, 0, false, true, false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.MOVE_ENTITY, packet, false);
+            player.packetEntityReplication.onMoveEntity(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // A move_minecart_along_track ending at this position, its proof answered.
+        void moveMinecart(int id, Vec3 to) {
+            var step = new ClientboundMoveMinecart.Step(new Vec3d(to.x, to.y, to.z), new Vec3d(0, 0, 0), 0, 0, 1);
+            var packet = new ClientboundMoveMinecart(id, List.of(step));
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.MOVE_MINECART, packet, false);
+            player.packetEntityReplication.onMoveMinecart(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // A rotation-only move_entity, its proof answered.
+        void turnEntity(int id, float yaw) {
+            var packet = new ClientboundMoveEntity(
+                    id, new EntityDelta.Linear((short) 0, (short) 0, (short) 0), yaw, 0, false, false, true);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.MOVE_ENTITY, packet, false);
+            player.packetEntityReplication.onMoveEntity(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // Sends entity movements in their own bundles, or each between its two pings.
+        void inBundles(boolean bundled, Runnable sends) {
+            useBundleDelimiter(bundled);
+            try {
+                sends.run();
+            } finally {
+                useBundleDelimiter(true);
+            }
         }
 
         private void useBundleDelimiter(boolean use) {
