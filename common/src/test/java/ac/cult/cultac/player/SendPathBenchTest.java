@@ -33,6 +33,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.List;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -118,8 +119,8 @@ class SendPathBenchTest {
                     "encodeBundleDelimiter", ConnectionPhase.class, ByteBufAllocator.class, CodecState.class);
             MethodHandle handle = MethodHandles.publicLookup().unreflect(method);
             System.out.println("delimiter: encodeBundleDelimiter");
-            return () -> (ProjectedPackets.Encoded)
-                    handle.invokeExact(packets, ConnectionPhase.PLAY, allocator, CodecState.EMPTY);
+            return () -> new ProjectedPackets.Encoded(
+                    List.of((ByteBuf) handle.invokeExact(packets, ConnectionPhase.PLAY, allocator, CodecState.EMPTY)));
         } catch (NoSuchMethodException absent) {
             var type = ClientboundPackets.BUNDLE_DELIMITER;
             System.out.println("delimiter: encode");

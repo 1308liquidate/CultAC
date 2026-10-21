@@ -200,20 +200,24 @@ public final class ProjectedPackets implements AutoCloseable {
         }
     }
 
-    /** As {@link #encode} for a bundle delimiter, whose bytes depend only on the phase; each call owns a fresh buffer. */
-    public Encoded encodeBundleDelimiter(ConnectionPhase phase, ByteBufAllocator allocator, CodecState state) {
+    /**
+     * The one frame {@link #encode} gives a bundle delimiter, whose bytes depend only on the phase; each call owns a
+     * fresh buffer.
+     */
+    public ByteBuf encodeBundleDelimiter(ConnectionPhase phase, ByteBufAllocator allocator, CodecState state) {
         if (closed) throw new IllegalStateException("Packet values are closed");
         byte[] bytes = bundleDelimiters[phase.ordinal()];
         if (bytes == null) {
             var type = ClientboundPackets.BUNDLE_DELIMITER;
-            var encoded = encode(phase, type, type.opaqueValue(), allocator, state);
-            bundleDelimiters[phase.ordinal()] =
-                    ByteBufUtil.getBytes(encoded.frames().getFirst());
-            return encoded;
+            ByteBuf frame = encode(phase, type, type.opaqueValue(), allocator, state)
+                    .frames()
+                    .getFirst();
+            bundleDelimiters[phase.ordinal()] = ByteBufUtil.getBytes(frame);
+            return frame;
         }
         ByteBuf output = allocator.buffer();
         output.writeBytes(bytes);
-        return new Encoded(List.of(output));
+        return output;
     }
 
     public <R> PacketType<R> writableType(R packet) {

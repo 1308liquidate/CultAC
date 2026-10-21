@@ -10,6 +10,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.PooledByteBufAllocator;
+import java.util.List;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
@@ -33,13 +34,13 @@ class BundleDelimiterEncodeTest {
                                 ClientboundPackets.BUNDLE_DELIMITER.opaqueValue(),
                                 ALLOCATOR,
                                 CodecState.EMPTY));
-                        String actual = outcome(() -> cached.encodeBundleDelimiter(phase, ALLOCATOR, CodecState.EMPTY));
+                        String actual = outcome(() -> delimiter(cached, phase));
                         assertEquals(expected, actual, label);
                         if (!actual.startsWith("!")) encoded++;
                     }
                 }
-                var first = cached.encodeBundleDelimiter(ConnectionPhase.PLAY, ALLOCATOR, CodecState.EMPTY);
-                var second = cached.encodeBundleDelimiter(ConnectionPhase.PLAY, ALLOCATOR, CodecState.EMPTY);
+                var first = delimiter(cached, ConnectionPhase.PLAY);
+                var second = delimiter(cached, ConnectionPhase.PLAY);
                 ByteBuf a = first.frames().getFirst(), b = second.frames().getFirst();
                 assertNotSame(a, b);
                 a.setByte(0, a.getByte(0) ^ 0x55);
@@ -63,10 +64,14 @@ class BundleDelimiterEncodeTest {
                                 ClientboundPackets.BUNDLE_DELIMITER.opaqueValue(),
                                 ALLOCATOR,
                                 CodecState.EMPTY)),
-                        outcome(() -> cached.encodeBundleDelimiter(ConnectionPhase.PLAY, ALLOCATOR, CodecState.EMPTY)));
+                        outcome(() -> delimiter(cached, ConnectionPhase.PLAY)));
             }
         }
         assertTrue(encoded > 0);
+    }
+
+    private static ProjectedPackets.Encoded delimiter(ProjectedPackets packets, ConnectionPhase phase) {
+        return new ProjectedPackets.Encoded(List.of(packets.encodeBundleDelimiter(phase, ALLOCATOR, CodecState.EMPTY)));
     }
 
     private static String outcome(Supplier<ProjectedPackets.Encoded> body) {
