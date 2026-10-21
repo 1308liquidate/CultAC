@@ -214,12 +214,11 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 prepareGroup(ctx, group, promise, activeFamilies, batch);
             } else {
                 boolean requested = expandPacket(ctx, message, promise, activeFamilies, batch);
-                if (!insideBundle && (requested || batch.output.size() > 1) && connection.clientHasLevel())
-                    wrap(ctx, batch.output);
+                if (!insideBundle && (requested || batch.size() > 1) && connection.clientHasLevel()) wrap(ctx, batch);
             }
-            output.append(batch.output);
+            output.append(batch);
         } catch (Throwable failure) {
-            batch.output.discard(failure, fallback == null ? null : promise);
+            batch.discard(failure, fallback == null ? null : promise);
             CultNetworkManager.reportFailure("outbound packet expansion", failure);
             if (fallback != null) {
                 PacketType<?> type = fallbackType(fallback);
@@ -281,19 +280,19 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 var entry = new Batch(batch.inside);
                 try {
                     boolean requested = expandPacket(ctx, write, part, activeFamilies, entry);
-                    if (!batch.inside && (requested || entry.output.size() > 1) && connection.clientHasLevel())
-                        wrap(ctx, entry.output);
+                    if (!batch.inside && (requested || entry.size() > 1) && connection.clientHasLevel())
+                        wrap(ctx, entry);
                     batch.inside = entry.inside;
-                    batch.output.append(entry.output);
+                    batch.append(entry);
                 } catch (Throwable failure) {
-                    entry.output.discard(failure);
+                    entry.discard(failure);
                     throw failure;
                 }
             }
         }
         if (wrapGroup) batch.add(delimiter(ctx));
-        batch.output.collectPromises(parts);
-        batch.output.addGroup(new GroupCompletion(List.copyOf(parts), promise));
+        batch.collectPromises(parts);
+        batch.addGroup(new GroupCompletion(List.copyOf(parts), promise));
     }
 
     /** Expands only packets. The caller decides whether this expansion needs a bundle. */
@@ -338,7 +337,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 transferred++;
                 requested |= expandFrame(ctx, frame, part, write.silent(), true, activeFamilies, batch);
             }
-            if (encoded.frames().size() > 1) batch.output.addGroup(new GroupCompletion(List.copyOf(parts), promise));
+            if (encoded.frames().size() > 1) batch.addGroup(new GroupCompletion(List.copyOf(parts), promise));
             return requested;
         } catch (Throwable failure) {
             for (int i = transferred; i < encoded.frames().size(); i++)
@@ -411,7 +410,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                             expandPacket(ctx, write, ctx.newPromise(), activeFamilies, batch);
                         }
                     }
-                    batch.output.addTasks(event.tasksAfter());
+                    batch.addTasks(event.tasksAfter());
                     requested |= event.isBundleRequested();
                 } finally {
                     activeFamilies.removeLast();
@@ -495,8 +494,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 batch.add(new Frame(frame, part, transferred == 0 ? type : null));
                 transferred++;
             }
-            if (replacement.frames().size() > 1)
-                batch.output.addGroup(new GroupCompletion(List.copyOf(parts), promise));
+            if (replacement.frames().size() > 1) batch.addGroup(new GroupCompletion(List.copyOf(parts), promise));
         } catch (Throwable failure) {
             for (int i = transferred; i < replacement.frames().size(); i++)
                 replacement.frames().get(i).release();
@@ -610,8 +608,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     }
 
     /** Local bundle cursor during expansion; it never changes the emitted wire state. */
-    private static final class Batch {
-        final Output output = new Output();
+    private static final class Batch extends Output {
         boolean inside;
 
         Batch(boolean inside) {
@@ -619,13 +616,13 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
 
         void add(Frame frame) {
-            output.addLast(frame);
+            addLast(frame);
             if (frame.type == ClientboundPackets.BUNDLE_DELIMITER) inside = !inside;
         }
     }
 
     /** Owns only un-emitted frames. Appending transfers ownership without retaining a tree. */
-    private static final class Output {
+    private static class Output {
         // Most expansions contain exactly one frame. Allocate a queue only for a second one.
         Frame first;
         ArrayDeque<Frame> tail;
