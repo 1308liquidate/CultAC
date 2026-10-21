@@ -591,15 +591,16 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
     /** Inline recursion guard for the ordinary one-family dispatch. */
     private static final class Families {
-        PacketType<?> first;
+        PacketType<?> first, second;
         ArrayDeque<PacketType<?>> nested;
 
         boolean contains(PacketType<?> type) {
-            return first == type || nested != null && nested.contains(type);
+            return first == type || second == type || nested != null && nested.contains(type);
         }
 
         void addLast(PacketType<?> type) {
             if (first == null) first = type;
+            else if (second == null) second = type;
             else {
                 if (nested == null) nested = new ArrayDeque<>(2);
                 nested.addLast(type);
@@ -607,8 +608,9 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
 
         void removeLast() {
-            if (nested == null || nested.isEmpty()) first = null;
-            else nested.removeLast();
+            if (nested != null && !nested.isEmpty()) nested.removeLast();
+            else if (second != null) second = null;
+            else first = null;
         }
     }
 
