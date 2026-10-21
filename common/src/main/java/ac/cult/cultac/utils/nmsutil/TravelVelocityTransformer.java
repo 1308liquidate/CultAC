@@ -10,8 +10,6 @@ import java.util.Collections;
 import java.util.List;
 
 public final class TravelVelocityTransformer {
-    private static final List<Boolean> AIR = List.of(false);
-
     private TravelVelocityTransformer() {}
 
     public static List<Vec3> transform(
@@ -32,14 +30,10 @@ public final class TravelVelocityTransformer {
         }
 
         List<Vec3> frictions = new ArrayList<>(4);
-        // Player#isAffectedByFluids is false in flight, so LivingEntity#travel takes travelInAir in any fluid.
-        boolean abilityFlying = result.getSimulationContext().getVehicle() == null && player.isFlying;
-        List<Boolean> inWaterStates = abilityFlying
-                ? AIR
-                : result.getSimulationContext().getWorldData().getInWater().getStates();
-        List<Boolean> inLavaStates = abilityFlying
-                ? AIR
-                : result.getSimulationContext().getWorldData().getInLava().getStates();
+        List<Boolean> inWaterStates =
+                result.getSimulationContext().getWorldData().getInWater().getStates();
+        List<Boolean> inLavaStates =
+                result.getSimulationContext().getWorldData().getInLava().getStates();
 
         for (int waterIndex = 0, waterSize = inWaterStates.size(); waterIndex < waterSize; waterIndex++) {
             boolean inWater = inWaterStates.get(waterIndex);
@@ -83,7 +77,9 @@ public final class TravelVelocityTransformer {
         }
 
         // Player#travel replaces the travelled Y with 0.6 of the Y it travelled with, without gravity.
-        if (abilityFlying && result.getInitialStartingVel() != null) {
+        if (result.getSimulationContext().getVehicle() == null
+                && player.isFlying
+                && result.getInitialStartingVel() != null) {
             double flightY = result.getInitialStartingVel().y * 0.6;
             frictions.replaceAll(velocity -> new Vec3(velocity.x, flightY, velocity.z));
         }
