@@ -568,10 +568,11 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         ClientboundEntityMotion motion = packet;
         if (player.isBedrockMovement() && motion.entityId() != player.entityID) return;
         int velocityTransaction = player.checkManager.getKnockbackHandler().handleEntityVelocity(event, packet);
+        if (velocityTransaction <= 0 && readsVelocityOnReceipt(motion.entityId())) {
+            velocityTransaction = player.appendFlushProofTransaction(event);
+        }
         if (velocityTransaction <= 0) {
-            CultPlayer.TrackedTransaction afterVelocity = appendTrailingProofTransaction(event);
-            velocityTransaction =
-                    afterVelocity == null ? player.lastTransactionSent.get() : afterVelocity.transaction();
+            velocityTransaction = player.lastTransactionSent.get();
         }
         Vec3 movement = PacketCodecUtil.clientVelocityFromObserved(
                 event.getDecodedProtocol(),
@@ -590,6 +591,18 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             }
             clearPacketHandlerDeltaMovement(motion.entityId(), packetHandlerDeltaSequence);
         });
+    }
+
+    // Only the player, the vehicle the server last put it on and the server's camera read a velocity at the
+    // moment the client handles it: movement and vehicle prediction, and the camera's Entity#getKnownMovement in
+    // ProjectileUtil#getHitEntitiesAlong. Another entity's velocity is read only once a later packet with its own
+    // proof makes it the vehicle (an unridden LivingEntity keeps it through aiStep), so the last sent ping is
+    // early enough and it gets no ping of its own.
+    private boolean readsVelocityOnReceipt(int entityId) {
+        Integer serverVehicle = player.compensatedEntities.vehicles.serverPlayerVehicle;
+        return entityId == player.entityID
+                || serverVehicle != null && serverVehicle == entityId
+                || player.cameraEntity.isServerCamera(entityId);
     }
 
     private void handleMoveEntityPacket(PacketSendEvent<ClientboundMoveEntity> event, ClientboundMoveEntity packet) {
