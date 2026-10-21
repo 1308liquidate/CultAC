@@ -2,8 +2,10 @@ package ac.cult.cultac.utils.nmsutil;
 
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.Ladder;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
@@ -370,12 +372,46 @@ public final class VelocityCandidates {
         // LivingEntity#travelFallFlying has already replaced deltaMovement
         // before Entity#move. Carry that velocity on uncollided axes as well;
         // carrying the initial vector would retain a stale pre-elytra candidate.
-        // LivingEntity#moveRelative adds the input to deltaMovement before
-        // Entity#move, so the carried velocity holds the accepted input too.
+        // In LivingEntity#handleRelativeFrictionAndCalculateMovement,
+        // LivingEntity#moveRelative adds the input to deltaMovement and
+        // LivingEntity#handleOnClimbable then clamps it on a climbable, both
+        // before Entity#move, so the carried velocity holds the accepted input,
+        // clamped while climbing. The travelFallFlying glide adds no input; its
+        // carried velocity is the accepted glide movement.
         Vec3 postMoveDelta = preCollisionVelocity(result);
         if (result.getValidMovements().getClosestTrace() != null && result.getAcceptedClosestToTarget() != null) {
             postMoveDelta = postMoveDelta.add(acceptedInput(result));
         }
+        CultPlayer player = result.getPlayer();
+        SimulationContext context = result.getSimulationContext();
+        DesyncStatus climbing = player == null ? DesyncStatus.FALSE : Ladder.clampsDeltaMovement(context);
+        if (climbing != DesyncStatus.TRUE) {
+            addPostMoveDeltaMovementCandidates(
+                    candidates, result, postMoveDelta, canZeroX, canZeroY, canZeroZ, clippedY, stepped);
+        }
+        if (climbing != DesyncStatus.FALSE) {
+            addPostMoveDeltaMovementCandidates(
+                    candidates,
+                    result,
+                    Ladder.handleOnClimbable(player, context, postMoveDelta),
+                    canZeroX,
+                    canZeroY,
+                    canZeroZ,
+                    clippedY,
+                    stepped);
+        }
+    }
+
+    /** Adds what Entity#move leaves of the deltaMovement {@code postMoveDelta} it moved by. */
+    private static void addPostMoveDeltaMovementCandidates(
+            Set<Vec3> candidates,
+            PredictionResult result,
+            Vec3 postMoveDelta,
+            boolean canZeroX,
+            boolean canZeroY,
+            boolean canZeroZ,
+            double clippedY,
+            boolean stepped) {
         CultPlayer player = result.getPlayer();
         boolean use26Dot2 = player != null && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_2);
         if (use26Dot2) {

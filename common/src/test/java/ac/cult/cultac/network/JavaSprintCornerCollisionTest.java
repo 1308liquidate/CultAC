@@ -4,7 +4,6 @@ import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
@@ -25,7 +24,7 @@ import org.junit.jupiter.api.Test;
 /**
  * A 26.3 client sprint-jumps forward so it lands touching a floor and a wall in the same tick, once into the corner of
  * a raised floor and once onto the edge of a step. Its collided movement stays within 8 degrees of its input, so
- * LocalPlayer#shouldStopRunSprinting keeps the sprint until the next jump turns the collision hard. The moves are a
+ * LocalPlayer#shouldStopRunSprinting keeps the sprint until a later move along the wall is hard. The moves are a
  * real client's at their recorded coordinates. LivingEntity#moveRelative adds each tick's input to deltaMovement before
  * Entity#move, so the momentum the landing starts from carries the previous tick's input.
  */
@@ -41,43 +40,29 @@ class JavaSprintCornerCollisionTest {
     @Test
     void landingInACornerKeepsTheSprint() throws Exception {
         try (var f = new JavaTickFixture()) {
-            for (int chunkX = 6; chunkX <= 8; chunkX++) {
-                for (int chunkZ = 9; chunkZ <= 11; chunkZ++) {
-                    f.player.compensatedWorld.ensureValidationChunkLoaded(chunkX, chunkZ);
-                }
-            }
-            for (int x = 112; x <= 127; x++) {
-                for (int z = 156; z <= 170; z++) {
-                    stone(f, x, 72, z);
-                    if (z >= 166) stone(f, x, 73, z);
-                }
-            }
-            Client c = client(f);
-            c.groundStart(122.07070437744618, 162.0309428836821, 122.022564469627, 73.0, 162.28826776903628);
-
-            f.input(JUMP_SPRINT);
-            c.command(PlayerCommandAction.START_SPRINTING);
-            c.move(-352.02277F, 22.948555F, 121.95081910581396, 73.41999998688698, 162.7529956005854, false);
-            c.move(-352.55957F, 24.69316F, 121.90834535376196, 73.7531999805212, 163.03200232294301, false);
-            c.move(-353.49905F, 27.108751F, 121.86680809448174, 74.00133597911214, 163.31121446081085, false);
-            f.input(SPRINT);
-            c.move(-353.70038F, 29.054646F, 121.82621286586786, 74.16610926093821, 163.5906236050661, false);
-            c.move(-353.36484F, 29.65855F, 121.78632681924243, 74.24918707874468, 163.87019523865726, false);
-            c.move(121.7470861282451, 74.25220334025373, 164.14991473754836, false);
-            c.move(121.70843271088626, 74.17675927506424, 164.4297687938663, false);
-            c.move(121.67031371255383, 74.02442408821369, 164.70974529744615, false);
-            c.move(121.63268103554948, 73.79673560066871, 164.98983322803758, false);
-            c.move(121.59549091096642, 73.49520087700593, 165.27002255721249, false);
-            c.move(121.55870350909834, 73.1212968405392, 165.550304159101, false);
-            // The wall at z = 166 clips the landing; (-0.0364, 0.1497) lies 7 degrees from the forward input.
-            f.input(JUMP_SPRINT);
-            PredictionResult landing = c.move(121.52228258491145, 73.0, 165.69999998807907, true);
-            assertNotEquals(DesyncStatus.TRUE, ClientHorizontalCollision.hard(landing), describe(landing));
+            Client c = landInACorner(f);
             // The jump's movement along the wall is hard, so the client stops sprinting.
-            c.move(121.45130624068176, 73.41999998688698, 165.69999998807907, false);
+            PredictionResult jump = c.move(121.45130624068176, 73.41999998688698, 165.69999998807907, false);
+            assertEquals(DesyncStatus.TRUE, ClientHorizontalCollision.hard(jump), describe(jump));
             c.command(PlayerCommandAction.STOP_SPRINTING);
-            c.move(-353.29773F, 29.72565F, 121.4102639754279, 73.7531999805212, 165.69999998807907, false);
+            PredictionResult rise =
+                    c.move(-353.29773F, 29.72565F, 121.4102639754279, 73.7531999805212, 165.69999998807907, false);
+            assertEquals(DesyncStatus.TRUE, ClientHorizontalCollision.hard(rise), describe(rise));
             c.move(-352.76086F, 30.195354F, 121.37044541000586, 74.00133597911214, 165.71944371692285, false);
+        }
+    }
+
+    @Test
+    void sprintingOnAfterTheCornerJumpIsFlagged() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Client c = landInACorner(f);
+            c.move(121.45130624068176, 73.41999998688698, 165.69999998807907, false);
+            f.player.xRot = -353.29773F;
+            f.player.yRot = 29.72565F;
+            c.move(1.0, 121.4102639754279, 73.7531999805212, 165.69999998807907, false);
+            f.player.xRot = -352.76086F;
+            f.player.yRot = 30.195354F;
+            c.move(2.0, 121.37044541000586, 74.00133597911214, 165.71944371692285, false);
         }
     }
 
@@ -110,12 +95,19 @@ class JavaSprintCornerCollisionTest {
             // The step at x = 80 clips the fall; (-0.1675, -0.0202) lies 4 degrees from the forward input.
             PredictionResult edge =
                     c.move(-266.7398F, 30.73217F, 80.30000001192093, 81.79673560066871, 151.6935085214557, false);
-            assertNotEquals(DesyncStatus.TRUE, ClientHorizontalCollision.hard(edge), describe(edge));
+            assertEquals(DesyncStatus.FALSE, ClientHorizontalCollision.hard(edge), describe(edge));
+            // The fall along the step is hard, so the client stops sprinting.
             f.input(JUMP_SPRINT);
-            c.move(-266.7398F, 30.79927F, 80.30000001192093, 81.49520087700593, 151.6736711163911, false);
+            PredictionResult fall =
+                    c.move(-266.7398F, 30.79927F, 80.30000001192093, 81.49520087700593, 151.6736711163911, false);
+            assertEquals(DesyncStatus.TRUE, ClientHorizontalCollision.hard(fall), describe(fall));
             c.command(PlayerCommandAction.STOP_SPRINTING);
-            c.move(-266.6056F, 30.933472F, 80.30000001192093, 81.1212968405392, 151.6544584564404, false);
-            c.move(-265.59903F, 31.403175F, 80.30000001192093, 81.0, 151.63546936047692, true);
+            PredictionResult lower =
+                    c.move(-266.6056F, 30.933472F, 80.30000001192093, 81.1212968405392, 151.6544584564404, false);
+            assertEquals(DesyncStatus.TRUE, ClientHorizontalCollision.hard(lower), describe(lower));
+            PredictionResult landing =
+                    c.move(-265.59903F, 31.403175F, 80.30000001192093, 81.0, 151.63546936047692, true);
+            assertEquals(DesyncStatus.TRUE, ClientHorizontalCollision.hard(landing), describe(landing));
             c.move(-262.71387F, 32.14128F, 80.30000001192093, 81.41999998688698, 151.60575488548105, false);
         }
     }
@@ -151,6 +143,43 @@ class JavaSprintCornerCollisionTest {
         }
     }
 
+    /** Sprint-jumps forward into the corner of a raised floor and lands touching the wall at z = 166. */
+    private static Client landInACorner(JavaTickFixture f) {
+        for (int chunkX = 6; chunkX <= 8; chunkX++) {
+            for (int chunkZ = 9; chunkZ <= 11; chunkZ++) {
+                f.player.compensatedWorld.ensureValidationChunkLoaded(chunkX, chunkZ);
+            }
+        }
+        for (int x = 112; x <= 127; x++) {
+            for (int z = 156; z <= 170; z++) {
+                stone(f, x, 72, z);
+                if (z >= 166) stone(f, x, 73, z);
+            }
+        }
+        Client c = client(f);
+        c.groundStart(122.07070437744618, 162.0309428836821, 122.022564469627, 73.0, 162.28826776903628);
+
+        f.input(JUMP_SPRINT);
+        c.command(PlayerCommandAction.START_SPRINTING);
+        c.move(-352.02277F, 22.948555F, 121.95081910581396, 73.41999998688698, 162.7529956005854, false);
+        c.move(-352.55957F, 24.69316F, 121.90834535376196, 73.7531999805212, 163.03200232294301, false);
+        c.move(-353.49905F, 27.108751F, 121.86680809448174, 74.00133597911214, 163.31121446081085, false);
+        f.input(SPRINT);
+        c.move(-353.70038F, 29.054646F, 121.82621286586786, 74.16610926093821, 163.5906236050661, false);
+        c.move(-353.36484F, 29.65855F, 121.78632681924243, 74.24918707874468, 163.87019523865726, false);
+        c.move(121.7470861282451, 74.25220334025373, 164.14991473754836, false);
+        c.move(121.70843271088626, 74.17675927506424, 164.4297687938663, false);
+        c.move(121.67031371255383, 74.02442408821369, 164.70974529744615, false);
+        c.move(121.63268103554948, 73.79673560066871, 164.98983322803758, false);
+        c.move(121.59549091096642, 73.49520087700593, 165.27002255721249, false);
+        c.move(121.55870350909834, 73.1212968405392, 165.550304159101, false);
+        // The wall at z = 166 clips the landing; (-0.0364, 0.1497) lies 7 degrees from the forward input.
+        f.input(JUMP_SPRINT);
+        PredictionResult landing = c.move(121.52228258491145, 73.0, 165.69999998807907, true);
+        assertEquals(DesyncStatus.FALSE, ClientHorizontalCollision.hard(landing), describe(landing));
+        return c;
+    }
+
     private static void stone(JavaTickFixture f, int x, int y, int z) {
         f.player.compensatedWorld.updateBlock(new BlockPos(x, y, z), BlockIds.STONE.defaultState());
     }
@@ -181,9 +210,14 @@ class JavaSprintCornerCollisionTest {
 
         /** A move at the current rotation; the prediction is exact and SprintE stays quiet. */
         PredictionResult move(double x, double y, double z, boolean onGround) {
+            return move(0.0, x, y, z, onGround);
+        }
+
+        /** A move at the current rotation; the prediction is exact and SprintE holds {@code violations} after it. */
+        PredictionResult move(double violations, double x, double y, double z, boolean onGround) {
             PredictionResult result = f.tick(new Vec3(x, y, z), onGround);
             assertTrue(exact(result), describe(result));
-            assertEquals(0.0, sprintE.violations, describe(result));
+            assertEquals(violations, sprintE.violations, describe(result));
             return result;
         }
 

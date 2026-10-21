@@ -2,7 +2,10 @@ package ac.cult.cultac.checks.impl.prediction;
 
 import ac.cult.cultac.checks.impl.prediction.checks.HorizontalAnalyzer;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
+import ac.cult.cultac.network.protocol.ClientVersion;
+import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.data.CollideAxisData;
+import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.math.Vec3;
 
 /**
@@ -15,11 +18,14 @@ import ac.cult.cultac.utils.math.Vec3;
  * collided movement under 1e-5 squared, is never minor. The collided movement is the reported delta, so only the
  * attempted delta is unknown. KeyboardInput's move vector only points in the eight key directions, which
  * LocalPlayer#modifyInput scales without turning, so each direction is tested with any input length up to the
- * accepted input allowance.
+ * accepted input allowance. LocalPlayer#sendChanges reports the keys of the tick's travel before its move, so a
+ * reported direction that reaches the delta is the only one tested.
  */
 public final class ClientHorizontalCollision {
     private static final double TOLERANCE = HorizontalAnalyzer.HORIZONTAL_INPUT_UNCERTAINTY;
     private static final double MINOR_ANGLE = 0.13962634F;
+    private static final int SOFT = 1;
+    private static final int HARD = 2;
 
     private ClientHorizontalCollision() {}
 
@@ -40,48 +46,97 @@ public final class ClientHorizontalCollision {
         int wallZ = wallSide(collide.getZ(), target.z);
         if (wallX == 0 && wallZ == 0) return DesyncStatus.FALSE;
 
-        Vec3 movement = trace.preCollisionMovement();
         Vec3 stuck = trace.position().collisionStuckSpeedMultiplier(context);
-        double stuckX = stuck == null ? 1 : stuck.x;
-        double stuckZ = stuck == null ? 1 : stuck.z;
-        double maxInput = result.getHorizontalInputRadius();
         double yaw = context.getXRot() * (Math.PI / 180.0);
-        double sin = Math.sin(yaw);
-        double cos = Math.cos(yaw);
+        Move move = new Move(
+                trace.preCollisionMovement(),
+                target,
+                wallX,
+                wallZ,
+                stuck == null ? 1 : stuck.x,
+                stuck == null ? 1 : stuck.z,
+                result.getHorizontalInputRadius(),
+                Math.sin(yaw),
+                Math.cos(yaw));
 
-        boolean couldBeHard = false;
-        boolean couldBeSoft = false;
+        KnownInput keys = reportedKeys(result.getPlayer());
+        if (keys != null) {
+            int reported = move.collisions((int) keys.strafeImpulse(), (int) keys.forwardImpulse());
+            if (reported != 0) return verdict(reported);
+        }
+        int collisions = 0;
         for (int strafe = -1; strafe <= 1; strafe++) {
             for (int forward = -1; forward <= 1; forward++) {
-                double length = Math.sqrt(strafe * strafe + forward * forward);
-                double dirX = length == 0 ? 0 : (strafe * cos - forward * sin) / length;
-                double dirZ = length == 0 ? 0 : (forward * cos + strafe * sin) / length;
-                Axis x = new Axis(movement.x, dirX * stuckX, target.x, wallX);
-                Axis z = new Axis(movement.z, dirZ * stuckZ, target.z, wallZ);
-
-                double[] consistent = {0, length == 0 ? 0 : maxInput};
-                if (!x.consistent(consistent) || !z.consistent(consistent)) continue;
-                double low = consistent[0];
-                double high = consistent[1];
-
-                // The minor angle is measured on the collided movement, which the reported delta fixes.
-                boolean minor = length != 0 && isMinor(dirX, dirZ, target.x, target.z);
-                // Collision is certain where a wall axis overshoots by more than the tolerance, else it may not exist.
-                double[] noCollision = {low, high};
-                if (minor || x.reachesWithin(noCollision) && z.reachesWithin(noCollision)) couldBeSoft = true;
-                if (!minor && (x.overshoots(new double[] {low, high}) || z.overshoots(new double[] {low, high}))) {
-                    couldBeHard = true;
-                }
+                collisions |= move.collisions(strafe, forward);
             }
         }
-        if (!couldBeHard && !couldBeSoft) return DesyncStatus.UNKNOWN;
-        return couldBeHard ? (couldBeSoft ? DesyncStatus.UNKNOWN : DesyncStatus.TRUE) : DesyncStatus.FALSE;
+        return verdict(collisions);
+    }
+
+    /**
+     * The keys LocalPlayer#sendChanges reported in PLAYER_INPUT before the move, which KeyboardInput#tick read for its
+     * travel, or null when the client does not report the keys LocalPlayer#applyInput moves by.
+     */
+    private static KnownInput reportedKeys(CultPlayer player) {
+        if (player == null
+                || player.getClientVersion().isOlderThan(ClientVersion.V_1_21_2)
+                || player.isBedrockMovement()
+                || !player.cameraEntity.isSelf()) return null;
+        return player.packetStateData.knownInput;
+    }
+
+    private static DesyncStatus verdict(int collisions) {
+        return switch (collisions) {
+            case HARD -> DesyncStatus.TRUE;
+            case SOFT -> DesyncStatus.FALSE;
+            default -> DesyncStatus.UNKNOWN;
+        };
     }
 
     /** +1/-1 when the move ends flush against a wall on that side of the axis, else 0. */
     private static int wallSide(CollideAxisData.CollideResult result, double target) {
         if (result == null || !result.isLikelyCollide() || result.getSide() == 0) return 0;
         return Math.abs(result.getResult() - target) <= TOLERANCE ? result.getSide() : 0;
+    }
+
+    /** The attempted movement {@code base + input * t} of a move that reported {@code target}. */
+    private record Move(
+            Vec3 base,
+            Vec3 target,
+            int wallX,
+            int wallZ,
+            double stuckX,
+            double stuckZ,
+            double maxInput,
+            double sin,
+            double cos) {
+        /**
+         * {@link #SOFT} and {@link #HARD} for the collisions the key direction (strafe, forward) can end in with an
+         * input length that reaches the reported delta, 0 when no length does.
+         */
+        int collisions(int strafe, int forward) {
+            double length = Math.sqrt(strafe * strafe + forward * forward);
+            double dirX = length == 0 ? 0 : (strafe * cos - forward * sin) / length;
+            double dirZ = length == 0 ? 0 : (forward * cos + strafe * sin) / length;
+            Axis x = new Axis(base.x, dirX * stuckX, target.x, wallX);
+            Axis z = new Axis(base.z, dirZ * stuckZ, target.z, wallZ);
+
+            double[] consistent = {0, length == 0 ? 0 : maxInput};
+            if (!x.consistent(consistent) || !z.consistent(consistent)) return 0;
+            double low = consistent[0];
+            double high = consistent[1];
+
+            int collisions = 0;
+            // The minor angle is measured on the collided movement, which the reported delta fixes.
+            boolean minor = length != 0 && isMinor(dirX, dirZ, target.x, target.z);
+            // Collision is certain where a wall axis overshoots by more than the tolerance, else it may not exist.
+            double[] noCollision = {low, high};
+            if (minor || x.reachesWithin(noCollision) && z.reachesWithin(noCollision)) collisions |= SOFT;
+            if (!minor && (x.overshoots(new double[] {low, high}) || z.overshoots(new double[] {low, high}))) {
+                collisions |= HARD;
+            }
+            return collisions;
+        }
     }
 
     private static boolean isMinor(double dirX, double dirZ, double movementX, double movementZ) {
