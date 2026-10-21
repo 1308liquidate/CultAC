@@ -420,9 +420,15 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
     }
 
     private static void onLocalPlayerSprintTick(CultPlayer player) {
+        if (!localPlayerTicked(player)) return;
         // LocalPlayer#tick only reaches sendIsSprintingIfNeeded mounted when the root vehicle is
         // locally authoritative, and then after the vehicle movement; hold the model while mounted.
-        if (!localPlayerTicked(player) || player.compensatedEntities.getSelf().inVehicle()) return;
+        PacketEntity vehicle = player.compensatedEntities.getSelf().getRiding();
+        if (vehicle != null) {
+            player.onMountedClientTick(vehicle);
+            return;
+        }
+        if (player.compensatedEntities.getSelf().inVehicle()) return;
         player.sprintState.onClientTick(player.isSprinting);
     }
 

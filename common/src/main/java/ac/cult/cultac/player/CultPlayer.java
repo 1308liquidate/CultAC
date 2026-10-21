@@ -247,6 +247,8 @@ public class CultPlayer implements GrimUser {
     public boolean isSneaking;
     // The client's last START/STOP_SPRINTING (LocalPlayer#wasSprinting)
     public boolean isSprinting;
+    // LocalPlayer#aiStep cleared the sprint flag of a passenger without a STOP_SPRINTING; the next START_SPRINTING ends it.
+    public boolean sprintClearedAsPassenger;
     public final ClientSprintState sprintState = new ClientSprintState();
     public final ClientSwimState swimState = new ClientSwimState();
     public final ClientAttackStrength attackStrength = new ClientAttackStrength();
@@ -1495,6 +1497,22 @@ public class CultPlayer implements GrimUser {
 
     public boolean inVehicle() {
         return compensatedEntities.getSelf().inVehicle();
+    }
+
+    /**
+     * Whether the client's sprint flag is set. LocalPlayer#aiStep clears it for a passenger whose vehicle cannot
+     * sprint or that it does not control, and LocalPlayer#sendChanges sends no STOP_SPRINTING for a vehicle it does
+     * not control, so {@link #isSprinting} keeps the last START_SPRINTING until the client sprints or dismounts.
+     */
+    public boolean isClientSprinting() {
+        return isSprinting && !sprintClearedAsPassenger;
+    }
+
+    /** A client tick mounted on {@code vehicle}: only a camel the player controls (Camel#canSprint) keeps the flag. */
+    public void onMountedClientTick(PacketEntity vehicle) {
+        if (EntityTypeUtil.isCamelFamily(vehicle.type)
+                && compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(vehicle)) return;
+        sprintClearedAsPassenger = true;
     }
 
     @Override
