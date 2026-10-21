@@ -7,6 +7,7 @@ import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
+import com.sun.management.ThreadMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
@@ -39,7 +40,7 @@ class CollisionGatheringCpuBenchTest {
             version.setAccessible(true);
             var queries = queries();
             var actor = new JavaCollisionState(0, false, false, false);
-            var thread = ManagementFactory.getThreadMXBean();
+            var thread = (ThreadMXBean) ManagementFactory.getThreadMXBean();
             String jfr = System.getenv("CULT_COLLISION_BENCH_JFR");
             Recording recording = null;
             if (jfr != null) {
@@ -52,11 +53,15 @@ class CollisionGatheringCpuBenchTest {
                 long sink = 0;
                 for (int i = 0; i < warmup; i++) sink += pass(player, queries, actor);
                 long[] nanos = new long[reps];
+                long[] bytes = new long[reps];
                 for (int i = 0; i < reps; i++) {
+                    long allocated = thread.getCurrentThreadAllocatedBytes();
                     long start = thread.getCurrentThreadCpuTime();
                     for (int j = 0; j < inner; j++) sink += pass(player, queries, actor);
                     nanos[i] = thread.getCurrentThreadCpuTime() - start;
+                    bytes[i] = thread.getCurrentThreadAllocatedBytes() - allocated;
                 }
+                Arrays.sort(bytes);
                 long[] sorted = nanos.clone();
                 Arrays.sort(sorted);
                 long median = sorted[reps / 2];
@@ -64,12 +69,16 @@ class CollisionGatheringCpuBenchTest {
                 for (int i = 0; i < reps; i++) deviations[i] = Math.abs(nanos[i] - median);
                 Arrays.sort(deviations);
                 report.append(String.format(
-                        "%s median %.3f ms/pass MAD %.3f min %.3f max %.3f (%d queries x %d passes, sink %d)%n",
+                        "%s median %.3f ms/pass MAD %.3f min %.3f max %.3f, alloc median %.1f KB/pass min %.1f max"
+                                + " %.1f (%d queries x %d passes, sink %d)%n",
                         client,
                         median / 1e6 / inner,
                         deviations[reps / 2] / 1e6 / inner,
                         sorted[0] / 1e6 / inner,
                         sorted[reps - 1] / 1e6 / inner,
+                        bytes[reps / 2] / 1e3 / inner,
+                        bytes[0] / 1e3 / inner,
+                        bytes[reps - 1] / 1e3 / inner,
                         QUERIES,
                         inner,
                         sink));
