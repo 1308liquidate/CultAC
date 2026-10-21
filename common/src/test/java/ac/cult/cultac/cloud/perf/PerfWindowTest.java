@@ -45,6 +45,32 @@ class PerfWindowTest {
     }
 
     @Test
+    void dropsEachThreadsEarliestAllocationSampleInAnyDeliveryOrder() {
+        PerfRecorder.Window window = reorderedWindow();
+
+        PerfRecorder.Window.Calibration calibration = window.calibrate(null);
+
+        PerfProfile profile = window.trie.encode(true, 1 << 20).build();
+        assertEquals(1_000, profile.getAllocBytesTotal());
+        assertEquals(Map.of("x.B.alloc", 400L, "x.D.alloc", 600L), allocByLeaf(profile));
+        assertEquals(Map.of("[B", 400L, "Foo", 600L), classBytes(window));
+        assertEquals(List.of(calibration(OWN_GROUP, 1_000, 0)), calibration.groups());
+    }
+
+    @Test
+    void ofTwoSamplesAtOneTimeTheFirstDeliveredIsDropped() {
+        PerfRecorder.Window window = new PerfRecorder.Window(-1);
+        window.alloc(OWN, OWN_GROUP, 1, 5, "[B", 1_000_000);
+        window.alloc(FOREIGN, OWN_GROUP, 1, 5, "Foo", 70);
+
+        window.calibrate(null);
+
+        assertEquals(
+                Map.of("x.D.alloc", 70L),
+                allocByLeaf(window.trie.encode(true, 1 << 20).build()));
+    }
+
+    @Test
     void scalesStacksAndClassesToTheExactBytesOfTheirGroup() {
         PerfRecorder.Window window = sampledWindow();
         long[] exact = new long[Attribution.GROUPS.size()];
@@ -66,12 +92,12 @@ class PerfWindowTest {
     @Test
     void partnerModeNamesPartnerAllocationClassesOther() {
         PerfRecorder.Window window = new PerfRecorder.Window(-1);
-        window.alloc(OWN, OWN_GROUP, -1, "[B", 100);
-        window.alloc(OWN, OWN_GROUP, -1, "[Ljava.lang.String;", 50);
-        window.alloc(OWN, OWN_GROUP, -1, "partner.Secret", 30);
-        window.alloc(OWN, OWN_GROUP, -1, "[Lpartner.Secret;", 20);
-        window.alloc(OWN, OWN_GROUP, -1, null, 5);
-        window.alloc(FOREIGN, OWN_GROUP, -1, "partner.Elsewhere", 1_000);
+        window.alloc(OWN, OWN_GROUP, -1, 1, "[B", 100);
+        window.alloc(OWN, OWN_GROUP, -1, 2, "[Ljava.lang.String;", 50);
+        window.alloc(OWN, OWN_GROUP, -1, 3, "partner.Secret", 30);
+        window.alloc(OWN, OWN_GROUP, -1, 4, "[Lpartner.Secret;", 20);
+        window.alloc(OWN, OWN_GROUP, -1, 5, null, 5);
+        window.alloc(FOREIGN, OWN_GROUP, -1, 6, "partner.Elsewhere", 1_000);
 
         Map<String, Long> partner = window.topClasses(false).stream()
                 .collect(Collectors.toMap(PerfClassAlloc::getClassName, PerfClassAlloc::getBytes));
@@ -91,8 +117,8 @@ class PerfWindowTest {
     @Test
     void aGroupWithoutExactBytesIsLeftUncalibrated() {
         PerfRecorder.Window window = sampledWindow();
-        window.alloc(FOREIGN, Attribution.NETTY, 7, "Foo", 9_999);
-        window.alloc(FOREIGN, Attribution.NETTY, 7, "Foo", 50);
+        window.alloc(FOREIGN, Attribution.NETTY, 7, 10, "Foo", 9_999);
+        window.alloc(FOREIGN, Attribution.NETTY, 7, 11, "Foo", 50);
         long[] exact = new long[Attribution.GROUPS.size()];
         exact[OWN_GROUP] = 2_000;
 
@@ -105,12 +131,59 @@ class PerfWindowTest {
     @Test
     void samplesWithoutAThreadAreKept() {
         PerfRecorder.Window window = new PerfRecorder.Window(-1);
-        window.alloc(FOREIGN, Attribution.OTHER, -1, "Foo", 70);
-        window.alloc(FOREIGN, Attribution.OTHER, -1, "Foo", 30);
+        window.alloc(FOREIGN, Attribution.OTHER, -1, 2, "Foo", 70);
+        window.alloc(FOREIGN, Attribution.OTHER, -1, 1, "Foo", 30);
 
         window.calibrate(null);
 
         assertEquals(100, window.trie.encode(true, 1 << 20).build().getAllocBytesTotal());
+    }
+
+    @Test
+    void aHeldSampleKeepsItsFramesWhenTheStreamReusesTheView() {
+        StackTrie.StackTraceView[] current = {OWN};
+        StackTrie.StackTraceView reused = new StackTrie.StackTraceView() {
+            @Override
+            public int size() {
+                return current[0].size();
+            }
+
+            @Override
+            public String type(int fromLeaf) {
+                return current[0].type(fromLeaf);
+            }
+
+            @Override
+            public String method(int fromLeaf) {
+                return current[0].method(fromLeaf);
+            }
+        };
+        PerfRecorder.Window window = new PerfRecorder.Window(-1);
+
+        window.alloc(reused, OWN_GROUP, 1, 5, "[B", 400);
+        current[0] = FOREIGN;
+        window.alloc(reused, OWN_GROUP, 1, 1, "Foo", 1_000_000);
+        window.calibrate(null);
+
+        assertEquals(
+                Map.of("x.B.alloc", 400L),
+                allocByLeaf(window.trie.encode(true, 1 << 20).build()));
+    }
+
+    @Test
+    void aThreadStartedAfterTheStartSnapshotKeepsItsEarliestSample() {
+        PerfRecorder.Window window =
+                new PerfRecorder.Window(-1, Map.of(1L, new PerfRecorder.ThreadBytes("cult-a", 0)));
+
+        window.alloc(OWN, OWN_GROUP, 1, 1, "[B", 1_000_000);
+        window.alloc(OWN, OWN_GROUP, 1, 2, "[B", 100);
+        window.alloc(FOREIGN, OWN_GROUP, 2, 2, "Foo", 600);
+        window.alloc(FOREIGN, OWN_GROUP, 2, 1, "Foo", 300);
+        window.calibrate(null);
+
+        assertEquals(
+                Map.of("x.B.alloc", 100L, "x.D.alloc", 900L),
+                allocByLeaf(window.trie.encode(true, 1 << 20).build()));
     }
 
     @Test
@@ -208,11 +281,22 @@ class PerfWindowTest {
     /** Two anticheat threads: thread 1's first sample (1e12) and thread 2's (5e11) are dropped, 1000 bytes stay. */
     private static PerfRecorder.Window sampledWindow() {
         PerfRecorder.Window window = new PerfRecorder.Window(-1);
-        window.alloc(OWN, OWN_GROUP, 1, "[B", 1_000_000_000_000L);
-        window.alloc(FOREIGN, OWN_GROUP, 2, "Foo", 500_000_000_000L);
-        window.alloc(OWN, OWN_GROUP, 1, "[B", 100);
-        window.alloc(OWN, OWN_GROUP, 1, "[B", 300);
-        window.alloc(FOREIGN, OWN_GROUP, 2, "Foo", 600);
+        window.alloc(OWN, OWN_GROUP, 1, 1, "[B", 1_000_000_000_000L);
+        window.alloc(FOREIGN, OWN_GROUP, 2, 2, "Foo", 500_000_000_000L);
+        window.alloc(OWN, OWN_GROUP, 1, 3, "[B", 100);
+        window.alloc(OWN, OWN_GROUP, 1, 4, "[B", 300);
+        window.alloc(FOREIGN, OWN_GROUP, 2, 5, "Foo", 600);
+        return window;
+    }
+
+    /** {@link #sampledWindow}'s samples delivered as JFR may deliver them, each thread's earliest not first. */
+    private static PerfRecorder.Window reorderedWindow() {
+        PerfRecorder.Window window = new PerfRecorder.Window(-1);
+        window.alloc(OWN, OWN_GROUP, 1, 3, "[B", 100);
+        window.alloc(FOREIGN, OWN_GROUP, 2, 5, "Foo", 600);
+        window.alloc(OWN, OWN_GROUP, 1, 4, "[B", 300);
+        window.alloc(OWN, OWN_GROUP, 1, 1, "[B", 1_000_000_000_000L);
+        window.alloc(FOREIGN, OWN_GROUP, 2, 2, "Foo", 500_000_000_000L);
         return window;
     }
 

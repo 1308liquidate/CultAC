@@ -13,16 +13,15 @@ import java.lang.management.ThreadInfo;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -133,7 +132,6 @@ public final class PerfRecorder {
     }
 
     private Result run(PerfSettings settings, BooleanSupplier cancelled) throws InterruptedException {
-        Window window = new Window(Thread.currentThread().threadId());
         Load load = new Load();
         long startMillis = clock.millis();
         long start = System.nanoTime();
@@ -141,6 +139,7 @@ public final class PerfRecorder {
         long ownCpu = ownCpuNanos();
         Map<Long, Long> ownAlloc = ownAllocatedBytes();
         Map<Long, ThreadBytes> threadAlloc = threadAllocatedBytes();
+        Window window = new Window(Thread.currentThread().threadId(), threadAlloc);
         ProcCpu.Snapshot procStart = procCpu();
         load.players(platform, start);
         long dispatchCpu;
@@ -469,6 +468,8 @@ public final class PerfRecorder {
         /** {@code groups}: one per thread group with sampled or exact bytes. */
         record Calibration(boolean calibrated, List<PerfAllocCalibration> groups) {}
 
+        private record HeldAlloc(CopiedStack stack, int group, String type, long bytes, long startNanos) {}
+
         final StackTrie trie = new StackTrie();
         /**
          * Allocated bytes by class, at {@code 2 * group}: on stacks with a CultAC frame, at {@code 2 * group + 1}: on
@@ -477,8 +478,10 @@ public final class PerfRecorder {
         private final Map<String, long[]> classes = new HashMap<>();
         /** Sampled allocated bytes by thread group. */
         private final long[] sampledAlloc = new long[Attribution.GROUPS.size()];
-        /** Threads whose first allocation sample, weighted since before the window, has been dropped. */
-        private final Set<Long> allocThreads = new HashSet<>();
+        /** The earliest allocation sample so far of each thread, held back from the trie. */
+        private final Map<Long, HeldAlloc> earliestAlloc = new HashMap<>();
+        /** The allocated bytes at the window start of each platform thread ThreadMXBean lists; null when unknown. */
+        private final Map<Long, ThreadBytes> allocStart;
 
         int gcCount;
         long gcPauseNanos;
@@ -493,7 +496,12 @@ public final class PerfRecorder {
         private Throwable failure;
 
         Window(long recordingThread) {
+            this(recordingThread, null);
+        }
+
+        Window(long recordingThread, Map<Long, ThreadBytes> allocStart) {
             this.recordingThread = recordingThread;
+            this.allocStart = allocStart;
         }
 
         synchronized void sample(RecordedEvent event, int kind) {
@@ -517,19 +525,41 @@ public final class PerfRecorder {
                 case NATIVE -> trie.add(stack, group, 0, 1, 0);
                 default -> {
                     RecordedClass allocated = event.getClass("objectClass");
+                    Instant at = event.getStartTime();
                     alloc(
                             stack,
                             group,
                             thread == null ? -1 : thread.getJavaThreadId(),
+                            at.getEpochSecond() * 1_000_000_000L + at.getNano(),
                             allocated == null ? null : allocated.getName(),
                             Math.max(0, event.getLong("weight")));
                 }
             }
         }
 
-        /** One allocation sample; the first of each thread, {@code threadId} >= 0, is dropped. */
-        synchronized void alloc(StackTrie.StackTraceView stack, int group, long threadId, String type, long bytes) {
-            if (threadId >= 0 && allocThreads.add(threadId)) return;
+        /**
+         * One allocation sample of {@code threadId}, -1 when unknown, taken at {@code startNanos}. JFR weighs a sample
+         * by the bytes its thread allocated since that thread's previous sample, which for the first sample of a window
+         * reaches back before it, and delivers samples out of order. Each thread's earliest sample is therefore held
+         * back and dropped, unless the thread started after the window's start snapshot: its first sample is weighed
+         * from zero.
+         */
+        synchronized void alloc(
+                StackTrie.StackTraceView stack, int group, long threadId, long startNanos, String type, long bytes) {
+            if (threadId < 0 || allocStart != null && !allocStart.containsKey(threadId)) {
+                add(stack, group, type, bytes);
+                return;
+            }
+            HeldAlloc held = earliestAlloc.get(threadId);
+            if (held != null && startNanos >= held.startNanos()) {
+                add(stack, group, type, bytes);
+                return;
+            }
+            earliestAlloc.put(threadId, new HeldAlloc(CopiedStack.of(stack), group, type, bytes, startNanos));
+            if (held != null) add(held.stack(), held.group(), held.type(), held.bytes());
+        }
+
+        private void add(StackTrie.StackTraceView stack, int group, String type, long bytes) {
             trie.add(stack, group, 0, 0, bytes);
             sampledAlloc[group] += bytes;
             if (type == null) type = OTHER_CLASSES;
@@ -678,6 +708,34 @@ public final class PerfRecorder {
                 at = fromLeaf;
             }
             return method;
+        }
+    }
+
+    /** A stack's frames copied out of a JFR event, which the stream reuses. */
+    private record CopiedStack(String[] types, String[] methods) implements StackTrie.StackTraceView {
+        static CopiedStack of(StackTrie.StackTraceView stack) {
+            String[] types = new String[stack.size()];
+            String[] methods = new String[types.length];
+            for (int i = 0; i < types.length; i++) {
+                types[i] = stack.type(i);
+                methods[i] = stack.method(i);
+            }
+            return new CopiedStack(types, methods);
+        }
+
+        @Override
+        public int size() {
+            return types.length;
+        }
+
+        @Override
+        public String type(int fromLeaf) {
+            return types[fromLeaf];
+        }
+
+        @Override
+        public String method(int fromLeaf) {
+            return methods[fromLeaf];
         }
     }
 }
