@@ -48,6 +48,28 @@ public class Collisions {
         return collide(player, box, desiredX, desiredY, desiredZ, getAxisStepOrder(desiredX, desiredZ), true);
     }
 
+    /** {@code onGroundForStep} is Entity#onGround at the move's start, which lets Entity#collide step upwards. */
+    public static Vec3 collide(
+            CultPlayer player,
+            SimpleCollisionBox box,
+            double desiredX,
+            double desiredY,
+            double desiredZ,
+            boolean onGroundForStep) {
+        return collide(
+                player,
+                box,
+                desiredX,
+                desiredY,
+                desiredZ,
+                getAxisStepOrder(desiredX, desiredZ),
+                true,
+                box.minY,
+                null,
+                onGroundForStep,
+                null);
+    }
+
     public static Vec3 collideWithAdditionalCollisionBoxes(
             CultPlayer player,
             SimpleCollisionBox box,
