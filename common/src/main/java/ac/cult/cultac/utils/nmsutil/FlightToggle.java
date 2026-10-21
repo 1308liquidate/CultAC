@@ -45,6 +45,12 @@ public final class FlightToggle {
                 && !vehicleCanBlock(player);
     }
 
+    /** Abilities#flying at the start of LocalPlayer#aiStep, before this client tick's toggle sent player_abilities. */
+    public static boolean flyingBeforeAiStep(CultPlayer player) {
+        PacketStateData data = player.packetStateData;
+        return data.flightStopThisClientTick || player.isFlying && !data.flyingStartBeforeTravel;
+    }
+
     /** Runs the toggle's timer update and Player#aiStep's decrement for a client tick LocalPlayer#aiStep ran. */
     public static void onClientTick(CultPlayer player) {
         PacketStateData data = player.packetStateData;
@@ -98,8 +104,7 @@ public final class FlightToggle {
     // swims. ClientPacketListener#handleSetEntityData can overwrite the previous state with the server's.
     private static boolean swimmingPossible(CultPlayer player) {
         PacketStateData data = player.packetStateData;
-        boolean flying = data.flightStopThisClientTick || player.isFlying && !data.flyingStartBeforeTravel;
-        if (flying || player.inVehicle() || !player.sprintState.flagBeforeAiStep()) return false;
+        if (flyingBeforeAiStep(player) || player.inVehicle() || !player.sprintState.flagBeforeAiStep()) return false;
         PredictionResult prediction = player.checkManager.getSimulationProcessor().getLastPrediction();
         if (prediction == null) return true;
         if (!prediction.getSimulationContext().getWorldData().getInWater().getStates().contains(true)) return false;

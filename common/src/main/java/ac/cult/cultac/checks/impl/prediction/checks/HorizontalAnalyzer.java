@@ -23,6 +23,7 @@ import ac.cult.cultac.utils.math.OptifineFastMath;
 import ac.cult.cultac.utils.math.VanillaMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.Collisions;
+import ac.cult.cultac.utils.nmsutil.FlightToggle;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -108,6 +109,11 @@ public class HorizontalAnalyzer implements EngineCheck {
             isSlowed = false;
         }
         if (player.inVehicle()) isSlowed = false;
+        // LocalPlayer#aiStep crouches only a player not flying before its toggle; a flyer still moves slowly crawling.
+        Pose pose = result.getSimulationContext().getPose();
+        if (FlightToggle.flyingBeforeAiStep(player) && pose != Pose.SWIMMING && pose != Pose.FALL_FLYING) {
+            isSlowed = false;
+        }
         // LocalPlayer#aiStep crouches a player in water only when Entity#updateSwimming, which needs the sprint flag,
         // left it not swimming and the crouching pose fits; Entity#isVisuallyCrawling never slows it in water.
         if (isSlowed

@@ -10,6 +10,7 @@ import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoSneakSlow;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.Strafe;
 import ac.cult.cultac.events.packets.PacketChangeGameState;
 import ac.cult.cultac.events.packets.PacketPlayerAbilities;
@@ -62,7 +63,13 @@ class CreativeFlightTest {
             new ServerboundPlayerInput(true, false, false, false, false, false, false);
     private static final ServerboundPlayerInput FORWARD_JUMP =
             new ServerboundPlayerInput(true, false, false, false, true, false, false);
+    private static final ServerboundPlayerInput FORWARD_SHIFT =
+            new ServerboundPlayerInput(true, false, false, false, false, true, false);
+    private static final ServerboundPlayerInput FORWARD_JUMP_SHIFT =
+            new ServerboundPlayerInput(true, false, false, false, true, true, false);
     private static final float FLYING_SPEED = 0.05F;
+    /** LivingEntity#getFrictionInfluencedSpeed on stone at 0.1 movement speed. */
+    private static final float GROUND_SPEED = 0.1F * (0.21600002F / (0.6F * 0.6F * 0.6F));
     private static final double IMPULSE = FLYING_SPEED * 3.0F;
     private static final Vec3 HOVER = new Vec3(0.5, FLOOR_Y + 3, 0.5);
     private static final Vec3 GROUND = new Vec3(0.5, FLOOR_Y, 0.5);
@@ -934,6 +941,71 @@ class CreativeFlightTest {
         }
     }
 
+    /** LocalPlayer#aiStep never crouches a flyer, so shift held in flight leaves the horizontal input unscaled. */
+    @Test
+    void shiftHeldInFlightKeepsTheFullHorizontalInput() throws Exception {
+        try (var f = flying()) {
+            f.input(FORWARD_SHIFT);
+            Vec3 input = ClientMoveInput.of(f, FORWARD_SHIFT, 1.0F, FLYING_SPEED, f.player.xRot);
+            Vec3 at = HOVER.add(input.x, -IMPULSE, input.z);
+            assertPredicted(f.tick(at, false));
+            f.pongThrough(f.velocity(KNOCKBACK));
+            PredictionResult result = f.tick(at.add(KNOCKBACK).add(input.x, -IMPULSE, input.z), false);
+            assertFalse(result.hasFlag(NoSneakSlow.class), describe(result));
+            assertPredicted(result);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /**
+     * LocalPlayer#aiStep sets crouching before its double-tap toggle starts flight, so a grounded takeoff with shift
+     * held since the last tick moves at the sneaking input.
+     */
+    @Test
+    void aGroundedFlightToggleWithShiftHeldMovesAtTheSneakingInput() throws Exception {
+        try (var f = armedOnTheGround(true)) {
+            takeOffSneaking(f);
+            Vec3 sneaking = ClientMoveInput.of(f, FORWARD_JUMP_SHIFT, 0.3F, GROUND_SPEED, f.player.xRot);
+            PredictionResult result = f.tick(GROUND.add(sneaking.x, JUMP_POWER, sneaking.z), false);
+            assertFalse(result.hasFlag(NoSneakSlow.class), describe(result));
+            assertPredicted(result);
+        }
+    }
+
+    /** The takeoff tick's crouching still bounds the input, so a takeoff at the walking input with shift held flags. */
+    @Test
+    void aGroundedFlightToggleWithShiftHeldAtTheWalkingInputFlags() throws Exception {
+        try (var f = armedOnTheGround(true)) {
+            takeOffSneaking(f);
+            Vec3 input = ClientMoveInput.of(f, FORWARD_JUMP_SHIFT, 1.0F, GROUND_SPEED, f.player.xRot);
+            PredictionResult result = f.tick(GROUND.add(input.x, JUMP_POWER, input.z), false);
+            assertTrue(result.hasFlag(NoSneakSlow.class), describe(result));
+        }
+    }
+
+    /**
+     * LocalPlayer#aiStep reads Abilities#flying for crouching before an airborne double-tap stops flight, so the
+     * stopping tick's input is unscaled although shift is held.
+     */
+    @Test
+    void anAirborneFlightStopWithShiftHeldKeepsTheFullHorizontalInput() throws Exception {
+        try (var f = flying()) {
+            f.input(JUMP_SHIFT);
+            assertPredicted(f.tick(HOVER, false));
+            f.input(SHIFT);
+            Vec3 at = HOVER.add(0, -IMPULSE, 0);
+            assertPredicted(f.tick(at, false));
+
+            f.abilities(false);
+            f.input(FORWARD_JUMP_SHIFT);
+            Vec3 input = ClientMoveInput.of(f, FORWARD_JUMP_SHIFT, 1.0F, 0.02F, f.player.xRot);
+            PredictionResult result = f.tick(at.add(input.x, -IMPULSE * 0.6, input.z), false);
+            assertFalse(f.player.isFlying, "the toggle did not stop flight");
+            assertFalse(result.hasFlag(NoSneakSlow.class), describe(result));
+            assertPredicted(result);
+        }
+    }
+
     /** A player hovering at {@link #HOVER} that the server lets fly and sets flying. */
     private static JavaTickFixture flying() throws Exception {
         return flying(HOVER, true);
@@ -1094,6 +1166,14 @@ class CreativeFlightTest {
         f.player.packetEntityReplication.onUpdateAttributes(event, f.player, packet);
         event.tasksAfter().forEach(Runnable::run);
         return f.player.lastTransactionSent.get();
+    }
+
+    /** A tick standing on the floor with shift held, then a grounded double-tap with forward and shift held. */
+    private static void takeOffSneaking(JavaTickFixture f) {
+        f.input(SHIFT);
+        assertPredicted(f.tick(GROUND, true));
+        f.abilities(true);
+        f.input(FORWARD_JUMP_SHIFT);
     }
 
     /** Water at the feet of a player hovering at {@link #HOVER}. */
