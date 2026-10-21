@@ -111,6 +111,6 @@ class IntakeStreamTest {
         assertEquals(reference[4], written[5], "frame header descriptor");
         assertEquals(reference[5], written[6], "window descriptor");
         assertEquals(0x00, written[5], "no content size, single segment, checksum or dictionary");
-        assertEquals((byte) ((IntakeWire.StreamWriter.WINDOW_LOG - 10) << 3), written[6], "a 2 MiB window");
+        assertEquals((byte) 0x58, written[6], "a 2 MiB window");
     }
 }
