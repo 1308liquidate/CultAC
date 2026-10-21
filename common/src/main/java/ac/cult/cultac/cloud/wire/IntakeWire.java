@@ -282,6 +282,23 @@ public final class IntakeWire {
         return Intake.newBuilder().addMessages(message).build().toByteArray();
     }
 
+    /**
+     * Whether a queued record is a JOIN, a LEAVE or team sync: the service answers a JOIN with the capture policy the
+     * stream waits on, orders a player's sessions across sockets by JOIN and LEAVE, and shows portal roles to staff, so
+     * none of them may wait for a message to fill.
+     */
+    public static boolean endsMessage(byte[] record) {
+        if (record.length < 3 || record[0] != (MESSAGES << 3 | WireFormat.WIRETYPE_LENGTH_DELIMITED))
+            return false;
+        int at = 1;
+        while (at < record.length && record[at] < 0) at++;
+        if (++at >= record.length) return false;
+        int kind = WireFormat.getTagFieldNumber(record[at] & 0xFF);
+        return kind == IntakeMessage.JOIN_FIELD_NUMBER
+                || kind == IntakeMessage.LEAVE_FIELD_NUMBER
+                || kind == IntakeMessage.TEAM_FIELD_NUMBER;
+    }
+
     /** A {@code META} record's body: the player's own combat settings. */
     public static byte[] meta(Map<String, String> settings) {
         Meta.Builder meta = Meta.newBuilder();
@@ -893,8 +910,8 @@ public final class IntakeWire {
                 .setChecksum(false)
                 .setContentSize(false);
         /**
-         * The buffers' resting size, the size past which they drop back to it, and the run of messages no larger than
-         * it that drops them, so a burst followed by small messages does not reallocate them each time.
+         * The buffers' resting size, the size past which they drop back to what recent messages needed, and how many
+         * messages that need is taken over.
          */
         private static final int RESTING_BYTES = 64 * 1024;
 
@@ -905,38 +922,70 @@ public final class IntakeWire {
 
         private ByteBuffer output = ByteBuffer.allocateDirect(RESTING_BYTES);
         private byte[] buffer = new byte[RESTING_BYTES];
-        /** Messages in a row no larger than {@link #RESTING_BYTES}. */
-        private int small;
+        /** Messages ended since the buffers were last fitted to need, and the largest part and message among them. */
+        private int messages;
 
-        /** {@code bytes} is the records' total length. */
-        public ByteBuffer write(List<byte[]> records, int bytes) {
-            small = bytes <= RESTING_BYTES ? small + 1 : 0;
-            if (small >= SHRINK_AFTER_MESSAGES
-                    && (input.capacity() > SHRINK_PAST_BYTES
-                            || output.capacity() > SHRINK_PAST_BYTES
-                            || buffer.length > SHRINK_PAST_BYTES)) {
-                input = ByteBuffer.allocateDirect(RESTING_BYTES);
-                output = ByteBuffer.allocateDirect(RESTING_BYTES);
-                buffer = new byte[RESTING_BYTES];
-                small = 0;
-            }
+        private int largestPart;
+        private int largestMessage;
+        /** Record bytes written since the last message ended. */
+        private long open;
+
+        /**
+         * Writes {@code records}, {@code bytes} long in all, into the open message. With {@code end} the message ends
+         * at a flush and is returned; without, it stays open, its output held off-heap, and null is returned.
+         */
+        public ByteBuffer write(List<byte[]> records, int bytes, boolean end) {
+            if (open == 0) shrink();
+            open += bytes;
+            largestPart = Math.max(largestPart, bytes);
             if (input.capacity() < bytes) input = ByteBuffer.allocateDirect(bytes);
             input.clear();
             for (byte[] record : records) input.put(record);
             input.flip();
             int bound = (int) Zstd.compressBound(bytes);
-            if (output.capacity() < bound) output = ByteBuffer.allocateDirect(bound);
-            output.clear();
-            while (!stream.compressDirectByteBufferStream(output, input, EndDirective.FLUSH)) {
+            if (output.remaining() < bound) {
+                int held = output.position();
+                output = ByteBuffer.allocateDirect(held == 0 ? bound : Math.max(held + bound, output.capacity() * 2))
+                        .put(output.flip());
+            }
+            EndDirective directive = end ? EndDirective.FLUSH : EndDirective.CONTINUE;
+            while (!stream.compressDirectByteBufferStream(output, input, directive)) {
                 if (!output.hasRemaining())
                     output = ByteBuffer.allocateDirect(output.capacity() * 2).put(output.flip());
             }
+            if (!end) return null;
+            open = 0;
             output.flip();
             int length = 1 + output.remaining();
+            messages++;
+            largestMessage = Math.max(largestMessage, length);
             if (buffer.length < length) buffer = new byte[Math.max(length, buffer.length * 2)];
             buffer[0] = COMPRESSED;
             output.get(buffer, 1, length - 1);
+            output.clear();
             return ByteBuffer.wrap(buffer, 0, length);
+        }
+
+        /** The compressed bytes the open message holds so far, short of what zstd buffers until a block fills. */
+        public int held() {
+            return output.position();
+        }
+
+        /**
+         * Before a message, once every {@link #SHRINK_AFTER_MESSAGES}: a buffer past {@link #SHRINK_PAST_BYTES} and
+         * past what those messages needed drops to that need.
+         */
+        private void shrink() {
+            if (messages < SHRINK_AFTER_MESSAGES) return;
+            int part = Math.max(RESTING_BYTES, largestPart);
+            int message = Math.max(RESTING_BYTES, largestMessage);
+            int written = (int) Math.min(Integer.MAX_VALUE - 8, message + Zstd.compressBound(part));
+            if (input.capacity() > Math.max(SHRINK_PAST_BYTES, part)) input = ByteBuffer.allocateDirect(part);
+            if (output.capacity() > Math.max(SHRINK_PAST_BYTES, written)) output = ByteBuffer.allocateDirect(written);
+            if (buffer.length > Math.max(SHRINK_PAST_BYTES, message)) buffer = new byte[message];
+            messages = 0;
+            largestPart = 0;
+            largestMessage = 0;
         }
 
         /** Frees the native context; the frame is left unended. */

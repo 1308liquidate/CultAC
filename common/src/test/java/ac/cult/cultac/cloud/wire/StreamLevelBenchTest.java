@@ -160,7 +160,7 @@ class StreamLevelBenchTest {
                     IntakeWire.StreamWriter real = new IntakeWire.StreamWriter()) {
                 for (Message message : socket) {
                     assertArrayEquals(
-                            bytes(real.write(message.records(), message.bytes())),
+                            bytes(real.write(message.records(), message.bytes(), true)),
                             bytes(writer.write(message.records(), message.bytes())));
                 }
             }

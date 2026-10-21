@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.cultac.cloud.intake.v3.Capture;
 import ac.cult.cultac.cloud.intake.v3.Condition;
+import ac.cult.cultac.cloud.intake.v3.DiagPart;
 import ac.cult.cultac.cloud.intake.v3.Edition;
 import ac.cult.cultac.cloud.intake.v3.Event;
 import ac.cult.cultac.cloud.intake.v3.Frame;
@@ -20,6 +21,7 @@ import ac.cult.cultac.cloud.intake.v3.IntakeMessage;
 import ac.cult.cultac.cloud.intake.v3.Join;
 import ac.cult.cultac.cloud.intake.v3.Meta;
 import ac.cult.cultac.cloud.intake.v3.Outcome;
+import ac.cult.cultac.cloud.intake.v3.PerfPart;
 import ac.cult.cultac.cloud.intake.v3.PortalRole;
 import ac.cult.cultac.cloud.intake.v3.Record;
 import ac.cult.cultac.cloud.intake.v3.Refused;
@@ -338,7 +340,7 @@ class IntakeWireTest {
         try (IntakeWire.StreamWriter writer = new IntakeWire.StreamWriter();
                 ZstdDecompressCtx reader = new ZstdDecompressCtx()) {
             for (int round = 0; round < 2; round++) {
-                byte[] compressed = bytes(writer.write(List.of(join, leave), records.length));
+                byte[] compressed = bytes(writer.write(List.of(join, leave), records.length, true));
                 assertEquals(IntakeWire.COMPRESSED, compressed[0]);
                 byte[] decompressed = decompress(reader, compressed);
                 assertArrayEquals(records, decompressed);
@@ -355,7 +357,7 @@ class IntakeWireTest {
         new Random(1).nextBytes(big);
         try (IntakeWire.StreamWriter writer = new IntakeWire.StreamWriter();
                 ZstdDecompressCtx reader = new ZstdDecompressCtx()) {
-            assertArrayEquals(big, decompress(reader, bytes(writer.write(List.of(big), big.length))));
+            assertArrayEquals(big, decompress(reader, bytes(writer.write(List.of(big), big.length, true))));
         }
     }
 
@@ -970,6 +972,32 @@ class IntakeWireTest {
         add(builder, IntakeWire.SERVERBOUND, 300, new byte[200]);
         int body = CodedOutputStream.computeTagSize(IntakeWire.SERVERBOUND) + 2 + 200 + 1 + 2;
         assertEquals(1 + 2 + body, builder.bytes());
+    }
+
+    @Test
+    void joinLeaveAndTeamRecordsEndTheirMessage() {
+        List<TeamRole> roles = new ArrayList<>();
+        for (int i = 0; i < 100; i++)
+            roles.add(IntakeWire.teamRole(PLAYER, "staff" + i, PortalRole.PORTAL_ROLE_ADMIN, false));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.join(PLAYER, 773, "vanilla", -64, 384, null, "name", 0)));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.unstreamed(PLAYER, 819, "geyser", -64, 384, null, null)));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.leave(PLAYER)));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.team(roles)));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.team(List.of())));
+
+        IntakeWire.FrameBuilder builder = new IntakeWire.FrameBuilder();
+        add(builder, IntakeWire.SERVERBOUND, 300, new byte[2000]);
+        assertFalse(IntakeWire.endsMessage(builder.build(PLAYER, 1)));
+        assertFalse(IntakeWire.endsMessage(Intake.newBuilder()
+                .addMessages(IntakeMessage.newBuilder().setDiag(DiagPart.getDefaultInstance()))
+                .build()
+                .toByteArray()));
+        assertFalse(IntakeWire.endsMessage(Intake.newBuilder()
+                .addMessages(IntakeMessage.newBuilder().setPerf(PerfPart.getDefaultInstance()))
+                .build()
+                .toByteArray()));
+        assertFalse(IntakeWire.endsMessage(new byte[0]));
+        assertFalse(IntakeWire.endsMessage(new byte[] {0x0A, (byte) 0x80}));
     }
 
     @Test

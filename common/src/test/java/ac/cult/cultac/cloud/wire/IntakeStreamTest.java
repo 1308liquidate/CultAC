@@ -81,7 +81,7 @@ class IntakeStreamTest {
         try (IntakeWire.StreamWriter writer = new IntakeWire.StreamWriter();
                 ZstdDecompressCtx reader = new ZstdDecompressCtx()) {
             for (List<byte[]> records : messages()) {
-                byte[] message = array(writer.write(records, bytes(records)));
+                byte[] message = array(writer.write(records, bytes(records), true));
                 assertArrayEquals(concat(records), decompress(reader, message));
             }
         }
@@ -92,7 +92,7 @@ class IntakeStreamTest {
         for (List<byte[]> first : messages()) {
             byte[] written;
             try (IntakeWire.StreamWriter writer = new IntakeWire.StreamWriter()) {
-                written = array(writer.write(first, bytes(first)));
+                written = array(writer.write(first, bytes(first), true));
             }
             for (int level : new int[] {1, 3}) {
                 byte[] reference = frameHeader(first, level);
