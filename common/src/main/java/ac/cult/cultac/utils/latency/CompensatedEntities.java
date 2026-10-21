@@ -142,10 +142,10 @@ public class CompensatedEntities {
 
     private void refreshTypeViews() {
         if (typeViewsAt == entityMap.mutations) return;
-        List<PacketEntity> pushOrCollide = new ArrayList<>();
-        List<PacketEntity> boatList = new ArrayList<>();
-        List<PacketEntity> pose = new ArrayList<>();
-        List<PacketEntity> unknown = new ArrayList<>();
+        List<PacketEntity> pushOrCollide = presized(pushOrCollideCandidates);
+        List<PacketEntity> boatList = presized(boats);
+        List<PacketEntity> pose = presized(poseCollisionCandidates);
+        List<PacketEntity> unknown = presized(unknownCollisionCandidates);
         for (PacketEntity entity : entityMap.values()) {
             if (entity.mayPushOrCollide()) pushOrCollide.add(entity);
             boolean boat = entity.isBoat();
@@ -159,6 +159,11 @@ public class CompensatedEntities {
         poseCollisionCandidates = pose;
         unknownCollisionCandidates = unknown;
         typeViewsAt = entityMap.mutations;
+    }
+
+    private List<PacketEntity> presized(List<PacketEntity> previous) {
+        if (previous.isEmpty() || entityMap.isEmpty()) return new ArrayList<>();
+        return new ArrayList<>(Math.max(10, previous.size() + 1));
     }
 
     private void track(PacketEntity entity) {
