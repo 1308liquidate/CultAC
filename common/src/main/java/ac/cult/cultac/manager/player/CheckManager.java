@@ -991,20 +991,20 @@ public class CheckManager {
             double lastY = player.y;
             double lastZ = player.z;
 
-            Vec3 claimed = player.packetStateData.clientSidePosition;
-            player.x = claimed.x;
-            player.y = claimed.y;
-            player.z = claimed.z;
-
-            if (player.inVehicle()) {
-                Vec3 posFromVehicle = BoundingBoxSize.getRidingOffsetFromVehicle(
-                        player.compensatedEntities.getSelf().getRiding(), player);
-                player.x = posFromVehicle.x;
-                player.y = posFromVehicle.y;
-                player.z = posFromVehicle.z;
-            }
-
             for (BlockBreak blockBreak : breaksToCheck) {
+                Vec3 claimed = blockBreak.clientPosition;
+                player.x = claimed.x;
+                player.y = claimed.y;
+                player.z = claimed.z;
+
+                if (player.inVehicle()) {
+                    Vec3 posFromVehicle = BoundingBoxSize.getRidingOffsetFromVehicle(
+                            player.compensatedEntities.getSelf().getRiding(), player);
+                    player.x = posFromVehicle.x;
+                    player.y = posFromVehicle.y;
+                    player.z = posFromVehicle.z;
+                }
+
                 for (CheckListener check : postFlyingBlockBreakListeners) {
                     if (!shouldDispatch(check)) {
                         continue;
