@@ -10,6 +10,7 @@ import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.checks.psuedo.Strafe;
 import ac.cult.cultac.events.packets.PacketChangeGameState;
 import ac.cult.cultac.events.packets.PacketPlayerAbilities;
 import ac.cult.cultac.events.packets.PacketServerRegistries;
@@ -888,6 +889,51 @@ class CreativeFlightTest {
         }
     }
 
+    /**
+     * Player#isAffectedByFluids is false in flight, so LivingEntity#travel takes travelInAir in water: the flyer moves
+     * at Player#getFlyingSpeed and carries the 0.91 air drag, not the water drag, into the next move's explosion. The
+     * knockback runs along the input, so the drag's difference cannot hide in the input.
+     */
+    @Test
+    void aFlyerInWaterTakesTheKnockbackAtTheFlyingSpeed() throws Exception {
+        try (var f = flying()) {
+            floodTheHover(f);
+            f.input(FORWARD);
+            Vec3 knockback = new Vec3(0, KNOCKBACK.y, 0.45);
+            f.pongThrough(f.velocity(knockback));
+            Vec3 input = ClientMoveInput.of(f, FORWARD, 1.0F, FLYING_SPEED, f.player.xRot);
+            Vec3 taken = knockback.add(input);
+            Vec3 at = HOVER.add(taken);
+            PredictionResult result = f.tick(at, false);
+            assertFalse(result.hasFlag(Strafe.class), describe(result));
+            assertPredicted(result);
+            assertEquals(0.0, antiKb(f), "the client took the knockback");
+
+            Vec3 explosion = new Vec3(0, 0, 0.1);
+            f.explosion(explosion);
+            Vec3 cruise = new Vec3(
+                    taken.x * 0.91F + explosion.x + input.x, taken.y * 0.6, taken.z * 0.91F + explosion.z + input.z);
+            PredictionResult cruising = f.tick(at.add(cruise), false);
+            assertFalse(cruising.hasFlag(Strafe.class), describe(cruising));
+            assertPredicted(cruising);
+            double violations = f.player.checkManager.getExplosionHandler().violations;
+            assertEquals(0.0, violations, "the client took the explosion: " + describe(cruising));
+        }
+    }
+
+    /** A flyer in water still cannot move past the flying speed under a knockback. */
+    @Test
+    void aFlyerInWaterOutrunningTheFlyingSpeedStillFlags() throws Exception {
+        try (var f = flying()) {
+            floodTheHover(f);
+            f.input(FORWARD);
+            f.pongThrough(f.velocity(KNOCKBACK));
+            Vec3 input = ClientMoveInput.of(f, FORWARD, 1.0F, FLYING_SPEED * 2, f.player.xRot);
+            f.tick(HOVER.add(KNOCKBACK).add(input), false);
+            assertTrue(antiKb(f) > 0, "AntiKB violations " + antiKb(f));
+        }
+    }
+
     /** A player hovering at {@link #HOVER} that the server lets fly and sets flying. */
     private static JavaTickFixture flying() throws Exception {
         return flying(HOVER, true);
@@ -1048,6 +1094,13 @@ class CreativeFlightTest {
         f.player.packetEntityReplication.onUpdateAttributes(event, f.player, packet);
         event.tasksAfter().forEach(Runnable::run);
         return f.player.lastTransactionSent.get();
+    }
+
+    /** Water at the feet of a player hovering at {@link #HOVER}. */
+    private static void floodTheHover(JavaTickFixture f) {
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) block(f, x, (int) HOVER.y, z, BlockIds.WATER.defaultState());
+        }
     }
 
     private static void block(JavaTickFixture f, int x, int y, int z, int state) {

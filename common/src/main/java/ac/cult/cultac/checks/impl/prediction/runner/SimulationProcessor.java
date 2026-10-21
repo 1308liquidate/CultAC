@@ -86,6 +86,7 @@ import ac.cult.cultac.utils.math.VectorUtils;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
 import ac.cult.cultac.utils.nmsutil.Collisions;
+import ac.cult.cultac.utils.nmsutil.FlightToggle;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.NextTickVelocityDeriver;
 import ac.cult.cultac.utils.nmsutil.ReusableVelocitySet;
@@ -1339,10 +1340,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         return result;
     }
 
-    // LocalPlayer#aiStep stops flight after a grounded travel; an airborne stop is the double-jump toggle.
+    // LocalPlayer#aiStep stops flight after a grounded travel; any other stop is the double-jump toggle before it.
     private boolean keepsFlyingThroughTravel(boolean onGround) {
         if (!this.player.packetStateData.flyingStopAfterTravel) return false;
-        if (onGround) return true;
+        if (onGround && !FlightToggle.stopsBeforeTravel(this.player)) return true;
         this.player.packetStateData.flyingStopAfterTravel = false;
         this.player.isFlying = false;
         return false;

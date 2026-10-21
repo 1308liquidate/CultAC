@@ -516,7 +516,9 @@ public class SimulationContext {
             return (float) normalSpeed;
         }
 
-        if (water) {
+        // Player#isAffectedByFluids is false in flight, so LivingEntity#travel takes travelInAir in water and lava.
+        boolean fluidTravel = vehicle != null || !player.isFlying;
+        if (water && fluidTravel) {
             float speed = 0.02f;
 
             if (waterMovementEfficiency > 0) {
@@ -530,7 +532,7 @@ public class SimulationContext {
             return speed;
         }
 
-        if (lava) {
+        if (lava && fluidTravel) {
             return 0.02f;
         }
 

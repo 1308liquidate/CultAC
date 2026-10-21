@@ -49,8 +49,11 @@ public final class Friction {
             return;
         }
 
+        // Player#isAffectedByFluids is false in flight, so LivingEntity#travel takes travelInAir in water and lava.
+        boolean fluidTravel = context.getVehicle() != null || !player.isFlying;
+
         // Water friction - has highest priority
-        if (inWater) {
+        if (inWater && fluidTravel) {
             int start = out.size();
             List<Double> frictions = getSwimFriction(context);
             for (int i = 0, size = frictions.size(); i < size; i++) {
@@ -65,7 +68,7 @@ public final class Friction {
         }
 
         // Lava friction applies a stronger lateral slowdown before fluid falling is applied.
-        if (inLava) {
+        if (inLava && fluidTravel) {
             Vec3 withSomeFriction = playerVelocity.multiply(0.5, 0.8f, 0.5).add(0, -gravity / 4, 0);
             addFluidFallingAdjustedMovement(
                     player, context, out, out.size(), false, gravity, falling, withSomeFriction);

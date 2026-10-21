@@ -33,6 +33,18 @@ public final class FlightToggle {
         return pressReachesToggle(player) && (player.packetStateData.jumpTriggerTimes & ~UNARMED) != 0;
     }
 
+    /**
+     * This client tick's flight stop is the toggle ahead of travel: a press that every timer value the client can
+     * have arms, with no auto-jump or vehicle to block it. Player#updateSwimming never lets a flyer swim.
+     */
+    public static boolean stopsBeforeTravel(CultPlayer player) {
+        PacketStateData data = player.packetStateData;
+        return pressReachesToggle(player)
+                && (data.jumpTriggerTimes & UNARMED) == 0
+                && !data.autoJumpPossible
+                && !vehicleCanBlock(player);
+    }
+
     /** Runs the toggle's timer update and Player#aiStep's decrement for a client tick LocalPlayer#aiStep ran. */
     public static void onClientTick(CultPlayer player) {
         PacketStateData data = player.packetStateData;
