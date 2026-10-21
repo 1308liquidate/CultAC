@@ -3,6 +3,7 @@ package ac.cult.cultac.network;
 import static org.junit.jupiter.api.Assertions.*;
 
 import ac.cult.blocksim.data.Components;
+import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.blocksim.entity.EntityTypes;
@@ -13,6 +14,8 @@ import ac.cult.cultac.checks.impl.combat.EntityReach;
 import ac.cult.cultac.checks.impl.combat.PlayerHitboxes;
 import ac.cult.cultac.checks.impl.combat.PlayerReach;
 import ac.cult.cultac.checks.impl.combat.ReachCheck;
+import ac.cult.cultac.checks.impl.visibility.AttackMobVisibility;
+import ac.cult.cultac.checks.impl.visibility.AttackPlayerVisibility;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
 import ac.cult.cultac.network.codec.ModelRegistryNamesState;
@@ -134,6 +137,149 @@ class ReachInteractionRangeTest {
             setup.hold("{\"max_reach\":4.5,\"hitbox_margin\":0.125}");
             assertEquals(List.of(), setup.attack(EntityTypeIds.PLAYER, .9, 4.0));
             assertEquals(List.of("PlayerHitboxes"), setup.attack(EntityTypeIds.PLAYER, 1.0, 4.0));
+        }
+    }
+
+    @Test
+    void anAttackBeyondReachInPlainSightIsPlayerReachsToFlag() throws Exception {
+        try (var setup = new Setup()) {
+            Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+            visibility.setEnabled(true);
+            var plain = setup.routedAttack(3.7);
+            assertEquals(List.of("PlayerReach"), plain.flagged());
+            assertTrue(plain.cancelled(), "PlayerReach cancels it");
+            assertEquals(0, visibility.violations);
+            setup.wall();
+            var walled = setup.routedAttack(3.7);
+            assertEquals(List.of("PlayerReach"), walled.flagged(), "Beyond every pick range reach owns it");
+            assertTrue(walled.cancelled(), "PlayerReach cancels it");
+            assertEquals(0, visibility.violations);
+            var near = setup.routedAttack(2.5);
+            assertEquals(List.of(), near.flagged(), "Visibility cancels an attack through blocks");
+            assertTrue(near.cancelled());
+            assertEquals(1, visibility.violations);
+        }
+    }
+
+    @Test
+    void anotherSelectionsItemRangeKeepsAnAttackThroughBlocksWithVisibility() throws Exception {
+        try (var setup = new Setup()) {
+            Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+            visibility.setEnabled(true);
+            setup.hold(0, "{\"min_reach\":2,\"max_reach\":4.5,\"hitbox_margin\":0.125}");
+            setup.hold(1, null);
+            setup.tickEnd();
+            setup.wall();
+            // Within the held weapon's range, beyond the hand's: the hotbar switch keeps both selections this tick.
+            setup.selectSlot(1);
+            var routed = setup.routedAttack(3.5);
+            assertTrue(routed.cancelled(), "The weapon's selection reaches it and every ray is blocked");
+            assertEquals(List.of(), routed.flagged());
+            assertEquals(1, visibility.violations);
+        }
+    }
+
+    @Test
+    void aJavaClientsBoatBeyondReachInPlainSightIsEntityReachsToFlag() throws Exception {
+        try (var setup = new Setup()) {
+            Check visibility = setup.player.checkManager.getCheck(AttackMobVisibility.class);
+            visibility.setEnabled(true);
+            // The boat's near face 3.7 blocks ahead at the eye's height.
+            var ahead = new Vec3(setup.player.x, setup.player.y + 1.62 - .3, setup.player.z + 3.7 + 1.375 / 2);
+            var java = setup.routedAttack(EntityTypeIds.OAK_BOAT, ahead);
+            assertEquals(List.of("EntityReach"), java.flagged());
+            assertTrue(java.cancelled(), "EntityReach cancels it");
+            assertEquals(0, visibility.violations);
+        }
+    }
+
+    @Test
+    void aDisabledReachLeavesTheDistanceToVisibility() throws Exception {
+        try (var setup = new Setup()) {
+            Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+            visibility.setEnabled(true);
+            setup.player.checkManager.getCheck(PlayerReach.class).setEnabled(false);
+            var routed = setup.routedAttack(3.7);
+            assertTrue(routed.cancelled());
+            assertEquals(1, visibility.violations);
+        }
+    }
+
+    @Test
+    void aLowTargetOnlyTheEyeInsideGrassReachesStaysWithVisibility() throws Exception {
+        for (String mode : new String[] {"plain", "grass", "grass+wall"}) {
+            try (var setup = new Setup()) {
+                Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+                visibility.setEnabled(true);
+                // LocalPlayer#pick's block clip from the crawling eye inside the grass outline hits the grass.
+                if (!mode.equals("plain")) setup.block(0, 64, -2, "short_grass");
+                if (mode.endsWith("wall")) for (int y = 58; y <= 68; y++) setup.block(0, y, 0, "stone");
+                setup.look(0, 0, 22, 0, 22);
+                // The near face 2.65 ahead and its top 0.5 below the feet: only the crawling eye is within range.
+                var routed = setup.routedAttack(EntityTypeIds.PLAYER, new Vec3(.5, 61.7, 1.45));
+                assertEquals(List.of(), routed.flagged(), mode);
+                if (mode.equals("plain")) {
+                    assertFalse(routed.cancelled(), "The crawling eye sees it");
+                    assertEquals(0, visibility.violations);
+                } else {
+                    assertTrue(routed.cancelled(), mode);
+                    assertEquals(1, visibility.violations, mode);
+                }
+            }
+        }
+    }
+
+    @Test
+    void anInexactTargetBehindAWallJustBeyondItsPhysicalBoxStaysCancelled() throws Exception {
+        for (boolean walled : new boolean[] {false, true}) {
+            for (double face : new double[] {3.01, 3.025, 3.04}) {
+                try (var setup = new Setup()) {
+                    Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+                    visibility.setEnabled(true);
+                    if (walled) for (int y = 60; y <= 68; y++) setup.block(0, y, 0, "stone");
+                    int id = setup.addTarget(EntityTypeIds.PLAYER, new Vec3(.5, 64, -1.5 + face + .3));
+                    setup.player.compensatedEntities.getEntity(id).markPositionInexact();
+                    var routed = setup.routedAttack(id);
+                    String at = "face=" + face + " wall=" + walled;
+                    if (face > 3.03) {
+                        // The reach box, 0.03125 larger, is beyond range from every eye.
+                        assertEquals(List.of("PlayerReach"), routed.flagged(), at);
+                        assertTrue(routed.cancelled(), at);
+                        assertEquals(0, visibility.violations, at);
+                    } else if (walled) {
+                        assertEquals(List.of(), routed.flagged(), at);
+                        assertTrue(routed.cancelled(), at);
+                        assertEquals(1, visibility.violations, at);
+                    } else {
+                        assertEquals(List.of(), routed.flagged(), at);
+                        assertFalse(routed.cancelled(), "In sight and within reach of the reach box: " + at);
+                        assertEquals(0, visibility.violations, at);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void anExemptPlayersAttackThroughAWallBeyondRangeStaysWithVisibility() throws Exception {
+        for (String permission : new String[] {
+            "cult.exempt.playerreach", "cult.nomodifypacket.playerreach", "cult.exempt.playerhitboxes"
+        }) {
+            try (var setup = new Setup()) {
+                Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+                visibility.setEnabled(true);
+                PlatformPlayer platform = Mockito.mock(PlatformPlayer.class);
+                Mockito.when(platform.hasPermission(permission)).thenReturn(true);
+                setup.player.platformPlayer = platform;
+                setup.player.checkManager.getCheck(PlayerReach.class).updatePermissions();
+                setup.player.checkManager.getCheck(PlayerHitboxes.class).updatePermissions();
+                setup.wall();
+                // At 7 blocks the tick end reports a missed hitbox, which PlayerHitboxes flags.
+                var routed = setup.routedAttack(permission.endsWith("hitboxes") ? 7 : 3.7);
+                assertTrue(routed.cancelled(), permission);
+                assertEquals(List.of(), routed.flagged(), permission);
+                assertEquals(1, visibility.violations, permission);
+            }
         }
     }
 
@@ -1088,6 +1234,18 @@ class ReachInteractionRangeTest {
                     packet);
         }
 
+        // Stone from the feet to above the eye, 1.5 blocks down the look.
+        void wall() {
+            block(0, 64, 0, "stone");
+            block(0, 65, 0, "stone");
+        }
+
+        void block(int x, int y, int z, String block) {
+            int state =
+                    DataTables.defaults().registry().block("minecraft:" + block).defaultState();
+            player.compensatedWorld.applyBlockChangeRawDANGER(x, y, z, state);
+        }
+
         void tickEnd() {
             listener.processClientTickEndReceive(
                     new PacketReceiveEvent<>(
@@ -1798,6 +1956,43 @@ class ReachInteractionRangeTest {
         // Attacks a player looked at head-on whose hitbox face is this far from the eye; returns whether it flagged.
         boolean attack(double distance) {
             return !attack(EntityTypeIds.PLAYER, .5, distance).isEmpty();
+        }
+
+        record Routed(boolean cancelled, List<String> flagged) {}
+
+        // Attacks a player head-on through the early handlers first, as PacketDispatcher routes it; a cancel ends it.
+        Routed routedAttack(double distance) {
+            return routedAttack(EntityTypeIds.PLAYER, new Vec3(.5, 64, distance - 1.2));
+        }
+
+        Routed routedAttack(int type, Vec3 position) {
+            return routedAttack(addTarget(type, position));
+        }
+
+        int addTarget(int type, Vec3 position) {
+            int id = nextEntity++;
+            player.compensatedEntities.addEntity(id, type, position, 0, 0, 0);
+            return id;
+        }
+
+        Routed routedAttack(int id) {
+            var packet = new ServerboundInteract(id, InteractAction.ATTACK, Hand.MAIN_HAND, Optional.empty(), false);
+            var event =
+                    new PacketReceiveEvent<>(fixture.user, ConnectionPhase.PLAY, ServerboundPackets.INTERACT, packet);
+            double[] before =
+                    checks.stream().mapToDouble(check -> check.violations).toArray();
+            player.checkManager.dispatchEarlyReceive(event);
+            if (!event.isCancelled()) player.checkManager.dispatchReceiveHandlers(event);
+            for (Check check : checks) {
+                if (check instanceof ReachCheck reach) reach.onPlayerTickEnd(null);
+            }
+            player.checkManager.getListener(ClientVisibilityProcessor.class).onPlayerTickEnd(null);
+            List<String> flagged = new ArrayList<>();
+            for (int i = 0; i < checks.size(); i++) {
+                if (checks.get(i).violations > before[i])
+                    flagged.add(checks.get(i).getCheckName());
+            }
+            return new Routed(event.isCancelled(), flagged);
         }
 
         // Attacks an entity at this x whose hitbox face is this far down the look; returns the checks that flagged.

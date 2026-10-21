@@ -81,10 +81,11 @@ class PacketHandlerTransformCapTest {
                 double.class,
                 double.class,
                 double.class,
-                Float.class,
-                Float.class);
+                boolean.class,
+                float.class,
+                float.class);
         record.setAccessible(true);
-        record.invoke(player.packetEntityReplication, entityId, true, 1.0D, 64.0D, 1.0D, 0.0F, 0.0F);
+        record.invoke(player.packetEntityReplication, entityId, true, 1.0D, 64.0D, 1.0D, true, 0.0F, 0.0F);
     }
 
     private static Int2ObjectOpenHashMap<?> transforms(CultPlayer player) throws Exception {

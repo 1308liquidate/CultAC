@@ -9,6 +9,11 @@ import ac.cult.cultac.utils.math.Vec3;
 
 public class SwimSpaceShift implements UncertaintyHandler {
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        return !context.getWorldData().maybeInLiquid() || context.getVehicle() != null;
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,

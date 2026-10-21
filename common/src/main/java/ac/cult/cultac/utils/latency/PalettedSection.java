@@ -303,6 +303,36 @@ public final class PalettedSection {
         });
     }
 
+    /**
+     * As {@link #forEachCount}, in palette order, when the palette is local with every entry in [0, {@code limit})
+     * and every stored code has an entry; any other section takes {@link #forEachCount} itself.
+     */
+    public void forEachCountWithin(int limit, CountConsumer consumer) {
+        int perWord = bits == 0 ? 0 : 64 / bits;
+        if (paletteSize == 1
+                || bits == 0
+                || !localPaletteWithin(limit)
+                || words.length != (size + perWord - 1) / perWord) {
+            forEachCount(consumer);
+            return;
+        }
+        int[] counts = new int[1 << bits];
+        long mask = (1L << bits) - 1;
+        int index = 0;
+        for (long word : words) {
+            for (int shift = 0; shift < perWord * bits && index < size; shift += bits, index++)
+                counts[(int) (word >>> shift & mask)]++;
+        }
+        int entries = Math.min(paletteSize, counts.length);
+        for (int code = entries; code < counts.length; code++) {
+            if (counts[code] != 0) {
+                forEachCount(consumer);
+                return;
+            }
+        }
+        for (int code = 0; code < entries; code++) if (counts[code] != 0) consumer.accept(palette[code], counts[code]);
+    }
+
     boolean isUniform() {
         int first = codeAt(0);
         for (int i = 1; i < size; i++) if (codeAt(i) != first) return false;

@@ -284,9 +284,7 @@ class DispatchCpuBenchTest {
         int stone = registry.block("minecraft:stone").defaultState();
         for (int cx = -FLOOR_RADIUS >> 4; cx <= FLOOR_RADIUS >> 4; cx++) {
             for (int cz = -FLOOR_RADIUS >> 4; cz <= FLOOR_RADIUS >> 4; cz++) {
-                world.chunks.put(
-                        CompensatedWorld.chunkPositionToLong(cx, cz),
-                        new CompensatedWorld.CachedChunk(new CompensatedWorld.CachedSection[16], 0));
+                world.putChunk(cx, cz, new CompensatedWorld.CachedChunk(new CompensatedWorld.CachedSection[16], 0));
             }
         }
         for (int x = -FLOOR_RADIUS; x < FLOOR_RADIUS; x++) {

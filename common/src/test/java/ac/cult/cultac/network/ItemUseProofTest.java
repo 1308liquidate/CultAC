@@ -126,7 +126,7 @@ class ItemUseProofTest {
             player.platformPlayer = platform;
             when(platform.hasServerAuthority()).thenReturn(false);
             player.gamemode = GameMode.SURVIVAL;
-            var snapshot = new ClientItemUseState.Snapshot(1, 0, 1, 0.2F, 0.2F, false, true, true);
+            var snapshot = new ClientItemUseState.Snapshot(1, 0, 1, 0.2F, 0.2F, 0.2F, false, true, true);
             var prediction = evidence(player, new ItemUseTickResult(snapshot, 0.05, 0.05));
             var check = player.checkManager.getListener(NoSlow.class);
             double previous = check.violations;
@@ -154,7 +154,7 @@ class ItemUseProofTest {
             for (int tick = 0; tick < 6; tick++) {
                 player.packetStateData.acceptedClientTick = tick;
                 boolean bad = tick >= 4;
-                var state = new ClientItemUseState.Snapshot(tick + 1, tick, 1, 1, 0.2F, true, true, false);
+                var state = new ClientItemUseState.Snapshot(tick + 1, tick, 1, 1, 0.2F, 0.2F, true, true, false);
                 var prediction = evidence(player, new ItemUseTickResult(state, 0, bad ? 0.05 : 0));
                 check.onPredictionComplete(prediction);
                 policy.onPredictionComplete(prediction);

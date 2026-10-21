@@ -12,6 +12,11 @@ import ac.cult.cultac.utils.math.VectorUtils;
 public class PistonShulkerPush implements UncertaintyHandler {
 
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        return !ExternalMovementUncertainty.mayShove(context, lastResult);
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,

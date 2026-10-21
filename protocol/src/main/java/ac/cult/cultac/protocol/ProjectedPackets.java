@@ -1,8 +1,10 @@
 package ac.cult.cultac.protocol;
 
+import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.wire.Wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.ByteBufUtil;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
@@ -16,6 +18,7 @@ public final class ProjectedPackets implements AutoCloseable {
 
     private final ProtocolRuntime observed, model;
     private final Supplier<PacketValueAdapter> adapter;
+    private final byte[][] bundleDelimiters = new byte[ConnectionPhase.values().length][];
     private boolean closed;
 
     public ProjectedPackets(ProtocolRuntime observed, ProtocolRuntime model, Supplier<PacketValueAdapter> adapter) {
@@ -146,6 +149,22 @@ public final class ProjectedPackets implements AutoCloseable {
         } finally {
             if (output != null) output.release();
         }
+    }
+
+    /** As {@link #encode} for a bundle delimiter, whose bytes depend only on the phase; each call owns a fresh buffer. */
+    public Encoded encodeBundleDelimiter(ConnectionPhase phase, ByteBufAllocator allocator, CodecState state) {
+        if (closed) throw new IllegalStateException("Packet values are closed");
+        byte[] bytes = bundleDelimiters[phase.ordinal()];
+        if (bytes == null) {
+            var type = ClientboundPackets.BUNDLE_DELIMITER;
+            var encoded = encode(phase, type, type.opaqueValue(), allocator, state);
+            bundleDelimiters[phase.ordinal()] =
+                    ByteBufUtil.getBytes(encoded.frames().getFirst());
+            return encoded;
+        }
+        ByteBuf output = allocator.buffer();
+        output.writeBytes(bytes);
+        return new Encoded(List.of(output));
     }
 
     public <R> PacketType<R> writableType(R packet) {

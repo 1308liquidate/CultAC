@@ -1088,9 +1088,7 @@ public class CompensatedEntities {
     public boolean isTicking(PacketEntity entity) {
         if (entity.type == EntityTypeIds.PLAYER) return true;
         Vec3 position = entity.clientPhysicalPosition;
-        return position != null
-                && player.compensatedWorld.isChunkLoaded(
-                        CultMath.floor(position.x) >> 4, CultMath.floor(position.z) >> 4);
+        return position != null && entity.isInLoadedChunk(player.compensatedWorld, position);
     }
 
     public void tickClientEntities(Consumer<PacketEntity> tick) {

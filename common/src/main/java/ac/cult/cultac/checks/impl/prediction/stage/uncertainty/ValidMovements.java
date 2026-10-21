@@ -5,6 +5,7 @@ import static ac.cult.cultac.utils.math.VectorUtils.LARGE_MOVEMENT;
 import ac.cult.cultac.bedrock.prediction.integration.BedrockMovementEngine;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.stage.UncertaintyPipeline;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -25,6 +26,13 @@ public class ValidMovements {
 
     private static final UncertaintyHandler[] MODIFIERS =
             UncertaintyPipeline.MODIFIERS.toArray(new UncertaintyHandler[0]);
+
+    static {
+        // ElytraTransform's skip holds only for the start trace, which only the first handler sees.
+        if (!(MODIFIERS[0] instanceof ElytraTransform)) {
+            throw new IllegalStateException("ElytraTransform must run first in UncertaintyPipeline.MODIFIERS");
+        }
+    }
 
     PredVector initialStartingVel;
     transient CultPlayer player;
@@ -97,10 +105,15 @@ public class ValidMovements {
     }
 
     public MovementTrace transformTraceTowards(Vec3 end, PredictionResult lastResult) {
+        return transformTraceTowards(handlers, handlers.length, end, lastResult);
+    }
+
+    private MovementTrace transformTraceTowards(
+            UncertaintyHandler[] handlers, int count, Vec3 end, PredictionResult lastResult) {
         MovementTrace trace = startTrace;
 
-        for (UncertaintyHandler handler : handlers) {
-            trace = handler.handleMovementTrace(
+        for (int i = 0; i < count; i++) {
+            trace = handlers[i].handleMovementTrace(
                     player, result.getValidMovements(), result, result.getSimulationContext(), lastResult, trace, end);
         }
 
@@ -200,12 +213,35 @@ public class ValidMovements {
     }
 
     public SimpleCollisionBox computeAABB(PredictionResult lastResult) {
-        double posX = transformTowards(initialStartingVel.withX(LARGE_MOVEMENT), lastResult).x;
-        double negX = transformTowards(initialStartingVel.withX(-LARGE_MOVEMENT), lastResult).x;
-        double posY = transformTowards(initialStartingVel.withY(LARGE_MOVEMENT), lastResult).y;
-        double negY = transformTowards(initialStartingVel.withY(-LARGE_MOVEMENT), lastResult).y;
-        double posZ = transformTowards(initialStartingVel.withZ(LARGE_MOVEMENT), lastResult).z;
-        double negZ = transformTowards(initialStartingVel.withZ(-LARGE_MOVEMENT), lastResult).z;
+        // Only handlers run between the six traces, and no skip predicate reads what a handler writes.
+        UncertaintyHandler[] kept = handlers;
+        int count = kept.length;
+        if (handlers == MODIFIERS) {
+            kept = new UncertaintyHandler[handlers.length];
+            count = 0;
+            SimulationContext context = result.getSimulationContext();
+            for (UncertaintyHandler handler : handlers) {
+                if (!handler.skipsContext(player, context, lastResult)) kept[count++] = handler;
+            }
+        }
+        double posX = transformTraceTowards(kept, count, initialStartingVel.withX(LARGE_MOVEMENT), lastResult)
+                .position()
+                .x;
+        double negX = transformTraceTowards(kept, count, initialStartingVel.withX(-LARGE_MOVEMENT), lastResult)
+                .position()
+                .x;
+        double posY = transformTraceTowards(kept, count, initialStartingVel.withY(LARGE_MOVEMENT), lastResult)
+                .position()
+                .y;
+        double negY = transformTraceTowards(kept, count, initialStartingVel.withY(-LARGE_MOVEMENT), lastResult)
+                .position()
+                .y;
+        double posZ = transformTraceTowards(kept, count, initialStartingVel.withZ(LARGE_MOVEMENT), lastResult)
+                .position()
+                .z;
+        double negZ = transformTraceTowards(kept, count, initialStartingVel.withZ(-LARGE_MOVEMENT), lastResult)
+                .position()
+                .z;
 
         return new SimpleCollisionBox(negX, negY, negZ, posX, posY, posZ).sort();
     }

@@ -76,15 +76,15 @@ import ac.grim.grimac.api.handler.ResyncHandler;
 import com.viaversion.viaversion.api.Via;
 import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.protocol.packet.PacketTracker;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.UUID;
@@ -151,8 +151,11 @@ public class CultPlayer implements GrimUser {
     // Determining player ping
     // The difference between keepalive and transactions is that keepalive is async while transactions are sync
     private Queue<SentTransaction> transactionsSent = new ArrayDeque<>();
-    private final @NotNull Map<@NotNull Integer, @NotNull TrackedTransaction> transactionsPendingSend =
-            new HashMap<>(4);
+    /** The ids in {@link #transactionsSent}, which never holds one id twice. */
+    private final IntOpenHashSet transactionIdsSent = new IntOpenHashSet();
+
+    private final Int2ObjectOpenHashMap<@NotNull TrackedTransaction> transactionsPendingSend =
+            new Int2ObjectOpenHashMap<>(4);
     /** Ping ids a client cannot predict from the ones it has answered. */
     private final SecureRandom wireIds = wireIdSource();
 
@@ -591,6 +594,7 @@ public class CultPlayer implements GrimUser {
             if (current == null) {
                 return null;
             }
+            transactionIdsSent.remove(current.id());
             lastTransactionReceived.set(current.transaction());
             rawTransactionPing = System.nanoTime() - current.sentAt();
             transPings.add(rawTransactionPing);
@@ -838,8 +842,11 @@ public class CultPlayer implements GrimUser {
         } else {
             transactionsSent.add(new SentTransaction(transaction.transaction(), transaction.id(), System.nanoTime()));
         }
-        TransactionChannels.SEND.fire(
-                ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(this), transaction.id(), timestamp);
+        transactionIdsSent.add(transaction.id());
+        if (!TransactionChannels.SEND.isEmpty()) {
+            TransactionChannels.SEND.fire(
+                    ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(this), transaction.id(), timestamp);
+        }
         return true;
     }
 
@@ -870,8 +877,7 @@ public class CultPlayer implements GrimUser {
         boolean used;
         do {
             id = nextWireId(random);
-            used = false;
-            for (SentTransaction sent : transactionsSent) used |= sent.id() == id;
+            used = transactionIdsSent.contains(id);
             used |= transactionsPendingSend.containsKey(id);
             used |= foreignPings.contains(id);
         } while (used);
@@ -921,6 +927,7 @@ public class CultPlayer implements GrimUser {
             if (index < 0) throw new IllegalStateException("Last written transaction is missing");
             pending.add(index + 1, transaction);
         }
+        transactionIdsSent.add(transaction.id());
         return transaction;
     }
 

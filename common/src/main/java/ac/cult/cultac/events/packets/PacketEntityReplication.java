@@ -98,20 +98,26 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             int entityId,
             MovementKind kind,
             PositionChange position,
-            @Nullable EntityRotation rotation,
+            boolean hasRotation,
+            float rotationYaw,
+            float rotationPitch,
             @Nullable Boolean onGround,
             DeltaMovementChange deltaMovement) {
         private static EntityMovement relativeEntityPacket(
                 int entityId,
                 boolean hasPosition,
                 EntityPositionPath path,
-                @Nullable EntityRotation rotation,
+                boolean hasRotation,
+                float yaw,
+                float pitch,
                 boolean onGround) {
             return new EntityMovement(
                     entityId,
                     MovementKind.RELATIVE_ENTITY,
                     new PathPositionChange(hasPosition, path),
-                    rotation,
+                    hasRotation,
+                    yaw,
+                    pitch,
                     onGround,
                     DeltaMovementChange.NONE);
         }
@@ -122,13 +128,17 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 int xa,
                 int ya,
                 int za,
-                @Nullable EntityRotation rotation,
+                boolean hasRotation,
+                float yaw,
+                float pitch,
                 boolean onGround) {
             return new EntityMovement(
                     entityId,
                     MovementKind.RELATIVE_ENTITY,
                     PositionChange.relative(hasPosition, xa, ya, za),
-                    rotation,
+                    hasRotation,
+                    yaw,
+                    pitch,
                     onGround,
                     DeltaMovementChange.NONE);
         }
@@ -136,35 +146,42 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         private static EntityMovement teleportEntityPacket(
                 int entityId,
                 Vec3 position,
-                EntityRotation rotation,
+                float yaw,
+                float pitch,
                 boolean onGround,
                 DeltaMovementChange deltaMovement) {
             return new EntityMovement(
                     entityId,
                     MovementKind.TELEPORT_ENTITY,
                     PositionChange.absolute(position),
-                    rotation,
+                    true,
+                    yaw,
+                    pitch,
                     onGround,
                     deltaMovement);
         }
 
         private static EntityMovement positionSyncPacket(
-                int entityId, EntityPositionPath path, EntityRotation rotation, boolean onGround) {
+                int entityId, EntityPositionPath path, float yaw, float pitch, boolean onGround) {
             return new EntityMovement(
                     entityId,
                     MovementKind.POSITION_SYNC,
                     new PathPositionChange(true, path),
-                    rotation,
+                    true,
+                    yaw,
+                    pitch,
                     onGround,
                     DeltaMovementChange.NONE);
         }
 
-        private static EntityMovement minecartPacket(int entityId, Vec3 position, EntityRotation rotation) {
+        private static EntityMovement minecartPacket(int entityId, Vec3 position, float yaw, float pitch) {
             return new EntityMovement(
                     entityId,
                     MovementKind.MINECART,
                     PositionChange.absolute(position),
-                    rotation,
+                    true,
+                    yaw,
+                    pitch,
                     null,
                     DeltaMovementChange.NONE);
         }
@@ -175,12 +192,12 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
 
         @Nullable
         private Float yaw() {
-            return rotation == null ? null : rotation.yaw();
+            return hasRotation ? rotationYaw : null;
         }
 
         @Nullable
         private Float pitch() {
-            return rotation == null ? null : rotation.pitch();
+            return hasRotation ? rotationPitch : null;
         }
     }
 
@@ -259,8 +276,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             return true;
         }
     }
-
-    private record EntityRotation(float yaw, float pitch) {}
 
     private record DeltaMovementChange(boolean present, double x, double y, double z, int packetHandlerSequence) {
         private static final DeltaMovementChange NONE = new DeltaMovementChange(false, 0.0D, 0.0D, 0.0D, -1);
@@ -640,7 +655,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                             delta.x(),
                             delta.y(),
                             delta.z(),
-                            packet.hasRotation() ? new EntityRotation(packet.yaw(), packet.pitch()) : null,
+                            packet.hasRotation(),
+                            packet.yaw(),
+                            packet.pitch(),
                             packet.onGround()));
             return;
         }
@@ -660,7 +677,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                         entityId,
                         packet.hasPosition(),
                         path,
-                        packet.hasRotation() ? new EntityRotation(packet.yaw(), packet.pitch()) : null,
+                        packet.hasRotation(),
+                        packet.yaw(),
+                        packet.pitch(),
                         packet.onGround()));
     }
 
@@ -699,11 +718,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         handleMoveEntity(
                 event,
                 EntityMovement.teleportEntityPacket(
-                        teleport.entityId(),
-                        pos,
-                        new EntityRotation(finalYaw, finalPitch),
-                        teleport.onGround(),
-                        deltaMovementChange));
+                        teleport.entityId(), pos, finalYaw, finalPitch, teleport.onGround(), deltaMovementChange));
     }
 
     private void handleRemovedPlayerVehicleTeleport(
@@ -871,7 +886,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                                 ? viaSteppedPath(EntityPositionPath.fromProtocol(position)
                                         .endPosition())
                                 : EntityPositionPath.fromProtocol(position),
-                        new EntityRotation(packet.yaw(), packet.pitch()),
+                        packet.yaw(),
+                        packet.pitch(),
                         packet.onGround()));
     }
 
@@ -901,7 +917,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 EntityMovement.minecartPacket(
                         packet.entityId(),
                         new Vec3(position.x(), position.y(), position.z()),
-                        new EntityRotation(step.yaw(), step.pitch())));
+                        step.yaw(),
+                        step.pitch()));
     }
 
     private void handleSetEntityData(PacketSendEvent<EntityMetadata> event, EntityMetadata packet) {
@@ -1631,9 +1648,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 data.setCodecBaseY(position.y());
                 data.setCodecBaseZ(position.z());
             }
-            if (movement.yaw() != null) {
-                data.setXRot(movement.yaw());
-                data.setYRot(movement.pitch());
+            if (movement.hasRotation()) {
+                data.setXRot(movement.rotationYaw());
+                data.setYRot(movement.rotationPitch());
             }
             if (movement.onGround() != null) {
                 data.setOnGround(movement.onGround());
@@ -1712,8 +1729,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     absoluteX,
                     absoluteY,
                     absoluteZ,
-                    movement.yaw(),
-                    movement.pitch());
+                    movement.hasRotation(),
+                    movement.rotationYaw(),
+                    movement.rotationPitch());
         }
 
         if (position.relative()
@@ -1726,7 +1744,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     movement.entityId(),
                     movement.hasPosition(),
                     EntityPositionPath.linear(new Vec3(absoluteX, absoluteY, absoluteZ)),
-                    movement.rotation(),
+                    movement.hasRotation(),
+                    movement.rotationYaw(),
+                    movement.rotationPitch(),
                     movement.onGround());
         }
         if (proof != null) {
@@ -1747,7 +1767,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             if (entity == null) {
                 return;
             }
-            applyEntityRotationAndGround(entity, movement.yaw(), movement.onGround());
+            applyEntityRotationAndGround(entity, movement);
             if (applyClientPath(entity, movement, true)) {
                 // Native RC1 interpolation path was appended at this proof.
             } else if (movement.hasPosition()) {
@@ -1779,7 +1799,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     if (entity == null) {
                         return;
                     }
-                    applyEntityRotationAndGround(entity, movement.yaw(), movement.onGround());
+                    applyEntityRotationAndGround(entity, movement);
                     applyBundleFirstMovement(entity, movement);
                     markUncertainPosition(entity, movement);
                     applyDeltaMovementUpdate(entity, movement.deltaMovement());
@@ -1823,7 +1843,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             if (entity == null) {
                 return;
             }
-            applyEntityRotationAndGround(entity, movement.yaw(), movement.onGround());
+            applyEntityRotationAndGround(entity, movement);
             applyFirstMovement(entity, movement);
             markUncertainPosition(entity, movement);
             applyDeltaMovementUpdate(entity, movement.deltaMovement());
@@ -1910,12 +1930,13 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 player);
     }
 
-    private void applyEntityRotationAndGround(PacketEntity entity, @Nullable Float yaw, @Nullable Boolean onGround) {
-        if (entity instanceof PacketEntityTrackXRot && yaw != null) {
+    private void applyEntityRotationAndGround(PacketEntity entity, EntityMovement movement) {
+        if (entity instanceof PacketEntityTrackXRot && movement.hasRotation()) {
             PacketEntityTrackXRot xRotEntity = (PacketEntityTrackXRot) entity;
-            xRotEntity.packetYaw = yaw;
+            xRotEntity.packetYaw = movement.rotationYaw();
             xRotEntity.steps = 3;
         }
+        Boolean onGround = movement.onGround();
         if (onGround != null) {
             entity.onGround = onGround;
         }
@@ -1958,15 +1979,15 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private void recordPacketHandlerTransform(
-            int entityId, boolean hasPos, double x, double y, double z, @Nullable Float yaw, @Nullable Float pitch) {
+            int entityId, boolean hasPos, double x, double y, double z, boolean hasRotation, float yaw, float pitch) {
         PacketEntity entity = player.compensatedEntities.getEntity(entityId);
         TrackerData data = player.compensatedEntities.getTrackedEntity(entityId);
         PacketHandlerEntityTransform source = packetHandlerTransformSource(entity, data, transformScratch);
         double nextX = hasPos ? x : source.x;
         double nextY = hasPos ? y : source.y;
         double nextZ = hasPos ? z : source.z;
-        float nextYRot = yaw == null ? source.yRot : yaw;
-        float nextXRot = pitch == null ? source.xRot : pitch;
+        float nextYRot = hasRotation ? yaw : source.yRot;
+        float nextXRot = hasRotation ? pitch : source.xRot;
         PacketHandlerEntityTransform entry = packetHandlerEntityTransforms.get(entityId);
         if (entry == null) {
             if (packetHandlerEntityTransforms.size() >= MAX_REUSED_TRANSFORMS
@@ -1986,10 +2007,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private boolean isLocalAuthoritativeRootVehicle(int entityId) {
-        PacketEntity vehicle = player.compensatedEntities.getEntity(entityId);
         return player.compensatedEntities.vehicles.serverPlayerVehicle != null
                 && player.compensatedEntities.vehicles.serverPlayerVehicle == entityId
-                && player.compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(vehicle);
+                && player.compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(
+                        player.compensatedEntities.getEntity(entityId));
     }
 
     private void applyDeltaMovementUpdate(PacketEntity entity, DeltaMovementChange update) {
