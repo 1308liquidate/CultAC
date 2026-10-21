@@ -37,7 +37,6 @@ public class CompensatedEntities {
     /** LivingEntity#SPEED_MODIFIER_SPRINTING, which LivingEntity#setSprinting adds to movement_speed. */
     public static final AttributeModifier SPRINTING_SPEED_MODIFIER =
             new AttributeModifier(SPRINTING_MODIFIER_ID, 0.3F, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
-
     public static final String SNOW_MODIFIER_ID = "minecraft:powder_snow";
     public static final Set<String> EXCLUDED_MODIFIER_IDS = Set.of(SPRINTING_MODIFIER_ID, SNOW_MODIFIER_ID);
     private static final String ATTRIBUTE_NAMESPACE = "minecraft:";
@@ -742,7 +741,7 @@ public class CompensatedEntities {
             return new PacketEntityHook(player, entityID, entityType, position.x, position.y, position.z, data);
         }
         if (PacketEntityHurtingProjectile.isHurtingProjectile(entityType)) {
-            return new PacketEntityHurtingProjectile(player, entityID, entityType, position, data);
+            return new PacketEntityHurtingProjectile(player, entityID, entityType, position);
         }
         return new PacketEntity(player, entityID, entityType, position.x, position.y, position.z);
     }

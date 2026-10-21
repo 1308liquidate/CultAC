@@ -817,18 +817,6 @@ public class PacketEntity {
 
     private SimpleCollisionBox passengerPhysicalBox;
 
-    /**
-     * Whether the client may be off every movement candidate: a snapshot still holds a folded step, or a seat comes
-     * from a vehicle that does. A teleport or snap starts a snapshot without one.
-     */
-    public boolean hasLossyPosition() {
-        PacketEntity entity = this;
-        int hops = tracker == null ? 0 : tracker.entityMap.size();
-        while (entity.passengerPhysicalBox != null && entity.riding != null && hops-- > 0) entity = entity.riding;
-        return entity.newPacketLocation != null && entity.newPacketLocation.hasDroppedSteps()
-                || entity.oldPacketLocation != null && entity.oldPacketLocation.hasDroppedSteps();
-    }
-
     public void setPassengerPosition(CultPlayer player, SimpleCollisionBox box) {
         if (player.isBedrockMovement() || player.getClientVersion().isOlderThan(ClientVersion.V_26_3)) {
             setPositionRaw(box);
@@ -959,11 +947,6 @@ public class PacketEntity {
 
         List<SimpleCollisionBox> locations = newPacketLocation.getPossibleMovementLocations();
         return locations.size() == 1 ? locations.getFirst() : null;
-    }
-
-    /** The movement boxes of the client states this entity can be in, each bounding one state's positions. */
-    public List<SimpleCollisionBox> getPossibleMovementCollisionBoxGroups() {
-        return List.of(getPossibleMovementCollisionBoxes());
     }
 
     public long getClientTickOrder() {

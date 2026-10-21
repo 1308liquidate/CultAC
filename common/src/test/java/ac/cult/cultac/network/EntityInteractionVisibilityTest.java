@@ -10,6 +10,7 @@ import ac.cult.blocksim.entity.EntityTypes;
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.checks.impl.visibility.InteractEntityVisibility;
+import ac.cult.cultac.events.packets.PacketEntityReplication;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerAttack;
 import ac.cult.cultac.network.event.PacketListenerPriority;
@@ -30,6 +31,7 @@ import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityPositionSync;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPing;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundProjectilePower;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundTeleportEntity;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.value.EntityDelta;
@@ -314,13 +316,13 @@ class EntityInteractionVisibilityTest {
             var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
             setup.power(42, -.1);
             setup.clientTick();
-            assertStops(fireball, 5 - (2.2 - .1) * .95);
+            assertAt(fireball, 5 - (2.2 - .1) * .95);
         }
         try (var setup = new Setup(version).asClient()) {
             var fireball = setup.fireball(42, 5, -.05, NO_OWNER);
             setup.power(42, -.1);
             setup.clientTick();
-            assertStops(fireball, 5 + (.1 - .05) * .95);
+            assertAt(fireball, 5 + (.1 - .05) * .95);
         }
     }
 
@@ -332,7 +334,7 @@ class EntityInteractionVisibilityTest {
             var fireball = setup.fireball(42, 1.5, 0, NO_OWNER);
             setup.attack(42);
             setup.clientTick();
-            assertStops(fireball, version == ProtocolVersion.V26_3 ? 1.5 : 2.545);
+            assertAt(fireball, version == ProtocolVersion.V26_3 ? 1.5 : 2.545);
         }
     }
 
@@ -346,7 +348,7 @@ class EntityInteractionVisibilityTest {
                 for (int tick = 0; tick < ticks; tick++) setup.clientTick();
                 setup.attack(42);
                 setup.clientTick();
-                assertStops(charge, ticks == 5 && version != ProtocolVersion.V26_3 ? 2.5 : 1.5);
+                assertAt(charge, ticks == 5 && version != ProtocolVersion.V26_3 ? 2.5 : 1.5);
             }
         }
     }
@@ -364,106 +366,8 @@ class EntityInteractionVisibilityTest {
             setup.clientTick();
             setup.player.packetStateData.serverTicksFrozen = false;
             setup.clientTick();
-            assertStops(fireball, version == ProtocolVersion.V26_3 ? 1.5 : 2.545);
+            assertAt(fireball, version == ProtocolVersion.V26_3 ? 1.5 : 2.545);
             assertEquals(.5, fireball.clientPhysicalPosition.x, 1.0E-6);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aProjectileIsAtOneOfItsServerPositionsNeverBetweenThem(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // Both positions are 4.3 from the eye; the box spanning them passes 2.5 in front of it.
-            var fireball = setup.projectile(42, "minecraft:fireball", new Vec3d(-3.5, 64.5, 1.5), Vec3d.ZERO, NO_OWNER);
-            fireball.onFirstTransaction(false, true, 4.5, 64.5, 1.5, setup.player);
-            setup.clientTick();
-            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aFireballStopsAtAMobInFrontOfAWall(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 2, state("stone"));
-            setup.cow(41, new Vec3(.5, 64, 3.7));
-            // The step from z 5 to 2.815 meets the cow's face at 4.15 before the wall's at 3.
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertEquals(4.15, fireball.clientPhysicalPosition.z, 1.0E-6);
-            assertEquals(4.15, fireball.getPossibleMovementCollisionBoxes().maxZ - .5, 1.0E-6);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aFireballStopsAtTheWallBeforeAMobBehindIt(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            setup.player.compensatedWorld.applyBlockChangeRawDANGER(0, 64, 2, state("stone"));
-            setup.cow(41, new Vec3(.5, 64, 1.5));
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertEquals(3, fireball.clientPhysicalPosition.z, 1.0E-6);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aFireballPassesMobsBeyondItsStepOrBesideItsPath(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            setup.cow(40, new Vec3(.5, 64, 1.5));
-            setup.cow(41, new Vec3(1.5, 64, 3.7));
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertEquals(5 - 2.185, fireball.clientPhysicalPosition.z, 1.0E-6);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aFireballPassesThroughItsOwnerUntilItHasLeftIt(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            setup.cow(41, new Vec3(.5, 64, 3.7));
-            var fireball = setup.fireball(42, 5, -2.2, 41);
-            setup.clientTick();
-            assertEquals(5 - 2.185, fireball.clientPhysicalPosition.z, 1.0E-6);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aMobWhosePositionIsNotKnownDoesNotStopAProjectile(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            setup.cow(41, new Vec3(.5, 64, 3.7));
-            // Until the client answers the move, the cow may still be on the path or interpolating off it.
-            setup.player.compensatedEntities.getEntity(41).onFirstTransaction(false, true, 3.5, 64, 3.7, setup.player);
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertStops(fireball, 5 - 2.185);
-            assertEquals(5 - 2.185, fireball.getExactMovementCollisionBox().minZ + .5, 1.0E-6);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void anOwnerTreeWithAnUnplacedRiderKeepsTheProjectilePassingIt(ProtocolVersion version) throws Exception {
-        // The boat spans z 3.0125 to 4.3875. One tick from z 8 takes the fireball out of reach of it; its fourth step,
-        // 4.689 to 3.474, meets the boat grown by the 0.1 margin at 4.4875.
-        double first = 1.045, second = (first + .1) * .95, third = (second + .1) * .95, fourth = (third + .1) * .95;
-        try (var setup = new Setup(version).asClient()) {
-            setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
-            var fireball = setup.fireball(42, 8, -1, 41);
-            for (int tick = 0; tick < 4; tick++) setup.clientTick();
-            assertStops(fireball, 4.4875);
-        }
-        try (var setup = new Setup(version).asClient()) {
-            // The cow riding the owner's boat has no simulated position, so the projectile may still be on its owner.
-            setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
-            setup.cow(40, new Vec3(.5, 64, 3.7));
-            setup.player.compensatedEntities.getEntity(40).mount(setup.player.compensatedEntities.getEntity(41));
-            var fireball = setup.fireball(42, 8, -1, 41);
-            for (int tick = 0; tick < 4; tick++) setup.clientTick();
-            assertStops(fireball, 8 - first - second - third - fourth);
         }
     }
 
@@ -471,21 +375,20 @@ class EntityInteractionVisibilityTest {
     @MethodSource("clients")
     @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void aPassengerListClosingARidingCycleIsRefused(ProtocolVersion version) throws Exception {
-        double first = 1.045, second = (first + .1) * .95, third = (second + .1) * .95, fourth = (third + .1) * .95;
         try (var setup = new Setup(version).asClient()) {
-            // Entity#startRiding refuses a vehicle that rides the passenger, so boat 41 stays the root.
             setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
             setup.entity(43, EntityTypeIds.OAK_BOAT, 3.7);
-            var fireball = setup.fireball(42, 8, -1, 41);
+            setup.entity(44, EntityTypeIds.OAK_BOAT, 6.7);
             var entities = setup.player.compensatedEntities;
-            assertTrue(entities.vehicles.applyVehiclePassengers(41, new int[] {43}));
-            assertTrue(entities.vehicles.applyVehiclePassengers(43, new int[] {41}));
-            assertSame(entities.getEntity(41), entities.getEntity(43).getRiding());
-            assertNull(entities.getEntity(41).getRiding());
-            assertTrue(entities.getEntity(43).passengers.isEmpty());
-            // Boat 43 rides outside the local player's tree, so the projectile may still be on its owner.
-            for (int tick = 0; tick < 4; tick++) setup.clientTick();
-            assertStops(fireball, 8 - first - second - third - fourth);
+            // Entity#startRiding refuses a vehicle that rides the passenger, so boat 43 stays the root.
+            setup.passengers(43, 41);
+            setup.passengers(41, 43, setup.player.entityID);
+            assertSame(entities.getEntity(43), entities.getEntity(41).getRiding());
+            assertNull(entities.getEntity(43).getRiding());
+            assertSame(entities.getEntity(41), entities.getSelf().getRiding());
+            // ClientPacketListener#handleSetEntityPassengersPacket walks the local player's vehicles before a mount.
+            setup.passengers(44, setup.player.entityID);
+            assertSame(entities.getEntity(44), entities.getSelf().getRiding());
         }
     }
 
@@ -493,24 +396,21 @@ class EntityInteractionVisibilityTest {
     @MethodSource("clients")
     @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void aRidingCycleEndsEveryRootWalk(ProtocolVersion version) throws Exception {
-        double first = 1.045, second = (first + .1) * .95, third = (second + .1) * .95, fourth = (third + .1) * .95;
         try (var setup = new Setup(version).asClient()) {
             setup.entity(41, EntityTypeIds.OAK_BOAT, 3.7);
             setup.entity(43, EntityTypeIds.OAK_BOAT, 3.7);
-            var fireball = setup.fireball(42, 8, -1, 41);
             var entities = setup.player.compensatedEntities;
             entities.getEntity(43).mount(entities.getEntity(41));
             entities.getEntity(41).mount(entities.getEntity(43));
-            // A cycle has no root: its riders are untracked and the owner counts as left.
+            // A cycle has no root, and the local player is not on it.
             assertNull(entities.rootOf(entities.getEntity(41)));
-            assertFalse(entities.ridesIndirectly(entities.getSelf(), entities.getEntity(41)));
+            assertFalse(entities.ridesIndirectly(entities.getEntity(41), entities.getSelf()));
             for (int tick = 0; tick < 4; tick++) setup.clientTick();
-            assertStops(fireball, 8 - first - second - third - fourth);
         }
     }
 
     @Test
-    void aMobPastAFoldedInterpolationStepDoesNotStopAProjectile() throws Exception {
+    void aFireballPassesAMobPastAFoldedInterpolationStep() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
             setup.cow(41, new Vec3(.5, 64, 3.7));
             var cow = setup.player.compensatedEntities.getEntity(41);
@@ -522,17 +422,17 @@ class EntityInteractionVisibilityTest {
             }
             var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
             setup.clientTick();
-            assertTrue(cow.hasLossyPosition());
-            assertStops(fireball, 5 - 2.185);
-            // The next tick finishes the folded step, after which the client and the queue agree again.
+            assertAt(fireball, 5 - 2.185);
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
             setup.clientTick();
-            assertFalse(cow.hasLossyPosition());
+            assertAt(fireball, 5 - 2.185 - 2.17075);
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
         }
     }
 
     @ParameterizedTest
     @ValueSource(doubles = {-1, 6})
-    void aFireballPastAMobItMayHaveHitStopsAtNoLaterOne(double eyeX) throws Exception {
+    void aFireballPastAMobItMayHaveHitMovesOnAtEveryTick(double eyeX) throws Exception {
         try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
             setup.player.x = eyeX;
             setup.player.z = 1.5;
@@ -553,41 +453,30 @@ class EntityInteractionVisibilityTest {
             var fireball =
                     setup.projectile(42, "minecraft:fireball", new Vec3d(-1, 64.5, .5), new Vec3d(6, 0, 0), NO_OWNER);
             setup.clientTick();
+            assertEquals(-1 + (6 + .1) * .95F, fireball.clientPhysicalPosition.x, 1.0E-6);
+            assertEquals(eyeX == -1, setup.route(42, InteractAction.INTERACT_AT).isCancelled());
             setup.cow(43, new Vec3(3.5, 64, .5));
             setup.motion(42, new Vec3d(-4, 0, 0));
             setup.clientTick();
-            // Vanilla stops at the first cow and ends at x -3.345; neither step stops here, as on dev. Both are in
-            // reach of x -1 and out of reach of x 6.
             assertEquals(-1 + (6 + .1) * .95F - (4 + .1) * .95F, fireball.clientPhysicalPosition.x, 1.0E-6);
             assertEquals(eyeX == 6, setup.route(42, InteractAction.INTERACT_AT).isCancelled());
         }
     }
 
     @Test
-    void anAbsoluteServerPositionLetsAWindChargeStopAtAMobAgain() throws Exception {
-        // The cow at z 1.5 spans z 1.05 to 1.95; a charge synced to z 3 would move on to .8.
-        assertEquals(1.95, pastAnUnplacedMob("minecraft:wind_charge", setup -> setup.positionSync(42, 3)), 1.0E-6);
+    void aServerPositionSetsAWindChargeThatPassedAMob() throws Exception {
+        assertEquals(.8, pastAnUnplacedMob("minecraft:wind_charge", setup -> setup.positionSync(42, 3)), 1.0E-6);
+        assertEquals(.8, pastAnUnplacedMob("minecraft:wind_charge", setup -> setup.teleport(42, 3, Set.of())), 1.0E-6);
         assertEquals(
-                1.95, pastAnUnplacedMob("minecraft:wind_charge", setup -> setup.teleport(42, 3, Set.of())), 1.0E-6);
-        assertEquals(
-                1.95,
+                .8,
                 pastAnUnplacedMob("minecraft:wind_charge", setup -> {
                     setup.positionSync(42, 3);
                     setup.moveEntity(42);
                 }),
                 1.0E-6);
         assertEquals(.6, pastAnUnplacedMob("minecraft:wind_charge", setup -> {}), 1.0E-6);
-        // The engine decodes the move against the teleport, z 3; the client against its last move or sync, z 5.
-        assertEquals(
-                3 - 2.2,
-                pastAnUnplacedMob("minecraft:wind_charge", setup -> {
-                    setup.teleport(42, 3, Set.of());
-                    setup.moveEntity(42);
-                }),
-                1.0E-6);
         var relative = Set.of(Relative.X, Relative.Y, Relative.Z, Relative.DELTA_X, Relative.DELTA_Y, Relative.DELTA_Z);
         assertEquals(.6, pastAnUnplacedMob("minecraft:wind_charge", setup -> setup.teleport(42, 0, relative)), 1.0E-6);
-        // A fireball's next inertia follows the water state of its last client tick, which a position leaves alone.
         assertEquals(
                 3 - (2.185 + .1) * .95,
                 pastAnUnplacedMob("minecraft:fireball", setup -> setup.positionSync(42, 3)),
@@ -596,7 +485,7 @@ class EntityInteractionVisibilityTest {
 
     /**
      * The z after a projectile from z 5 at -2.2 passes a cow the engine can't place, {@code server} positions it, and
-     * it takes one more step towards a cow at z 1.5.
+     * it takes one more step past a cow at z 1.5.
      */
     private static double pastAnUnplacedMob(String type, Consumer<Setup> server) throws Exception {
         try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
@@ -608,6 +497,8 @@ class EntityInteractionVisibilityTest {
             }
             var projectile = setup.projectile(42, type, 5, -2.2, NO_OWNER);
             setup.clientTick();
+            assertEquals(
+                    type.equals("minecraft:fireball") ? 5 - 2.185 : 2.8, projectile.clientPhysicalPosition.z, 1.0E-6);
             setup.player.compensatedEntities.removeEntity(41);
             setup.cow(43, new Vec3(.5, 64, 1.5));
             server.accept(setup);
@@ -617,7 +508,7 @@ class EntityInteractionVisibilityTest {
     }
 
     @Test
-    void anOwnerPastAFoldedInterpolationStepKeepsItsProjectileOnIt() throws Exception {
+    void aFireballLeavesAnOwnerPastAFoldedInterpolationStep() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
             setup.cow(41, new Vec3(.5, 64, 3.7));
             var cow = setup.player.compensatedEntities.getEntity(41);
@@ -629,7 +520,7 @@ class EntityInteractionVisibilityTest {
                     setup.projectile(42, "minecraft:fireball", new Vec3d(4.5, 64.5, 3.7), new Vec3d(0, 0, 0), 41);
             // The queue samples the cow at x .5, clear of the fireball; the client samples x 4.5, still on it.
             setup.clientTick();
-            assertTrue(cow.hasLossyPosition());
+            assertEquals(4.5, fireball.clientPhysicalPosition.x, 1.0E-6);
             setup.motion(42, new Vec3d(8, 0, 0));
             setup.clientTick();
             assertEquals(4.5 + 8.1 * .95, fireball.clientPhysicalPosition.x, 1.0E-6);
@@ -637,7 +528,7 @@ class EntityInteractionVisibilityTest {
     }
 
     @Test
-    void aSeparationInsideAFoldedStepPassesTheOwnerAsAnUnstoppedProjectile() throws Exception {
+    void aFireballPassesItsOwnerAfterASeparationInsideAFoldedStep() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V26_3).asClient()) {
             setup.cow(41, new Vec3(.5, 64, 3.7));
             var cow = setup.player.compensatedEntities.getEntity(41);
@@ -652,15 +543,18 @@ class EntityInteractionVisibilityTest {
                     setup.projectile(42, "minecraft:fireball", new Vec3d(2.6, 64.5, 3.7), new Vec3d(0, 0, 0), 41);
             // The client samples the cow at x -3.5, clear of the fireball, and leaves its owner; the fold hides that.
             setup.clientTick();
-            assertTrue(cow.hasLossyPosition());
+            assertEquals(2.6, fireball.clientPhysicalPosition.x, 1.0E-6);
             setup.motion(42, new Vec3d(-1, 0, 0));
             setup.clientTick();
             assertEquals(2.6 - 1.1 * .95, fireball.clientPhysicalPosition.x, 1.0E-6);
             setup.motion(42, new Vec3d(0, 0, 0));
-            for (int tick = 0; tick < 8; tick++) setup.clientTick();
+            for (int tick = 0; tick < 8; tick++) {
+                setup.clientTick();
+                assertEquals(2.6 - 1.1 * .95, fireball.clientPhysicalPosition.x, 1.0E-6);
+            }
             setup.motion(42, new Vec3d(-1, 0, 0));
             setup.clientTick();
-            // The client stops at the cow's box grown by the 0.3 margin, x 1.25; the projectile passes as on dev.
+            // The client stops at the cow's box grown by the 0.3 margin, x 1.25; the engine moves the full step.
             assertEquals(2.6 - 2.2 * .95, fireball.clientPhysicalPosition.x, 1.0E-6);
         }
     }
@@ -678,7 +572,6 @@ class EntityInteractionVisibilityTest {
             var visibility = new ClientVisibility(setup.player);
             for (int tick = 0; tick < 3; tick++) {
                 setup.clientTick();
-                if (tick == 0) assertTrue(cow.hasLossyPosition());
                 assertTrue(visibility.entityHidden(cow, 0));
                 assertTrue(visibility.entityInteractionHidden(cow, 0));
                 assertTrue(setup.route(41, InteractAction.INTERACT_AT).isCancelled());
@@ -686,81 +579,72 @@ class EntityInteractionVisibilityTest {
         }
     }
 
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aFireballStopsAtTheLocalPlayer(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // The player's box spans z -1.8 to -1.2; the step runs from .5 to -1.685.
-            var fireball = setup.fireball(42, .5, -2.2, NO_OWNER);
+    @Test
+    void aWindChargeSyncedAfterPassingAMobMovesOnAtEveryTick() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V26_2).asClient()) {
+            setup.player.x = 11.5;
+            setup.player.z = 1.5;
+            setup.player.boundingBox = GetBoundingBox.getCollisionBoxForPlayer(setup.player, 11.5, 64, 1.5);
+            setup.player.compensatedWorld.ensureValidationChunkLoaded(-1, 0);
+            setup.cow(41, new Vec3(1, 64, .5));
+            var charge = setup.projectile(
+                    42, "minecraft:breeze_wind_charge", new Vec3d(-1, 64.5, .5), new Vec3d(8, 0, 0), NO_OWNER);
+            // The cow may still be on the charge's path or already at z 4.5.
+            setup.player.compensatedEntities.getEntity(41).onFirstTransaction(false, true, 1, 64, 4.5, setup.player);
             setup.clientTick();
-            assertEquals(-1.2, fireball.clientPhysicalPosition.z, 1.0E-6);
+            assertEquals(7, charge.clientPhysicalPosition.x, 1.0E-6);
+            setup.player.compensatedEntities.removeEntity(41);
+            setup.cow(43, new Vec3(10, 64, .5));
+            setup.positionSync(42, new Vec3d(0, 64.5, .5));
+            setup.clientTick();
+            assertEquals(15, charge.clientPhysicalPosition.x, 1.0E-6);
+            assertTrue(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
         }
     }
 
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aWindChargePassesThroughAnEndCrystalThatStopsAFireball(ProtocolVersion version) throws Exception {
-        // The crystal's 2-wide box spans z 2.7 to 4.7 across both steps from z 5.
-        try (var setup = new Setup(version).asClient()) {
-            setup.player.compensatedEntities.addEntity(41, EntityTypeIds.END_CRYSTAL, new Vec3(.5, 64, 3.7), 0, 0, 0);
-            var charge = setup.projectile(42, "minecraft:wind_charge", 5, -2.2, NO_OWNER);
+    @Test
+    void aFireballWithAPendingServerPositionIsJudgedAtEveryCandidate() throws Exception {
+        try (var setup = new Setup(ProtocolVersion.V1_21_11).asClient()) {
+            setup.player.x = 0;
+            setup.player.z = 1.5;
+            setup.player.boundingBox = GetBoundingBox.getCollisionBoxForPlayer(setup.player, 0, 64, 1.5);
+            setup.player.compensatedWorld.ensureValidationChunkLoaded(-1, 0);
+            setup.cow(41, new Vec3(1, 64, .5));
+            var fireball =
+                    setup.projectile(42, "minecraft:fireball", new Vec3d(-1, 64.5, .5), new Vec3d(6, 0, 0), NO_OWNER);
+            setup.player.compensatedEntities.getEntity(41).onFirstTransaction(false, true, 1, 64, 4.5, setup.player);
             setup.clientTick();
-            assertEquals(2.8, charge.clientPhysicalPosition.z, 1.0E-6);
-        }
-        try (var setup = new Setup(version).asClient()) {
-            setup.player.compensatedEntities.addEntity(41, EntityTypeIds.END_CRYSTAL, new Vec3(.5, 64, 3.7), 0, 0, 0);
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertEquals(4.7, fireball.clientPhysicalPosition.z, 1.0E-6);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aWindChargePassesThroughAnotherWindChargeThatStopsAFireball(ProtocolVersion version) throws Exception {
-        // The resting charge's box spans z 3.54375 to 3.85625 and y 64.35 to 64.6625 around the path.
-        try (var setup = new Setup(version).asClient()) {
-            setup.projectile(41, "minecraft:wind_charge", 3.7, 0, NO_OWNER);
-            var charge = setup.projectile(42, "minecraft:wind_charge", 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertEquals(2.8, charge.clientPhysicalPosition.z, 1.0E-6);
-        }
-        try (var setup = new Setup(version).asClient()) {
-            setup.projectile(41, "minecraft:wind_charge", 3.7, 0, NO_OWNER);
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.clientTick();
-            assertEquals(3.85625, fireball.clientPhysicalPosition.z, 1.0E-6);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void aFireballTicksBeforeAWindChargeAddedAfterIt(ProtocolVersion version) throws Exception {
-        // ClientLevel#tickEntities runs in add order: 42 meets 41's box at z 3.85625 before 41 steps off the path.
-        try (var setup = new Setup(version).asClient()) {
-            var fireball = setup.fireball(42, 5, -2.2, NO_OWNER);
-            setup.projectile(41, "minecraft:wind_charge", new Vec3d(.5, 64.5, 3.7), new Vec3d(1, 0, 0), NO_OWNER);
-            setup.clientTick();
-            assertEquals(3.85625, fireball.clientPhysicalPosition.z, 1.0E-6);
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("clients")
-    void theHitMarginGrowsByATwentiethPerTickFromTheThirdTick(ProtocolVersion version) throws Exception {
-        try (var setup = new Setup(version).asClient()) {
-            // Tick 3 runs from z 5.867 to 4.739 and meets the cow's face at 4.95, inflated by 0.05.
-            setup.cow(41, new Vec3(.5, 64, 4.5));
-            var fireball = setup.fireball(42, 8, -1, NO_OWNER);
-            for (int tick = 0; tick < 3; tick++) setup.clientTick();
-            assertEquals(5, fireball.clientPhysicalPosition.z, 1.0E-6);
+            assertEquals(4.795, fireball.clientPhysicalPosition.x, 1.0E-6);
+            // A sync whose ping the client has not answered leaves both the ticked and the synced position possible.
+            JavaTickFixture.setField(
+                    PacketEntityReplication.class,
+                    setup.player.packetEntityReplication,
+                    "useReachBundleDelimiter",
+                    false);
+            int ping = Math.max(setup.player.lastTransactionSent.get(), setup.player.lastTransactionReceived.get()) + 1;
+            setup.player.lastTransactionSent.set(ping);
+            var packet = new ClientboundEntityPositionSync(
+                    42, new PositionPath.Linear(new Vec3d(-5, 64.5, .5)), 0, 0, false);
+            setup.player.packetEntityReplication.onEntityPositionSync(
+                    new PacketSendEvent<>(
+                            setup.fixture.user,
+                            ConnectionPhase.PLAY,
+                            ClientboundPackets.ENTITY_POSITION_SYNC,
+                            packet,
+                            false),
+                    setup.player,
+                    packet);
+            setup.player.lastTransactionReceived.set(ping);
+            setup.player.latencyUtils.handleNettySyncTransaction(ping);
+            assertEquals(3, fireball.getPossibleMovementCollisionBoxCandidates().size());
+            assertFalse(setup.route(42, InteractAction.INTERACT_AT).isCancelled());
         }
     }
 
     @Test
     void clientsBefore1_21_2KeepAProjectileAtItsServerPosition() throws Exception {
         try (var setup = new Setup(ProtocolVersion.V1_21_11)) {
-            setup.spawn(42, "minecraft:wind_charge", new Vec3d(2.5, 65.12, 4.5), new Vec3d(0, 0, -1.5));
+            setup.spawn(42, "minecraft:wind_charge", new Vec3d(.5, 65.12, 4.5), new Vec3d(0, 0, -1.5));
             var charge = setup.player.compensatedEntities.getEntity(42);
             JavaTickFixture.setField(CultPlayer.class, setup.player, "resolvedClientVersion", ClientVersion.V_1_21);
             for (int tick = 0; tick < 4; tick++) setup.clientTick();
@@ -977,8 +861,8 @@ class EntityInteractionVisibilityTest {
         }
     }
 
-    /** The projectile is at z {@code z} on every possible position. */
-    private static void assertStops(PacketEntity projectile, double z) {
+    /** The projectile is at z {@code z}, its only possible position. */
+    private static void assertAt(PacketEntity projectile, double z) {
         assertEquals(z, projectile.clientPhysicalPosition.z, 1.0E-6);
         var stops = projectile.getPossibleMovementCollisionBoxCandidates();
         assertEquals(1, stops.size());
@@ -1077,8 +961,11 @@ class EntityInteractionVisibilityTest {
         }
 
         void positionSync(int id, double z) {
-            var packet =
-                    new ClientboundEntityPositionSync(id, new PositionPath.Linear(new Vec3d(.5, 64.5, z)), 0, 0, false);
+            positionSync(id, new Vec3d(.5, 64.5, z));
+        }
+
+        void positionSync(int id, Vec3d position) {
+            var packet = new ClientboundEntityPositionSync(id, new PositionPath.Linear(position), 0, 0, false);
             var event = new PacketSendEvent<>(
                     fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_POSITION_SYNC, packet, false);
             player.packetEntityReplication.onEntityPositionSync(event, player, packet);
@@ -1109,6 +996,14 @@ class EntityInteractionVisibilityTest {
             var event = new PacketSendEvent<>(
                     fixture.user, ConnectionPhase.PLAY, ClientboundPackets.TELEPORT_ENTITY, packet, false);
             player.packetEntityReplication.onTeleportEntity(event, player, packet);
+            acknowledge(event);
+        }
+
+        void passengers(int vehicle, Integer... passengers) {
+            var packet = new ClientboundSetPassengers(vehicle, List.of(passengers));
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.SET_PASSENGERS, packet, false);
+            player.packetEntityReplication.onSetPassengers(event, player, packet);
             acknowledge(event);
         }
 

@@ -136,16 +136,13 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         private static EntityMovement teleportEntityPacket(
                 int entityId,
                 Vec3 position,
-                boolean relativeToClient,
                 EntityRotation rotation,
                 boolean onGround,
                 DeltaMovementChange deltaMovement) {
             return new EntityMovement(
                     entityId,
                     MovementKind.TELEPORT_ENTITY,
-                    relativeToClient
-                            ? new ResolvedRelativePositionChange(position.x, position.y, position.z)
-                            : PositionChange.absolute(position),
+                    PositionChange.absolute(position),
                     rotation,
                     onGround,
                     deltaMovement);
@@ -252,19 +249,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private record AbsolutePositionChange(double x, double y, double z) implements PositionChange {
-        @Override
-        public boolean relative() {
-            return false;
-        }
-
-        @Override
-        public boolean hasPosition() {
-            return true;
-        }
-    }
-
-    // A teleport position relative to the client's own, resolved against the tracked one.
-    private record ResolvedRelativePositionChange(double x, double y, double z) implements PositionChange {
         @Override
         public boolean relative() {
             return false;
@@ -717,9 +701,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 EntityMovement.teleportEntityPacket(
                         teleport.entityId(),
                         pos,
-                        packetFlags.isSet(RelativeFlag.X.getMask())
-                                || packetFlags.isSet(RelativeFlag.Y.getMask())
-                                || packetFlags.isSet(RelativeFlag.Z.getMask()),
                         new EntityRotation(finalYaw, finalPitch),
                         teleport.onGround(),
                         deltaMovementChange));
@@ -1781,7 +1762,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 applyBundledMovement(entity, movement);
             }
             markUncertainPosition(entity, movement);
-            placeProjectile(entity, movement, true);
             applyDeltaMovementUpdate(entity, movement.deltaMovement());
             clearPacketHandlerDeltaMovement(movement);
             player.compensatedEntities.updatePassengerPositions();
@@ -1802,7 +1782,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     applyEntityRotationAndGround(entity, movement.yaw(), movement.onGround());
                     applyBundleFirstMovement(entity, movement);
                     markUncertainPosition(entity, movement);
-                    placeProjectile(entity, movement, true);
                     applyDeltaMovementUpdate(entity, movement.deltaMovement());
                     clearPacketHandlerDeltaMovement(movement);
                     player.compensatedEntities.updatePassengerPositions();
@@ -1847,7 +1826,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             applyEntityRotationAndGround(entity, movement.yaw(), movement.onGround());
             applyFirstMovement(entity, movement);
             markUncertainPosition(entity, movement);
-            placeProjectile(entity, movement, false);
             applyDeltaMovementUpdate(entity, movement.deltaMovement());
             clearPacketHandlerDeltaMovement(movement);
             player.compensatedEntities.updatePassengerPositions();
@@ -1886,16 +1864,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 || (movement.kind() == MovementKind.POSITION_SYNC
                         && player.getClientVersion().isOlderThan(ClientVersion.V_26_3))) {
             entity.markPositionInexact();
-        }
-    }
-
-    private static void placeProjectile(PacketEntity entity, EntityMovement movement, boolean afterPacket) {
-        if (!(entity instanceof PacketEntityHurtingProjectile projectile) || !movement.hasPosition()) return;
-        switch (movement.kind()) {
-            case POSITION_SYNC -> projectile.onPositionSync(afterPacket);
-            case TELEPORT_ENTITY ->
-                projectile.onTeleport(!(movement.position() instanceof ResolvedRelativePositionChange), afterPacket);
-            default -> projectile.onMoveEntity(afterPacket);
         }
     }
 

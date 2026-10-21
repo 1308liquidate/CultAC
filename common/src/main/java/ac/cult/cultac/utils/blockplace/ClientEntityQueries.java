@@ -30,7 +30,6 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntityPlayer;
 import ac.cult.cultac.utils.data.packetentity.PacketEntitySpider;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiPredicate;
@@ -143,77 +142,10 @@ public final class ClientEntityQueries {
         return false;
     }
 
-    /**
-     * An entity and its box at each of its candidate positions; a null box selects nothing at that position, and no box
-     * means the engine doesn't place the entity.
-     */
-    public record PickCandidates(PacketEntity entity, List<Box> boxes) {}
-
-    /**
-     * The entities {@code ProjectileUtil#getEntityHitResult} can select for {@code source} before its owner rule:
-     * {@code Entity#canBeHitByProjectile} (alive and pickable) without {@code noPhysics}, the local player first. A
-     * wind charge also skips wind charges and end crystals ({@code AbstractWindCharge#canHitEntity}). A rider outside
-     * the local player's riding tree comes without boxes.
-     */
-    public List<PickCandidates> projectileTargets(PacketEntity source) {
-        var result = new ArrayList<PickCandidates>();
-        var self = player.compensatedEntities.getSelf();
-        if (player.gamemode != GameMode.SPECTATOR && self.actionAlive)
-            result.add(new PickCandidates(self, List.of(localBox())));
-        boolean windCharge = isWindCharge(source.type);
-        for (var entity : player.compensatedEntities.entityMap.values()) {
-            if (entity == source
-                    || entity instanceof PacketEntityPlayer remote && !remote.actionPresent
-                    || !pickable(entity)
-                    || entity.isLivingEntity() && !entity.actionAlive
-                    || noPhysics(entity)
-                    || windCharge && (isWindCharge(entity.type) || entity.type == EntityTypeIds.END_CRYSTAL)) continue;
-            boolean placed = !player.compensatedEntities.isUntrackedRider(entity);
-            result.add(new PickCandidates(entity, placed ? candidateBoxes(entity) : List.of()));
-        }
-        return result;
-    }
-
-    /** {@code EntitySelector.CAN_BE_PICKED}: the pickable entities that are not spectators, the local player first. */
-    public List<PickCandidates> pickableEntities() {
-        var result = new ArrayList<PickCandidates>();
-        if (player.gamemode != GameMode.SPECTATOR)
-            result.add(new PickCandidates(player.compensatedEntities.getSelf(), List.of(localBox())));
-        for (var entity : player.compensatedEntities.entityMap.values())
-            if (present(entity) && !spectator(entity) && pickable(entity))
-                result.add(new PickCandidates(entity, candidateBoxes(entity)));
-        return result;
-    }
-
-    /** Whether {@code Entity#deflection} is not {@code NONE} for {@code projectile} hitting {@code target}. */
-    public boolean deflects(PacketEntity target, PacketEntity projectile) {
-        // Breeze#deflection is NONE for wind charges.
-        if (modelType(target).key().equals("minecraft:breeze") && isWindCharge(projectile.type)) return false;
-        return members("entity_type:minecraft:deflects_projectiles")
-                .contains(modelType(target).key());
-    }
-
     /** Whether {@code entity} is in {@code #redirectable_projectile}, which {@code Player#attack} aims. */
     public boolean redirectable(PacketEntity entity) {
         return members("entity_type:minecraft:redirectable_projectile")
                 .contains(modelType(entity).key());
-    }
-
-    private static boolean isWindCharge(int type) {
-        return type == EntityTypeIds.WIND_CHARGE || type == EntityTypeIds.BREEZE_WIND_CHARGE;
-    }
-
-    // Interaction and ShulkerBullet set noPhysics on construction; a spectator player is not pickable.
-    private static boolean noPhysics(PacketEntity entity) {
-        String key = modelType(entity).key();
-        return key.equals("minecraft:interaction") || key.equals("minecraft:shulker_bullet");
-    }
-
-    /** Whether {@code Level#getEntities} may return ender dragon parts, which the engine doesn't place. */
-    public boolean mayHaveDragonParts() {
-        for (var entity : player.compensatedEntities.entityMap.values())
-            if (modelType(entity).key().equals("minecraft:ender_dragon")) return true;
-        return false;
     }
 
     private void requireDragonParts() {
@@ -320,18 +252,8 @@ public final class ClientEntityQueries {
 
     /** Null means that the existing packet/tick ordering has not proved one query outcome. */
     private Boolean test(PacketEntity entity, Predicate<Box> query) {
+        if (entity instanceof PacketEntityHanging hanging) return query.test(hanging.actionBounds());
         Boolean result = null;
-        for (var box : candidateBoxes(entity)) {
-            boolean matched = box != null && query.test(box);
-            if (result != null && result != matched) return null;
-            result = matched;
-        }
-        return result;
-    }
-
-    private List<Box> candidateBoxes(PacketEntity entity) {
-        if (entity instanceof PacketEntityHanging hanging) return Collections.singletonList(hanging.actionBounds());
-        var boxes = new ArrayList<Box>();
         for (var position : entity.getPossibleMovementCollisionBoxCandidates()) {
             Box box;
             if (entity.isLivingEntity() && entity.actionPose == EntityPose.SLEEPING) {
@@ -346,9 +268,11 @@ public final class ClientEntityQueries {
                 var bounds = entity.toBoundingBox(player, position);
                 box = new Box(bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ);
             }
-            boxes.add(box);
+            boolean matched = box != null && query.test(box);
+            if (result != null && result != matched) return null;
+            result = matched;
         }
-        return boxes;
+        return result;
     }
 
     private static boolean intersects(VoxelShape shape, Box box) {
