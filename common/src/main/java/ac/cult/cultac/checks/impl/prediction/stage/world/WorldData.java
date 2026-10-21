@@ -55,7 +55,9 @@ public class WorldData {
     boolean pushable;
 
     // Default model state identifies the supporting block, independent of its properties.
+    @Setter
     int onBlock;
+
     StuckEdgeData sneak;
     BubbleColumnData bubbleColumn;
     PistonPushes pistonPushes;
@@ -65,7 +67,10 @@ public class WorldData {
 
     DesyncStatus honeySlide;
     DesyncStatus onHoneyBlock;
+
+    @Setter
     MainSupportingBlockData mainSupportingBlockPos;
+
     SimpleCollisionBox fishingRodPulls;
 
     /** The x/z range of the pushes taken while the level loaded, carried into the first loaded travel; null if none. */

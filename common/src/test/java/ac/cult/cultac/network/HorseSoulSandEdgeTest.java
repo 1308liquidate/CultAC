@@ -36,25 +36,71 @@ class HorseSoulSandEdgeTest {
     private static final double GROUND_FRICTION = 0.6F * 0.91F;
     /** LivingEntity#travelInAir: a grounded horse's (0 - 0.08) * 0.98F. */
     private static final double GROUNDED_Y = -0.0784000015258789;
+    /** The top of honey's 0.9375-tall shape on the y 63 layer. */
+    private static final double HONEY_TOP = FLOOR_Y - 0.0625;
 
     private static final ServerboundPlayerInput FORWARD_SPRINT =
             new ServerboundPlayerInput(true, false, false, false, false, false, true);
 
-    /** Ticks seq 3139 and 3184; the second flagged VehicleOffset (0.1045, 0, -0.007135) with the 0.4 factor. */
+    /**
+     * Ticks seq 3139 and 3184. The stone at x 251 supports the horse, so its factor is 1.0; the soul sand's 0.4 under
+     * its center puts the second tick off by (0.1045, 0, -0.007135).
+     */
     @Test
     void aHorseOnGrassAlongSoulSandKeepsItsSpeed() throws Exception {
-        ridesAlongTheEdgeOf(BlockIds.SOUL_SAND);
-    }
+        try (var f = new JavaTickFixture()) {
+            ground(f, BlockIds.SOUL_SAND);
+            Vec3 before = new Vec3(251.5866402041141, 64.0, 164.9410660631421);
+            Vec3 start = new Vec3(251.9057245669415, 64.0, 164.92119323886106);
+            // Its center is over the full block at x 251, which also supports it.
+            mount(f, start, 265.88745F, carried(start.subtract(before), 1.0F));
 
-    /** The same ride beside honey: 0.9375 tall, so it supports nothing at y 64, with the same 0.4 factor. */
-    @Test
-    void aHorseOnGrassAlongHoneyKeepsItsSpeed() throws Exception {
-        ridesAlongTheEdgeOf(BlockIds.HONEY_BLOCK);
+            assertExact(ride(f, 265.68613F, 26.236082F, new Vec3(252.22471060116337, 64.0, 164.89941287885532)));
+            assertExact(ride(f, 265.5519F, 26.974188F, new Vec3(252.54361741212884, 64.0, 164.87625793187456)));
+        }
     }
 
     /**
-     * Ticks seq 6043 (the step up from soul sand), 6114 and 6252. The last two flagged VehicleOffset (0.006165, 0,
-     * 0.06051) and (0.007434, 0, 0.080586) with the 0.4 factor.
+     * A horse falling onto the edge of the soul sand. The landing move's verticalCollisionBelow makes the stone at
+     * x 251 its supporting block on the landing tick itself, so its factor stays 1.0 and these are the moves it makes
+     * on all-stone ground. Read from the tick's airborne start, nothing supports it and the soul sand's 0.4 under its
+     * center slows the next tick.
+     */
+    @Test
+    void aHorseLandingBesideSoulSandKeepsItsSpeed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            ground(f, BlockIds.SOUL_SAND);
+            mount(f, new Vec3(251.5, 64.25, 164.9), 270F, new Vec3(0.3, -0.1, 0), false);
+
+            assertExact(ride(f, 270F, 0F, new Vec3(251.81451779660154, 64.15, 164.9), false));
+            assertExact(ride(f, 270F, 0F, new Vec3(252.11524679635903, 64.0, 164.9), true));
+            assertExact(ride(f, 270F, 0F, new Vec3(252.53408815456444, 64.0, 164.9), true));
+            assertExact(ride(f, 270F, 0F, new Vec3(252.90795352324642, 64.0, 164.9), true));
+        }
+    }
+
+    /**
+     * A horse on honey with its center over air at x 251. Honey's 0.9375-tall shape, inset 1/16, supports it from
+     * x 252, so Entity#getBlockSpeedFactor reads air at its feet, then honey's 0.4 in the supporting block's column:
+     * these are the moves it makes on all-honey ground. The column under its center holds air, factor 1.0.
+     */
+    @Test
+    void aHorseOnHoneyOverAGapKeepsHoneysSlowdown() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            honeyFromX252(f);
+            mount(f, new Vec3(251.9, HONEY_TOP, 160.5), 0F, new Vec3(0, GROUNDED_Y, 0));
+
+            assertExact(ride(f, 0F, 0F, new Vec3(251.9, HONEY_TOP, 160.64517796053917)));
+            assertExact(ride(f, 0F, 0F, new Vec3(251.9, HONEY_TOP, 160.8220627918154)));
+            assertExact(ride(f, 0F, 0F, new Vec3(251.9, HONEY_TOP, 161.00587240456812)));
+            assertExact(ride(f, 0F, 0F, new Vec3(251.9, HONEY_TOP, 161.1911943897935)));
+        }
+    }
+
+    /**
+     * Ticks seq 6043 (the step up from soul sand), 6114 and 6252. Stepping up makes the stone at z 168 the supporting
+     * block, so its factor is 1.0; the soul sand's 0.4 under its center puts the last two off by (0.006165, 0,
+     * 0.06051) and (0.007434, 0, 0.080586).
      */
     @Test
     void aHorseSteppingFromSoulSandOntoGrassKeepsItsSpeed() throws Exception {
@@ -68,19 +114,6 @@ class HorseSoulSandEdgeTest {
             assertExact(ride(f, 355.06326F, 33.34872F, new Vec3(255.52093204776958, 64.0, 167.37169968434037)));
             assertExact(ride(f, 358.68658F, 33.48292F, new Vec3(255.534547781, 64.0, 167.61768845154788)));
             assertExact(ride(f, 359.0221F, 33.48292F, new Vec3(255.5444733085273, 64.0, 167.89715491232602)));
-        }
-    }
-
-    private static void ridesAlongTheEdgeOf(BlockDefinition slow) throws Exception {
-        try (var f = new JavaTickFixture()) {
-            ground(f, slow);
-            Vec3 before = new Vec3(251.5866402041141, 64.0, 164.9410660631421);
-            Vec3 start = new Vec3(251.9057245669415, 64.0, 164.92119323886106);
-            // Its center is over the full block at x 251, which also supports it.
-            mount(f, start, 265.88745F, carried(start.subtract(before), 1.0F));
-
-            assertExact(ride(f, 265.68613F, 26.236082F, new Vec3(252.22471060116337, 64.0, 164.89941287885532)));
-            assertExact(ride(f, 265.5519F, 26.974188F, new Vec3(252.54361741212884, 64.0, 164.87625793187456)));
         }
     }
 
@@ -104,6 +137,22 @@ class HorseSoulSandEdgeTest {
         for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
     }
 
+    /** Honey under x 252..262, z 158..174 and air west of it. */
+    private static void honeyFromX252(JavaTickFixture f) {
+        for (int chunkX = 14; chunkX <= 17; chunkX++) {
+            for (int chunkZ = 9; chunkZ <= 11; chunkZ++) {
+                f.player.compensatedWorld.ensureValidationChunkLoaded(chunkX, chunkZ);
+            }
+        }
+        for (int x = 252; x <= 262; x++) {
+            for (int z = 158; z <= 174; z++) {
+                f.player.compensatedWorld.updateBlock(
+                        new BlockPos(x, FLOOR_Y - 1, z), BlockIds.HONEY_BLOCK.defaultState());
+            }
+        }
+        for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
+    }
+
     /**
      * The grounded horse's velocity after it moved {@code moved} unobstructed: Entity#move scales it by the block
      * speed factor, then LivingEntity#travelInAir by the ground friction.
@@ -112,29 +161,37 @@ class HorseSoulSandEdgeTest {
         return new Vec3(moved.x * speedFactor * GROUND_FRICTION, GROUNDED_Y, moved.z * speedFactor * GROUND_FRICTION);
     }
 
-    /** The saddled horse at {@code start} carrying {@code velocity}, ridden with forward and sprint held. */
     private static void mount(JavaTickFixture f, Vec3 start, float yaw, Vec3 velocity) {
+        mount(f, start, yaw, velocity, true);
+    }
+
+    /** The saddled horse at {@code start} carrying {@code velocity}, ridden with forward and sprint held. */
+    private static void mount(JavaTickFixture f, Vec3 start, float yaw, Vec3 velocity, boolean onGround) {
         f.player.compensatedEntities.addEntity(HORSE, EntityTypeIds.HORSE, start, yaw, 0, 0);
         PacketEntityHorse horse = (PacketEntityHorse) f.player.compensatedEntities.getEntity(HORSE);
         horse.hasSaddle = true;
         horse.isTame = true;
         horse.movementSpeedAttribute = SPEED;
-        horse.onGround = true;
+        horse.onGround = onGround;
         f.setPassengers(HORSE, List.of(f.player.entityID));
         f.pongThrough(f.player.lastTransactionSent.get());
         // AbstractHorse#tick runs before LocalPlayer#rideTick hands it this tick's keys.
         f.input(FORWARD_SPRINT);
         f.tickEnd();
         f.player.checkManager.getSimulationProcessor().seedStartingVelocity(velocity);
-        f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
+        f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.fromBoolean(onGround));
     }
 
-    /** One captured client tick: the rider's Rot, the horse's move at half the pitch and the tick end. */
     private static PredictionResult ride(JavaTickFixture f, float yaw, float pitch, Vec3 to) {
+        return ride(f, yaw, pitch, to, true);
+    }
+
+    /** One client tick: the rider's Rot, the horse's move at half the pitch and the tick end. */
+    private static PredictionResult ride(JavaTickFixture f, float yaw, float pitch, Vec3 to, boolean onGround) {
         PredictionResult before = f.player.checkManager.getSimulationProcessor().getLastPrediction();
         var rot = new ServerboundMovePlayer(0, 0, 0, yaw, pitch, false, false, false, true);
         f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
-        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), yaw, pitch * 0.5F, true, true);
+        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), yaw, pitch * 0.5F, onGround, true);
         f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, move), f.player, move);
         f.tickEnd();
         PredictionResult result = f.player.checkManager.getSimulationProcessor().getLastPrediction();

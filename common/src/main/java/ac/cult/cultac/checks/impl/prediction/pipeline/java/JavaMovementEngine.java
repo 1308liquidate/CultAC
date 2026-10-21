@@ -17,7 +17,9 @@ import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
+import ac.cult.cultac.utils.data.MainSupportingBlockData;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.GeyserVelocity;
 import ac.cult.cultac.utils.nmsutil.NextTickVelocityDeriver;
 import java.util.ArrayList;
@@ -128,8 +130,13 @@ public final class JavaMovementEngine implements MovementEngine {
             PredictionResult lastPrediction,
             Vec3 acceptedDiff,
             NextTickVelocityDeriver.Scratch scratch) {
-        if (contextUsesExactEffects(result.getSimulationContext())) {
-            var moved = JavaFallDistance.afterCollision(player, result, acceptedDiff);
+        SimulationContext context = result.getSimulationContext();
+        boolean exact = contextUsesExactEffects(context);
+        JavaFallDistance.Moved moved = exact || context.getVehicle() != null
+                ? JavaFallDistance.afterCollision(player, result, acceptedDiff)
+                : null;
+        if (context.getVehicle() != null) settleRiddenSupport(player, result, moved.movement());
+        if (exact) {
             result.setJavaCommittedMove(moved);
             Set<Vec3> velocities = NextTickVelocityDeriver.beforeBlockEffects(
                     player, result, lastPrediction, moved.movement(), scratch);
@@ -176,6 +183,25 @@ public final class JavaMovementEngine implements MovementEngine {
                 JavaFallDistance.commit(player, result, acceptedDiff),
                 NextTickVelocityDeriver.findVelocitiesForNextTick(
                         player, result, lastPrediction, acceptedDiff, scratch));
+    }
+
+    /**
+     * Entity#move's setOnGroundWithMovement on the root vehicle: checkSupportingBlock runs on the move's own
+     * verticalCollisionBelow, set when collision changes a downward move's y (a landing or a step up), and
+     * getBlockSpeedFactor, the effect block and the next travel's friction read the supporting block it stores. The
+     * world data's support, built before the move, holds the vehicle's starting ground.
+     */
+    private static void settleRiddenSupport(CultPlayer player, PredictionResult result, Vec3 movement) {
+        SimulationContext context = result.getSimulationContext();
+        double requestedY = result.getInitialStartingVel().y * context.getLastStuckSpeed().y;
+        boolean collidedBelow = requestedY < 0.0 && Math.abs(movement.y - requestedY) > 1.0E-7D;
+        MainSupportingBlockData support = player.checkManager
+                .getSimulationProcessor()
+                .mainSupportingBlockAfter(
+                        context.getToMaxPose(), context.getEnd().subtract(context.getStart()), collidedBelow);
+        WorldData world = context.getWorldData();
+        world.setMainSupportingBlockPos(support);
+        world.setOnBlock(BlockProperties.getOnPos(player, support, context.getEnd()));
     }
 
     /**

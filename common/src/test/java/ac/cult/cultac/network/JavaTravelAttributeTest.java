@@ -10,12 +10,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.blocksim.entity.EntityTypes;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
+import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.protocol.ClientVersion;
+import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
@@ -27,11 +31,15 @@ import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.data.MainSupportingBlockData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityNautilus;
 import ac.cult.cultac.utils.enums.Pose;
+import ac.cult.cultac.utils.math.TrigHandler;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockSpeedFactors;
 import ac.cult.cultac.utils.nmsutil.Friction;
+import java.lang.reflect.Method;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -353,6 +361,41 @@ class JavaTravelAttributeTest {
     }
 
     @Test
+    void aFlyingRidersVehicleKeepsItsSoulSandSlowdown() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            PacketEntity horse = horseOnSoulSand(f);
+            // Only Player#getBlockSpeedFactor reads abilities.flying, which a passenger keeps.
+            f.player.isFlying = true;
+            assertEquals(0.4F, BlockSpeedFactors.nextTickForResult(f.player, ridden(f, horse)));
+        }
+    }
+
+    @Test
+    void aFlyingRidersCamelDashesAtItsSoulSandSpeed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            PacketEntityCamel camel = (PacketEntityCamel) vehicleOnSoulSand(f, EntityTypeIds.CAMEL);
+            camel.horseJump = 1.0F;
+            Vec3 walking = camelDash(f, camel);
+            f.player.isFlying = true;
+            // Camel#executeRidersJump scales the dash by the camel's own getBlockSpeedFactor.
+            assertEquals(walking, camelDash(f, camel));
+        }
+    }
+
+    @Test
+    void aFlyingRidersNautilusDashesAtItsSoulSandSpeed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            PacketEntityNautilus nautilus = (PacketEntityNautilus) vehicleOnSoulSand(
+                    f, EntityTypes.defaults().byKey("minecraft:nautilus").id());
+            nautilus.pendingJumpScale = 1.0;
+            Vec3 walking = nautilusDash(f, nautilus);
+            f.player.isFlying = true;
+            // AbstractNautilus#executeRidersJump scales the dash by the nautilus's own getBlockSpeedFactor.
+            assertEquals(walking, nautilusDash(f, nautilus));
+        }
+    }
+
+    @Test
     void aRiddenHorsesWaterMovementEfficiencyWalksAtItsSpeedInWater() throws Exception {
         try (var f = new JavaTickFixture()) {
             riddenHorseInWater(f, 1.0, true);
@@ -492,9 +535,42 @@ class JavaTravelAttributeTest {
     }
 
     private static PacketEntity horseOnSoulSand(JavaTickFixture f) {
+        return vehicleOnSoulSand(f, EntityTypeIds.HORSE);
+    }
+
+    private static PacketEntity vehicleOnSoulSand(JavaTickFixture f, int type) {
         f.player.compensatedWorld.updateBlock(new BlockPos(0, FLOOR_Y - 1, 0), BlockIds.SOUL_SAND.defaultState());
-        f.player.compensatedEntities.addEntity(100, EntityTypeIds.HORSE, new Vec3(0.5, SOUL_SAND_TOP, 0.5), 0, 0, 0);
+        f.player.compensatedEntities.addEntity(100, type, new Vec3(0.5, SOUL_SAND_TOP, 0.5), 0, 0, 0);
         return f.player.compensatedEntities.getEntity(100);
+    }
+
+    /** The dash VelocityTransformer adds from rest for {@code camel}, grounded on its soul sand. */
+    private static Vec3 camelDash(JavaTickFixture f, PacketEntityCamel camel) throws Exception {
+        Method dash = VelocityTransformer.class.getDeclaredMethod(
+                "applyCamelDash", CultPlayer.class, PredVector.class, double.class);
+        dash.setAccessible(true);
+        Vec3 dashed = (Vec3) dash.invoke(dashing(f, camel), f.player, new PredVector(Vec3.ZERO), 1.0);
+        return new Vec3(dashed.x, dashed.y, dashed.z);
+    }
+
+    /** The dry dash VelocityTransformer adds from rest for {@code nautilus} on its soul sand. */
+    private static Vec3 nautilusDash(JavaTickFixture f, PacketEntityNautilus nautilus) throws Exception {
+        Method dash = VelocityTransformer.class.getDeclaredMethod(
+                "applyNautilusDash", CultPlayer.class, PredVector.class, PacketEntityNautilus.class, boolean.class);
+        dash.setAccessible(true);
+        Vec3 dashed = (Vec3) dash.invoke(dashing(f, nautilus), f.player, new PredVector(Vec3.ZERO), nautilus, false);
+        return new Vec3(dashed.x, dashed.y, dashed.z);
+    }
+
+    private static VelocityTransformer dashing(JavaTickFixture f, PacketEntity vehicle) {
+        SimulationContext context = Mockito.mock(SimulationContext.class);
+        Mockito.when(context.getVehicle()).thenReturn(vehicle);
+        Mockito.when(context.getStart()).thenReturn(new Vec3(0.5, SOUL_SAND_TOP, 0.5));
+        Mockito.when(context.getLastTickMainSupportingBlockData())
+                .thenReturn(new MainSupportingBlockData(new BlockPos(0, FLOOR_Y - 1, 0), true));
+        Mockito.when(context.getLastOnGround()).thenReturn(DesyncStatus.TRUE);
+        Mockito.when(context.getTrig()).thenReturn(new TrigHandler(f.player));
+        return new VelocityTransformer(context);
     }
 
     private static PredictionResult ridden(JavaTickFixture f, PacketEntity vehicle) {

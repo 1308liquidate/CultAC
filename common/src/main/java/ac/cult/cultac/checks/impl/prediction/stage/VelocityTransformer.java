@@ -672,7 +672,7 @@ public class VelocityTransformer {
 
             final double blockSpeedFactor = CultMath.lerp(
                     (float) horse.movementEfficiency,
-                    BlockProperties.getBlockSpeedFactor(
+                    BlockProperties.getEntityBlockSpeedFactor(
                             player,
                             simulationContext.getLastTickMainSupportingBlockData(),
                             simulationContext.getStart()),
@@ -755,7 +755,7 @@ public class VelocityTransformer {
         Vec3 look = getExactNautilusDashLook(player.xRot, player.yRot);
         float blockSpeedFactor = CultMath.lerp(
                 (float) nautilus.movementEfficiency,
-                BlockProperties.getBlockSpeedFactor(
+                BlockProperties.getEntityBlockSpeedFactor(
                         player, simulationContext.getLastTickMainSupportingBlockData(), simulationContext.getStart()),
                 1.0F);
         double waterMultiplier = inWater ? 1.2F : 0.5F;
