@@ -139,7 +139,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                         new Pending(message, promise).discard(new ClosedChannelException());
                         return;
                     }
-                    output = process(ctx, new Pending(message, promise));
+                    output = process(ctx, message, promise);
                     if (emission == null) emit(ctx, output);
                     else emission.append(output);
                 } catch (Throwable failure) {
@@ -170,7 +170,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         write(ctx, new CultConnection.WriteTask(java.util.Objects.requireNonNull(task)), ctx.newPromise());
     }
 
-    private Output process(ChannelHandlerContext ctx, Pending pending) {
+    private Output process(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
         var output = new Output();
         var activeFamilies = new Families();
         // Recursive callbacks finish first and append their complete groups here.
@@ -184,7 +184,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         reentrantWrites.output = output;
         connection.reentrantWriter(reentrantWrites);
         try {
-            prepare(ctx, pending, activeFamilies, output);
+            prepare(ctx, message, promise, activeFamilies, output);
             return output;
         } catch (Throwable failure) {
             output.discard(failure);
@@ -197,35 +197,36 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
     }
 
-    private void prepare(ChannelHandlerContext ctx, Pending pending, Families activeFamilies, Output output) {
+    private void prepare(
+            ChannelHandlerContext ctx, Object message, ChannelPromise promise, Families activeFamilies, Output output) {
         // Reentrant writes observe the emitted wire state, not an enclosing
         // group's planned delimiters. I/O cannot emit while this dispatch runs.
         var batch = new Batch(insideBundle);
-        ByteBuf fallback = pending.message instanceof ByteBuf frame ? frame.retain() : null;
+        ByteBuf fallback = message instanceof ByteBuf frame ? frame.retain() : null;
         try {
-            if (pending.message instanceof CultConnection.WriteTask task) {
+            if (message instanceof CultConnection.WriteTask task) {
                 // The active writer captures callback-generated packets at this exact
                 // queue position, before packets that arrived after the callback.
                 task.action().run();
                 output.flush |= !output.isEmpty();
-                pending.promise.trySuccess();
-            } else if (pending.message instanceof CultConnection.WriteGroup group) {
-                prepareGroup(ctx, group, pending.promise, activeFamilies, batch);
+                promise.trySuccess();
+            } else if (message instanceof CultConnection.WriteGroup group) {
+                prepareGroup(ctx, group, promise, activeFamilies, batch);
             } else {
-                boolean requested = expandPacket(ctx, pending, activeFamilies, batch);
+                boolean requested = expandPacket(ctx, message, promise, activeFamilies, batch);
                 if (!insideBundle && (requested || batch.output.size() > 1) && connection.clientHasLevel())
                     wrap(ctx, batch.output);
             }
             output.append(batch.output);
         } catch (Throwable failure) {
-            batch.output.discard(failure, fallback == null ? null : pending.promise);
+            batch.output.discard(failure, fallback == null ? null : promise);
             CultNetworkManager.reportFailure("outbound packet expansion", failure);
             if (fallback != null) {
                 PacketType<?> type = fallbackType(fallback);
-                output.addLast(new Frame(fallback, pending.promise, type));
+                output.addLast(new Frame(fallback, promise, type));
                 fallback = null;
                 connection.placedClientbound(type);
-            } else pending.promise.tryFailure(failure);
+            } else promise.tryFailure(failure);
         } finally {
             if (fallback != null) fallback.release();
         }
@@ -273,14 +274,13 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         for (CultWrite write : group.writes()) {
             var part = ctx.newPromise();
             parts.add(part);
-            var pending = new Pending(write, part);
             if (group.bundle()) {
-                expandPacket(ctx, pending, activeFamilies, batch);
+                expandPacket(ctx, write, part, activeFamilies, batch);
             } else {
                 // Unbundled groups give each entry its own automatic bundle scope.
                 var entry = new Batch(batch.inside);
                 try {
-                    boolean requested = expandPacket(ctx, pending, activeFamilies, entry);
+                    boolean requested = expandPacket(ctx, write, part, activeFamilies, entry);
                     if (!batch.inside && (requested || entry.output.size() > 1) && connection.clientHasLevel())
                         wrap(ctx, entry.output);
                     batch.inside = entry.inside;
@@ -297,9 +297,10 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     }
 
     /** Expands only packets. The caller decides whether this expansion needs a bundle. */
-    private boolean expandPacket(ChannelHandlerContext ctx, Pending pending, Families activeFamilies, Batch batch) {
-        if (!(pending.message instanceof CultWrite write)) {
-            return expandFrame(ctx, (ByteBuf) pending.message, pending.promise, false, false, activeFamilies, batch);
+    private boolean expandPacket(
+            ChannelHandlerContext ctx, Object message, ChannelPromise promise, Families activeFamilies, Batch batch) {
+        if (!(message instanceof CultWrite write)) {
+            return expandFrame(ctx, (ByteBuf) message, promise, false, false, activeFamilies, batch);
         }
         var phase = connection.phase(PacketDirection.CLIENTBOUND);
         ac.cult.cultac.protocol.ProjectedPackets.Encoded encoded;
@@ -311,17 +312,17 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             // CultAC's own play packets need the client's level; without one they are dropped, never sent.
             if (!type.phases().contains(ConnectionPhase.CONFIGURATION) && !connection.clientHasLevel()) {
                 connection.droppedWithoutLevel(type);
-                pending.promise.tryFailure(new UnsupportedOnVersionException(type + " needs the client's level"));
+                promise.tryFailure(new UnsupportedOnVersionException(type + " needs the client's level"));
                 return false;
             }
             encoded = connection.packets().encode(phase, type, write.packet(), ctx.alloc(), connection);
         } catch (Throwable failure) {
-            pending.promise.tryFailure(failure);
+            promise.tryFailure(failure);
             CultNetworkManager.reportFailure("authored packet encoding", failure);
             return false;
         }
         if (encoded.frames().isEmpty()) {
-            pending.promise.trySuccess();
+            promise.trySuccess();
             return false;
         }
         var parts = encoded.frames().size() > 1
@@ -332,18 +333,17 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         try {
             for (int i = 0; i < encoded.frames().size(); i++) {
                 ByteBuf frame = encoded.frames().get(i);
-                var part = encoded.frames().size() == 1 ? pending.promise : ctx.newPromise();
+                var part = encoded.frames().size() == 1 ? promise : ctx.newPromise();
                 if (parts != null) parts.add(part);
                 transferred++;
                 requested |= expandFrame(ctx, frame, part, write.silent(), true, activeFamilies, batch);
             }
-            if (encoded.frames().size() > 1)
-                batch.output.addGroup(new GroupCompletion(List.copyOf(parts), pending.promise));
+            if (encoded.frames().size() > 1) batch.output.addGroup(new GroupCompletion(List.copyOf(parts), promise));
             return requested;
         } catch (Throwable failure) {
             for (int i = transferred; i < encoded.frames().size(); i++)
                 encoded.frames().get(i).release();
-            pending.promise.tryFailure(failure);
+            promise.tryFailure(failure);
             throw failure;
         }
     }
@@ -387,7 +387,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                     var writesBefore = event.writesBefore();
                     if (!writesBefore.isEmpty()) {
                         for (CultWrite write : writesBefore) {
-                            expandPacket(ctx, new Pending(write, ctx.newPromise()), activeFamilies, batch);
+                            expandPacket(ctx, write, ctx.newPromise(), activeFamilies, batch);
                         }
                     }
                     {
@@ -408,7 +408,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                     var writesAfter = event.writesAfter();
                     if (!writesAfter.isEmpty()) {
                         for (CultWrite write : writesAfter) {
-                            expandPacket(ctx, new Pending(write, ctx.newPromise()), activeFamilies, batch);
+                            expandPacket(ctx, write, ctx.newPromise(), activeFamilies, batch);
                         }
                     }
                     batch.output.addTasks(event.tasksAfter());
@@ -458,7 +458,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
         @Override
         public void accept(Object message, ChannelPromise promise) {
-            prepare(ctx, new Pending(message, promise), activeFamilies, output);
+            prepare(ctx, message, promise, activeFamilies, output);
         }
     }
 
