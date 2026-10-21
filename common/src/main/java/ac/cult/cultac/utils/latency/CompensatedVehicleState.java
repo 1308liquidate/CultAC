@@ -240,6 +240,20 @@ public final class CompensatedVehicleState implements Debuggable {
         vehicle.onGround = onGround;
     }
 
+    /** {@link #applyVehiclePacketPosition} for a LocalPlayer#tick move of a root the client controls. */
+    public void applyControlledVehicleMove(
+            PacketEntity vehicle, Vec3 to, boolean onGround, float physicalYaw, float physicalPitch) {
+        if (vehicle == null) {
+            return;
+        }
+
+        vehicle.moveLocallyControlledRoot(
+                GetBoundingBox.getPacketEntityBoundingBox(player, to.x, to.y, to.z, vehicle),
+                physicalYaw,
+                physicalPitch);
+        vehicle.onGround = onGround;
+    }
+
     public void setServerVehicle(int vehicleId, int[] passengers, int transaction) {
         PacketEntity vehicle = entities.getEntity(vehicleId);
         if (serverPlayerVehicle == null || serverPlayerVehicle != vehicleId) {

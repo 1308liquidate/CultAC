@@ -490,7 +490,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     @CultPacketHandler
     public void onSetEquipment(
             PacketSendEvent<InventoryPackets.Equipment> event, CultPlayer player, InventoryPackets.Equipment packet) {
-        handleSetEquipment(packet);
+        handleSetEquipment(event, packet);
     }
 
     @CultPacketHandler
@@ -958,7 +958,21 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         }
     }
 
-    private void handleSetEquipment(InventoryPackets.Equipment packet) {
+    private void handleSetEquipment(
+            PacketSendEvent<InventoryPackets.Equipment> event, InventoryPackets.Equipment packet) {
+        Integer serverVehicle = player.compensatedEntities.vehicles.serverPlayerVehicle;
+        if (serverVehicle != null && serverVehicle == packet.entityId()) {
+            // A saddle or harness hands the rider control of the root at the client tick after
+            // ClientPacketListener#handleSetEquipment, which the trailing proof orders.
+            CultPlayer.TrackedTransaction proof = player.appendTrailingProofTransaction(event);
+            if (proof != null) {
+                if (!event.isInsideBundle()) event.bundle();
+                player.latencyUtils.addRealTimeTask(
+                        proof.transaction(),
+                        () -> player.compensatedEntities.updateEntityEquipment(packet.entityId(), packet.slots()));
+                return;
+            }
+        }
         player.latencyUtils.addRealTimeTaskNow(
                 () -> player.compensatedEntities.updateEntityEquipment(packet.entityId(), packet.slots()));
     }

@@ -839,6 +839,9 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         player.packetStateData.vehicleMovementStartOnGround =
                 packetRoot == null ? vehiclePacket.onGround() : packetRoot.onGround;
         player.packetStateData.vehicleMovementOnGroundPresent = clientReportsOnGround;
+        if (checkableClientTick) {
+            packetRoot.interpolateBeforeLocalTravel(player);
+        }
         Vec3 oldPosition = currentVehiclePhysicalPosition(player, packetRoot, new Vec3(player.x, player.y, player.z));
         if (shouldTickControlledBoatForClientVehiclePacket(packetRoot, checkableClientTick)) {
             player.boatData.tick(player);
@@ -906,7 +909,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             if (teleportData.isTeleport()) {
                 applyAcceptedVehicleTeleportState(player, packetRoot, physicalNewPos, vehiclePacket, teleportData);
             } else if (checkableClientTick) {
-                player.compensatedEntities.vehicles.applyVehiclePacketPosition(
+                player.compensatedEntities.vehicles.applyControlledVehicleMove(
                         packetRoot,
                         physicalNewPos,
                         clientReportsOnGround ? vehiclePacket.onGround() : packetRoot.onGround,

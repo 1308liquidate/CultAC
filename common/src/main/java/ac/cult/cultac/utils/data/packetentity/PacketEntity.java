@@ -621,24 +621,7 @@ public class PacketEntity {
                     && interpolation.isSettled()) return;
             idleProbe = interpolation.beginIdleProbe();
         }
-        carryInterpolationTargetByLocalPhysics(player);
-        SimpleCollisionBox exactAfterClientTick = exactInterpolatedLocationAfterClientTick(player);
-        float exactYawAfterClientTick = exactYawAfterClientTick();
-        float exactPitchAfterClientTick = exactPitchAfterClientTick();
-        boolean exactRotationAfterClientTick = exactRotationAfterClientTick();
-        newPacketLocation.tickMovement(oldPacketLocation == null, tickingReliably);
-        alignExactInterpolatedLocation(exactAfterClientTick);
-        if (exactRotationAfterClientTick) {
-            newPacketLocation.setExactRotation(exactYawAfterClientTick, exactPitchAfterClientTick);
-            clientPhysicalYaw = exactYawAfterClientTick;
-            clientPhysicalPitch = exactPitchAfterClientTick;
-        }
-        if (exactAfterClientTick != null) {
-            clientPhysicalPosition = positionFromCollisionBox(exactAfterClientTick, clientPhysicalPosition);
-            clientPhysicalPositionExact = true;
-        } else {
-            clientPhysicalPositionExact = false;
-        }
+        stepInterpolation(player, tickingReliably);
 
         if (player.isBedrockMovement() && isBoat() && bedrockPrediction != null) {
             ac.cult.cultac.bedrock.prediction.integration.BedrockVehiclePredictionState.rebase(
@@ -659,6 +642,49 @@ public class PacketEntity {
             settledInterpolation = interpolation;
             settledPhysicalPosition = physicalBefore;
         }
+    }
+
+    private void stepInterpolation(CultPlayer player, boolean tickingReliably) {
+        carryInterpolationTargetByLocalPhysics(player);
+        SimpleCollisionBox exactAfterClientTick = exactInterpolatedLocationAfterClientTick(player);
+        float exactYawAfterClientTick = exactYawAfterClientTick();
+        float exactPitchAfterClientTick = exactPitchAfterClientTick();
+        boolean exactRotationAfterClientTick = exactRotationAfterClientTick();
+        newPacketLocation.tickMovement(oldPacketLocation == null, tickingReliably);
+        alignExactInterpolatedLocation(exactAfterClientTick);
+        if (exactRotationAfterClientTick) {
+            newPacketLocation.setExactRotation(exactYawAfterClientTick, exactPitchAfterClientTick);
+            clientPhysicalYaw = exactYawAfterClientTick;
+            clientPhysicalPitch = exactPitchAfterClientTick;
+        }
+        if (exactAfterClientTick != null) {
+            clientPhysicalPosition = positionFromCollisionBox(exactAfterClientTick, clientPhysicalPosition);
+            clientPhysicalPositionExact = true;
+        } else {
+            clientPhysicalPositionExact = false;
+        }
+    }
+
+    /**
+     * Entity#commonTick for a root the client moves itself: InterpolationHandler#interpolate advances the server path
+     * it still follows before LivingEntity#aiStep reaches travelRidden. Only the 26.3 stepped interpolation keeps that
+     * path under local control.
+     */
+    public void interpolateBeforeLocalTravel(CultPlayer player) {
+        if (!hasActiveSteppedInterpolation()) {
+            return;
+        }
+        stepInterpolation(player, true);
+        if (oldPacketLocation != null) {
+            oldPacketLocation.tickMovement(true, true);
+            newPacketLocation.updatePossibleStartingLocation(oldPacketLocation.getPossibleMovementLocationCombined());
+        }
+    }
+
+    private boolean hasActiveSteppedInterpolation() {
+        return newPacketLocation != null
+                && newPacketLocation.usesSteppedInterpolation()
+                && newPacketLocation.hasActiveInterpolationTarget();
     }
 
     public void tickPacketInterpolationPreservingPhysical(CultPlayer player, Vec3 physicalPosition) {
@@ -883,6 +909,21 @@ public class PacketEntity {
         setPositionRaw(box);
         setClientPhysicalRotation(yaw, pitch);
         this.newPacketLocation.setCurrentAndTargetRotation(yaw, pitch);
+    }
+
+    /**
+     * Moves a root the client moves itself to {@code box}. A 26.3 stepped path it still follows keeps its steps and
+     * codec base, since ClientPacketListener#handleMoveVehicle alone cancels it; without one this is
+     * {@link #setPositionRaw(SimpleCollisionBox, float, float)}.
+     */
+    public void moveLocallyControlledRoot(SimpleCollisionBox box, float yaw, float pitch) {
+        if (!hasActiveSteppedInterpolation()) {
+            setPositionRaw(box, yaw, pitch);
+            return;
+        }
+        clientPhysicalPosition = positionFromCollisionBox(box);
+        clientPhysicalPositionExact = true;
+        setClientPhysicalRotation(yaw, pitch);
     }
 
     public void setClientPhysicalRotation(float yaw, float pitch) {
