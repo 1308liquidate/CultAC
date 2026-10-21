@@ -83,6 +83,7 @@ public class PacketStateData {
     public int clientTickVehicleMovePacketsThisClientTick = 0;
     public int localAuthoritativeVehicleMovePacketsThisClientTick = 0;
     public boolean carriedItemChangedThisClientTick = false;
+    public boolean carriedItemClaimedThisClientTick = false;
     public boolean vehicleMovementStartOnGround = false;
     // Original-client-reported ground, excluding fields synthesized by protocol translation.
     public boolean vehicleMovementOnGroundPresent = true;

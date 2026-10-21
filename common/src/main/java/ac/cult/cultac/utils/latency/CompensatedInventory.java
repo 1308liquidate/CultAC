@@ -934,6 +934,10 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     public void onSetCarriedItem(
             PacketReceiveEvent<ServerboundSetCarriedItem> event, CultPlayer player, ServerboundSetCarriedItem packet) {
         selectHotbarSlot(packet.slot());
+        // A claim after the tick's first cannot name a slot the previous Player#tick saw.
+        if (player.packetStateData.carriedItemClaimedThisClientTick) return;
+        player.packetStateData.carriedItemClaimedThisClientTick = true;
+        player.attackStrength.onClaimedMainHand(getHeldItem());
     }
 
     public void selectHotbarSlot(int slot) {

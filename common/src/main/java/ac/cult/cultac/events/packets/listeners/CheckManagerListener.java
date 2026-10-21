@@ -1158,6 +1158,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             if (localPlayerTicked(player)) player.packetStateData.localPlayerTickedSinceSpawn = true;
             player.serverOpenedInventoryThisTick = false;
             player.packetStateData.carriedItemChangedThisClientTick = false;
+            player.packetStateData.carriedItemClaimedThisClientTick = false;
         }
         player.packetStateData.receivedMovementThisClientTick = false;
         player.packetStateData.flyingStartBeforeTravel = false;
