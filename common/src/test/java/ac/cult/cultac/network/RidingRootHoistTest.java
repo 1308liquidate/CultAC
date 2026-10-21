@@ -66,6 +66,13 @@ class RidingRootHoistTest {
         return root;
     }
 
+    // CompensatedEntities#isUntrackedRider: a rider whose chain root is neither own riding root, or has no root.
+    private static boolean untrackedRider(CompensatedEntities entities, PacketEntity entity) {
+        if (entity.getRiding() == null) return false;
+        PacketEntity root = chainRoot(entities, entity);
+        return root == null || root != entities.selfRidingRoot() && root != entities.serverVehicleRoot();
+    }
+
     @Test
     void sharedRootWithTheSelfRootReadOnceMatchesThePerEntityWalk() throws Exception {
         try (var f = new JavaTickFixture()) {
@@ -103,24 +110,30 @@ class RidingRootHoistTest {
             int untracked = 0;
             int trackedRiders = 0;
             int serverRoots = 0;
+            int riders = 0;
+            int rootlessRiders = 0;
             for (int config = 0; config < CONFIGS; config++) {
                 ride(world, random);
                 PacketEntity selfRidingRoot = entities.selfRidingRoot();
                 PacketEntity serverVehicleRoot = entities.serverVehicleRoot();
                 if (serverVehicleRoot != null && serverVehicleRoot != selfRidingRoot) serverRoots++;
                 for (PacketEntity entity : world.all()) {
-                    boolean expected = entities.isUntrackedRider(entity);
-                    assertEquals(
-                            expected,
-                            entities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot),
-                            "config " + config + " entity " + entity.getEntityId());
+                    boolean expected = untrackedRider(entities, entity);
+                    String step = "config " + config + " entity " + entity.getEntityId();
+                    assertEquals(expected, entities.isUntrackedRider(entity), step);
+                    assertEquals(expected, entities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot), step);
                     if (expected) untracked++;
                     else if (entity.getRiding() != null) trackedRiders++;
+                    if (selfRidingRoot == null && serverVehicleRoot == null && entity.getRiding() != null) {
+                        if (chainRoot(entities, entity) == null) rootlessRiders++;
+                        else riders++;
+                    }
                 }
             }
             assertTrue(
-                    untracked > 0 && trackedRiders > 0 && serverRoots > 0,
-                    "untracked=" + untracked + " trackedRiders=" + trackedRiders + " serverRoots=" + serverRoots);
+                    untracked > 0 && trackedRiders > 0 && serverRoots > 0 && riders > 0 && rootlessRiders > 0,
+                    "untracked=" + untracked + " trackedRiders=" + trackedRiders + " serverRoots=" + serverRoots
+                            + " riders=" + riders + " rootlessRiders=" + rootlessRiders);
         }
     }
 }

@@ -229,8 +229,7 @@ public class CompensatedEntities {
      */
     public boolean isUntrackedRider(PacketEntity entity) {
         if (entity.getRiding() == null) return false;
-        PacketEntity root = rootOf(entity);
-        return root == null || root != selfRidingRoot() && root != serverVehicleRoot();
+        return isUntrackedRider(entity, selfRidingRoot(), serverVehicleRoot());
     }
 
     /**
@@ -240,6 +239,8 @@ public class CompensatedEntities {
     public boolean isUntrackedRider(
             PacketEntity entity, @Nullable PacketEntity selfRidingRoot, @Nullable PacketEntity serverVehicleRoot) {
         if (entity.getRiding() == null) return false;
+        // Every root, and a cycle's null, differs from two null roots.
+        if (selfRidingRoot == null && serverVehicleRoot == null) return true;
         PacketEntity root = rootOf(entity);
         return root == null || root != selfRidingRoot && root != serverVehicleRoot;
     }
