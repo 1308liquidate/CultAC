@@ -37,6 +37,7 @@ public final class PalettedSection {
     private int[] palette;
     private Int2IntOpenHashMap indices;
     private long[] words;
+    private boolean sharedStorage;
 
     private PalettedSection(int size, int minimumBits, int maximumLocalBits, int registrySize, int initial) {
         this(size, minimumBits, maximumLocalBits, registrySize, 0, new int[] {initial}, 1, NO_WORDS);
@@ -255,6 +256,7 @@ public final class PalettedSection {
     }
 
     public int getAndSet(int index, int state) {
+        if (sharedStorage) ownStorage();
         int code = idFor(state);
         int previous = get(index);
         setCode(index, code);
@@ -304,6 +306,21 @@ public final class PalettedSection {
                 palette == null ? null : palette.clone(),
                 paletteSize,
                 words.clone());
+    }
+
+    /** As {@link #copy}, sharing this section's storage until either section is next written. */
+    public PalettedSection copyOnWrite() {
+        var result = new PalettedSection(
+                size, minimumBits, maximumLocalBits, registrySize, bits, palette, paletteSize, words);
+        result.sharedStorage = true;
+        sharedStorage = true;
+        return result;
+    }
+
+    private void ownStorage() {
+        if (palette != null) palette = palette.clone();
+        words = words.clone();
+        sharedStorage = false;
     }
 
     public PalettedSection translated(IntUnaryOperator mapper) {

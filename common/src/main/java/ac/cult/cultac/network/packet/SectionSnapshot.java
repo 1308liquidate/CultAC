@@ -49,7 +49,7 @@ public final class SectionSnapshot {
     }
 
     public PalettedSection copyBlocks() {
-        return blocks.copy();
+        return blocks.copyOnWrite();
     }
 
     /** The biome of every cell when the palette holds a single entry; -1 otherwise. */
