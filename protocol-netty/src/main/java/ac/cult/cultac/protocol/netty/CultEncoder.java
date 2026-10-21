@@ -681,7 +681,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         void addTasks(List<Runnable> actions) {
             if (actions.isEmpty()) return;
             if (tasks == null) tasks = new ArrayDeque<>(actions.size());
-            tasks.addAll(actions);
+            for (int i = 0; i < actions.size(); i++) tasks.addLast(actions.get(i));
         }
 
         void addGroup(GroupCompletion group) {
@@ -700,7 +700,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             }
             if (source.hasTasks()) {
                 if (tasks == null) tasks = source.tasks;
-                else tasks.addAll(source.tasks);
+                else while (!source.tasks.isEmpty()) tasks.addLast(source.tasks.pollFirst());
             }
             if (source.groups != null && !source.groups.isEmpty()) {
                 if (groups == null) groups = source.groups;
