@@ -1011,6 +1011,13 @@ public class CompensatedEntities {
             if (dashData != null && dashData.value() instanceof Boolean dashing) {
                 nautilus.setDashingFromMetadata(dashing);
             }
+            EntityMetadata.Entry tameData = WatchableIndexUtil.getIndex(
+                    watchableObjects,
+                    WatchableIndexUtil.tameableFlags(
+                            player.user.getCultConnection().getObservedProtocol()));
+            if (tameData != null && tameData.value() instanceof Byte tameFlags) {
+                nautilus.isTame = (tameFlags & 0x04) != 0;
+            }
         }
         applyGravityMetadata(entity, watchableObjects);
 
