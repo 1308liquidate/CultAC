@@ -3,7 +3,6 @@ package ac.cult.cultac.utils.nmsutil;
 import ac.cult.blocksim.data.FluidTags;
 import ac.cult.blocksim.engine.SimFluidState;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
-import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -121,65 +120,16 @@ public final class WaterCurrent {
             Vec3 velocityBeforeCurrent,
             FluidTags fluidTag,
             double scale) {
-        SimpleCollisionBox fluidBox = entityBox.copy().expand(-0.001D);
-
-        int minX = (int) Math.floor(fluidBox.minX);
-        int minY = (int) Math.floor(fluidBox.minY);
-        int minZ = (int) Math.floor(fluidBox.minZ);
-        int maxX = (int) Math.ceil(fluidBox.maxX) - 1;
-        int maxY = (int) Math.ceil(fluidBox.maxY) - 1;
-        int maxZ = (int) Math.ceil(fluidBox.maxZ) - 1;
-
-        Vec3 accumulatedCurrent = Vec3.ZERO;
-        int currentCount = 0;
-        double height = 0.0;
-        // 1.21.11 Entity#updateFluidHeightAndDoFluidPushing measures fluid height from the deflated box;
-        // 26.1 and 26.2 EntityFluidInteraction#update measure it from the entity's bounding box.
-        double entityMinY =
-                player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_1) ? entityBox.minY : fluidBox.minY;
-        BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
-
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
-                    mutablePos.set(x, y, z);
-                    SimFluidState fluidState = ClientFluidQueries.fluidAt(player.compensatedWorld, mutablePos);
-                    // An empty cell is in no fluid tag; skipping it keeps a dry tick off the client tag projection.
-                    if (fluidState.isEmpty() || !ClientFluidQueries.is(player, fluidState, fluidTag)) {
-                        continue;
-                    }
-
-                    double fluidTop = y + ClientFluidQueries.height(player.compensatedWorld, mutablePos, fluidState);
-                    if (fluidTop < fluidBox.minY) {
-                        continue;
-                    }
-
-                    height = Math.max(fluidTop - entityMinY, height);
-                    Vec3 flow = FluidTypeFlowing.flow(player, mutablePos, fluidState);
-                    if (height < 0.4D) {
-                        flow = flow.scale(height);
-                    }
-
-                    accumulatedCurrent = accumulatedCurrent.add(flow);
-                    currentCount++;
-                }
-            }
-        }
-
-        if (currentCount == 0 || accumulatedCurrent.lengthSqr() < 1.0E-5F) {
-            return null;
-        }
-
-        // MCP-Reborn EntityFluidInteraction.Tracker#applyCurrentTo averages water
-        // current only for Player entities. Other entities, including boats,
-        // normalize accumulated current before scaling it by 0.014.
-        Vec3 current = (playerEntity ? accumulatedCurrent.scale(1.0 / currentCount) : accumulatedCurrent.normalize())
-                .scale(scale);
-        if (Math.abs(velocityBeforeCurrent.x) < 0.003
-                && Math.abs(velocityBeforeCurrent.z) < 0.003
-                && current.length() < 0.0045000000000000005) {
-            current = current.normalize().scale(0.0045000000000000005);
-        }
-        return current;
+        FluidCurrent current = new FluidCurrent();
+        return current.compute(
+                        player,
+                        entityBox,
+                        playerEntity,
+                        velocityBeforeCurrent.x,
+                        velocityBeforeCurrent.z,
+                        fluidTag,
+                        scale)
+                ? new Vec3(current.x, current.y, current.z)
+                : null;
     }
 }
