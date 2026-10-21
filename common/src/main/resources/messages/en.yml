@@ -64,6 +64,7 @@ help:
     - "/%command% debug <player> &f- &7Developer Prediction output"
     - "/%command% perf &f- &7Developer ms/prediction"
     - "/%command% reload &f- &7Reloads the config"
+    - "/%command% observe [on|off] &f- &7Show or switch observe-only mode"
     - "/%command% spectate <player> &f- &7Spectate a player"
     - "/%command% verbose &f- &7Shows every flag to you, without buffers"
     - "/%command% log [0-255] &f- &7Uploads a debug log for prediction flags"

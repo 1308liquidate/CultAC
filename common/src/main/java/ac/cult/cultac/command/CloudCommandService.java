@@ -108,6 +108,7 @@ public class CloudCommandService implements CommandService {
         new CultHistoryMigrate().register(commandManager, commandArguments);
         new CultHistoryCopy().register(commandManager, commandArguments);
         new CultReload().register(commandManager, commandArguments);
+        new CultObserve().register(commandManager, commandArguments);
         new CultSpectate().register(commandManager, commandArguments);
         new CultStopSpectating().register(commandManager, commandArguments);
         new CultLog().register(commandManager, commandArguments);

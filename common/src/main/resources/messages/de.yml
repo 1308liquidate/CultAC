@@ -63,6 +63,7 @@ help:
     - "/%command% debug <player> &f- &7Entwicklerausgabe für Vorhersagen"
     - "/%command% perf &f- &7Entwickler ms/Vorhersage"
     - "/%command% reload &f- &7Lädt die Konfiguration neu"
+    - "/%command% observe [on|off] &f- &7Observe-only-Modus anzeigen oder umschalten"
     - "/%command% spectate <player> &f- &7Beobachte einen Spieler"
     - "/%command% verbose &f- &7Zeigt dir jeden Verstoß ohne Puffer an"
     - "/%command% log [0-255] &f- &7Lädt ein Debug-Log für Vorhersagefehler hoch"
