@@ -56,6 +56,8 @@ public class PunishmentManager implements ConfigReloadable {
                 check.setEnabled(false);
             }
 
+            AbstractCheck[] known = null;
+            String[] names = null, alternativeNames = null;
             for (Object s : punish) {
                 LinkedHashMap<String, Object> map = (LinkedHashMap<String, Object>) s;
 
@@ -73,18 +75,25 @@ public class PunishmentManager implements ConfigReloadable {
                         exclude = true;
                         command = command.substring(1);
                     }
-                    for (AbstractCheck check : player.getChecks()) { // o(n) * o(n)?
-                        String alternativeName = check.getAlternativeName();
-                        if (check.getCheckName() != null
-                                && (check.getCheckName()
-                                                .toLowerCase(Locale.ROOT)
-                                                .contains(command)
-                                        || (alternativeName != null
-                                                && alternativeName
-                                                        .toLowerCase(Locale.ROOT)
-                                                        .contains(
-                                                                command)))) { // Some checks have equivalent names like
-                            // AntiKB and AntiKnockback
+                    if (known == null) {
+                        known = player.getChecks().toArray(new AbstractCheck[0]);
+                        names = new String[known.length];
+                        alternativeNames = new String[known.length];
+                        for (int i = 0; i < known.length; i++) {
+                            String name = known[i].getCheckName();
+                            String alternativeName = known[i].getAlternativeName();
+                            names[i] = name == null ? null : name.toLowerCase(Locale.ROOT);
+                            alternativeNames[i] =
+                                    alternativeName == null ? null : alternativeName.toLowerCase(Locale.ROOT);
+                        }
+                    }
+                    for (int i = 0; i < known.length; i++) {
+                        AbstractCheck check = known[i];
+                        String alternativeName = alternativeNames[i];
+                        // Some checks have equivalent names like AntiKB and AntiKnockback
+                        if (names[i] != null
+                                && (names[i].contains(command)
+                                        || (alternativeName != null && alternativeName.contains(command)))) {
                             if (exclude) {
                                 excluded.add(check);
                             } else {
