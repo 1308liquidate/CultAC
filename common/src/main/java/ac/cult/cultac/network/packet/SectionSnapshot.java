@@ -35,8 +35,8 @@ public final class SectionSnapshot {
         return new SectionSnapshot(
                 nonEmpty,
                 fluids,
-                PalettedSection.readBlocks(input, version, sourceStates).remap(states, modelStates),
-                PalettedSection.readBiomes(input, version, sourceBiomes).remap(biomes, modelBiomes));
+                PalettedSection.readBlocks(input, version, sourceStates, states, modelStates),
+                PalettedSection.readBiomes(input, version, sourceBiomes, biomes, modelBiomes));
     }
 
     public static SectionSnapshot readBiomes(
@@ -45,7 +45,7 @@ public final class SectionSnapshot {
                 (short) 0,
                 (short) 0,
                 null,
-                PalettedSection.readBiomes(input, version, sourceBiomes).remap(biomes, modelBiomes));
+                PalettedSection.readBiomes(input, version, sourceBiomes, biomes, modelBiomes));
     }
 
     public PalettedSection copyBlocks() {

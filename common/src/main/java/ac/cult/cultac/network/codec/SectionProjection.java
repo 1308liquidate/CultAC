@@ -57,10 +57,10 @@ final class SectionProjection {
             for (int section = 0; section < count; section++) {
                 short nonEmpty = input.readShort();
                 short fluids = version.atLeast(ProtocolVersion.V26_1) ? input.readShort() : 0;
-                var states = PalettedSection.readBlocks(input, version, registries.sourceStates())
-                        .remap(registries.states(), registries.modelStates());
-                var biomes = PalettedSection.readBiomes(input, version, registries.sourceBiomes())
-                        .remap(registries.biomes(), registries.modelBiomes());
+                var states = PalettedSection.readBlocks(
+                        input, version, registries.sourceStates(), registries.states(), registries.modelStates());
+                var biomes = PalettedSection.readBiomes(
+                        input, version, registries.sourceBiomes(), registries.biomes(), registries.modelBiomes());
                 output.writeShort(nonEmpty);
                 output.writeShort(fluids);
                 states.write(output);
@@ -76,8 +76,12 @@ final class SectionProjection {
         ByteBuf output = Unpooled.buffer();
         try {
             for (int section = 0; section < count; section++) {
-                PalettedSection.readBiomes(input, version, registries.sourceBiomes())
-                        .remap(registries.biomes(), registries.modelBiomes())
+                PalettedSection.readBiomes(
+                                input,
+                                version,
+                                registries.sourceBiomes(),
+                                registries.biomes(),
+                                registries.modelBiomes())
                         .write(output);
             }
             return ByteBufUtil.getBytes(output);

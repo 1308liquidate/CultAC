@@ -86,6 +86,18 @@ public final class PalettedSection {
         return read(input, 64, 1, 3, registrySize, !version.atLeast(ProtocolVersion.V1_21_5));
     }
 
+    /** {@link #readBlocks(ByteBuf, ProtocolVersion, int)} then {@link #remap}, remapping the read storage in place. */
+    public static PalettedSection readBlocks(
+            ByteBuf input, ProtocolVersion version, int registrySize, IntUnaryOperator mapper, int targetRegistrySize) {
+        return readBlocks(input, version, registrySize).remap(mapper, targetRegistrySize, true);
+    }
+
+    /** {@link #readBiomes(ByteBuf, ProtocolVersion, int)} then {@link #remap}, remapping the read storage in place. */
+    public static PalettedSection readBiomes(
+            ByteBuf input, ProtocolVersion version, int registrySize, IntUnaryOperator mapper, int targetRegistrySize) {
+        return readBiomes(input, version, registrySize).remap(mapper, targetRegistrySize, true);
+    }
+
     private static PalettedSection read(
             ByteBuf input, int size, int minimumBits, int maximumLocalBits, int registrySize, boolean lengthPrefixed) {
         var section = new PalettedSection(size, minimumBits, maximumLocalBits, registrySize, 0, null, 0, NO_WORDS);
@@ -141,6 +153,10 @@ public final class PalettedSection {
      * container is repacked at the target registry's width.
      */
     public PalettedSection remap(IntUnaryOperator mapper, int targetRegistrySize) {
+        return remap(mapper, targetRegistrySize, false);
+    }
+
+    private PalettedSection remap(IntUnaryOperator mapper, int targetRegistrySize, boolean reuseStorage) {
         if (isGlobal()) {
             var result = new PalettedSection(
                     size,
@@ -164,9 +180,9 @@ public final class PalettedSection {
                 maximumLocalBits,
                 targetRegistrySize,
                 bits,
-                palette.clone(),
+                reuseStorage ? palette : palette.clone(),
                 paletteSize,
-                words.clone());
+                reuseStorage ? words : words.clone());
         for (int i = 0; i < paletteSize; i++) result.palette[i] = mapped(mapper, palette[i], targetRegistrySize);
         return result;
     }
