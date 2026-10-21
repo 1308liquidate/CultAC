@@ -690,6 +690,11 @@ public class CompensatedEntities {
         rideTickSeat = riding == null ? null : BoundingBoxSize.getRidingOffsetFromVehicle(riding, playerEntity, player);
     }
 
+    /** The seat the last client tick's Entity#rideTick ended on, or null when it ended off a vehicle. */
+    public Vec3 lastRideTickSeat() {
+        return rideTickSeat;
+    }
+
     /** Whether the local player was a passenger at the end of the last client tick. */
     public boolean rodeLastClientTick() {
         return rideTickSeat != null;

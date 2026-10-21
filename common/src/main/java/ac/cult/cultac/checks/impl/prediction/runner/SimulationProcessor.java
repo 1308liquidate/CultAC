@@ -89,6 +89,7 @@ import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.FlightToggle;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.NextTickVelocityDeriver;
+import ac.cult.cultac.utils.nmsutil.PassengerRideTick;
 import ac.cult.cultac.utils.nmsutil.ReusableVelocitySet;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -134,6 +135,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     private boolean rideTicked;
     /** Whether a dismount after a passenger tick precedes the next prediction. */
     private boolean rideTicksSinceLastPrediction;
+
+    private final PassengerRideTick passengerRideTick = new PassengerRideTick();
 
     private boolean bedrockSleepingStateObserved;
     private TeleportData bedrockTeleport;
@@ -1183,6 +1186,27 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     public void recordRideTick() {
         this.rideTicked =
                 !this.player.isBedrockMovement() && this.player.compensatedEntities.playerEntity.getRiding() != null;
+        if (!this.rideTicked) return;
+        Vec3 seat = this.player.compensatedEntities.lastRideTickSeat();
+        if (seat == null) {
+            this.passengerRideTick.record(this.player, this.player.x, this.player.y, this.player.z);
+        } else {
+            this.passengerRideTick.record(this.player, seat.x, seat.y, seat.z);
+        }
+    }
+
+    /** A set_entity_motion of the local passenger after its last Entity#rideTick sets the delta a dismount keeps. */
+    public void replaceRideTickVelocity(Vec3 velocity) {
+        if (this.rideTicked) this.passengerRideTick.setMotion(velocity);
+    }
+
+    /** Seeds the delta movements the last Entity#rideTick can have left, which a dismount with no velocity resync keeps. */
+    public void seedRideTickVelocity() {
+        if (!this.rideTicked) return;
+        List<Vec3> velocities = this.passengerRideTick.velocities();
+        if (velocities.isEmpty()) return;
+        this.player.compensatedEntities.playerEntity.deltaMovement = velocities.get(0);
+        this.seedStartingVelocities(velocities);
     }
 
     /** Carries what the last ride tick can have left once the player leaves its vehicle; with none, the on-foot carry stays. */

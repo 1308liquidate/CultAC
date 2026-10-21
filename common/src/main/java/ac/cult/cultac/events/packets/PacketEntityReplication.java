@@ -611,6 +611,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 if (!player.compensatedEntities.vehicles.applyClientboundVehicleVelocity(entity, movement)) {
                     entity.deltaMovement = movement;
                 }
+                if (entity == player.compensatedEntities.playerEntity) {
+                    player.checkManager.getSimulationProcessor().replaceRideTickVelocity(movement);
+                }
             }
             clearPacketHandlerDeltaMovement(motion.entityId(), packetHandlerDeltaSequence);
         });
@@ -1193,10 +1196,11 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                                     seat != null ? seat : new Vec3(player.x, player.y, player.z),
                                     Vec3.ZERO,
                                     player.getSetbackTeleportUtil().nextTeleportId());
-            int transaction = transactionForSetPassengers(event, null, dismountResyncState);
+            CultPlayer.TrackedTransaction proof = proofForSetPassengers(event, null, dismountResyncState);
+            int transaction = proof == null ? player.lastTransactionSent.get() : proof.transaction();
             if (changesSelfPassengers) player.compensatedEntities.markSelfPassengersChange(transaction);
             int vehicleId = packet.vehicleId();
-            boolean resyncTeleports = dismountResyncState != null;
+            boolean resyncTeleports = dismountResyncState != null && proof != null;
             player.compensatedEntities.vehicles.setServerVehicleDismount(vehicleId, transaction);
             player.latencyUtils.addRealTimeTask(transaction, () -> {
                 player.compensatedEntities.playerEntity.deltaMovement =
@@ -1216,6 +1220,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     player.onGround = false;
                     player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.FALSE);
                     if (!player.compensatedEntities.getSelf().inVehicle()) {
+                        if (!resyncTeleports)
+                            player.checkManager.getSimulationProcessor().seedRideTickVelocity();
                         player.checkManager.getSimulationProcessor().endRide();
                     }
                 }
@@ -1234,7 +1240,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             }
         }
 
-        int transaction = transactionForSetPassengers(event, mountResyncState, null);
+        CultPlayer.TrackedTransaction proof = proofForSetPassengers(event, mountResyncState, null);
+        int transaction = proof == null ? player.lastTransactionSent.get() : proof.transaction();
         if (setsSelfPassengers) {
             player.compensatedEntities.sentSelfPassengers(packet.passengers(), transaction);
         } else if (changesSelfPassengers) {
@@ -1278,7 +1285,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         return player.compensatedEntities.ridesIndirectly(player.compensatedEntities.getSelf(), vehicle);
     }
 
-    private int transactionForSetPassengers(
+    /** The trailing proof of a set_passengers and its resync packets, or null when none was written. */
+    @Nullable
+    private CultPlayer.TrackedTransaction proofForSetPassengers(
             PacketSendEvent<?> event,
             @Nullable VehicleMountResyncState mountResyncState,
             @Nullable SelfDismountResyncState dismountResyncState) {
@@ -1286,8 +1295,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 ? List.of()
                 : resyncPackets(mountResyncState, dismountResyncState);
         boolean useDelimiter = !resyncPackets.isEmpty() || useReachBundleDelimiter;
-        CultPlayer.TrackedTransaction proof = appendTrailingProofTransaction(event, resyncPackets, useDelimiter);
-        return proof == null ? player.lastTransactionSent.get() : proof.transaction();
+        return appendTrailingProofTransaction(event, resyncPackets, useDelimiter);
     }
 
     private List<CultWrite> resyncPackets(
@@ -1495,6 +1503,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 player.checkManager.getSimulationProcessor().seedStartingVelocity(velocity);
             }
             if (wasPassenger && !player.compensatedEntities.getSelf().inVehicle() && !player.isBedrockMovement()) {
+                if (!sentVelocityReset)
+                    player.checkManager.getSimulationProcessor().seedRideTickVelocity();
                 player.checkManager.getSimulationProcessor().endRide();
             }
             if (wasPassenger
