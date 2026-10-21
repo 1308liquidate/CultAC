@@ -6,6 +6,8 @@ import ac.cult.blocksim.data.BlockProps;
 import ac.cult.blocksim.data.BlockTags;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.StateFacts;
+import ac.cult.blocksim.engine.shapes.Shapes;
+import ac.cult.blocksim.engine.shapes.VoxelShape;
 import ac.cult.cultac.events.packets.PacketWorldBorder;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
@@ -14,6 +16,7 @@ import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.utils.collisions.ClientBlockShapes;
 import ac.cult.cultac.utils.collisions.datatypes.CollisionBox;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox;
 import ac.cult.cultac.utils.latency.CompensatedWorld.CachedChunk;
 import ac.cult.cultac.utils.latency.CompensatedWorld.CachedSection;
 import ac.cult.cultac.utils.math.CultMath;
@@ -565,6 +568,33 @@ public class Collisions {
                                 }
                                 if (actor == CURRENT_ACTOR && BlockIds.is(data, BlockIds.POWDER_SNOW))
                                     actor = JavaCollisionState.current(player);
+                                if (modernJava && direct) {
+                                    // Must match NativeBlockCollisionHelper.getCollisionBox bit for bit.
+                                    VoxelShape shape = NativeBlockCollisionHelper.getCollisionShape(
+                                            player, data, x, y, z, entityBottom, actor);
+                                    if (shape.isEmpty()) continue;
+                                    boolean fullBlock = shape == Shapes.block();
+                                    if (!fullBlock && queryShape == null) {
+                                        queryShape = Shapes.create(
+                                                wantedBB.minX,
+                                                wantedBB.minY,
+                                                wantedBB.minZ,
+                                                wantedBB.maxX,
+                                                wantedBB.maxY,
+                                                wantedBB.maxZ);
+                                    }
+                                    if (fullBlock
+                                            ? !(wantedBB.minX < 1.0 + x
+                                                    && wantedBB.maxX > 0.0 + x
+                                                    && wantedBB.minY < 1.0 + y
+                                                    && wantedBB.maxY > 0.0 + y
+                                                    && wantedBB.minZ < 1.0 + z
+                                                    && wantedBB.maxZ > 0.0 + z)
+                                            : !shape.intersectsAabb(queryShape, x, y, z, true)) continue;
+                                    if (onlyCheckCollide) return true;
+                                    listOfBlocks.add(new VoxelShapeCollisionBox(shape, fullBlock).offset(x, y, z));
+                                    continue;
+                                }
                                 CollisionBox collisionBox =
                                         ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor, direct);
                                 if (collisionBox.isNull()) continue;
