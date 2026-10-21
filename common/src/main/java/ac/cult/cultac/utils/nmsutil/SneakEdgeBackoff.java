@@ -4,6 +4,7 @@ import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaFallDistance;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
@@ -67,8 +68,8 @@ final class SneakEdgeBackoff {
     }
 
     /**
-     * The carry for {@code movingSlowlyFactor} at the speed LivingEntity#getSpeed gives on the ground or in water,
-     * kept when one getSpeed() the client's sprint modifier allows alone reproduces the move.
+     * The carry for {@code movingSlowlyFactor} at the speed LivingEntity#getFrictionInfluencedSpeed gives in water, on
+     * the ground or in the air, kept when one speed the client's sprint state allows alone reproduces the move.
      */
     private static Vec3 deltaMovementFrom(
             CultPlayer player,
@@ -83,13 +84,24 @@ final class SneakEdgeBackoff {
         }
         Vec3 found = null;
         ClientSprintState.Outcome outcome = context.getSprintOutcome(player, result.getInitialStartingVel());
-        for (float speed : context.getGroundMoveRelativeSpeeds(player, outcome)) {
+        float[] speeds = context.getWorldData().getLastOnGround() == DesyncStatus.TRUE
+                ? context.getGroundMoveRelativeSpeeds(player, outcome)
+                : flyingSpeeds(context);
+        for (float speed : speeds) {
             Vec3 carry = deltaMovementFrom(player, result, context, accepted, movingSlowlyFactor, speed);
             if (carry == null) continue;
             if (found != null && !found.equals(carry)) return null;
             found = carry;
         }
         return found;
+    }
+
+    /** Player#getFlyingSpeed off the ground for each sprint flag the client may have held during travel. */
+    private static float[] flyingSpeeds(SimulationContext context) {
+        List<Boolean> sprinting = context.getIsSprinting().getStates();
+        float[] speeds = new float[sprinting.size()];
+        for (int i = 0; i < speeds.length; i++) speeds[i] = sprinting.get(i) ? 0.025999999F : 0.02F;
+        return speeds;
     }
 
     private static Vec3 deltaMovementFrom(
@@ -148,7 +160,7 @@ final class SneakEdgeBackoff {
                 && !start.isJump()
                 && !start.isKnockback()
                 && !(start.y > 0.0D)
-                && world.getLastOnGround() == DesyncStatus.TRUE
+                && isAboveGround(player, result, context)
                 && world.getInLava() == DesyncStatus.FALSE
                 && world.getClimbingAtStart() == DesyncStatus.FALSE
                 && !world.isMightBeInBlock()
@@ -160,6 +172,26 @@ final class SneakEdgeBackoff {
                 && !IsUsingItem.isUsingItem(player)
                 && result.getValidMovements() != null
                 && result.getValidMovements().getPositionOnlyDelta().lengthSqr() <= 1.0E-14;
+    }
+
+    /**
+     * Player#isAboveGround at the tick's start box, with the fallDistance Entity#move reads before its checkFallDamage
+     * adds this tick's fall.
+     */
+    private static boolean isAboveGround(CultPlayer player, PredictionResult result, SimulationContext context) {
+        DesyncStatus onGround = context.getWorldData().getLastOnGround();
+        if (onGround != DesyncStatus.FALSE) return onGround == DesyncStatus.TRUE;
+        float maxDownStep = player.getMaxUpStep();
+        double fallDistance = JavaFallDistance.beforeMove(player, context, result.getInitialStartingVel())
+                .fallDistance();
+        return fallDistance < maxDownStep
+                && !canFallAtLeast(
+                        player,
+                        context.getFromActualPose(),
+                        new SimpleCollisionBox(),
+                        0.0,
+                        0.0,
+                        maxDownStep - fallDistance);
     }
 
     /**
