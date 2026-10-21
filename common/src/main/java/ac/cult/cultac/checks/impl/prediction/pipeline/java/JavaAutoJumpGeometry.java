@@ -46,6 +46,7 @@ final class JavaAutoJumpGeometry {
 
     static List<SimpleCollisionBox> blockCollisions(CultPlayer player, SimpleCollisionBox query) {
         var result = new ArrayList<SimpleCollisionBox>();
+        var boxes = new ArrayList<SimpleCollisionBox>();
         int x0 = (int) Math.floor(query.minX - 1.0E-7) - 1, x1 = (int) Math.floor(query.maxX + 1.0E-7) + 1;
         int y0 = (int) Math.floor(query.minY - 1.0E-7) - 1, y1 = (int) Math.floor(query.maxY + 1.0E-7) + 1;
         int z0 = (int) Math.floor(query.minZ - 1.0E-7) - 1, z1 = (int) Math.floor(query.maxZ + 1.0E-7) + 1;
@@ -62,9 +63,14 @@ final class JavaAutoJumpGeometry {
                     if (edge == 1 && !facts.has(StateFacts.LARGE_COLLISION)
                             || edge == 2 && !BlockIds.is(state, BlockIds.MOVING_PISTON)) continue;
                     var shape = ClientBlockShapes.movement(player, state, x, y, z, player.y);
-                    var boxes = new ArrayList<SimpleCollisionBox>();
+                    boxes.clear();
                     shape.downCast(boxes);
-                    if (boxes.stream().anyMatch(query::isIntersected)) result.addAll(boxes);
+                    for (int i = 0; i < boxes.size(); i++) {
+                        if (query.isIntersected(boxes.get(i))) {
+                            result.addAll(boxes);
+                            break;
+                        }
+                    }
                 }
         return result;
     }
