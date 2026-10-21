@@ -623,6 +623,32 @@ class WireValueDecoderTest {
         }
     }
 
+    @Test
+    void metadataOfEveryLengthIsAnImmutableListInWireOrder() throws Exception {
+        for (var version : ProtocolVersion.values()) {
+            var byteType = field(PrivateCodecService.types(version).entityDataTypes(), "byteType");
+            for (int count = 0; count <= 5; count++) {
+                var entries = new ArrayList<EntityData>();
+                for (int i = 0; i < count; i++) entries.add(new EntityData(10 + i, byteType, (byte) i));
+                var input = Unpooled.buffer();
+                try {
+                    PrivateCodecService.types(version).entityDataList().write(input, entries);
+                    var decoded = decoder.metadata(version, input, names(version));
+                    assertEquals(count, decoded.size());
+                    for (int i = 0; i < count; i++) {
+                        assertEquals(10 + i, decoded.get(i).index());
+                        assertEquals((byte) i, decoded.get(i).value());
+                    }
+                    assertSame(decoded, List.copyOf(decoded), version + " " + count);
+                    assertEquals(List.copyOf(new ArrayList<>(decoded)).getClass(), decoded.getClass());
+                    assertThrows(UnsupportedOperationException.class, () -> decoded.add(null));
+                } finally {
+                    input.release();
+                }
+            }
+        }
+    }
+
     private static EntityDataType field(Object value, String field) throws Exception {
         return (EntityDataType) value.getClass().getField(field).get(value);
     }

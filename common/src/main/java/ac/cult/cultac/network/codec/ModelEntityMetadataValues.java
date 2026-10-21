@@ -14,7 +14,7 @@ import ac.cult.cultac.protocol.wire.Wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Function;
@@ -54,8 +54,9 @@ final class ModelEntityMetadataValues {
                 : decoded.getLast().offset() + decoded.getLast().length() - payloadStart;
         ByteBuffer payload = ByteBuffer.wrap(ByteBufUtil.getBytes(input, payloadStart, payloadLength))
                 .asReadOnlyBuffer();
-        var entries = new ArrayList<EntityMetadata.Entry>(decoded.size());
-        for (var value : decoded) {
+        var entries = new EntityMetadata.Entry[decoded.size()];
+        for (int i = 0; i < entries.length; i++) {
+            var value = decoded.get(i);
             Object converted = switch (value.kind()) {
                 case "item" -> items.item((WireValueDecoder.DecodedItem<NbtValue>) value.value());
                 case "painting_variant" ->
@@ -71,10 +72,10 @@ final class ModelEntityMetadataValues {
                 default -> value.value();
             };
             if (converted == null && value.kind().equals("painting_variant")) return null;
-            entries.add(EntityMetadata.Entry.of(
-                    value.index(), converted, payload, value.offset() - payloadStart, value.length()));
+            entries[i] = EntityMetadata.Entry.of(
+                    value.index(), converted, payload, value.offset() - payloadStart, value.length());
         }
-        return new EntityMetadata(id, entries);
+        return new EntityMetadata(id, List.of(entries));
     }
 
     private static BlockPos position(int[] values) {
