@@ -384,8 +384,11 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                         promise.trySuccess();
                         return false;
                     }
-                    for (CultWrite write : event.writesBefore()) {
-                        expandPacket(ctx, new Pending(write, ctx.newPromise()), activeFamilies, batch);
+                    var writesBefore = event.writesBefore();
+                    if (!writesBefore.isEmpty()) {
+                        for (CultWrite write : writesBefore) {
+                            expandPacket(ctx, new Pending(write, ctx.newPromise()), activeFamilies, batch);
+                        }
                     }
                     {
                         if (bytes == null) throw new IllegalStateException("Multiple physical packet identities");
@@ -402,8 +405,11 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                         }
                         connection.placedClientbound(type);
                     }
-                    for (CultWrite write : event.writesAfter()) {
-                        expandPacket(ctx, new Pending(write, ctx.newPromise()), activeFamilies, batch);
+                    var writesAfter = event.writesAfter();
+                    if (!writesAfter.isEmpty()) {
+                        for (CultWrite write : writesAfter) {
+                            expandPacket(ctx, new Pending(write, ctx.newPromise()), activeFamilies, batch);
+                        }
                     }
                     batch.output.addTasks(event.tasksAfter());
                     requested |= event.isBundleRequested();
