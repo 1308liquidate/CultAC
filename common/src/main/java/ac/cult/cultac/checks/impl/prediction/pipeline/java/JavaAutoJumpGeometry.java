@@ -18,10 +18,34 @@ final class JavaAutoJumpGeometry {
 
     static List<SimpleCollisionBox> collisions(CultPlayer player, SimpleCollisionBox query) {
         var result = new ArrayList<SimpleCollisionBox>();
-        for (Box box : new ClientEntityQueries(player)
-                .playerCollisionBoxes(new Box(query.minX, query.minY, query.minZ, query.maxX, query.maxY, query.maxZ)))
+        for (Box box : entityCollisions(player, query))
             result.add(
                     SimpleCollisionBox.between(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()));
+        result.addAll(blockCollisions(player, query));
+        return result;
+    }
+
+    static boolean hasEntityCollision(CultPlayer player, SimpleCollisionBox query) {
+        return !entityCollisions(player, query).isEmpty();
+    }
+
+    /** Whether every chunk the query and its neighbouring blocks reach is loaded. */
+    static boolean loaded(CultPlayer player, SimpleCollisionBox query) {
+        int x0 = ((int) Math.floor(query.minX) - 1) >> 4, x1 = ((int) Math.floor(query.maxX) + 1) >> 4;
+        int z0 = ((int) Math.floor(query.minZ) - 1) >> 4, z1 = ((int) Math.floor(query.maxZ) + 1) >> 4;
+        for (int x = x0; x <= x1; x++)
+            for (int z = z0; z <= z1; z++)
+                if (player.compensatedWorld.getChunk(x, z) == null) return false;
+        return true;
+    }
+
+    private static List<Box> entityCollisions(CultPlayer player, SimpleCollisionBox query) {
+        return new ClientEntityQueries(player)
+                .playerCollisionBoxes(new Box(query.minX, query.minY, query.minZ, query.maxX, query.maxY, query.maxZ));
+    }
+
+    static List<SimpleCollisionBox> blockCollisions(CultPlayer player, SimpleCollisionBox query) {
+        var result = new ArrayList<SimpleCollisionBox>();
         int x0 = (int) Math.floor(query.minX - 1.0E-7) - 1, x1 = (int) Math.floor(query.maxX + 1.0E-7) + 1;
         int y0 = (int) Math.floor(query.minY - 1.0E-7) - 1, y1 = (int) Math.floor(query.maxY + 1.0E-7) + 1;
         int z0 = (int) Math.floor(query.minZ - 1.0E-7) - 1, z1 = (int) Math.floor(query.maxZ + 1.0E-7) + 1;

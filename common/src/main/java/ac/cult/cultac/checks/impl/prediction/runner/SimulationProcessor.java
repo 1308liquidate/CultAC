@@ -35,6 +35,7 @@ import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoFallPseudo;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngines;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaPredictionCarry;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfile;
@@ -112,6 +113,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     boolean couldPotentiallyTickSkip = false;
     Set<Vec3> validPlayerStartingVels = new HashSet<>();
     PredictionResult lastPrediction = null;
+    boolean lastWorldEyeInWater = false;
     PredCheckRunner flagger = new PredCheckRunner(this.player);
     DesyncStatus lastOnGround = DesyncStatus.FALSE;
     LastInstance lastFlying = new LastInstance(this.player);
@@ -1325,6 +1327,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.prepareFlaggedPrediction(result, movementProfile.shouldCreateVerboseLog(this.player, result));
             this.callPredictionEndListeners(result, null);
             this.commitPredictionState(result, end, movement, xRot, yRot, movementProfile);
+        } else if (result.isExempt()) {
+            // LocalPlayer#aiStep crouches the next tick from this tick's shift, whether or not it sends a position.
+            this.lastSneaking = this.player.isSneaking;
+            this.player.checkManager.getListener(JavaAutoJump.class).onExemptNoPositionTick(result);
         }
         if (flyingThroughTravel) {
             this.stopFlyingAfterTravel();
@@ -2045,6 +2051,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             MovementEngine engine = MovementEngines.requireForProfile(movementProfile);
             context.setWorldData(
                     engine.buildWorld(this.worldStageBuilder, player, context, lastPrediction, contextLastOnGround));
+            this.lastWorldEyeInWater = context.getWorldData().isEyeInWater();
         } else {
             world.attachTo(context);
         }
@@ -2214,6 +2221,11 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         return this.lastPrediction;
     }
 
+    /** The eye fluid of the last simulated movement start, whether or not its prediction was committed. */
+    public boolean isLastWorldEyeInWater() {
+        return this.lastWorldEyeInWater;
+    }
+
     public CarriedPush getCarriedPush() {
         return this.carriedPush;
     }
@@ -2241,6 +2253,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     }
 
     @Generated
+    public DesyncStatus getLastOnGround() {
+        return this.lastOnGround;
+    }
+
     public void setLastOnGround(DesyncStatus lastOnGround) {
         this.lastOnGround = lastOnGround;
     }

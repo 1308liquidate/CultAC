@@ -149,6 +149,14 @@ final class JavaTickFixture implements AutoCloseable {
         tickEnd();
     }
 
+    /** A client tick that sends StatusOnly: LocalPlayer#sendPosition withheld the position and rotation. */
+    void statusTick(boolean onGround, boolean horizontalCollision) {
+        var status = new ServerboundMovePlayer(
+                0, 0, 0, player.xRot, player.yRot, onGround, horizontalCollision, false, false);
+        listener.onMovePlayer(event(ServerboundPackets.MOVE_PLAYER, status), player, status);
+        tickEnd();
+    }
+
     void setPassengers(int vehicle, List<Integer> passengers) {
         var packet = new ClientboundSetPassengers(vehicle, passengers);
         var event = new PacketSendEvent<>(

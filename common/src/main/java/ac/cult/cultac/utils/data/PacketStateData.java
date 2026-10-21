@@ -17,6 +17,20 @@ public class PacketStateData {
     public boolean receivedMovementThisClientTick = false;
     // A flight stop LocalPlayer#aiStep may have sent after travel on landing; that tick still travelled flying.
     public boolean flyingStopAfterTravel = false;
+    // A flight start LocalPlayer#aiStep sent this client tick, ahead of its player_input and move.
+    public boolean flyingStartBeforeTravel = false;
+    // A flight stop this client tick's player_abilities sent.
+    public boolean flightStopThisClientTick = false;
+    // LocalPlayer#updateAutoJump can have set autoJumpTime for the next client tick.
+    public boolean autoJumpPossible = false;
+    // The jump key of the last client tick LocalPlayer#aiStep ran.
+    public boolean lastTickJump = false;
+    // Bit t: Player#jumpTriggerTime can be t at the next LocalPlayer#aiStep flight toggle check.
+    public int jumpTriggerTimes = 1;
+    // Entity#isSwimming can be true from the last client tick's baseTick on; the server's entity data overwrites it.
+    public boolean swimmingPossible = false;
+    // Entity#wasEyeInWater at the next client tick's baseTick: the eye fluid at the last client tick's start.
+    public boolean eyeInWaterBeforeTick = false;
     // Geyser forwards each auth frame before its movement. A horse move
     // precedes the rider's rotation; tick-end closes frames without movement.
     public final BedrockTranslatedMovementGate bedrockTranslatedMovement = new BedrockTranslatedMovementGate();

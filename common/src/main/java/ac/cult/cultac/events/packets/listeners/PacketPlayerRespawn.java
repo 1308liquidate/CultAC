@@ -14,6 +14,7 @@ import ac.cult.cultac.checks.impl.breaking.FastBreak;
 import ac.cult.cultac.checks.impl.combat.FairReach;
 import ac.cult.cultac.checks.impl.elytra.ElytraC;
 import ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor;
+import ac.cult.cultac.events.packets.PacketChangeGameState;
 import ac.cult.cultac.events.packets.RegistryGenerationAlerts;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -30,6 +31,7 @@ import ac.cult.cultac.utils.data.SprintingState;
 import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntitySelf;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.FlightToggle;
 
 public class PacketPlayerRespawn {
 
@@ -98,6 +100,7 @@ public class PacketPlayerRespawn {
         player.canInstabuild = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE;
         player.isInvulnerable = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE
                 || player.gamemode == ac.cult.cultac.protocol.value.GameMode.SPECTATOR;
+        final GameMode loginMode = player.gamemode;
         // ClientPacketListener.handleLogin sets the local player's ID from this packet.
         // A proxy may rewrite it independently of the backend's native entity ID.
         player.entityID = packet.playerId();
@@ -156,10 +159,17 @@ public class PacketPlayerRespawn {
                 player.checkManager.getListener(BadPacketsA.class).resetCarriedIndex();
                 player.checkManager.getListener(AirLiquidBreak.class).resetPending();
                 player.checkManager.getListener(FastBreak.class).resetDestroyDelay();
+                // ClientPacketListener#handleLogin runs MultiPlayerGameMode#setLocalMode on the local player.
+                PacketChangeGameState.applyGameModeAbilities(player, loginMode, newJavaLocalPlayer);
+                // ClientPacketListener#handleLogin gives the local player a new KeyboardInput, even one it keeps.
+                player.packetStateData.lastTickJump = false;
                 if (newJavaLocalPlayer) {
                     player.actionManager.onJavaPlayerReplacement();
                     // LocalPlayer starts from Input.EMPTY and sends PLAYER_INPUT once its keys differ from it.
                     player.packetStateData.knownInput = KnownInput.DEFAULT;
+                    FlightToggle.reset(player.packetStateData, false);
+                    // A new LocalPlayer's Abilities start at the default flying speed.
+                    player.flySpeed = 0.05F;
                     player.boatData.clearInput();
                     player.onGround = player.lastOnGround = false;
                     player.isSneaking = false;
@@ -267,6 +277,8 @@ public class PacketPlayerRespawn {
             player.isSneaking = false;
             // ClientPacketListener#handleRespawn starts the new LocalPlayer from Input.EMPTY unless KEEP_ENTITY_DATA.
             if (!keepEntityData) player.packetStateData.knownInput = KnownInput.DEFAULT;
+            // ClientPacketListener#handleRespawn gives every new LocalPlayer a fresh KeyboardInput.
+            FlightToggle.reset(player.packetStateData, keepEntityData);
             final BadPacketsF badPacketsF = player.checkManager.getListener(BadPacketsF.class);
             badPacketsF.exemptNext = true;
             player.lastOnGround = false;
@@ -366,6 +378,12 @@ public class PacketPlayerRespawn {
             player.canInstabuild = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE;
             player.isInvulnerable = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE
                     || player.gamemode == ac.cult.cultac.protocol.value.GameMode.SPECTATOR;
+            // ClientPacketListener#handleRespawn runs MultiPlayerGameMode#setLocalMode on its new LocalPlayer.
+            if (!player.isBedrockMovement()) {
+                PacketChangeGameState.applyGameModeAbilities(player, player.gamemode, true);
+                // A new LocalPlayer's Abilities start at the default flying speed.
+                player.flySpeed = 0.05F;
+            }
             respawnedSelf.onRespawn(
                     keepAttributeModifiers, player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE);
             if (dimensionType != null) player.compensatedWorld.setDimension(worldName, dimensionType);

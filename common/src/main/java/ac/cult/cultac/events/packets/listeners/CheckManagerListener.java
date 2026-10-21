@@ -78,6 +78,7 @@ import ac.cult.cultac.utils.inventory.InventoryClick;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.VectorUtils;
 import ac.cult.cultac.utils.nmsutil.BlockBreakSpeed;
+import ac.cult.cultac.utils.nmsutil.FlightToggle;
 import ac.cult.cultac.utils.nmsutil.TraverseBlocks;
 import java.util.List;
 import org.jetbrains.annotations.Nullable;
@@ -1148,6 +1149,8 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             onLocalPlayerAttackTick(player);
             dispatchPrePredictionReceive(event, player);
             dispatchReceiveHandlers(event, player);
+            // FlightToggle reads this tick's ClientSprintState#flagBeforeAiStep, which onClientTickEnd releases.
+            if (localPlayerTicked(player)) FlightToggle.onClientTick(player);
             player.sprintState.onClientTickEnd();
 
             player.packetStateData.acceptedClientTick++;
@@ -1157,6 +1160,8 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             player.packetStateData.carriedItemChangedThisClientTick = false;
         }
         player.packetStateData.receivedMovementThisClientTick = false;
+        player.packetStateData.flyingStartBeforeTravel = false;
+        player.packetStateData.flightStopThisClientTick = false;
         player.packetStateData.bedrockTranslatedMovement.clear();
         player.packetStateData.clientMovementInputUpdatedThisClientTick = false;
         player.packetStateData.vehicleMovePacketsThisClientTick = 0;

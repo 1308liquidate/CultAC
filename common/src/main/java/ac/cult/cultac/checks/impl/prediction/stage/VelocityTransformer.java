@@ -15,6 +15,7 @@ import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
+import ac.cult.cultac.utils.nmsutil.FlightToggle;
 import ac.cult.cultac.utils.nmsutil.WaterCurrent;
 import java.util.ArrayList;
 import java.util.List;
@@ -73,39 +74,63 @@ public class VelocityTransformer {
         // utils.nmsutil.NextTickVelocityDeriver.findVelocitiesForNextTick(...), which derives
         // the carried delta from the accepted packet movement after the move.
 
-        input = applyCreativeFlightInput(player, input);
+        boolean abilityFlying = simulationContext.getVehicle() == null && player.isFlying;
+        if (abilityFlying) {
+            input = applyFlightTakeoff(player, input);
+            input = applyFlightInput(player, input);
+        }
         input = applyMovementThreshold(input, simulationContext.getVersion(), simulationContext.getVehicle() == null);
-        return applyJumps(player, input);
+        // Player#isAffectedByFluids is false in flight, so LivingEntity#aiStep runs neither jump.
+        return abilityFlying ? input : applyJumps(player, input);
     }
 
     /**
-     * LocalPlayer#aiStep adds {@code inputYa * abilities.getFlyingSpeed() * 3.0F} while flying, before
-     * LivingEntity#aiStep's 0.003 cutoff; inputYa is +1 for jump and -1 for shift. From 1.21.2 the keys are the last
-     * PLAYER_INPUT sent (none sent means no keys: LocalPlayer#lastSentInput starts at Input.EMPTY). Older clients send
-     * no jump key, only shift (PRESS/RELEASE_SHIFT_KEY from LocalPlayer#sendPosition before the move), so jump can
-     * hold or not.
+     * LocalPlayer#aiStep runs jumpFromGround when its double-tap toggle turns flight on while on the ground, ahead of
+     * the flight input. The player_abilities of that start precedes this tick's player_input and move. Any other
+     * flight start is a player_abilities ServerGamePacketListenerImpl#handlePlayerAbilities accepts without a jump.
      */
-    private List<PredVector> applyCreativeFlightInput(CultPlayer player, List<PredVector> input) {
-        if (simulationContext.getVehicle() != null || !player.isFlying) return input;
-        int[] inputs;
-        KnownInput keys = player.packetStateData.knownInput;
-        if (simulationContext.getVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)) {
-            int inputYa = (keys.jump() ? 1 : 0) - (keys.shift() ? 1 : 0);
-            if (inputYa == 0) return input;
-            inputs = new int[] {inputYa};
-        } else {
-            inputs = keys.shift() ? new int[] {-1, 0} : new int[] {0, 1};
+    private List<PredVector> applyFlightTakeoff(CultPlayer player, List<PredVector> velocities) {
+        if (!player.packetStateData.flyingStartBeforeTravel || !FlightToggle.canToggle(player)) return velocities;
+        List<Boolean> onGroundStates = simulationContext.getLastOnGround().getStates();
+        if (!onGroundStates.contains(true)) return velocities;
+        List<PredVector> outputs = new ArrayList<>();
+        for (PredVector velocity : velocities) {
+            outputs.addAll(applyPossibleJumpStates(player, velocity));
         }
-        List<PredVector> outputs = new ArrayList<>(input.size() * inputs.length);
-        for (PredVector vector : input) {
-            for (int inputYa : inputs) {
-                if (inputYa == 0) {
-                    outputs.add(vector);
-                    continue;
-                }
-                double impulse = (float) inputYa * player.flySpeed * 3.0F;
-                outputs.add(vector.add(0.0, impulse, 0.0, "Creative flight input"));
-            }
+        // LivingEntity#jumpFromGround leaves the velocity unchanged at or below 1.0E-5F.
+        if (onGroundStates.contains(false) || jumpFromGroundCanDoNothing(player)) outputs.addAll(velocities);
+        return outputs;
+    }
+
+    private boolean jumpFromGroundCanDoNothing(CultPlayer player) {
+        for (boolean onHoney :
+                simulationContext.getWorldData().getOnHoneyBlock().getStates()) {
+            if (jumpPower(player, onHoney) <= 1.0E-5F) return true;
+        }
+        return false;
+    }
+
+    private float jumpPower(CultPlayer player, boolean onHoney) {
+        float jumpPower = (float) player.compensatedEntities.getSelf().jumpStrength * (onHoney ? 0.5f : 1.0f);
+        if (simulationContext.getJumpAmplifier() != null) {
+            jumpPower += 0.1f * (simulationContext.getJumpAmplifier() + 1);
+        }
+        return jumpPower;
+    }
+
+    /**
+     * LocalPlayer#aiStep adds three times the abilities' flying speed to the delta movement's Y while jump is held
+     * in flight and subtracts it while shift is held, before LivingEntity#aiStep's movement threshold. The keys are
+     * the ones LocalPlayer#sendChanges reports in the player_input preceding this tick's move.
+     */
+    private static List<PredVector> applyFlightInput(CultPlayer player, List<PredVector> velocities) {
+        KnownInput keys = player.packetStateData.knownInput;
+        int inputYa = (keys.jump() ? 1 : 0) - (keys.shift() ? 1 : 0);
+        if (inputYa == 0) return velocities;
+        double impulse = (float) inputYa * player.flySpeed * 3.0F;
+        List<PredVector> outputs = new ArrayList<>(velocities.size());
+        for (PredVector velocity : velocities) {
+            outputs.add(velocity.add(0, impulse, 0, "Flight input"));
         }
         return outputs;
     }
@@ -692,11 +717,7 @@ public class VelocityTransformer {
                 }
                 PredVector modified;
 
-                float jumpPower = (float) player.compensatedEntities.getSelf().jumpStrength * (onHoney ? 0.5f : 1.0f);
-
-                if (simulationContext.getJumpAmplifier() != null) {
-                    jumpPower += 0.1f * (simulationContext.getJumpAmplifier() + 1);
-                }
+                float jumpPower = jumpPower(player, onHoney);
 
                 // LivingEntity#jumpFromGround does nothing at or below 1.0E-5F.
                 if (jumpPower <= 1.0E-5F) continue;
