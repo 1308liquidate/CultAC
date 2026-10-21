@@ -473,7 +473,6 @@ public class Collisions {
         if (modernJava)
             ac.cult.blocksim.data.Box.validateBounds(
                     wantedBB.minX, wantedBB.minY, wantedBB.minZ, wantedBB.maxX, wantedBB.maxY, wantedBB.maxZ);
-        ac.cult.blocksim.engine.shapes.VoxelShape queryShape = null;
         boolean resolvedDirect = false;
         boolean direct = false;
         var registry = DataTables.defaults().registry();
@@ -574,15 +573,6 @@ public class Collisions {
                                             player, data, x, y, z, entityBottom, actor);
                                     if (shape.isEmpty()) continue;
                                     boolean fullBlock = shape == Shapes.block();
-                                    if (!fullBlock && queryShape == null) {
-                                        queryShape = Shapes.create(
-                                                wantedBB.minX,
-                                                wantedBB.minY,
-                                                wantedBB.minZ,
-                                                wantedBB.maxX,
-                                                wantedBB.maxY,
-                                                wantedBB.maxZ);
-                                    }
                                     if (fullBlock
                                             ? !(wantedBB.minX < 1.0 + x
                                                     && wantedBB.maxX > 0.0 + x
@@ -590,7 +580,17 @@ public class Collisions {
                                                     && wantedBB.maxY > 0.0 + y
                                                     && wantedBB.minZ < 1.0 + z
                                                     && wantedBB.maxZ > 0.0 + z)
-                                            : !shape.intersectsAabb(queryShape, x, y, z, true)) continue;
+                                            : !shape.intersectsAabb(
+                                                    wantedBB.minX,
+                                                    wantedBB.minY,
+                                                    wantedBB.minZ,
+                                                    wantedBB.maxX,
+                                                    wantedBB.maxY,
+                                                    wantedBB.maxZ,
+                                                    x,
+                                                    y,
+                                                    z,
+                                                    true)) continue;
                                     if (onlyCheckCollide) return true;
                                     listOfBlocks.add(new VoxelShapeCollisionBox(shape, fullBlock).offset(x, y, z));
                                     continue;
@@ -598,20 +598,6 @@ public class Collisions {
                                 CollisionBox collisionBox =
                                         ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor, direct);
                                 if (collisionBox.isNull()) continue;
-                                if (modernJava
-                                        && queryShape == null
-                                        && collisionBox
-                                                instanceof
-                                                ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox voxel
-                                        && !voxel.usesStrictFullBlockIntersection()) {
-                                    queryShape = ac.cult.blocksim.engine.shapes.Shapes.create(
-                                            wantedBB.minX,
-                                            wantedBB.minY,
-                                            wantedBB.minZ,
-                                            wantedBB.maxX,
-                                            wantedBB.maxY,
-                                            wantedBB.maxZ);
-                                }
                                 // Vanilla BlockCollisions filters the swept query before axis clipping
                                 // or collecting step heights. The full-block path deliberately uses
                                 // strict AABB intersection; other voxel shapes use Shapes AND.
@@ -620,7 +606,7 @@ public class Collisions {
                                                         instanceof
                                                         ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox
                                                                 voxel
-                                                ? voxel.intersectsQuery(wantedBB, queryShape)
+                                                ? voxel.intersectsQuery(wantedBB)
                                                 : collisionBox.isIntersected(wantedBB))) continue;
                                 // Don't add to a list if we only care if the player intersects with the block
                                 if (!onlyCheckCollide) {

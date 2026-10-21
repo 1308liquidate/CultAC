@@ -13,6 +13,18 @@ final class AabbVoxelIntersection {
                 query.coords[0][1], query.coords[1][1], query.coords[2][1], x, y, z, translated);
     }
 
+    /** The same test against {@code Shapes.create(minX, ..., maxZ)}, built only when the Boolean join needs it. */
+    static boolean intersects(VoxelShape shape, double minX, double minY, double minZ, double maxX, double maxY,
+                              double maxZ, double x, double y, double z, boolean translated) {
+        if (maxX - minX < Shapes.EPSILON || maxY - minY < Shapes.EPSILON || maxZ - minZ < Shapes.EPSILON) return false;
+        if (Shapes.findBits(minX, maxX) >= 0 && Shapes.findBits(minY, maxY) >= 0 && Shapes.findBits(minZ, maxZ) >= 0) {
+            return intersects(shape, Shapes.create(minX, minY, minZ, maxX, maxY, maxZ), x, y, z, translated);
+        }
+        if (shape.isEmpty()) return false;
+        return intersects(shape, null, minX, minY, minZ, maxX, maxY, maxZ, x, y, z, translated);
+    }
+
+    /** A null query stands for the bounds' one-cell, non-cube-grid {@code Shapes.create}. */
     private static boolean intersects(VoxelShape shape, VoxelShape query, double minX, double minY, double minZ,
                                       double maxX, double maxY, double maxZ, double x, double y, double z,
                                       boolean translated) {
@@ -24,6 +36,7 @@ final class AabbVoxelIntersection {
                     && mergeable(shape, query, 2, minZ, maxZ, z, translated)) {
                 return mergedCellsIntersect(shape, minX, minY, minZ, maxX, maxY, maxZ, x, y, z, translated);
             }
+            if (query == null) query = Shapes.create(minX, minY, minZ, maxX, maxY, maxZ);
             return Shapes.joinIsNotEmpty(translated ? shape.move(x, y, z) : shape, query, BooleanOp.AND);
         }
         int fromX = Math.max(0, floor(shape.coords[0], minX + Shapes.EPSILON, x, translated));
@@ -69,7 +82,7 @@ final class AabbVoxelIntersection {
     /** Whether {@link #pairedCells} reproduces this axis's IndexMerge: finite, at most 64 cells, no cube-grid merger. */
     private static boolean mergeable(VoxelShape shape, VoxelShape query, int axis, double min, double max,
                                      double offset, boolean translated) {
-        if (!translated && (shape == query || shape.cubeCoordinates(axis) && query.cubeCoordinates(axis))) {
+        if (!translated && query != null && (shape == query || shape.cubeCoordinates(axis) && query.cubeCoordinates(axis))) {
             return false;
         }
         if (shape.size(axis) > Long.SIZE || !Double.isFinite(min) || !Double.isFinite(max)) return false;

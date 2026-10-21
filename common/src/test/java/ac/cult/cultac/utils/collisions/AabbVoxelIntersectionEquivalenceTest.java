@@ -81,6 +81,7 @@ class AabbVoxelIntersectionEquivalenceTest {
                     hi[axis] = Math.max(a, a + width);
                 }
                 check(root, root, lo, hi, OFFSETS[0], false);
+                check(root, root.move(0, 0, 0), lo, hi, OFFSETS[0], true);
             }
             assertSame(root, root.intersectsAabb(root, 0, 0, 0, false), "identity");
             assertSame(
@@ -119,9 +120,12 @@ class AabbVoxelIntersectionEquivalenceTest {
         VoxelShape query = Shapes.create(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
         boolean expected = Shapes.joinIsNotEmpty(moved, query, BooleanOp.AND);
         boolean actual = root.intersectsAabb(query, offset[0], offset[1], offset[2], translated);
-        if (expected != actual)
+        boolean raw = root.intersectsAabb(
+                lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], offset[0], offset[1], offset[2], translated);
+        if (expected != actual || expected != raw)
             fail("shape=" + describe(root) + " offset=" + Arrays.toString(offset) + " translated=" + translated
-                    + " lo=" + Arrays.toString(lo) + " hi=" + Arrays.toString(hi) + " expected=" + expected);
+                    + " lo=" + Arrays.toString(lo) + " hi=" + Arrays.toString(hi) + " expected=" + expected
+                    + " raw=" + raw);
     }
 
     private static void assertSame(boolean expected, boolean actual, String what) {

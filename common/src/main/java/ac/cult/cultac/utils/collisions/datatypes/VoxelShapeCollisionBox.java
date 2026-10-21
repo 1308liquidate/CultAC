@@ -142,6 +142,28 @@ public final class VoxelShapeCollisionBox extends SimpleCollisionBox {
                 : shape.intersectsAabb(queryShape, offsetX, offsetY, offsetZ, translated);
     }
 
+    /** {@link #intersectsQuery(SimpleCollisionBox, VoxelShape)} with {@code Shapes.create} of the query's bounds. */
+    public boolean intersectsQuery(SimpleCollisionBox query) {
+        return fullBlock
+                ? query.minX < maxX
+                        && query.maxX > minX
+                        && query.minY < maxY
+                        && query.maxY > minY
+                        && query.minZ < maxZ
+                        && query.maxZ > minZ
+                : shape.intersectsAabb(
+                        query.minX,
+                        query.minY,
+                        query.minZ,
+                        query.maxX,
+                        query.maxY,
+                        query.maxZ,
+                        offsetX,
+                        offsetY,
+                        offsetZ,
+                        translated);
+    }
+
     @Override
     public VoxelShapeCollisionBox offset(double x, double y, double z) {
         super.offset(x, y, z);
