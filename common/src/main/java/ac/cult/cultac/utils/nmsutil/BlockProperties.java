@@ -26,7 +26,12 @@ public class BlockProperties {
     public static float getBlockSpeedFactor(
             CultPlayer player, MainSupportingBlockData mainSupportingBlockData, Vec3 playerPos) {
         if (player.isGliding || player.isFlying) return 1.0f;
+        return getEntityBlockSpeedFactor(player, mainSupportingBlockData, playerPos);
+    }
 
+    /** Entity#getBlockSpeedFactor of an entity at {@code playerPos} on the supporting block its last move found. */
+    public static float getEntityBlockSpeedFactor(
+            CultPlayer player, MainSupportingBlockData mainSupportingBlockData, Vec3 playerPos) {
         int inBlock = player.compensatedWorld.getBlockStateIdAt(
                 CultMath.floor(playerPos.x), CultMath.floor(playerPos.y), CultMath.floor(playerPos.z));
         float inBlockSpeedFactor = getBlockSpeedFactor(inBlock);

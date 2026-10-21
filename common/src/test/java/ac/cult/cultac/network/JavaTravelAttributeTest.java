@@ -13,6 +13,7 @@ import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.protocol.ConnectionPhase;
@@ -24,6 +25,7 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.BlockPos;
+import ac.cult.cultac.utils.data.MainSupportingBlockData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.enums.Pose;
@@ -528,6 +530,10 @@ class JavaTravelAttributeTest {
                 null,
                 Pose.STANDING,
                 1.0F);
+        WorldData worldData = Mockito.mock(WorldData.class);
+        Mockito.when(worldData.getMainSupportingBlockPos())
+                .thenReturn(new MainSupportingBlockData(new BlockPos(0, FLOOR_Y - 1, 0), true));
+        context.setWorldData(worldData);
         PredictionResult result = Mockito.mock(PredictionResult.class);
         Mockito.when(result.getSimulationContext()).thenReturn(context);
         return result;
