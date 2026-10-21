@@ -9,6 +9,7 @@ import ac.cult.cultac.utils.blockplace.ClientEntityQueries;
 import ac.cult.cultac.utils.collisions.ClientBlockShapes;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,6 +48,8 @@ final class JavaAutoJumpGeometry {
     static List<SimpleCollisionBox> blockCollisions(CultPlayer player, SimpleCollisionBox query) {
         var result = new ArrayList<SimpleCollisionBox>();
         var boxes = new ArrayList<SimpleCollisionBox>();
+        boolean resolvedDirect = false;
+        boolean direct = false;
         int x0 = (int) Math.floor(query.minX - 1.0E-7) - 1, x1 = (int) Math.floor(query.maxX + 1.0E-7) + 1;
         int y0 = (int) Math.floor(query.minY - 1.0E-7) - 1, y1 = (int) Math.floor(query.maxY + 1.0E-7) + 1;
         int z0 = (int) Math.floor(query.minZ - 1.0E-7) - 1, z1 = (int) Math.floor(query.maxZ + 1.0E-7) + 1;
@@ -62,7 +65,13 @@ final class JavaAutoJumpGeometry {
                     var facts = DataTables.defaults().registry().facts(state);
                     if (edge == 1 && !facts.has(StateFacts.LARGE_COLLISION)
                             || edge == 2 && !BlockIds.is(state, BlockIds.MOVING_PISTON)) continue;
-                    var shape = ClientBlockShapes.movement(player, state, x, y, z, player.y);
+                    // Scans that reach no shape lookup never read the client version.
+                    if (!resolvedDirect) {
+                        direct = !ClientBlockShapes.hasMovementAlternatives(player);
+                        resolvedDirect = true;
+                    }
+                    var actor = BlockIds.is(state, BlockIds.POWDER_SNOW) ? JavaCollisionState.current(player) : null;
+                    var shape = ClientBlockShapes.movement(player, state, x, y, z, player.y, actor, direct);
                     boxes.clear();
                     shape.downCast(boxes);
                     for (int i = 0; i < boxes.size(); i++) {
