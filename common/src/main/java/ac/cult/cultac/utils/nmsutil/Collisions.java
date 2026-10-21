@@ -26,6 +26,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.IntPredicate;
 
 public class Collisions {
@@ -567,10 +568,17 @@ public class Collisions {
                                 }
                                 if (actor == CURRENT_ACTOR && BlockIds.is(data, BlockIds.POWDER_SNOW))
                                     actor = JavaCollisionState.current(player);
-                                if (modernJava && direct) {
-                                    // Must match NativeBlockCollisionHelper.getCollisionBox bit for bit.
-                                    VoxelShape shape = NativeBlockCollisionHelper.getCollisionShape(
+                                VoxelShape shape = null;
+                                Optional<CollisionBox> alternative = null;
+                                if (modernJava) {
+                                    shape = NativeBlockCollisionHelper.getCollisionShape(
                                             player, data, x, y, z, entityBottom, actor);
+                                    if (!direct)
+                                        alternative = ClientBlockShapes.movementAlternative(
+                                                player, data, x, y, z, entityBottom);
+                                }
+                                if (modernJava && (direct || alternative.isEmpty())) {
+                                    // Must match NativeBlockCollisionHelper.getCollisionBox bit for bit.
                                     if (shape.isEmpty()) continue;
                                     boolean fullBlock = shape == Shapes.block();
                                     if (fullBlock
@@ -595,8 +603,11 @@ public class Collisions {
                                     listOfBlocks.add(new VoxelShapeCollisionBox(shape, fullBlock).offset(x, y, z));
                                     continue;
                                 }
-                                CollisionBox collisionBox =
-                                        ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor, direct);
+                                CollisionBox collisionBox = alternative == null
+                                        ? ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor, direct)
+                                        : ClientBlockShapes.selectIfDifferent(
+                                                NativeBlockCollisionHelper.collider(player, shape, x, y, z),
+                                                alternative);
                                 if (collisionBox.isNull()) continue;
                                 // Vanilla BlockCollisions filters the swept query before axis clipping
                                 // or collecting step heights. The full-block path deliberately uses

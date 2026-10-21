@@ -63,6 +63,20 @@ public final class ClientBlockShapes {
                 : movement(player, state, x, y, z, entityBottom, actor);
     }
 
+    /** {@link #movement(CultPlayer, int, int, int, int, double, JavaCollisionState)} given its alternative. */
+    public static CollisionBox movement(
+            CultPlayer player,
+            int state,
+            int x,
+            int y,
+            int z,
+            double entityBottom,
+            JavaCollisionState actor,
+            Optional<CollisionBox> alternative) {
+        return selectIfDifferent(
+                NativeBlockCollisionHelper.getCollisionBox(player, state, x, y, z, entityBottom, actor), alternative);
+    }
+
     public static boolean hasStaticFullMovement(
             CultPlayer player, int state, int x, int y, int z, double entityBottom, boolean nativeOnly) {
         return nativeOnly
@@ -118,7 +132,7 @@ public final class ClientBlockShapes {
                 .toList());
     }
 
-    private static Optional<CollisionBox> movementAlternative(
+    public static Optional<CollisionBox> movementAlternative(
             CultPlayer player, int state, int x, int y, int z, double entityBottom) {
         Optional<CollisionBox> bedrock = BedrockClientBlockShapeMappings.movement(player, state, x, y, z);
         if (bedrock.isPresent()) {
@@ -144,7 +158,7 @@ public final class ClientBlockShapes {
         return VersionedJavaBlockShapes.visual(player, state, x, y, z);
     }
 
-    private static CollisionBox selectIfDifferent(CollisionBox latestJava, Optional<CollisionBox> alternative) {
+    public static CollisionBox selectIfDifferent(CollisionBox latestJava, Optional<CollisionBox> alternative) {
         if (alternative.isEmpty() || sameShape(latestJava, alternative.get())) {
             return latestJava;
         }

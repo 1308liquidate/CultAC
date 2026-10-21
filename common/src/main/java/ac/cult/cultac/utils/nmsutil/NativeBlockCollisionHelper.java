@@ -43,7 +43,7 @@ public final class NativeBlockCollisionHelper {
         return collider(player, getCollisionShape(player, state, x, y, z, entityBottom, actor), x, y, z);
     }
 
-    private static CollisionBox collider(CultPlayer player, VoxelShape shape, int x, int y, int z) {
+    static CollisionBox collider(CultPlayer player, VoxelShape shape, int x, int y, int z) {
         // Entity#collideWithShapes scans VoxelShape's cells, including internal
         // faces when a server update places the actor partly inside a shape.
         boolean voxelMovement = !player.isBedrockMovement();
