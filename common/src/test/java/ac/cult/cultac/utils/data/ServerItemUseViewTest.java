@@ -427,12 +427,28 @@ class ServerItemUseViewTest {
         return h;
     }
 
-    @Test
-    void theConfirmingFlagRestartsAUsePausedByAStaleClear() {
-        var h = afterReleaseWithStaleClear();
-        h.view.serverFlags(true, false, 6, h.now + 1);
+    /**
+     * The next use arrives three ticks after the release's clear (proof 5) was sent, and its
+     * confirming flag (proof 6) is sent with it; the client acknowledges the clear one tick later.
+     */
+    private static Harness pausedThreeTicksAfterTheClear(ServerItemUseView.Profile profile) {
+        var h = new Harness();
+        h.profile = profile;
+        h.start(1);
+        h.ticks(10, SLOWED, true);
+        h.view.release(h.now);
+        h.view.serverFlags(false, false, 5, h.now);
+        h.ticks(3, SLOWED, true);
+        h.view.use(false, 2, h.now, List.of());
+        h.view.serverFlags(true, false, 6, h.now);
         h.ticks(1, SLOWED, true);
         h.view.acknowledge(5, h.now);
+        return h;
+    }
+
+    @Test
+    void theConfirmingFlagRestartsAUsePausedByAStaleClear() {
+        var h = pausedThreeTicksAfterTheClear(CROSSBOW);
         h.ticks(3, UNSLOWED, true);
         h.view.acknowledge(6, h.now);
         h.ticks(10, SLOWED, true);
@@ -441,6 +457,28 @@ class ServerItemUseViewTest {
         assertEquals(11, h.last().ticks());
         assertEquals(0, h.last().unslowed());
         assertEquals(0, h.last().debt(), 1e-9);
+    }
+
+    @Test
+    void aPauseHeldPastTheSendGapIsCharged() {
+        var h = pausedThreeTicksAfterTheClear(CROSSBOW);
+        // No confirming flag is acknowledged while the client moves unslowed.
+        h.ticks(20, UNSLOWED, true);
+        h.view.selectSlot(1, 0, h.now);
+        // Only the three-tick send gap between the clear and the flag is excluded.
+        assertEquals(18, h.last().expected(), 1e-9);
+        assertEquals(1, h.last().ticks());
+        assertEquals(17, h.last().debt(), 1e-9);
+    }
+
+    @Test
+    void aCompletionDuringThePauseChargesTimePastTheSendGap() {
+        var h = pausedThreeTicksAfterTheClear(FOOD);
+        h.ticks(40, UNSLOWED, true);
+        h.view.serverComplete(7, h.now, TICK);
+        h.view.acknowledge(7, h.now);
+        assertEquals(38, h.last().expected(), 1e-9);
+        assertEquals(1, h.last().ticks());
     }
 
     @Test
@@ -460,10 +498,7 @@ class ServerItemUseViewTest {
 
     @Test
     void aReleaseDuringThePauseRefutesIt() {
-        var h = afterReleaseWithStaleClear();
-        h.view.serverFlags(true, false, 6, h.now + 1);
-        h.ticks(1, SLOWED, true);
-        h.view.acknowledge(5, h.now);
+        var h = pausedThreeTicksAfterTheClear(CROSSBOW);
         h.ticks(3, UNSLOWED, true);
         // A vanilla client only releases while using, and its restart precedes any release.
         h.view.release(h.now);
