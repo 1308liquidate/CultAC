@@ -25,11 +25,8 @@ import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundGameEvent;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerAbilities;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
-import ac.cult.cultac.protocol.packet.clientbound.ClientboundUpdateAttributes;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundAcceptTeleportation;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
-import ac.cult.cultac.protocol.value.AttributeModifier;
-import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.GameEventType;
 import ac.cult.cultac.protocol.value.GameMode;
@@ -59,8 +56,6 @@ class CreativeFlightTest {
             new ServerboundPlayerInput(false, false, false, false, true, true, false);
     private static final ServerboundPlayerInput FORWARD =
             new ServerboundPlayerInput(true, false, false, false, false, false, false);
-    private static final ServerboundPlayerInput FORWARD_JUMP =
-            new ServerboundPlayerInput(true, false, false, false, true, false, false);
     private static final float FLYING_SPEED = 0.05F;
     private static final double IMPULSE = FLYING_SPEED * 3.0F;
     private static final Vec3 HOVER = new Vec3(0.5, FLOOR_Y + 3, 0.5);
@@ -803,41 +798,6 @@ class CreativeFlightTest {
         }
     }
 
-    /**
-     * LocalPlayer#aiStep runs the double-tap toggle before travel, so a toggle that stops flight under water travels
-     * in water at the water movement efficiency's speed and can land on the floor in the same tick.
-     */
-    @Test
-    void aFlightToggleThatLandsUnderWaterTravelsInWater() throws Exception {
-        try (var f = new JavaTickFixture()) {
-            Vec3 at = flyingDownAFlooredPool(f, true);
-            f.pongThrough(f.velocity(new Vec3(0.2, -0.5, 0.2)));
-            f.abilities(false);
-            f.input(FORWARD_JUMP);
-            double swim = (double) 0.98F * (double) (0.02F + (0.1F - 0.02F) * 0.5F);
-            PredictionResult landed = f.tick(new Vec3(at.x + 0.2, FLOOR_Y, at.z + 0.2 + swim), true);
-            assertTrue(landed.getFlags().isEmpty(), "the landing flagged " + landed.getFlags());
-            assertTravelled(f, landed, false);
-            assertEquals(0.0, antiKb(f), "the client took the knockback");
-        }
-    }
-
-    /** A flight stop on an unarmed press is LocalPlayer#aiStep's landing after a travel in flight under water. */
-    @Test
-    void aFlightLandingUnderWaterTravelsInFlight() throws Exception {
-        try (var f = new JavaTickFixture()) {
-            Vec3 at = flyingDownAFlooredPool(f, false);
-            f.pongThrough(f.velocity(new Vec3(0.2, -0.5, 0.2)));
-            f.abilities(false);
-            f.input(FORWARD_JUMP);
-            double fly = (double) 0.98F * (double) FLYING_SPEED;
-            PredictionResult landed = f.tick(new Vec3(at.x + 0.2, FLOOR_Y, at.z + 0.2 + fly), true);
-            assertTrue(landed.getFlags().isEmpty(), "the landing flagged " + landed.getFlags());
-            assertTravelled(f, landed, true);
-            assertEquals(0.0, antiKb(f), "the client took the knockback");
-        }
-    }
-
     /** Entity#updateSwimming needs the sprint flag, so a wader that never sprinted toggles on an armed press. */
     @Test
     void aTakeoffKeptByAWadingPressFlags() throws Exception {
@@ -1001,42 +961,6 @@ class CreativeFlightTest {
         assertEquals(0.0, antiKb(f), "the client took the knockback");
     }
 
-    /**
-     * A player flying down through water three blocks deep over the floor, at a water movement efficiency of 1, for
-     * two ticks; an armed player pressed jump on the first. Returns its position.
-     */
-    private static Vec3 flyingDownAFlooredPool(JavaTickFixture f, boolean armed) {
-        for (int x = -2; x <= 2; x++) {
-            for (int z = -2; z <= 2; z++) {
-                for (int y = FLOOR_Y; y <= FLOOR_Y + 2; y++) block(f, x, y, z, BlockIds.WATER.defaultState());
-            }
-        }
-        f.pongThrough(sendAttribute(f, "minecraft:water_movement_efficiency", 0.0, 1.0));
-        Vec3 at = new Vec3(0.5, FLOOR_Y + 0.5, 0.5);
-        f.place(at, new Vec3(0, -0.3, 0));
-        grantFlight(f, true);
-        f.input(armed ? JUMP : NONE);
-        double fall = -0.3 + (armed ? IMPULSE : 0.0);
-        at = at.add(0, fall, 0);
-        f.tick(at, false);
-        f.input(NONE);
-        at = at.add(0, fall * 0.6, 0);
-        f.tick(at, false);
-        return at;
-    }
-
-    /** An update_attributes for the player; the transaction of its trailing ping. */
-    private static int sendAttribute(JavaTickFixture f, String name, double base, double added) {
-        var modifier = new AttributeModifier("test:modifier", added, AttributeModifier.Operation.ADD_VALUE);
-        var packet = new ClientboundUpdateAttributes(
-                f.player.entityID, List.of(new AttributeSnapshot(name, base, List.of(modifier))));
-        var event = new PacketSendEvent<>(
-                f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.UPDATE_ATTRIBUTES, packet, false);
-        f.player.packetEntityReplication.onUpdateAttributes(event, f.player, packet);
-        event.tasksAfter().forEach(Runnable::run);
-        return f.player.lastTransactionSent.get();
-    }
-
     private static void block(JavaTickFixture f, int x, int y, int z, int state) {
         f.player.compensatedWorld.updateBlock(new BlockPos(x, y, z), state);
         for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
@@ -1190,17 +1114,5 @@ class CreativeFlightTest {
 
     private static void assertPredicted(PredictionResult result) {
         assertTrue(result.getOffset() < 1.0E-5, describe(result));
-    }
-
-    // PredictionResult#getOffset reads the input radius from the current flight state, which the stop has cleared.
-    private static void assertTravelled(JavaTickFixture f, PredictionResult result, boolean inFlight) {
-        assertEquals(inFlight, result.getInitialStartingVel().hasReason("Flight input"), describe(result));
-        boolean flying = f.player.isFlying;
-        f.player.isFlying = inFlight;
-        try {
-            assertPredicted(result);
-        } finally {
-            f.player.isFlying = flying;
-        }
     }
 }

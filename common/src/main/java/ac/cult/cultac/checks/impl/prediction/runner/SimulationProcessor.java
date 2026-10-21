@@ -86,7 +86,6 @@ import ac.cult.cultac.utils.math.VectorUtils;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
 import ac.cult.cultac.utils.nmsutil.Collisions;
-import ac.cult.cultac.utils.nmsutil.FlightToggle;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.NextTickVelocityDeriver;
 import ac.cult.cultac.utils.nmsutil.ReusableVelocitySet;
@@ -115,7 +114,6 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     Set<Vec3> validPlayerStartingVels = new HashSet<>();
     PredictionResult lastPrediction = null;
     boolean lastWorldEyeInWater = false;
-    boolean flightStopBeforeTravelPossible = false;
     PredCheckRunner flagger = new PredCheckRunner(this.player);
     DesyncStatus lastOnGround = DesyncStatus.FALSE;
     LastInstance lastFlying = new LastInstance(this.player);
@@ -1080,8 +1078,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.commitSprintOutcomes(result);
             this.player.minPlayerAttackSlow = 0;
             this.player.maxPlayerAttackSlow = 0;
-            // A grounded flight stop's tick may have travelled in flight.
-            if (this.player.isFlying || this.flightStopBeforeTravelPossible) {
+            if (this.player.isFlying) {
                 this.lastFlying.reset();
             }
 
@@ -1346,22 +1343,16 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         return result;
     }
 
-    // LocalPlayer#aiStep stops flight after a grounded travel; an airborne stop is the double-jump toggle, which runs
-    // before travel and can also end on the ground.
+    // LocalPlayer#aiStep stops flight after a grounded travel; an airborne stop is the double-jump toggle.
     private boolean keepsFlyingThroughTravel(boolean onGround) {
-        this.flightStopBeforeTravelPossible = false;
         if (!this.player.packetStateData.flyingStopAfterTravel) return false;
-        if (onGround) {
-            this.flightStopBeforeTravelPossible = FlightToggle.canToggle(this.player);
-            return true;
-        }
+        if (onGround) return true;
         this.player.packetStateData.flyingStopAfterTravel = false;
         this.player.isFlying = false;
         return false;
     }
 
     private void stopFlyingAfterTravel() {
-        this.flightStopBeforeTravelPossible = false;
         this.player.packetStateData.flyingStopAfterTravel = false;
         this.player.isFlying = false;
         this.player.refreshPlayerPose();
@@ -1372,32 +1363,6 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     }
 
     private PredictionResult callPrediction(
-            Vec3 target,
-            Vec3 from,
-            Vec3 to,
-            boolean testing,
-            float xRot,
-            float yRot,
-            AuthoredMovementFrame authoredMovementFrame,
-            MovementProfile movementProfile) {
-        if (!this.flightStopBeforeTravelPossible) {
-            return this.predict(target, from, to, testing, xRot, yRot, authoredMovementFrame, movementProfile);
-        }
-        // A grounded flight stop is the landing after travel or the double-tap toggle before it; the tick travels in
-        // flight, or by its fluid or ground travel without the flight input.
-        this.player.isFlying = true;
-        PredictionResult flying =
-                this.predict(target, from, to, testing, xRot, yRot, authoredMovementFrame, movementProfile);
-        if (flying.getFlags().isEmpty()) return flying;
-        this.player.isFlying = false;
-        PredictionResult stopped =
-                this.predict(target, from, to, testing, xRot, yRot, authoredMovementFrame, movementProfile);
-        if (stopped.getFlags().isEmpty()) return stopped;
-        this.player.isFlying = true;
-        return flying;
-    }
-
-    private PredictionResult predict(
             Vec3 target,
             Vec3 from,
             Vec3 to,
