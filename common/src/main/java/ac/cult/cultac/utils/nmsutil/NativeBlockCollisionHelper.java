@@ -40,13 +40,62 @@ public final class NativeBlockCollisionHelper {
             return NoCollisionBox.INSTANCE;
         }
 
-        VoxelShape shape = getCollisionShape(player, state, x, y, z, entityBottom, actor);
+        return collider(player, getCollisionShape(player, state, x, y, z, entityBottom, actor), x, y, z);
+    }
+
+    private static CollisionBox collider(CultPlayer player, VoxelShape shape, int x, int y, int z) {
         // Entity#collideWithShapes scans VoxelShape's cells, including internal
         // faces when a server update places the actor partly inside a shape.
         boolean voxelMovement = !player.isBedrockMovement();
         if (voxelMovement && !shape.isEmpty())
             return new VoxelShapeCollisionBox(shape, shape == Shapes.block()).offset(x, y, z);
         return fromShape(shape, x, y, z);
+    }
+
+    /** Adds getCollisionBox's boxes to {@code result} when any of them intersects {@code query}. */
+    public static void addIfAnyIntersects(
+            CultPlayer player,
+            int state,
+            int x,
+            int y,
+            int z,
+            double entityBottom,
+            JavaCollisionState actor,
+            SimpleCollisionBox query,
+            List<SimpleCollisionBox> scratch,
+            List<SimpleCollisionBox> result) {
+        VoxelShape shape = getCollisionShape(player, state, x, y, z, entityBottom, actor);
+        if (shape.isEmpty()) return;
+        if (shape == Shapes.block() && !player.isBedrockMovement() && query.getClass() == SimpleCollisionBox.class) {
+            // The single box VoxelShapeCollisionBox.downCast emits for a unit cube.
+            double minX = 0.0 + x, minY = 0.0 + y, minZ = 0.0 + z;
+            double maxX = 1.0 + x, maxY = 1.0 + y, maxZ = 1.0 + z;
+            if (maxX - SimpleCollisionBox.COLLISION_EPSILON > query.minX
+                    && minX + SimpleCollisionBox.COLLISION_EPSILON < query.maxX
+                    && maxY - SimpleCollisionBox.COLLISION_EPSILON > query.minY
+                    && minY + SimpleCollisionBox.COLLISION_EPSILON < query.maxY
+                    && maxZ - SimpleCollisionBox.COLLISION_EPSILON > query.minZ
+                    && minZ + SimpleCollisionBox.COLLISION_EPSILON < query.maxZ)
+                result.add(SimpleCollisionBox.between(minX, minY, minZ, maxX, maxY, maxZ));
+            return;
+        }
+        addIfAnyIntersects(collider(player, shape, x, y, z), query, scratch, result);
+    }
+
+    /** Adds {@code box}'s boxes to {@code result} when any of them intersects {@code query}. */
+    public static void addIfAnyIntersects(
+            CollisionBox box,
+            SimpleCollisionBox query,
+            List<SimpleCollisionBox> scratch,
+            List<SimpleCollisionBox> result) {
+        scratch.clear();
+        box.downCast(scratch);
+        for (int i = 0; i < scratch.size(); i++) {
+            if (query.isIntersected(scratch.get(i))) {
+                result.addAll(scratch);
+                return;
+            }
+        }
     }
 
     public static CollisionBox getSelectionBox(CultPlayer player, int state, int x, int y, int z) {

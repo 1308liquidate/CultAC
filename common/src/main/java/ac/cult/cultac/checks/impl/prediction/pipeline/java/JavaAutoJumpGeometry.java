@@ -10,6 +10,7 @@ import ac.cult.cultac.utils.collisions.ClientBlockShapes;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
+import ac.cult.cultac.utils.nmsutil.NativeBlockCollisionHelper;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -71,15 +72,15 @@ final class JavaAutoJumpGeometry {
                         resolvedDirect = true;
                     }
                     var actor = BlockIds.is(state, BlockIds.POWDER_SNOW) ? JavaCollisionState.current(player) : null;
-                    var shape = ClientBlockShapes.movement(player, state, x, y, z, player.y, actor, direct);
-                    boxes.clear();
-                    shape.downCast(boxes);
-                    for (int i = 0; i < boxes.size(); i++) {
-                        if (query.isIntersected(boxes.get(i))) {
-                            result.addAll(boxes);
-                            break;
-                        }
-                    }
+                    if (direct)
+                        NativeBlockCollisionHelper.addIfAnyIntersects(
+                                player, state, x, y, z, player.y, actor, query, boxes, result);
+                    else
+                        NativeBlockCollisionHelper.addIfAnyIntersects(
+                                ClientBlockShapes.movement(player, state, x, y, z, player.y, actor),
+                                query,
+                                boxes,
+                                result);
                 }
         return result;
     }

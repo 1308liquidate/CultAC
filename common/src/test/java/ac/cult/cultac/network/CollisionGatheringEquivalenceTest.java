@@ -18,6 +18,7 @@ import ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
+import ac.cult.cultac.utils.nmsutil.NativeBlockCollisionHelper;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
@@ -131,6 +132,47 @@ class CollisionGatheringEquivalenceTest {
                 if (!bits(expectedStepped).equals(bits(expectedWithoutStep))) stepped++;
             }
             assertTrue(stepped > 100, "too few queries stepped: " + stepped);
+        }
+    }
+
+    @Test
+    void intersectingNativeCollidersMatchTheirDownCastBoxes() throws Exception {
+        try (var services = new RecordConsumerServices();
+                var fixture = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+            CultPlayer player = fixture.player;
+            CollisionWorlds.populate(player, 0x5eedL);
+            var random = new SplittableRandom(0xA070L);
+            int added = 0;
+            int rejected = 0;
+            for (int iteration = 0; iteration < 3000; iteration++) {
+                int platform = random.nextInt(12);
+                player.movementPlatform =
+                        platform == 0 || platform == 2 ? MovementPlatform.BEDROCK : MovementPlatform.JAVA;
+                player.bedrockState = platform <= 1 ? new BedrockPlayerState(new UUID(0, 1)) : null;
+                SimpleCollisionBox query = CollisionWorlds.randomQuery(random, player);
+                double entityBottom = random.nextBoolean() ? query.minY : Double.NaN;
+                JavaCollisionState actor = CollisionWorlds.randomActor(random);
+                var expected = new ArrayList<SimpleCollisionBox>();
+                var actual = new ArrayList<SimpleCollisionBox>();
+                var scratch = new ArrayList<SimpleCollisionBox>();
+                for (int x = (int) Math.floor(query.minX) - 1; x <= (int) Math.floor(query.maxX) + 1; x++)
+                    for (int y = (int) Math.floor(query.minY) - 1; y <= (int) Math.floor(query.maxY) + 1; y++)
+                        for (int z = (int) Math.floor(query.minZ) - 1; z <= (int) Math.floor(query.maxZ) + 1; z++) {
+                            int state = player.compensatedWorld.getBlockStateIdAt(x, y, z);
+                            var boxes = new ArrayList<SimpleCollisionBox>();
+                            NativeBlockCollisionHelper.getCollisionBox(player, state, x, y, z, entityBottom, actor)
+                                    .downCast(boxes);
+                            int before = expected.size();
+                            if (boxes.stream().anyMatch(query::isIntersected)) expected.addAll(boxes);
+                            NativeBlockCollisionHelper.addIfAnyIntersects(
+                                    player, state, x, y, z, entityBottom, actor, query, scratch, actual);
+                            if (expected.size() > before) added++;
+                            else if (!boxes.isEmpty()) rejected++;
+                        }
+                String context = iteration + " " + query + " " + platform;
+                assertEquals(describe(expected, query), describe(actual, query), context);
+            }
+            assertTrue(added > 3000 && rejected > 3000, "too few colliders: " + added + " " + rejected);
         }
     }
 
