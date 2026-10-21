@@ -539,7 +539,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         if (removedPlayerVehicleId == packet.entityId()) {
             removedPlayerVehicleId = Integer.MIN_VALUE;
         }
-        int transaction = appendTrailingProofTransactionId(event);
+        int transaction = player.appendFlushProofTransaction(event);
         var model =
                 player.user.getCultConnection().dispatcher().runtime().data().version();
         var client = player.getClientProtocol();
@@ -569,7 +569,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         if (player.isBedrockMovement() && motion.entityId() != player.entityID) return;
         int velocityTransaction = player.checkManager.getKnockbackHandler().handleEntityVelocity(event, packet);
         if (velocityTransaction <= 0 && readsVelocityOnReceipt(motion.entityId())) {
-            velocityTransaction = player.appendFlushProofTransaction(event);
+            // A Bedrock flush group is not handled in one task, so its velocity keeps a ping after it.
+            velocityTransaction = player.isBedrockMovement()
+                    ? transactionOf(appendTrailingProofTransaction(event))
+                    : player.appendFlushProofTransaction(event);
         }
         if (velocityTransaction <= 0) {
             velocityTransaction = player.lastTransactionSent.get();
@@ -1432,12 +1435,11 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         boolean resetsVelocity = !CultAPI.INSTANCE.getConfigManager().isObserveOnly()
                 && !player.isBedrockMovement()
                 && destroyEntityIds.stream().anyMatch(player.compensatedEntities.vehicles::isServerPlayerPassengerOf);
-        CultPlayer.TrackedTransaction proof = resetsVelocity
-                ? appendTrailingProofTransaction(
-                        event, List.of(entityMotion(player.entityID, SELF_DISMOUNT_VELOCITY)), true)
-                : appendTrailingProofTransaction(event);
-        int transaction = proof == null ? -1 : proof.transaction();
-        boolean sentVelocityReset = resetsVelocity && proof != null;
+        int transaction = resetsVelocity
+                ? transactionOf(appendTrailingProofTransaction(
+                        event, List.of(entityMotion(player.entityID, SELF_DISMOUNT_VELOCITY)), true))
+                : player.appendFlushProofTransaction(event);
+        boolean sentVelocityReset = resetsVelocity && transaction >= 0;
 
         for (int entityID : destroyEntityIds) {
             despawnedEntitiesThisTransaction.add(entityID);
@@ -1575,7 +1577,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         var backendTicks = player.backendTicks();
         if (backendTicks != null && movement.kind() != MovementKind.TELEPORT_ENTITY)
             backendTicks.onEntityTracked(movement.entityId(), System.nanoTime());
-        boolean useDelimiterProof = useReachBundleDelimiter;
+        // Geyser hands a Bedrock client no bundle, so its movement wave keeps a pre and a post ping.
+        boolean useDelimiterProof = useReachBundleDelimiter && !player.isBedrockMovement();
         if (!useDelimiterProof && !hasSentPreWavePacket) {
             hasSentPreWavePacket = true;
             player.sendTransaction();
@@ -2029,7 +2032,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     public void onEndOfTickEvent() {
-        player.sendTransaction(false);
+        player.sendEndOfTickTransaction();
     }
 
     public void onEndOfTickEvent(int serverTick) {
@@ -2039,6 +2042,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     public void tickStartTick() {
         hasSentPreWavePacket = false;
     }
+
 
     private static MovementEffect toMovementEffect(String effect) {
         return switch (effect) {

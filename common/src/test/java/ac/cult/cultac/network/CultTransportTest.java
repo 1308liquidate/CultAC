@@ -1316,6 +1316,38 @@ class CultTransportTest {
     }
 
     @Test
+    void aWriteTaskSeesThePingTheOpenFlushBundleShares() {
+        try (var f = new Fixture(false)) {
+            proveCameras(f);
+            var seen = new ArrayList<Integer>();
+            f.connection.executeAfterWrites(() -> seen.add(f.connection.provingPing()));
+            f.channel.write(wireCamera(f, 1));
+            f.connection.executeAfterWrites(() -> seen.add(f.connection.provingPing()));
+            f.pump();
+            assertEquals(List.of(0, 41), seen);
+            assertEquals(List.of("D", "P41", "minecraft:set_camera", "D"), f.output());
+            assertEquals(0, f.connection.provingPing());
+        }
+    }
+
+    @Test
+    void theLastPingProvesTheWireUntilAPacketFollowsItsBundle() {
+        try (var f = new Fixture(false)) {
+            proveCameras(f);
+            var seen = new ArrayList<Integer>();
+            f.channel.writeAndFlush(wireCamera(f, 1));
+            f.pump();
+            // The bundle has closed, and nothing has been written after it.
+            f.connection.executeAfterWrites(() -> seen.add(f.connection.provingPing()));
+            f.channel.writeAndFlush(f.frame(CLIENTBOUND, PLAY, "sound"));
+            f.connection.executeAfterWrites(() -> seen.add(f.connection.provingPing()));
+            f.pump();
+            assertEquals(List.of(41, 0), seen);
+            assertEquals(List.of("D", "P41", "minecraft:set_camera", "D", "minecraft:sound"), f.output());
+        }
+    }
+
+    @Test
     void anUnlistenedPacketStaysInsideTheFlushBundle() {
         try (var f = new Fixture(false)) {
             var proofs = proveCameras(f);
@@ -1332,7 +1364,7 @@ class CultTransportTest {
     }
 
     @Test
-    void aNativeBundleClosesTheFlushBundleWithoutNesting() {
+    void aHostBundleJoinsTheOpenFlushBundle() {
         try (var f = new Fixture(false)) {
             var proofs = proveCameras(f);
             f.channel.write(wireCamera(f, 1));
@@ -1342,13 +1374,42 @@ class CultTransportTest {
             f.channel.write(wireCamera(f, 2));
             f.channel.flush();
             f.pump();
+            // A client bundle cannot nest: the host's delimiters are dropped and its packets join the flush bundle.
             assertEquals(
-                    List.of(
-                            "D", "P41", "minecraft:set_camera", "D",
-                            "D", "P7", "D",
-                            "D", "P42", "minecraft:set_camera", "D"),
-                    f.output());
-            assertEquals(List.of(41, 42), proofs);
+                    List.of("D", "P41", "minecraft:set_camera", "P7", "minecraft:set_camera", "D"), f.output());
+            assertEquals(List.of(41, 41), proofs);
+        }
+    }
+
+    @Test
+    void aProofInsideAHostBundleMakesItTheFlushBundle() {
+        try (var f = new Fixture(false)) {
+            var proofs = proveCameras(f);
+            f.channel.write(f.delimiter());
+            f.channel.write(wireCamera(f, 1));
+            f.channel.write(f.delimiter());
+            f.channel.write(wireCamera(f, 2));
+            f.channel.flush();
+            f.pump();
+            assertEquals(
+                    List.of("D", "P41", "minecraft:set_camera", "minecraft:set_camera", "D"), f.output());
+            assertEquals(List.of(41, 41), proofs);
+        }
+    }
+
+    @Test
+    void closingTheFlushBundleInsideAHeldHostBundleReopensIt() {
+        try (var f = new Fixture(false)) {
+            proveCameras(f);
+            f.channel.write(f.delimiter());
+            f.channel.write(wireCamera(f, 1));
+            f.channel.write(f.frame(CLIENTBOUND, PLAY, "respawn"));
+            f.channel.write(f.delimiter());
+            f.channel.flush();
+            f.pump();
+            // The respawn stays in the host's bundle, as the host wrote it.
+            assertEquals(
+                    List.of("D", "P41", "minecraft:set_camera", "D", "D", "minecraft:respawn", "D"), f.output());
         }
     }
 
@@ -1369,6 +1430,45 @@ class CultTransportTest {
                             "D", "P42", "minecraft:set_camera", "D"),
                     f.output());
             assertEquals(List.of(41, 42), proofs);
+        }
+    }
+
+    @Test
+    void aBundleOpenedBeforeAStaleQueuedCloseRunsStillCloses() {
+        try (var f = new Fixture(false)) {
+            proveCameras(f);
+            // EmbeddedChannel runs queued tasks after each write and flush reaching its head. Holding the frames
+            // short of it keeps the first flush's queued close behind the later writes, as a host's event loop does.
+            var held = new ArrayList<ByteBuf>();
+            f.channel.pipeline().addFirst(new ChannelOutboundHandlerAdapter() {
+                @Override
+                public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
+                    held.add((ByteBuf) message);
+                    promise.setSuccess();
+                }
+
+                @Override
+                public void flush(ChannelHandlerContext ctx) {}
+            });
+            f.channel.pipeline().write(wireCamera(f, 1));
+            f.channel.pipeline().flush();
+            // The respawn closes the first bundle before its queued close runs.
+            f.channel.pipeline().write(f.frame(CLIENTBOUND, PLAY, "respawn"));
+            f.channel.pipeline().write(wireCamera(f, 2));
+            f.channel.pipeline().flush();
+            f.pump();
+            var names = new ArrayList<String>();
+            for (ByteBuf frame : held) {
+                names.add(f.name(frame));
+                frame.release();
+            }
+            assertEquals(
+                    List.of(
+                            "D", "P41", "minecraft:set_camera", "D",
+                            "minecraft:respawn",
+                            "D", "P42", "minecraft:set_camera", "D"),
+                    names);
+            assertFalse(f.connection.flushBundleOpen());
         }
     }
 

@@ -46,7 +46,7 @@ public class BasePacketWorldReader {
     public void onBlockEntityData(
             PacketSendEvent<BlockEntityUpdate> event, CultPlayer player, BlockEntityUpdate packet) {
         String dimension = packetDimension(player);
-        int transaction = appendTrailingProofTransaction(event, player);
+        int transaction = appendFlushProofTransaction(event, player);
         player.latencyUtils.addRealTimeTask(
                 transaction, () -> player.compensatedWorld.applyClientBlockEntityData(dimension, packet));
     }
@@ -65,7 +65,7 @@ public class BasePacketWorldReader {
 
     @CultPacketHandler
     public void onRecipeInputs(PacketSendEvent<RecipeInputs> event, CultPlayer player, RecipeInputs packet) {
-        int transaction = appendTrailingProofTransaction(event, player);
+        int transaction = appendFlushProofTransaction(event, player);
         player.latencyUtils.addRealTimeTask(transaction, () -> player.compensatedWorld.applyClientRecipeInputs(packet));
     }
 
@@ -158,7 +158,7 @@ public class BasePacketWorldReader {
             // Wrap this between bread.
             player.sendTransaction();
         }
-        int applyTransaction = appendTrailingProofTransaction(event, player);
+        int applyTransaction = appendFlushProofTransaction(event, player);
         if (player.chunkDebug) {
             player.sendMessage("Chunk " + chunkX + " " + chunkZ + " was added.");
         }
@@ -175,13 +175,14 @@ public class BasePacketWorldReader {
         if (player.chunkDebug) {
             player.sendMessage("Chunk " + x + " " + z + " queued for unload.");
         }
-        int applyTransaction = appendTrailingProofTransaction(event, player);
+        int applyTransaction = appendFlushProofTransaction(event, player);
         player.compensatedWorld.removeChunkLater(packetDimension(player), x, z, applyTransaction);
     }
 
-    protected int appendTrailingProofTransaction(PacketSendEvent<?> event, CultPlayer player) {
-        CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
-        return transaction == null ? player.lastTransactionSent.get() : transaction.transaction();
+    /** The flush ping that proves this world update; see {@link CultPlayer#appendFlushProofTransaction}. */
+    protected int appendFlushProofTransaction(PacketSendEvent<?> event, CultPlayer player) {
+        int transaction = player.appendFlushProofTransaction(event);
+        return transaction > 0 ? transaction : player.lastTransactionSent.get();
     }
 
     public void handleBlockChange(CultPlayer player, PacketSendEvent<BlockUpdate> event, BlockUpdate blockChange) {

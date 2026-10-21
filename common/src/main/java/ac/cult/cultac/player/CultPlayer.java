@@ -112,7 +112,8 @@ public class CultPlayer implements GrimUser {
                 CultAPI.INSTANCE.getEventBus().get(GrimTransactionSendEvent.class);
     }
 
-    public record TrackedTransaction(int transaction, CultWrite packet) {
+    /** A transaction and the ping that carries it; a {@code null} packet shares a ping already written. */
+    public record TrackedTransaction(int transaction, @Nullable CultWrite packet) {
         public int id() {
             return ((ClientboundPing) packet.packet()).id();
         }
@@ -646,9 +647,29 @@ public class CultPlayer implements GrimUser {
         return sendTransaction(false, PING_TRAILING, 0);
     }
 
-    /** The ping that ends server tick {@code serverTick}, written after the tick's packets. */
+    /** Ends server tick {@code serverTick}, after the tick's packets; see {@link #endServerTick}. */
     public void sendEndOfTickTransaction(int serverTick) {
-        sendTransaction(false, PING_END_OF_TICK, serverTick);
+        endServerTick(PING_END_OF_TICK, serverTick);
+    }
+
+    /** Ends an estimated server tick, which has no tick number; see {@link #endServerTick}. */
+    public void sendEndOfTickTransaction() {
+        endServerTick(PING_LEADING, 0);
+    }
+
+    /**
+     * Proves the tick's packets at their outbound position. ClientPacketListener#handleBundlePacket handles a whole
+     * bundle in one task and handlePing answers inside it, so when every packet written since the last CultAC ping
+     * shares its bundle, that ping proves the tick the way a ping after them would; the tick then ends on it and
+     * writes none. Geyser hands a Bedrock client no bundle, so any packet after the ping, such as a movement wave,
+     * needs the tick's own ping.
+     */
+    private void endServerTick(int kind, int serverTick) {
+        user.executeAfterWrites(() -> {
+            PlayerObserver observer = this.observer;
+            if (kind == PING_END_OF_TICK && observer != null) observer.serverTickEnded(serverTick);
+            if (user.getCultConnection().provingPing() <= 0) sendTransaction(false, kind, serverTick);
+        });
     }
 
     private int sendTransaction(boolean async, int kind, int serverTick) {
@@ -703,18 +724,17 @@ public class CultPlayer implements GrimUser {
     }
 
     /**
-     * The transaction that proves an ordinary Java entity or block update, or -1 when none can be sent. The
+     * The transaction that proves an ordinary entity, block or chunk update, or -1 when none can be sent. The
      * encoder keeps one flush bundle open from the first such update to the next Netty flush and starts it with
      * a ping. ClientPacketListener#handleBundlePacket handles the whole bundle in one task and handlePing answers
      * inside it, so the update shares the latest CultAC ping already in that bundle. Without one, a ping is
-     * written directly before the update and opens the bundle. Inside a host bundle, or for Bedrock, the update
-     * keeps its own trailing ping.
+     * written directly before the update and opens the bundle, or makes the host bundle it is in the flush bundle.
+     * A Bedrock player's flush group shares its ping the same way, to keep one ping per flush, though Geyser does
+     * not hand the client the group as one task.
      */
     public int appendFlushProofTransaction(PacketSendEvent<?> event) {
         var connection = user.getCultConnection();
-        if (isBedrockMovement()
-                || !connection.isPreparingWrites()
-                || (event.isInsideBundle() && !connection.flushBundleOpen())) {
+        if (!connection.isPreparingWrites()) {
             TrackedTransaction proof = appendTrailingProofTransaction(event);
             return proof == null ? -1 : proof.transaction();
         }
@@ -741,11 +761,18 @@ public class CultPlayer implements GrimUser {
      * Writes {@code packetsBeforeProof} and then a tracked ping directly after the event's packet. The
      * encoder bundles a packet that expands to several frames, and ClientPacketListener#handleBundlePacket
      * handles the sub-packets in order in one task, so the pong proves the packet was applied before the
-     * client's next tick. Returns null, writing nothing, when no transaction can be sent.
+     * client's next tick. In a Java flush bundle that already holds a CultAC ping, that ping is handled in the
+     * same task and proves the packet without another. Returns null, writing nothing, when no transaction can be
+     * sent.
      */
     @Nullable
     public TrackedTransaction appendTrailingProofTransaction(
             PacketSendEvent<?> event, List<CultWrite> packetsBeforeProof) {
+        int shared = isBedrockMovement() ? 0 : event.flushPing();
+        if (shared > 0) {
+            event.getWritesAfterSend().addAll(packetsBeforeProof);
+            return new TrackedTransaction(shared, null);
+        }
         TrackedTransaction proof = createTrackedTransactionPacketForDeferredSend();
         if (proof == null) {
             return null;
@@ -829,7 +856,7 @@ public class CultPlayer implements GrimUser {
     }
 
     public void markTrackedTransactionPacketSent(@Nullable TrackedTransaction transaction) {
-        if (transaction == null) {
+        if (transaction == null || transaction.packet() == null) {
             return;
         }
 

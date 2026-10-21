@@ -248,6 +248,15 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     }
 
     private void deferClientboundInventoryTask(PacketSendEvent<?> event, Runnable task) {
+        if (!player.isBedrockMovement()) {
+            // The flush bundle's ping is handled in the same ClientPacketListener#handleBundlePacket task as
+            // the update, before the client can emit another tick or inventory click.
+            int proof = player.appendFlushProofTransaction(event);
+            if (proof > 0) player.latencyUtils.addRealTimeTask(proof, task);
+            else task.run();
+            return;
+        }
+
         CultPlayer.TrackedTransaction transaction = player.createTrackedTransactionPacketForDeferredSend();
         if (transaction == null) {
             task.run();
@@ -255,15 +264,6 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
         }
 
         player.latencyUtils.addRealTimeTask(transaction.transaction(), task);
-        if (!player.isBedrockMovement()) {
-            // ChannelPacketHandler bundles a replacement group and preserves an
-            // enclosing vanilla bundle. Putting the proof in that group makes
-            // ClientPacketListener#handleBundlePacket process the update and ping
-            // together, before the client can emit another tick or inventory click.
-            event.getWritesAfterSend().add(transaction.packet());
-            event.getTasksAfterSend().add(() -> player.markTrackedTransactionPacketSent(transaction));
-            return;
-        }
 
         // PacketSendEvent<?> tasks run after the complete outbound group has been forwarded. Sending
         // the proof there keeps a ping out of the middle of a vanilla bundle while still placing it

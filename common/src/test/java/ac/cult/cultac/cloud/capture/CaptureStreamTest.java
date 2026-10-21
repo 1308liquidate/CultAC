@@ -1373,4 +1373,24 @@ class CaptureStreamTest {
         assertArrayEquals(
                 new long[][] {{103, 0}, {103, 1}}, serverTicks(frames.get(3)).toArray(long[][]::new));
     }
+
+    @Test
+    void aTickEndWithoutAPingStillEndsTheTick() {
+        TestSink sink = new TestSink();
+        CaptureStream stream = pinging(sink);
+        endOfTick(stream, 8, 1, 99);
+        tick(stream, 5);
+        // Tick 100's packets share leading ping 9, and the tick ends without a ping of its own.
+        ping(stream, 9, 11, 3);
+        clientbound(stream, 12);
+        stream.endOfTick(100);
+        clientbound(stream, 13);
+        tick(stream, 20);
+        for (int seq = 1; seq <= 2; seq++) verdict(stream, seq, seq, 0);
+
+        List<Frame> frames = frames(sink);
+        assertEquals(2, frames.size());
+        assertArrayEquals(
+                new long[][] {{100, 3}, {100, 0}, {101, 0}}, serverTicks(frames.get(1)).toArray(long[][]::new));
+    }
 }
