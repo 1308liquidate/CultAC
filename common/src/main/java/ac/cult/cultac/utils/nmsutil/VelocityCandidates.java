@@ -170,11 +170,15 @@ public final class VelocityCandidates {
                 || result.getAcceptedClosestToTarget() == null) {
             return fallback;
         }
-        Vec3 input = result.getLegacyLikePredictionVector().subtract(result.getAcceptedClosestToTarget());
         return result.getValidMovements()
                 .getClosestTrace()
                 .preCollisionVelocity()
-                .add(input);
+                .add(acceptedInput(result));
+    }
+
+    /** The accepted LivingEntity#moveRelative input: the circular allowance the closest movement used. */
+    private static Vec3 acceptedInput(PredictionResult result) {
+        return result.getLegacyLikePredictionVector().subtract(result.getAcceptedClosestToTarget());
     }
 
     private static Vec3 addFinite(Vec3 delta, Vec3 current) {
@@ -366,7 +370,12 @@ public final class VelocityCandidates {
         // LivingEntity#travelFallFlying has already replaced deltaMovement
         // before Entity#move. Carry that velocity on uncollided axes as well;
         // carrying the initial vector would retain a stale pre-elytra candidate.
+        // LivingEntity#moveRelative adds the input to deltaMovement before
+        // Entity#move, so the carried velocity holds the accepted input too.
         Vec3 postMoveDelta = preCollisionVelocity(result);
+        if (result.getValidMovements().getClosestTrace() != null && result.getAcceptedClosestToTarget() != null) {
+            postMoveDelta = postMoveDelta.add(acceptedInput(result));
+        }
         CultPlayer player = result.getPlayer();
         boolean use26Dot2 = player != null && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_2);
         if (use26Dot2) {
