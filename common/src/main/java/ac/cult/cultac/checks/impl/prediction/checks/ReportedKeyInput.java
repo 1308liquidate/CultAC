@@ -12,6 +12,7 @@ import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ClientItemUseState;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.StuckEdgeData;
+import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientKeyInput;
@@ -42,8 +43,13 @@ final class ReportedKeyInput {
 
         KnownInput keys = player.packetStateData.knownInput;
         ClientItemUseState.Snapshot use = context.getItemUse();
-        // LocalPlayer#isMovingSlowly crouches exactly when the previous keys held shift.
+        // LocalPlayer#isMovingSlowly: crouching, exactly when the previous keys held shift, or
+        // Entity#isVisuallyCrawling, which out of water is a SWIMMING pose or, through
+        // LivingEntity#isVisuallySwimming, a FALL_FLYING pose without fall flying. Player#updatePlayerPose sets the
+        // pose only after LocalPlayer#aiStep.
         float slow = context.isLastSneaking()
+                        || context.getPose() == Pose.SWIMMING
+                        || context.getPose() == Pose.FALL_FLYING
                 ? (float) player.compensatedEntities.getSelf().sneakingSpeed.value()
                 : 1.0F;
         float walk = context.getMoveRelativeSpeed(player, true, false, false);
@@ -58,8 +64,11 @@ final class ReportedKeyInput {
         System.arraycopy(sprint, 0, speeds, 1, sprint.length);
         double best = Double.MAX_VALUE;
         for (float speed : speeds) {
-            // LocalPlayer#modifyInput's item multiplier is the legal one, or the required one of a use the client owes.
-            for (float itemUse : new float[] {use.legalMultiplier(), use.requiredMultiplier()}) {
+            // LocalPlayer#modifyInput's item multiplier is the legal one, the required one of a use the client owes, or
+            // that of a use it may have started: Minecraft#tick runs handleKeybinds, whose startUseItem precedes the
+            // tick's LocalPlayer#aiStep, so a use slows the tick that sends its USE_ITEM.
+            for (float itemUse :
+                    new float[] {use.legalMultiplier(), use.requiredMultiplier(), use.slowestMultiplier()}) {
                 Vec3 input = ClientKeyInput.travelInput(player, context, keys, itemUse, slow, speed);
                 if (input == null) return 0.0D;
                 best = Math.min(best, offset(player, result, extents, input));

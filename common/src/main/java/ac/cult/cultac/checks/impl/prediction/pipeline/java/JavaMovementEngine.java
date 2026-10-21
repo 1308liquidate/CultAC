@@ -21,6 +21,7 @@ import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.GeyserVelocity;
 import ac.cult.cultac.utils.nmsutil.NextTickVelocityDeriver;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -135,7 +136,7 @@ public final class JavaMovementEngine implements MovementEngine {
             JavaInsideBlockEffects.Scan scan = JavaInsideBlockEffects.scan(player, result, moved.movement());
             Vec3 end = result.getSimulationContext().getStart().add(moved.movement());
             var states = new ArrayList<JavaPredictionCarry.State>(velocities.size());
-            var nextVelocities = new ArrayList<Vec3>(velocities.size());
+            var nextVelocities = new LinkedHashSet<Vec3>(velocities.size() * 2);
             for (Vec3 velocity : velocities) {
                 var effects = JavaInsideBlockEffects.resolve(
                         player, result, scan, moved.fallDistance(), velocity, moved.landed());
@@ -145,7 +146,7 @@ public final class JavaMovementEngine implements MovementEngine {
                         new JavaPredictionCarry.State(effects.velocity(), effects.fallDistance(), effects.stuckSpeed());
                 if (!states.contains(state)) {
                     states.add(state);
-                    if (!nextVelocities.contains(state.velocity())) nextVelocities.add(state.velocity());
+                    nextVelocities.add(state.velocity());
                 }
             }
             var stateList = List.copyOf(states);
@@ -168,7 +169,7 @@ public final class JavaMovementEngine implements MovementEngine {
                             ? moved.fallDistance()
                             : stateList.getFirst().fallDistance(),
                     stateList);
-            return new PredictionCommit(carry, Set.of(nextVelocities.toArray(Vec3[]::new)));
+            return new PredictionCommit(carry, nextVelocities);
         }
         return new PredictionCommit(
                 JavaFallDistance.commit(player, result, acceptedDiff),

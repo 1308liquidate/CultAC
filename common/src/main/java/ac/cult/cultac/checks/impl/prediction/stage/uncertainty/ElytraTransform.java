@@ -11,6 +11,12 @@ import ac.cult.cultac.utils.math.VectorUtils;
 import ac.cult.cultac.utils.nmsutil.ReachUtils;
 
 public class ElytraTransform implements UncertaintyHandler {
+    /** Holds for a start trace, whose pre-collision velocity is its position: the pipeline runs this first. */
+    @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        return !context.usesFallFlyingMovement() || context.getWorldData().mustBeInLiquid();
+    }
+
     @Override
     public MovementTrace handleMovementTrace(
             CultPlayer player,

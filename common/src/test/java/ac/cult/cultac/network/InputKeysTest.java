@@ -12,12 +12,16 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
 import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.AttributeModifier;
+import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.utils.data.ClientItemUseState;
+import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.inventory.Inventory;
 import ac.cult.cultac.utils.inventory.ItemUtil;
 import ac.cult.cultac.utils.math.Vec3;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -180,6 +184,33 @@ class InputKeysTest {
     }
 
     @Test
+    void walkingSlowedByTheServersPowderSnowModifierIsNotFlagged() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.place(new Vec3(0.5, FLOOR_Y, 4.5), GROUNDED);
+            // LivingEntity#aiStep runs tryAddFrost only on the server, so the client walks at the speed the server's
+            // minecraft:powder_snow modifier leaves after leaving the snow.
+            f.player.compensatedEntities.updateAttributes(
+                    f.player.entityID,
+                    List.of(new AttributeSnapshot(
+                            "minecraft:movement_speed",
+                            0.1F,
+                            List.of(new AttributeModifier(
+                                    "minecraft:powder_snow", -0.02D, AttributeModifier.Operation.ADD_VALUE)))));
+            double slowed = (double) 0.98F * (double) (float) (0.1F - 0.02D);
+            f.input(BACK);
+            double z = 4.5;
+            double velocity = 0.0;
+            for (int tick = 0; tick < 3; tick++) {
+                z += velocity - slowed;
+                assertExact(f.tick(new Vec3(0.5, FLOOR_Y, z), true));
+                velocity = (velocity - slowed) * FRICTION;
+            }
+
+            assertNoFlags(f);
+        }
+    }
+
+    @Test
     void walkingWhileUsingAnItemIsNotFlagged() throws Exception {
         try (var f = new JavaTickFixture()) {
             var food = ItemUtil.modelItems().stack("minecraft:golden_apple", 1);
@@ -197,6 +228,51 @@ class InputKeysTest {
                 velocity = (velocity - slowed) * FRICTION;
             }
 
+            assertNoFlags(f);
+        }
+    }
+
+    @Test
+    void walkingSlowedByAnItemUseThatMayHaveStartedIsNotFlagged() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            var food = ItemUtil.modelItems().stack("minecraft:golden_apple", 1);
+            f.player.getInventory().inventory.getInventoryStorage().setItem(Inventory.SLOT_OFFHAND, food);
+            f.place(new Vec3(0.5, FLOOR_Y, 4.5), GROUNDED);
+            f.input(BACK);
+            assertExact(f.tick(new Vec3(0.5, FLOOR_Y, 4.5 - WALK), true));
+            double velocity = -WALK * FRICTION;
+
+            // Minecraft#tick runs handleKeybinds, which starts the use, before LocalPlayer#aiStep reads the keys, so
+            // LocalPlayer#modifyInput already scales this tick by 0.2F. A possibly refused start leaves it uncertain.
+            f.player.clientItemUse.start(Hand.OFF_HAND, food, ClientItemUseState.duration(food), false);
+            double slowed = (double) (0.98F * 0.2F) * (double) 0.1F;
+            double z = 4.5 - WALK;
+            for (int tick = 0; tick < 3; tick++) {
+                z += velocity - slowed;
+                assertExact(f.tick(new Vec3(0.5, FLOOR_Y, z), true));
+                velocity = (velocity - slowed) * FRICTION;
+            }
+
+            assertNoFlags(f);
+        }
+    }
+
+    @Test
+    void walkingOnTheTickAfterAGlideEndsIsSlowedLikeCrawling() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.place(new Vec3(0.5, FLOOR_Y, 4.5), GROUNDED);
+            f.input(BACK);
+            assertExact(f.tick(new Vec3(0.5, FLOOR_Y, 4.5 - WALK), true));
+            double velocity = -WALK * FRICTION;
+
+            // Player#updatePlayerPose runs after LocalPlayer#aiStep, so the tick after the glide ends still starts in
+            // the FALL_FLYING pose. LivingEntity#isVisuallySwimming counts that pose without fall flying, which makes
+            // LocalPlayer#isMovingSlowly scale the keys by the sneaking speed.
+            f.player.pose = Pose.FALL_FLYING;
+            double slowed = (double) (0.98F * 0.3F) * (double) 0.1F;
+            PredictionResult result = f.tick(new Vec3(0.5, FLOOR_Y, 4.5 - WALK + velocity - slowed), true);
+
+            assertExact(result);
             assertNoFlags(f);
         }
     }

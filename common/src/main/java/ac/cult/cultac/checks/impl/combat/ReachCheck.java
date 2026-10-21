@@ -140,15 +140,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                 return;
             }
 
-            // Dead entities cause false flags (https://github.com/GrimAnticheat/Grim/issues/546)
-            if (entity.isDead) return;
-
-            if (entity.type == EntityTypeIds.ARMOR_STAND) return;
-
-            // Riders outside the local player's own riding tree have no simulated position.
-            if (player.compensatedEntities.isUntrackedRider(entity)) return;
-
-            if (player.gamemode == GameMode.SPECTATOR) return;
+            if (!measured(entity)) return;
 
             AttackReach reach = AttackReach.capture(player, visibility);
             boolean tooManyAttacks = playerAttackQueue.size() > 10;
@@ -345,9 +337,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             List<Vec3> fromCandidates,
             AttackReach reach,
             boolean isPrediction) {
-        targetBox = targetBox.copy();
-        targetBox.expand(threshold);
-        targetBox.expand(player.getMovementThreshold());
+        targetBox = measuredBox(targetBox);
 
         measureBest(targetBox, targetSize, fromCandidates, reach, isPrediction);
 
@@ -838,6 +828,63 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         double dy = y - eyeY;
         double dz = z - eyeZ;
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    /**
+     * Whether this check measures this player's attack on the target sent now and flags it when beyond reach, on
+     * itself or, for a missed hitbox, on its hitboxes check; it also cancels it as Reach.block-impossible-hits and
+     * packet modification allow.
+     */
+    public boolean enforcesReach(PacketEntity target) {
+        return isEnabled()
+                && !isExemptPermission()
+                && !player.checkManager.getCheck(hitboxes()).isExemptPermission()
+                && !player.isDisabled()
+                && targets(target.type)
+                && playerAttackQueue.size() <= 10
+                && measured(target)
+                && isEnforced(target);
+    }
+
+    /**
+     * Whether the attack on the target sent now lies beyond reach from every attack origin and eye: the box the tick
+     * end measures is farther from each than any range the client's picks allow, so that measurement flags it as
+     * beyond reach or as a missed hitbox.
+     */
+    public boolean measuresBeyondReach(PacketEntity target) {
+        SimpleCollisionBox box = measuredBox(target);
+        double max = AttackReach.capture(player, visibility).maxClosestDistance();
+        double scale = player.getScale();
+        for (Vec3 from : getAttackOrigins()) {
+            for (double height : EYE_HEIGHTS) {
+                if (nearest(box, from.x, from.y + height * scale, from.z) <= max) return false;
+            }
+        }
+        return true;
+    }
+
+    /** The target's reach box grown by the threshold, as this check measures attacks on it. */
+    public SimpleCollisionBox measuredBox(PacketEntity target) {
+        return measuredBox(getReachBox(target));
+    }
+
+    private SimpleCollisionBox measuredBox(SimpleCollisionBox reachBox) {
+        SimpleCollisionBox box = reachBox.copy();
+        box.expand(threshold);
+        box.expand(player.getMovementThreshold());
+        return box;
+    }
+
+    private boolean measured(PacketEntity entity) {
+        // Dead entities cause false flags (https://github.com/GrimAnticheat/Grim/issues/546)
+        if (entity.isDead) return false;
+
+        if (entity.type == EntityTypeIds.ARMOR_STAND) return false;
+
+        // Riders outside the local player's own riding tree have no simulated position.
+        if (player.compensatedEntities.isUntrackedRider(entity)) return false;
+
+        return player.gamemode != GameMode.SPECTATOR;
     }
 
     // The targets whose picked box Cult models: living entities but shulkers, end crystals, and a Java client's boats,

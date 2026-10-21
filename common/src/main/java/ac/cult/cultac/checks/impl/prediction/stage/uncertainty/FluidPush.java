@@ -14,6 +14,11 @@ public class FluidPush implements UncertaintyHandler {
     private static final double WATER_ENTRY_RADIUS = 0.028D;
 
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        return flowingCurrentRadius(context, lastResult) <= 0.0D;
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,

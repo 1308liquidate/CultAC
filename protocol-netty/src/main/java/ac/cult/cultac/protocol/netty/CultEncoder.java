@@ -441,12 +441,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         var type = ClientboundPackets.BUNDLE_DELIMITER;
         var encoded = connection
                 .packets()
-                .encode(
-                        connection.phase(PacketDirection.CLIENTBOUND),
-                        type,
-                        type.opaqueValue(),
-                        ctx.alloc(),
-                        connection);
+                .encodeBundleDelimiter(connection.phase(PacketDirection.CLIENTBOUND), ctx.alloc(), connection);
         if (encoded.frames().size() != 1) {
             encoded.frames().forEach(ByteBuf::release);
             throw new IllegalStateException("Bundle delimiter must encode one physical frame");

@@ -27,6 +27,8 @@ import ac.cult.cultac.utils.data.BoatData;
 import ac.cult.cultac.utils.data.ReachInterpolationData;
 import ac.cult.cultac.utils.enums.BoatEntityStatus;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
+import ac.cult.cultac.utils.latency.CompensatedWorld;
+import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
@@ -101,6 +103,13 @@ public class PacketEntity {
     private SimpleCollisionBox exactAfterClientTickBox;
     // Holds the current interpolation location only while carrying the target reads its position.
     private SimpleCollisionBox carryLocationBox;
+    private @Nullable ReachInterpolationData settledInterpolation;
+    private @Nullable Vec3 settledPhysicalPosition;
+    // Valid while the position, the world and its chunk epoch are the ones it was computed for.
+    private @Nullable Vec3 loadedChunkPosition;
+    private @Nullable CompensatedWorld loadedChunkWorld;
+    private long loadedChunkEpoch;
+    private boolean loadedChunk;
 
     public HashMap<MovementEffect, Integer> potionsMap = null;
     public BoatEntityStatus boatStatus = null;
@@ -599,6 +608,19 @@ public class PacketEntity {
             }
             return;
         }
+        ReachInterpolationData interpolation = newPacketLocation;
+        Vec3 physicalBefore = clientPhysicalPosition;
+        boolean idleProbe = false;
+        if (oldPacketLocation == null
+                && interpolation != null
+                && clientPhysicalPositionExact
+                && !player.isBedrockMovement()) {
+            // A settled state with the inputs it settled on makes this tick a no-op.
+            if (interpolation == settledInterpolation
+                    && physicalBefore == settledPhysicalPosition
+                    && interpolation.isSettled()) return;
+            idleProbe = interpolation.beginIdleProbe();
+        }
         carryInterpolationTargetByLocalPhysics(player);
         SimpleCollisionBox exactAfterClientTick = exactInterpolatedLocationAfterClientTick(player);
         float exactYawAfterClientTick = exactYawAfterClientTick();
@@ -627,6 +649,15 @@ public class PacketEntity {
         if (oldPacketLocation != null) {
             oldPacketLocation.tickMovement(true, tickingReliably);
             newPacketLocation.updatePossibleStartingLocation(oldPacketLocation.getPossibleMovementLocationCombined());
+        }
+        if (idleProbe
+                && newPacketLocation == interpolation
+                && oldPacketLocation == null
+                && clientPhysicalPosition == physicalBefore
+                && clientPhysicalPositionExact
+                && interpolation.settleIfIdleTickUnchanged()) {
+            settledInterpolation = interpolation;
+            settledPhysicalPosition = physicalBefore;
         }
     }
 
@@ -951,6 +982,18 @@ public class PacketEntity {
 
     public long getClientTickOrder() {
         return clientTickOrder;
+    }
+
+    /** Whether {@code world} holds the chunk column containing {@code position}. */
+    public boolean isInLoadedChunk(CompensatedWorld world, Vec3 position) {
+        long epoch = world.chunkEpoch();
+        if (position != loadedChunkPosition || world != loadedChunkWorld || epoch != loadedChunkEpoch) {
+            loadedChunk = world.isChunkLoaded(CultMath.floor(position.x) >> 4, CultMath.floor(position.z) >> 4);
+            loadedChunkPosition = position;
+            loadedChunkWorld = world;
+            loadedChunkEpoch = epoch;
+        }
+        return loadedChunk;
     }
 
     public void setClientTickOrder(long clientTickOrder) {

@@ -30,6 +30,7 @@ import ac.cult.cultac.checks.impl.prediction.PredictionSetbackState;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext.HardCollidingEntityCollision;
 import ac.cult.cultac.checks.impl.prediction.checks.PredCheckRunner;
+import ac.cult.cultac.checks.impl.prediction.checks.StepCollisionMemo;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoFallPseudo;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
@@ -91,10 +92,8 @@ import ac.cult.cultac.utils.nmsutil.NextTickVelocityDeriver;
 import ac.cult.cultac.utils.nmsutil.ReusableVelocitySet;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.Generated;
@@ -142,8 +141,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     private PredictionSetbackState activeBedrockSetbackState;
     private final WorldStageBuilder worldStageBuilder = new WorldStageBuilder();
     private final CollisionModifier collisionProbe = new CollisionModifier();
-    private final Map<CollisionProbeKey, CollideAxisData> collisionProbeCache = new HashMap<>();
     private final NextTickVelocityDeriver.Scratch velocityScratch = new NextTickVelocityDeriver.Scratch();
+    private final StepCollisionMemo stepCollisionMemo = new StepCollisionMemo();
 
     public SimulationProcessor(CultPlayer playerData) {
         super(playerData);
@@ -162,6 +161,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 movement.z,
                 box,
                 onGround);
+    }
+
+    public StepCollisionMemo getStepCollisionMemo() {
+        return this.stepCollisionMemo;
     }
 
     public Set<Vec3> getValidPlayerStartingVels() {
@@ -1558,11 +1561,45 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             float yRot,
             AuthoredMovementFrame authoredMovementFrame,
             MovementProfile movementProfile) {
+        // A time-based border lerp makes every collision read the clock, so a memoised one could go stale.
+        stepCollisionMemo.open(!player.isBedrockMovement()
+                && player.checkManager.getWorldBorder().hasClockIndependentDiameter());
+        try {
+            return predict(
+                    player,
+                    startingVel,
+                    lastPrediction,
+                    target,
+                    start,
+                    end,
+                    lastTickSkip,
+                    testing,
+                    xRot,
+                    yRot,
+                    authoredMovementFrame,
+                    movementProfile);
+        } finally {
+            stepCollisionMemo.close();
+        }
+    }
+
+    private PredictionResult predict(
+            CultPlayer player,
+            Set<Vec3> startingVel,
+            PredictionResult lastPrediction,
+            Vec3 target,
+            Vec3 start,
+            Vec3 end,
+            LastInstance lastTickSkip,
+            boolean testing,
+            float xRot,
+            float yRot,
+            AuthoredMovementFrame authoredMovementFrame,
+            MovementProfile movementProfile) {
         List<PredictionResult> alternativeRealities = new ArrayList<>();
         List<PredictionResult> invalidOrValidRealities = new ArrayList<>();
         List<ValidMovements> valid = new ArrayList<>();
         MovementEngine engine = MovementEngines.requireForProfile(movementProfile);
-        collisionProbeCache.clear();
 
         for (SimulationContext curSimulationContext : this.createSimulationContexts(
                 player,
@@ -1638,7 +1675,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                         : probeAtStepHeight
                                 ? stepHeightCollisionTarget(player, thisResult, attemptedExtents)
                                 : thisResult.getSimulationContext().getTarget();
-                CollideAxisData collisionData = probeCollisionsCached(
+                CollideAxisData collisionData = probeCollisions(
                         player,
                         engine,
                         thisResult,
@@ -1686,7 +1723,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                     // must not replace the ordinary move's collision/velocity state.
                     CollideAxisData stepEligibility = probedCollisions;
                     if (engine == JavaMovementEngine.INSTANCE && !stepEligibility.couldCollideHorizontally()) {
-                        stepEligibility = probeCollisionsCached(
+                        stepEligibility = probeCollisions(
                                 player,
                                 engine,
                                 thisResult,
@@ -1787,12 +1824,12 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         CollideAxisData firstCollisions = result.getCollideAxisData();
         Vec3 reselected = validMovements.computeCollisionIgnoredMovement(retarget, lastPrediction);
         // Entity#collideWithShapes orders X and Z by magnitude, so the reselected movement needs its own probe.
-        result.setCollideAxisData(probeCollisionsCached(player, engine, result, attemptedExtents, reselected, false));
+        result.setCollideAxisData(probeCollisions(player, engine, result, attemptedExtents, reselected, false));
         validMovements.applyCollisionsToSelectedMovement(lastPrediction);
         validMovements.keepNearerToTarget(firstTrace, firstCollisions);
     }
 
-    private CollideAxisData probeCollisionsCached(
+    private CollideAxisData probeCollisions(
             CultPlayer player,
             MovementEngine engine,
             PredictionResult result,
@@ -1800,7 +1837,9 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             Vec3 collisionTarget,
             boolean canStep) {
         SimulationContext context = result.getSimulationContext();
-        CollisionProbeKey key = new CollisionProbeKey(
+        return engine.probeCollisions(
+                collisionProbe,
+                player,
                 context,
                 attemptedExtents.minY,
                 collisionTarget,
@@ -1808,21 +1847,6 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 result.getInitialStartingVel(),
                 attemptedExtents,
                 canStep);
-        CollideAxisData collisions = collisionProbeCache.get(key);
-        if (collisions == null) {
-            collisions = engine.probeCollisions(
-                    collisionProbe,
-                    player,
-                    context,
-                    attemptedExtents.minY,
-                    collisionTarget,
-                    context.getStart(),
-                    result.getInitialStartingVel(),
-                    attemptedExtents,
-                    canStep);
-            collisionProbeCache.put(key, collisions);
-        }
-        return collisions;
     }
 
     private List<SimulationContext> createSimulationContexts(
@@ -2292,79 +2316,6 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             context.setWorldData(world.copy());
             context.cacheEntityCollisionBoxesForMovementTick(entityCollisionBoxes);
             context.cacheHardCollidingEntityCollisionsForMovementTick(hardCollidingEntityCollisions);
-        }
-    }
-
-    private static final class CollisionProbeKey {
-        private final SimulationContext context;
-        private final long minY;
-        private final Vec3 target;
-        private final Vec3 playerPos;
-        private final PredVector initialStartingVelocity;
-        private final long attemptedMinX;
-        private final long attemptedMinY;
-        private final long attemptedMinZ;
-        private final long attemptedMaxX;
-        private final long attemptedMaxY;
-        private final long attemptedMaxZ;
-        private final boolean canStep;
-
-        private CollisionProbeKey(
-                SimulationContext context,
-                double minY,
-                Vec3 target,
-                Vec3 playerPos,
-                PredVector initialStartingVelocity,
-                SimpleCollisionBox attemptedMovementExtents,
-                boolean canStep) {
-            this.context = context;
-            this.minY = Double.doubleToLongBits(minY);
-            this.target = target;
-            this.playerPos = playerPos;
-            this.initialStartingVelocity = initialStartingVelocity;
-            this.attemptedMinX = Double.doubleToLongBits(attemptedMovementExtents.minX);
-            this.attemptedMinY = Double.doubleToLongBits(attemptedMovementExtents.minY);
-            this.attemptedMinZ = Double.doubleToLongBits(attemptedMovementExtents.minZ);
-            this.attemptedMaxX = Double.doubleToLongBits(attemptedMovementExtents.maxX);
-            this.attemptedMaxY = Double.doubleToLongBits(attemptedMovementExtents.maxY);
-            this.attemptedMaxZ = Double.doubleToLongBits(attemptedMovementExtents.maxZ);
-            this.canStep = canStep;
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (this == other) {
-                return true;
-            }
-            return other instanceof CollisionProbeKey key
-                    && context == key.context
-                    && minY == key.minY
-                    && target.equals(key.target)
-                    && playerPos.equals(key.playerPos)
-                    && initialStartingVelocity == key.initialStartingVelocity
-                    && attemptedMinX == key.attemptedMinX
-                    && attemptedMinY == key.attemptedMinY
-                    && attemptedMinZ == key.attemptedMinZ
-                    && attemptedMaxX == key.attemptedMaxX
-                    && attemptedMaxY == key.attemptedMaxY
-                    && attemptedMaxZ == key.attemptedMaxZ
-                    && canStep == key.canStep;
-        }
-
-        @Override
-        public int hashCode() {
-            int result = System.identityHashCode(context);
-            result = 31 * result + Long.hashCode(minY);
-            result = 31 * result + target.hashCode();
-            result = 31 * result + playerPos.hashCode();
-            result = 31 * result + System.identityHashCode(initialStartingVelocity);
-            result = 31 * result + Long.hashCode(attemptedMinX);
-            result = 31 * result + Long.hashCode(attemptedMinY);
-            result = 31 * result + Long.hashCode(attemptedMinZ);
-            result = 31 * result + Long.hashCode(attemptedMaxX);
-            result = 31 * result + Long.hashCode(attemptedMaxY);
-            result = 31 * result + Long.hashCode(attemptedMaxZ);
-            return 31 * result + Boolean.hashCode(canStep);
         }
     }
 }

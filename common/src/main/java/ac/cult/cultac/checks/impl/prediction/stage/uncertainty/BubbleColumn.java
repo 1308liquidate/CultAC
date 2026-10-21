@@ -16,6 +16,16 @@ import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 
 public class BubbleColumn implements UncertaintyHandler {
     @Override
+    public boolean skipsContext(CultPlayer player, SimulationContext context, PredictionResult lastResult) {
+        return lastResult == null
+                || !lastResult
+                        .getSimulationContext()
+                        .getWorldData()
+                        .getBubbleColumn()
+                        .hasBubbleColumn();
+    }
+
+    @Override
     public PredVector handleUncertainty(
             CultPlayer player,
             ValidMovements valid,

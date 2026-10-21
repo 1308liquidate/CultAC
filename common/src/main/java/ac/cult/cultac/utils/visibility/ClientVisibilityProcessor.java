@@ -14,6 +14,7 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItem;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItemOn;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import java.util.List;
 
@@ -76,9 +77,15 @@ public final class ClientVisibilityProcessor extends CultProcessor implements Ch
                 () -> visibility.blockFaceHidden(position, face, positionError()));
     }
 
-    public boolean entityHidden(PacketEntity entity) {
+    public ClientVisibility.Sight entitySight(PacketEntity entity) {
+        if (untrackedView(entity)) return ClientVisibility.Sight.VISIBLE;
+        return player.compensatedWorld.withSelectionSnapshot(() -> visibility.entitySight(entity, positionError()));
+    }
+
+    public boolean entityHidden(PacketEntity entity, SimpleCollisionBox box) {
         if (untrackedView(entity)) return false;
-        return player.compensatedWorld.withSelectionSnapshot(() -> visibility.entityHidden(entity, positionError()));
+        return player.compensatedWorld.withSelectionSnapshot(
+                () -> visibility.entityHidden(entity, box, positionError()));
     }
 
     public List<ClientVisibility.ItemPick> attackItemPicks() {

@@ -168,7 +168,7 @@ class EntityTrackingParityTest {
     }
 
     private static void checkKeptBounds(ReachInterpolationData data, String where) {
-        ReachInterpolationData fresh = data.copy();
+        ReachInterpolationData fresh = fresh(data);
         String kept = bits(data.getPossibleMovementLocationCombined(new SimpleCollisionBox()));
         assertEquals(bits(fresh.getPossibleMovementLocationCombined(new SimpleCollisionBox())), kept, where);
         assertEquals(kept, bits(data.getPossibleMovementLocationCombined(new SimpleCollisionBox())), where);
@@ -306,14 +306,8 @@ class EntityTrackingParityTest {
                 long op = random.nextLong();
                 forceSort(reference.player.compensatedEntities);
                 String before = current.digest();
-                keepBounds(false);
-                String expected;
-                try {
-                    old.apply(op);
-                    expected = old.digest();
-                } finally {
-                    keepBounds(true);
-                }
+                old.apply(op);
+                String expected = old.digest();
                 current.apply(op);
                 String actual = current.digest();
                 assertEquals(expected, actual, "seed=" + seed + " step=" + step);
@@ -359,8 +353,7 @@ class EntityTrackingParityTest {
                     new ReachInterpolationData[] {entity.newPacketLocation, entity.oldPacketLocation}) {
                 if (data == null) continue;
                 if (data.usesSteppedInterpolation() && data.hasActiveInterpolationTarget()) activeStepped++;
-                // A copy starts without kept bounds, so it computes them from the same inputs.
-                ReachInterpolationData copy = data.copy();
+                ReachInterpolationData copy = fresh(data);
                 String kept = bits(data.getPossibleMovementLocationCombined(new SimpleCollisionBox()));
                 assertEquals(bits(copy.getPossibleMovementLocationCombined(new SimpleCollisionBox())), kept, where);
                 assertEquals(kept, bits(data.getPossibleMovementLocationCombined()), where);
@@ -674,11 +667,17 @@ class EntityTrackingParityTest {
         return (List<PacketEntity>) field.get(entities);
     }
 
-    /** Off, every ReachInterpolationData computes its movement bounds at each read, as before the cache. */
-    private static void keepBounds(boolean keep) throws Exception {
-        Field field = ReachInterpolationData.class.getDeclaredField("keepsBounds");
-        field.setAccessible(true);
-        field.setBoolean(null, keep);
+    /** A copy of data that computes its movement bounds from the same inputs at its first read. */
+    private static ReachInterpolationData fresh(ReachInterpolationData data) {
+        ReachInterpolationData copy = data.copy();
+        try {
+            Field field = ReachInterpolationData.class.getDeclaredField("boundsValid");
+            field.setAccessible(true);
+            field.setBoolean(copy, false);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
+        return copy;
     }
 
     private static ArrayDeque<?> queue(ReachInterpolationData data) throws Exception {

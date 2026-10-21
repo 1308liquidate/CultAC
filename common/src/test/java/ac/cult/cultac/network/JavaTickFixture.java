@@ -76,6 +76,11 @@ final class JavaTickFixture implements AutoCloseable {
         // Let the block-change timing uncertainty expire at client tick boundaries.
         for (int tick = 0; tick < 3; tick++) player.compensatedWorld.removeInvalidPistonLikeStuff(0);
         player.getSetbackTeleportUtil().hasFullyLoaded = true;
+        resetTimerBalances();
+    }
+
+    /** Gives the timer checks ten seconds of client ticks ahead of the wall clock. */
+    void resetTimerBalances() throws Exception {
         // These synchronous fixtures exercise packet ordering, not wall-clock pacing.
         setField(
                 AbstractTimerCheck.class,

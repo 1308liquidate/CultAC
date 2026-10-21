@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.checks.Check;
+import ac.cult.cultac.checks.impl.combat.EntityReach;
+import ac.cult.cultac.checks.impl.combat.PlayerReach;
 import ac.cult.cultac.checks.impl.visibility.AttackMobVisibility;
 import ac.cult.cultac.checks.impl.visibility.AttackPlayerVisibility;
 import ac.cult.cultac.checks.impl.visibility.BreakVisibility;
@@ -240,6 +243,82 @@ class InteractionVisibilityTest {
             assertTrue(setup.visibility.entityHidden(new SimpleCollisionBox(.2, 64, 1.5011, .8, 65.8, 1.8), 0));
             setup.wall("stone");
             assertTrue(setup.visibility.entityHidden(new SimpleCollisionBox(.2, 64, 1.5005, .8, 65.8, 1.8), 0));
+        }
+    }
+
+    @Test
+    void anEntityReachEnforcesIsLeftToReachBeyondEveryPickRange() throws Exception {
+        for (int type : new int[] {EntityTypeIds.PLAYER, EntityTypeIds.COW, EntityTypeIds.OAK_BOAT}) {
+            try (var setup = new Setup()) {
+                var players = setup.check(AttackPlayerVisibility.class);
+                var mobs = setup.check(AttackMobVisibility.class);
+                setup.check(PlayerReach.class);
+                setup.check(EntityReach.class);
+                setup.block(0, 64, 2, "air");
+                // 3.7 blocks from the eye to the hitbox: out of reach, in plain sight.
+                setup.fixture.player.compensatedEntities.addEntity(42, type, new Vec3(.5, 64, 2.5), 0, 0, 0);
+                assertFalse(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
+                assertEquals(0, players.violations + mobs.violations);
+            }
+        }
+    }
+
+    @Test
+    void targetsReachDoesNotEnforceStayHiddenBeyondRange() throws Exception {
+        for (int type : new int[] {EntityTypeIds.SHULKER, EntityTypeIds.ARMOR_STAND}) {
+            try (var setup = new Setup()) {
+                var mobs = setup.check(AttackMobVisibility.class);
+                setup.check(EntityReach.class);
+                setup.block(0, 64, 2, "air");
+                setup.fixture.player.compensatedEntities.addEntity(42, type, new Vec3(.5, 64, 2.5), 0, 0, 0);
+                assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled(), "type=" + type);
+                assertEquals(1, mobs.violations, "type=" + type);
+            }
+        }
+        try (var setup = new Setup()) {
+            var reach = setup.check(EntityReach.class);
+            setup.block(0, 64, 2, "air");
+            setup.fixture.player.compensatedEntities.addEntity(
+                    42, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 2.5), 0, 0, 0);
+            var boat = setup.fixture.player.compensatedEntities.getEntity(42);
+            assertTrue(reach.enforcesReach(boat), "A Java client's boat is left to reach");
+            assertTrue(reach.measuresBeyondReach(boat));
+            setup.fixture.player.movementPlatform = MovementPlatform.BEDROCK;
+            assertFalse(reach.enforcesReach(boat), "Reach does not enforce a Bedrock client's boat");
+        }
+    }
+
+    @Test
+    void anOccludedEyeInRangeIsNotRescuedByAnotherEyeBeyondRange() throws Exception {
+        try (var setup = new Setup()) {
+            var mobs = setup.check(AttackMobVisibility.class);
+            // Standing and crouching eyes are within 2.95 blocks; the crawling eye is 3.08 blocks away.
+            setup.fixture.player.compensatedEntities.addEntity(
+                    42, EntityTypeIds.SILVERFISH, new Vec3(.5, 65.3, 1.65), 0, 0, 0);
+            assertFalse(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
+            setup.fixture
+                    .player
+                    .checkManager
+                    .getListener(ClientVisibilityProcessor.class)
+                    .onPlayerTickEnd(null);
+            // Blocks every ray from the two eyes in range; the crawling eye still sees under it.
+            setup.block(0, 65, -1, "stone");
+            assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
+            assertEquals(1, mobs.violations);
+            setup.fixture
+                    .player
+                    .checkManager
+                    .getListener(ClientVisibilityProcessor.class)
+                    .onPlayerTickEnd(null);
+            setup.fixture
+                    .player
+                    .compensatedEntities
+                    .getSelf()
+                    .entityInteractionRange
+                    .replace(3.2, List.of());
+            assertFalse(
+                    setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled(),
+                    "Within range the crawling eye sees it");
         }
     }
 
