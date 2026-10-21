@@ -173,6 +173,15 @@ public final class JavaFallDistance {
                 && Math.abs(movementY - down.inMovementSpace(stuckSpeedY)) <= 1.0E-7D;
     }
 
+    /**
+     * Entity#move's verticalCollisionBelow, which sets a locally controlled actor's onGround: the requested Y is
+     * downward and collision changed it, by landing on the probed clip or by a step-up. A requested Y of zero is never
+     * below, even at rest on a block.
+     */
+    static boolean collidesBelow(double requestedY, Moved moved) {
+        return requestedY < 0.0D && (moved.landed() || Math.abs(moved.movement().y - requestedY) > 1.0E-7D);
+    }
+
     private static boolean crossesResetBlock(CultPlayer player, SimulationContext context, Vec3 movement) {
         Vec3 from = context.getStart();
         Vec3 to = from.add(movement.normalize().scale(Math.min(movement.length(), 8.0)));

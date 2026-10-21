@@ -138,8 +138,7 @@ public final class JavaMovementEngine implements MovementEngine {
             var states = new ArrayList<JavaPredictionCarry.State>(velocities.size());
             var nextVelocities = new LinkedHashSet<Vec3>(velocities.size() * 2);
             for (Vec3 velocity : velocities) {
-                Vec3 stepped =
-                        JavaInsideBlockEffects.stepOn(player, result.getSimulationContext(), moved.landed(), velocity);
+                Vec3 stepped = JavaInsideBlockEffects.stepOn(player, result, moved, velocity);
                 var effects = JavaInsideBlockEffects.resolve(
                         player, result, scan, moved.fallDistance(), stepped, moved.landed());
                 effects = afterActorTick(player, result.getSimulationContext(), moved.movement(), effects);

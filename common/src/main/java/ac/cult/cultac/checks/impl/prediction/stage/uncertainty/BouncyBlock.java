@@ -36,11 +36,10 @@ public class BouncyBlock implements UncertaintyHandler {
 
         int onBlock = lastContext.getSimulationContext().getWorldData().getOnBlock();
 
-        // This could be improved...
-        //
-        // Player velocity can multiply 0.4-0.45 (guess on max) when the player is on slime with
-        // a Y velocity of 0 to 0.1.  Because 0.03 we don't know this so just give lenience here
-        // A living vehicle's carried velocity already holds SlimeBlock#stepOn (JavaInsideBlockEffects#stepOn).
+        // SlimeBlock#stepOn scales the carried horizontal velocity by 0.4 to 0.42 below 0.1 vertical speed. A Java
+        // living vehicle's carried velocity holds that scale (JavaInsideBlockEffects#stepOn). Every other actor gets a
+        // box from its velocity to zero: a player's 0.03 movement threshold hides whether stepOn ran, and a boat runs
+        // it twice a tick.
         if (BlockIds.is(onBlock, BlockIds.SLIME_BLOCK)
                 && !JavaInsideBlockEffects.carriesStepOn(player, lastContext.getSimulationContext())) {
             SimpleCollisionBox expandToZero = new SimpleCollisionBox(start, start);

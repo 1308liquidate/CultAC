@@ -115,16 +115,18 @@ public final class JavaInsideBlockEffects {
     }
 
     /**
-     * SlimeBlock#stepOn, which Entity#applyEffectsFromBlocks runs before the inside-block callbacks when the actor
-     * ends its move on the ground: below 0.1 vertical speed it scales the carried horizontal velocity by
-     * 0.4 + |y| * 0.2, ahead of the next tick's LivingEntity#aiStep movement threshold and ridden input.
+     * SlimeBlock#stepOn, which Entity#applyEffectsFromBlocks runs before the inside-block callbacks when Entity#move
+     * left the actor on the ground ({@link JavaFallDistance#collidesBelow}): below 0.1 vertical speed it scales the
+     * carried horizontal velocity by 0.4 + |y| * 0.2, ahead of the next tick's LivingEntity#aiStep movement threshold
+     * and ridden input.
      */
-    public static Vec3 stepOn(CultPlayer player, SimulationContext context, boolean onGround, Vec3 velocity) {
-        if (!onGround
-                || !carriesStepOn(player, context)
+    public static Vec3 stepOn(CultPlayer player, PredictionResult result, JavaFallDistance.Moved moved, Vec3 velocity) {
+        SimulationContext context = result.getSimulationContext();
+        if (!carriesStepOn(player, context)
                 || !BlockIds.is(context.getWorldData().getOnBlock(), BlockIds.SLIME_BLOCK)
                 // Entity#isSteppingCarefully: the vehicle's shared crouching flag.
-                || (context.getVehicle().actionSharedFlags & 2) != 0) return velocity;
+                || (context.getVehicle().actionSharedFlags & 2) != 0
+                || !JavaFallDistance.collidesBelow(attemptedMovement(result).y, moved)) return velocity;
         double absDeltaY = Math.abs(velocity.y);
         if (absDeltaY >= 0.1) return velocity;
         double scale = 0.4 + absDeltaY * 0.2;

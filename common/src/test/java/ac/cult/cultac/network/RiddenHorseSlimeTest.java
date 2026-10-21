@@ -17,8 +17,8 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * A rider turning a horse that walks forward over slime, replayed from a 26.3 client's capture: four consecutive
- * horse positions, the rider's yaw and pitch of the last two moves, and the forward key the rider held throughout.
+ * A horse the rider walks forward over slime: moves replayed from a 26.3 client's capture of a turning rider, and moves
+ * that the 26.3 client sources give for a step-up, a horse without gravity, a shifting horse and a heavier horse.
  */
 class RiddenHorseSlimeTest {
     private static final ServerboundPlayerInput FORWARD =
@@ -31,11 +31,15 @@ class RiddenHorseSlimeTest {
     private static final double GROUNDED_Y = -0.0784000015258789;
     // LivingEntity#travelInAir: slime's 0.8F friction times the 0.91F air drag.
     private static final double SLIME_FRICTION = 0.8F * 0.91F;
+    // LivingEntity#getFrictionInfluencedSpeed: the grounded horse's ridden input on slime's 0.8F friction.
+    private static final double GROUND_INPUT = SPEED * (0.21600002F / (0.8F * 0.8F * 0.8F));
+    private static final float[] EAST = {-90.0F, -90.0F};
+    private static final float[] LEVEL = {0.0F, 0.0F};
 
     /**
      * The z the horse carries into the last move, 0.728 * -0.0087878 = -0.0063975, is above LivingEntity#aiStep's
-     * 0.003 cutoff, but SlimeBlock#stepOn scales it by 0.41568 to -0.0026593 at the end of the move before, so the
-     * client zeroes it and moves z = +0.0328116, the ridden input alone. It flagged VehicleOffset (0, 0, 0.006398).
+     * 0.003 cutoff, but SlimeBlock#stepOn at the end of the move before scales it by 0.41568 to -0.0026593, which the
+     * client zeroes: the last move's z, +0.0328116, is the ridden input alone.
      */
     @Test
     void theSlimeScaledCarriedAxisFallsUnderTheMovementThreshold() throws Exception {
@@ -51,8 +55,7 @@ class RiddenHorseSlimeTest {
 
     /**
      * The ridden input (+0.0195908) opposes the carried x (0.728 * -0.0127028 = -0.0092476). SlimeBlock#stepOn scales
-     * only that carried x, to -0.0038441, so the client moves x = +0.0157467, past the unscaled sum +0.0103432. It
-     * flagged VehicleOffset (0.005404, 0, 0).
+     * only that carried x, to -0.0038441, so the client moves x = +0.0157467, past the unscaled sum +0.0103432.
      */
     @Test
     void slimeScalesTheCarriedVelocityAndNotTheRiddenInput() throws Exception {
@@ -67,33 +70,127 @@ class RiddenHorseSlimeTest {
     }
 
     /**
+     * Entity#move sets onGround from verticalCollisionBelow: a downward requested move that collision changes. A
+     * step-up onto a slime block turns the requested -0.0784 into +1, so SlimeBlock#stepOn scales the velocity the
+     * horse carries off the step by 0.41568.
+     */
+    @Test
+    void slimeScalesTheVelocityCarriedOffAStepUp() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            slime(f, 245, 258, 63, 154, 161);
+            slime(f, 251, 258, 64, 154, 161);
+            Vec3 start = new Vec3(250.2D, 64.0D, 157.5D);
+            mount(f, start, true);
+            Vec3 seed = new Vec3(0.08D, GROUNDED_Y, 0.0D);
+            Vec3 step = new Vec3(start.x + seed.x + GROUND_INPUT, 65.0D, start.z);
+            Vec3 carried = carried(start, step);
+            Vec3 end = step.add(carried.x + GROUND_INPUT, 0.0D, 0.0D);
+            assertRides(f, seed, List.of(step, end), EAST, LEVEL, true, carried);
+        }
+    }
+
+    /**
+     * A horse without gravity requests no vertical move, so Entity#move leaves verticalCollisionBelow and onGround
+     * false while it rests on slime: SlimeBlock#stepOn does not run, and the horse carries its air velocity unscaled.
+     */
+    @Test
+    void aHorseWithoutGravityRestingOnSlimeCarriesItsVelocityUnscaled() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            slime(f, 247, 251, 63, 155, 159);
+            Vec3 start = new Vec3(248.0D, 64.0D, 157.5D);
+            mount(f, start, false).hasGravity = false;
+            Vec3 seed = new Vec3(0.05D, 0.0D, 0.0D);
+            // LivingEntity#getFlyingSpeed of a horse that a player controls.
+            double input = SPEED * 0.1F;
+            Vec3 first = start.add(seed.x + input, 0.0D, 0.0D);
+            Vec3 carried = new Vec3((first.x - start.x) * 0.91F, 0.0D, 0.0D);
+            Vec3 second = first.add(carried.x + input, 0.0D, 0.0D);
+            assertRides(f, seed, List.of(first, second), EAST, LEVEL, false, carried);
+        }
+    }
+
+    /** Entity#isSteppingCarefully reads the horse's own shift flag: a shifting horse carries its velocity unscaled. */
+    @Test
+    void aShiftingHorseCarriesItsVelocityOverSlimeUnscaled() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            slime(f, 247, 251, 63, 155, 159);
+            Vec3 start = new Vec3(248.0D, 64.0D, 157.5D);
+            mount(f, start, true).actionSharedFlags = 2;
+            Vec3 seed = new Vec3(0.08D, GROUNDED_Y, 0.0D);
+            Vec3 first = start.add(seed.x + GROUND_INPUT, 0.0D, 0.0D);
+            Vec3 carried = new Vec3((first.x - start.x) * SLIME_FRICTION, GROUNDED_Y, 0.0D);
+            Vec3 second = first.add(carried.x + GROUND_INPUT, 0.0D, 0.0D);
+            assertRides(f, seed, List.of(first, second), EAST, LEVEL, true, carried);
+        }
+    }
+
+    /**
+     * A 0.11 gravity attribute leaves a grounded horse a vertical delta of -0.11 * 0.98F = -0.1078, outside
+     * SlimeBlock#stepOn's 0.1 bound, so the horse carries its velocity over slime unscaled.
+     */
+    @Test
+    void aHorseLeavingAVerticalDeltaOfPointOneCarriesItsVelocityOverSlimeUnscaled() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            slime(f, 247, 251, 63, 155, 159);
+            Vec3 start = new Vec3(248.0D, 64.0D, 157.5D);
+            PacketEntityHorse horse = mount(f, start, true);
+            horse.gravity = 0.11D;
+            double groundedY = (0.0D - horse.gravity) * 0.98F;
+            Vec3 seed = new Vec3(0.08D, groundedY, 0.0D);
+            Vec3 first = start.add(seed.x + GROUND_INPUT, 0.0D, 0.0D);
+            Vec3 carried = new Vec3((first.x - start.x) * SLIME_FRICTION, groundedY, 0.0D);
+            Vec3 second = first.add(carried.x + GROUND_INPUT, 0.0D, 0.0D);
+            assertRides(f, seed, List.of(first, second), EAST, LEVEL, true, carried);
+        }
+    }
+
+    /**
      * Seeds the velocity the client carries into the third position's move, rides the last two moves, and requires
      * each to predict exactly and the velocity carried between them to be the client's.
      */
     private static void assertCarriesStepOn(Scenario scenario) throws Exception {
         try (var f = new JavaTickFixture()) {
             List<Vec3> positions = scenario.positions();
-            mountOnSlime(f, positions.get(1));
-            f.player
-                    .checkManager
-                    .getSimulationProcessor()
-                    .seedStartingVelocity(carried(positions.get(0), positions.get(1)));
-            // AbstractHorse#tick runs before LocalPlayer#rideTick hands it this tick's keys.
-            f.input(FORWARD);
-            f.tickEnd();
-
-            PredictionResult first = ride(f, positions.get(2), scenario.yaws()[0], scenario.pitches()[0]);
-            assertTrue(exact(first), explain(first));
-            Set<Vec3> starting =
-                    Set.copyOf(f.player.checkManager.getSimulationProcessor().getValidPlayerStartingVels());
-
-            PredictionResult second = ride(f, positions.get(3), scenario.yaws()[1], scenario.pitches()[1]);
-            assertTrue(exact(second), explain(second));
-            Vec3 carried = carried(positions.get(1), positions.get(2));
-            assertTrue(
-                    starting.stream().anyMatch(velocity -> velocity.distanceToSqr(carried) < 1.0E-18),
-                    "carried " + starting + ", the client carries " + carried);
+            slime(f, 247, 251, 63, 155, 159);
+            mount(f, positions.get(1), true);
+            assertRides(
+                    f,
+                    carried(positions.get(0), positions.get(1)),
+                    positions.subList(2, 4),
+                    scenario.yaws(),
+                    scenario.pitches(),
+                    true,
+                    carried(positions.get(1), positions.get(2)));
         }
+    }
+
+    /**
+     * Seeds {@code seed} as the velocity carried into the first move, rides the two moves in {@code to} holding forward,
+     * and requires each to predict exactly and the velocity carried between them to be {@code carried}.
+     */
+    private static void assertRides(
+            JavaTickFixture f,
+            Vec3 seed,
+            List<Vec3> to,
+            float[] yaws,
+            float[] pitches,
+            boolean onGround,
+            Vec3 carried) {
+        f.player.checkManager.getSimulationProcessor().seedStartingVelocity(seed);
+        // AbstractHorse#tick runs before LocalPlayer#rideTick hands it this tick's keys.
+        f.input(FORWARD);
+        f.tickEnd();
+
+        PredictionResult first = ride(f, to.get(0), yaws[0], pitches[0], onGround);
+        assertTrue(exact(first), "first move: " + explain(first));
+        Set<Vec3> starting =
+                Set.copyOf(f.player.checkManager.getSimulationProcessor().getValidPlayerStartingVels());
+
+        PredictionResult second = ride(f, to.get(1), yaws[1], pitches[1], onGround);
+        assertTrue(exact(second), "second move: " + explain(second) + ", carried " + starting);
+        assertTrue(
+                starting.stream().anyMatch(velocity -> velocity.distanceToSqr(carried) < 1.0E-18),
+                "carried " + starting + ", the client carries " + carried);
     }
 
     /**
@@ -112,34 +209,40 @@ class RiddenHorseSlimeTest {
         return text.toString();
     }
 
-    private static PredictionResult ride(JavaTickFixture f, Vec3 to, float yaw, float pitch) {
+    private static PredictionResult ride(JavaTickFixture f, Vec3 to, float yaw, float pitch, boolean onGround) {
         f.player.xRot = yaw;
         f.player.yRot = pitch;
         f.input(FORWARD);
-        return f.rideTick(to, true);
+        return f.rideTick(to, onGround);
     }
 
-    /** The captured 5x5 slime patch, and a saddled horse at {@code start} on it with the player riding. */
-    private static void mountOnSlime(JavaTickFixture f, Vec3 start) {
+    /** Slime blocks at height {@code y} over x0..x1 and z0..z1, in the loaded chunks around the captured patch. */
+    private static void slime(JavaTickFixture f, int x0, int x1, int y, int z0, int z1) {
         for (int cx = 14; cx <= 16; cx++) {
             for (int cz = 8; cz <= 10; cz++) f.player.compensatedWorld.ensureValidationChunkLoaded(cx, cz);
         }
-        for (int x = 247; x <= 251; x++) {
-            for (int z = 155; z <= 159; z++) {
-                f.player.compensatedWorld.updateBlock(new BlockPos(x, 63, z), BlockIds.SLIME_BLOCK.defaultState());
+        for (int x = x0; x <= x1; x++) {
+            for (int z = z0; z <= z1; z++) {
+                f.player.compensatedWorld.updateBlock(new BlockPos(x, y, z), BlockIds.SLIME_BLOCK.defaultState());
             }
         }
+    }
+
+    /** A saddled horse at {@code start} with the player riding it. */
+    private static PacketEntityHorse mount(JavaTickFixture f, Vec3 start, boolean onGround) {
         for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
         f.player.compensatedEntities.addEntity(HORSE, EntityTypeIds.HORSE, start, 0, 0, 0);
         PacketEntityHorse horse = (PacketEntityHorse) f.player.compensatedEntities.getEntity(HORSE);
         horse.hasSaddle = true;
         horse.isTame = true;
         horse.movementSpeedAttribute = SPEED;
-        horse.onGround = true;
+        horse.onGround = onGround;
         f.setPassengers(HORSE, List.of(f.player.entityID));
         f.pongThrough(f.player.lastTransactionSent.get());
-        f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
+        f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.fromBoolean(onGround));
+        return horse;
     }
 
+    /** Four consecutive horse positions, and the rider's yaw and pitch of the last two moves. */
     private record Scenario(List<Vec3> positions, float[] yaws, float[] pitches) {}
 }
