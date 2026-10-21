@@ -25,6 +25,8 @@ import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import io.netty.util.concurrent.ScheduledFuture;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.AllArgsConstructor;
 
@@ -112,11 +114,14 @@ public class FairReach extends Check implements CheckListener {
     private void schedule(PendingMove move) {
         // Ensure the client has received this before MAX_PING_TIME, or apply them sooner if client responds in time
         player.latencyUtils.addRealTimeTaskNext(move);
-        player.nettyScheduler.runTaskInMs(move, max_ping_compensation);
+        player.user.getPacketExecutor().schedule((Callable<Void>) move, max_ping_compensation, TimeUnit.MILLISECONDS);
     }
 
-    /** One entity move, applied by whichever of its transaction or its deadline comes first. */
-    private final class PendingMove extends AtomicBoolean implements Runnable {
+    /**
+     * One entity move, applied by whichever of its transaction or its deadline comes first. The deadline runs it as a
+     * {@link Callable} through {@link CultPlayer#runSafely}.
+     */
+    private final class PendingMove extends AtomicBoolean implements Runnable, Callable<Void> {
         private final int entityId;
         private final double x;
         private final double y;
@@ -137,6 +142,12 @@ public class FairReach extends Check implements CheckListener {
         @Override
         public void run() {
             applyChanges(entityId, x, y, z, update, holdsShownPosition, this);
+        }
+
+        @Override
+        public Void call() {
+            player.runSafely(this);
+            return null;
         }
     }
 
