@@ -147,7 +147,64 @@ public class ReachInterpolationData {
             boolean isPointNine,
             PacketEntity entity,
             boolean uncertainInitialSteps) {
-        this.startingLocation = startingLocation.copy();
+        this(
+                startingLocation.copy(),
+                player,
+                x,
+                y,
+                z,
+                currentYaw,
+                currentPitch,
+                targetYaw,
+                targetPitch,
+                isPointNine,
+                entity,
+                uncertainInitialSteps);
+    }
+
+    /** The constructor without its defensive copy: the result owns {@code startingLocation}. */
+    public static ReachInterpolationData takingStart(
+            CultPlayer player,
+            SimpleCollisionBox startingLocation,
+            double x,
+            double y,
+            double z,
+            float currentYaw,
+            float currentPitch,
+            float targetYaw,
+            float targetPitch,
+            boolean isPointNine,
+            PacketEntity entity,
+            boolean uncertainInitialSteps) {
+        return new ReachInterpolationData(
+                startingLocation,
+                player,
+                x,
+                y,
+                z,
+                currentYaw,
+                currentPitch,
+                targetYaw,
+                targetPitch,
+                isPointNine,
+                entity,
+                uncertainInitialSteps);
+    }
+
+    private ReachInterpolationData(
+            SimpleCollisionBox startingLocation,
+            CultPlayer player,
+            double x,
+            double y,
+            double z,
+            float currentYaw,
+            float currentPitch,
+            float targetYaw,
+            float targetPitch,
+            boolean isPointNine,
+            PacketEntity entity,
+            boolean uncertainInitialSteps) {
+        this.startingLocation = startingLocation;
         this.targetLocation = GetBoundingBox.getBoundingBoxFromPosAndSize(
                 x, y, z, BoundingBoxSize.getWidth(player, entity), BoundingBoxSize.getHeight(player, entity));
         this.currentYaw = currentYaw;
@@ -828,7 +885,7 @@ public class ReachInterpolationData {
         boundsValid = false;
         // CultACBukkitLoaderPlugin.staticGetLogger().info(ChatColor.BLUE + "Updated new starting location as second
         // trans hasn't arrived " + startingLocation);
-        this.startingLocation = combineCollisionBox(startingLocation, possibleLocationCombined);
+        combineCollisionBox(startingLocation, possibleLocationCombined, startingLocation);
         // CultAC.staticGetLogger().info(ChatColor.BLUE + "Finished updating new starting location as second trans
         // hasn't arrived " + startingLocation);
     }

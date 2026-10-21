@@ -106,6 +106,7 @@ public class PacketEntity {
     private SimpleCollisionBox exactAfterClientTickBox;
     // Holds the current interpolation location only while carrying the target reads its position.
     private SimpleCollisionBox carryLocationBox;
+    private SimpleCollisionBox oldLocationBox;
     private @Nullable ReachInterpolationData settledInterpolation;
     private @Nullable Vec3 settledPhysicalPosition;
     // Valid while the position, the world and its chunk epoch are the ones it was computed for.
@@ -136,8 +137,19 @@ public class PacketEntity {
         this.clientPhysicalPosition = spawnPosition;
         SimpleCollisionBox spawnBox = GetBoundingBox.getPacketEntityBoundingBox(cultPlayer, x, y, z, this);
         boolean ridingInVehicle = cultPlayer.compensatedEntities.getSelf().inVehicle();
-        this.newPacketLocation =
-                new ReachInterpolationData(cultPlayer, spawnBox, x, y, z, !ridingInVehicle, this, false);
+        this.newPacketLocation = ReachInterpolationData.takingStart(
+                cultPlayer,
+                spawnBox,
+                x,
+                y,
+                z,
+                clientPhysicalYaw,
+                clientPhysicalPitch,
+                clientPhysicalYaw,
+                clientPhysicalPitch,
+                !ridingInVehicle,
+                this,
+                false);
     }
 
     public int getType() {
@@ -258,7 +270,7 @@ public class PacketEntity {
                 placed ? packetPositionBox(player) : interpolationStartingLocation(player);
         boolean ridingInVehicle = player.compensatedEntities.getSelf().inVehicle();
         this.oldPacketLocation = newPacketLocation;
-        this.newPacketLocation = new ReachInterpolationData(
+        this.newPacketLocation = ReachInterpolationData.takingStart(
                 player,
                 startingLocation,
                 desyncClientPos.x,
@@ -319,7 +331,7 @@ public class PacketEntity {
         if (living && (newPacketLocation == null || !newPacketLocation.usesSteppedInterpolation())) {
             SimpleCollisionBox start = interpolationStartingLocation(player);
             Vec3 current = positionFromCollisionBox(start);
-            newPacketLocation = new ReachInterpolationData(
+            newPacketLocation = ReachInterpolationData.takingStart(
                     player,
                     start,
                     current.x,
@@ -420,7 +432,7 @@ public class PacketEntity {
             return;
         }
         this.oldPacketLocation = null;
-        this.newPacketLocation = new ReachInterpolationData(
+        this.newPacketLocation = ReachInterpolationData.takingStart(
                 player,
                 startingLocation,
                 desyncClientPos.x,
@@ -643,7 +655,7 @@ public class PacketEntity {
         // Handle uncertainty of second transaction spanning over multiple ticks
         if (oldPacketLocation != null) {
             oldPacketLocation.tickMovement(true, tickingReliably);
-            newPacketLocation.updatePossibleStartingLocation(oldPacketLocation.getPossibleMovementLocationCombined());
+            widenStartingLocationByOldLocation();
         }
         if (idleProbe
                 && newPacketLocation == interpolation
@@ -689,7 +701,7 @@ public class PacketEntity {
         stepInterpolation(player, true);
         if (oldPacketLocation != null) {
             oldPacketLocation.tickMovement(true, true);
-            newPacketLocation.updatePossibleStartingLocation(oldPacketLocation.getPossibleMovementLocationCombined());
+            widenStartingLocationByOldLocation();
         }
     }
 
@@ -727,7 +739,7 @@ public class PacketEntity {
 
         if (oldPacketLocation != null) {
             oldPacketLocation.tickMovement(true, true);
-            newPacketLocation.updatePossibleStartingLocation(oldPacketLocation.getPossibleMovementLocationCombined());
+            widenStartingLocationByOldLocation();
         }
 
         this.clientPhysicalPosition = physicalPosition;
@@ -782,6 +794,12 @@ public class PacketEntity {
         }
         interpolationData.shiftTargetRotationByPhysical(clientPhysicalYaw, clientPhysicalPitch);
         syncDesyncClientPosToInterpolationTarget(interpolationData);
+    }
+
+    private void widenStartingLocationByOldLocation() {
+        if (oldLocationBox == null) oldLocationBox = new SimpleCollisionBox();
+        newPacketLocation.updatePossibleStartingLocation(
+                oldPacketLocation.getPossibleMovementLocationCombined(oldLocationBox));
     }
 
     private void syncDesyncClientPosToInterpolationTarget(ReachInterpolationData interpolationData) {
