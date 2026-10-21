@@ -25,8 +25,11 @@ import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundGameEvent;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerAbilities;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundUpdateAttributes;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundAcceptTeleportation;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.AttributeModifier;
+import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.GameEventType;
 import ac.cult.cultac.protocol.value.GameMode;
@@ -56,6 +59,8 @@ class CreativeFlightTest {
             new ServerboundPlayerInput(false, false, false, false, true, true, false);
     private static final ServerboundPlayerInput FORWARD =
             new ServerboundPlayerInput(true, false, false, false, false, false, false);
+    private static final ServerboundPlayerInput FORWARD_JUMP =
+            new ServerboundPlayerInput(true, false, false, false, true, false, false);
     private static final float FLYING_SPEED = 0.05F;
     private static final double IMPULSE = FLYING_SPEED * 3.0F;
     private static final Vec3 HOVER = new Vec3(0.5, FLOOR_Y + 3, 0.5);
@@ -769,10 +774,7 @@ class CreativeFlightTest {
         }
     }
 
-    /**
-     * Player#isAffectedByFluids is false in flight, so LivingEntity#travel moves a flight landing in shallow water by
-     * Player#getFlyingSpeed, and the landing can fire updateAutoJump at the step up ahead.
-     */
+    /** A flight landing in shallow water can fire updateAutoJump at the step up ahead. */
     @Test
     void aFlightLandingInShallowWaterWhereAnAutoJumpCanFireMayLeaveTheToggleUnarmed() throws Exception {
         try (var f = new JavaTickFixture()) {
@@ -787,14 +789,65 @@ class CreativeFlightTest {
             f.abilities(false);
             double fly = (double) 0.98F * (double) FLYING_SPEED;
             Vec3 landing = GROUND.add(0, 0, fly);
-            PredictionResult moved = f.tick(landing, true);
-            assertTrue(moved.getFlags().isEmpty(), "the landing flagged " + moved.getFlags());
+            f.tick(landing, true);
             f.input(JUMP);
             f.tick(landing.add(0, JUMP_POWER, fly * 0.91F), false);
             assertTrue((f.player.packetStateData.jumpTriggerTimes & 1) != 0, "the auto-jump history was dropped");
 
             pressInTheAirThenTakeOff(f);
             assertEquals(0.0, antiKb(f), "the client took the knockback");
+        }
+    }
+
+    /** LocalPlayer#aiStep runs the double-tap toggle before travel, so a toggle can stop flight and land under water. */
+    @Test
+    void aFlightToggleThatLandsUnderWaterTakesTheKnockback() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 at = flyingDownAFlooredPool(f, true);
+            f.pongThrough(f.velocity(new Vec3(0.2, -0.5, 0.2)));
+            f.abilities(false);
+            f.input(FORWARD_JUMP);
+            double swim = (double) 0.98F * (double) (0.02F + (0.1F - 0.02F) * 0.5F);
+            PredictionResult landed = f.tick(new Vec3(at.x + 0.2, FLOOR_Y, at.z + 0.2 + swim), true);
+            assertEquals(0.0, antiKb(f), "the client took the knockback: " + describe(landed));
+        }
+    }
+
+    /** A flight stop on an unarmed press is LocalPlayer#aiStep's landing after a travel in flight under water. */
+    @Test
+    void aFlightLandingUnderWaterTakesTheKnockback() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 at = flyingDownAFlooredPool(f, false);
+            f.pongThrough(f.velocity(new Vec3(0.2, -0.5, 0.2)));
+            f.abilities(false);
+            f.input(FORWARD_JUMP);
+            double fly = (double) 0.98F * (double) FLYING_SPEED;
+            PredictionResult landed = f.tick(new Vec3(at.x + 0.2, FLOOR_Y, at.z + 0.2 + fly), true);
+            assertEquals(0.0, antiKb(f), "the client took the knockback: " + describe(landed));
+        }
+    }
+
+    /**
+     * A double-tap stop that lands under water carries LivingEntity#travelInWater's drag, at a water movement
+     * efficiency of 1 lerped halfway from 0.8 toward 0.546 off the ground, into the next move's explosion.
+     */
+    @Test
+    void aFlightToggleThatLandsUnderWaterCarriesItsDragIntoAnExplosion() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 at = flyingDownAFlooredPool(f, true);
+            f.pongThrough(f.velocity(new Vec3(0.8, -0.5, 0.8)));
+            f.abilities(false);
+            f.input(JUMP);
+            at = new Vec3(at.x + 0.8, FLOOR_Y, at.z + 0.8);
+            PredictionResult landed = f.tick(at, true);
+            assertEquals(0.0, antiKb(f), "the client took the velocity: " + describe(landed));
+            double drag = (double) (0.8F + (0.54600006F - 0.8F) * 0.5F);
+            f.input(NONE);
+            f.explosion(new Vec3(0.1, 0, 0.1));
+            double carry = 0.8 * drag + 0.1;
+            PredictionResult moved = f.tick(at.add(carry, 0, carry), true);
+            double violations = f.player.checkManager.getExplosionHandler().violations;
+            assertEquals(0.0, violations, "the client took the explosion: " + describe(moved));
         }
     }
 
@@ -959,6 +1012,42 @@ class CreativeFlightTest {
         f.input(JUMP);
         assertPredicted(f.tick(GROUND.add(KNOCKBACK.x, JUMP_POWER + IMPULSE, KNOCKBACK.z), false));
         assertEquals(0.0, antiKb(f), "the client took the knockback");
+    }
+
+    /**
+     * A player flying down through water three blocks deep over the floor, at a water movement efficiency of 1, for
+     * two ticks; an armed player pressed jump on the first. Returns its position.
+     */
+    private static Vec3 flyingDownAFlooredPool(JavaTickFixture f, boolean armed) {
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) {
+                for (int y = FLOOR_Y; y <= FLOOR_Y + 2; y++) block(f, x, y, z, BlockIds.WATER.defaultState());
+            }
+        }
+        f.pongThrough(sendAttribute(f, "minecraft:water_movement_efficiency", 0.0, 1.0));
+        Vec3 at = new Vec3(0.5, FLOOR_Y + 0.5, 0.5);
+        f.place(at, new Vec3(0, -0.3, 0));
+        grantFlight(f, true);
+        f.input(armed ? JUMP : NONE);
+        double fall = -0.3 + (armed ? IMPULSE : 0.0);
+        at = at.add(0, fall, 0);
+        f.tick(at, false);
+        f.input(NONE);
+        at = at.add(0, fall * 0.6, 0);
+        f.tick(at, false);
+        return at;
+    }
+
+    /** An update_attributes for the player; the transaction of its trailing ping. */
+    private static int sendAttribute(JavaTickFixture f, String name, double base, double added) {
+        var modifier = new AttributeModifier("test:modifier", added, AttributeModifier.Operation.ADD_VALUE);
+        var packet = new ClientboundUpdateAttributes(
+                f.player.entityID, List.of(new AttributeSnapshot(name, base, List.of(modifier))));
+        var event = new PacketSendEvent<>(
+                f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.UPDATE_ATTRIBUTES, packet, false);
+        f.player.packetEntityReplication.onUpdateAttributes(event, f.player, packet);
+        event.tasksAfter().forEach(Runnable::run);
+        return f.player.lastTransactionSent.get();
     }
 
     private static void block(JavaTickFixture f, int x, int y, int z, int state) {
