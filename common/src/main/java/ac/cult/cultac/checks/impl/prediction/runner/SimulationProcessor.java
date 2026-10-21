@@ -1194,6 +1194,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 !this.player.isBedrockMovement() && this.player.compensatedEntities.playerEntity.getRiding() != null;
         if (!this.rideTicked) {
             this.rideTickStuckSpeeds = 0;
+            this.passengerRideTick.clearBoat();
             return;
         }
         Vec3 seat = this.player.compensatedEntities.lastRideTickSeat();

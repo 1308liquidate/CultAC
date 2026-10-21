@@ -255,6 +255,41 @@ class DismountRideTickVelocityTest {
         }
     }
 
+    /**
+     * AbstractBoat#tick takes its status from the box before it moves, so a boat whose top surfaces on the last ride
+     * tick is still under water for that tick and its passenger travels in water.
+     */
+    @ParameterizedTest
+    @MethodSource("endings")
+    void aBoatSurfacingOnTheLastRideTickLeavesItsPassengerInWater(ClientVersion version, boolean removeSeat)
+            throws Exception {
+        try (var f = fixture(version);
+                var ignored = observeOnly(true)) {
+            for (int x = -4; x <= 4; x++) {
+                for (int z = -4; z <= 4; z++) {
+                    for (int y = FLOOR_Y; y <= FLOOR_Y + 2; y++) {
+                        f.player.compensatedWorld.updateBlock(new BlockPos(x, y, z), BlockIds.WATER.defaultState());
+                    }
+                }
+            }
+            double surfacingY = FLOOR_Y + 2 + 8.0 / 9.0 - 0.5625;
+            Vec3 under = new Vec3(0.5, surfacingY - 0.05, 0.5);
+            Vec3 surfaced = new Vec3(0.5, surfacingY + 0.01, 0.5);
+            f.place(VEHICLE_AT, Vec3.ZERO);
+            f.tick(VEHICLE_AT, true);
+            f.player.compensatedEntities.addEntity(VEHICLE, EntityTypeIds.OAK_BOAT, under, 0, 0, 0);
+            f.setPassengers(VEHICLE, List.of(f.player.entityID));
+            f.pongThrough(f.player.lastTransactionSent.get());
+            assertTrue(f.player.compensatedEntities.getSelf().inVehicle());
+            f.rideTick(under, false);
+            f.rideTick(under, false);
+            f.rideTick(surfaced, false);
+            dismount(f, removeSeat);
+            PredictionResult move = f.tick(position(f).add(0, -0.005, 0), false);
+            assertTrue(exact(move), describe(move));
+        }
+    }
+
     /** A ride tick in powder snow travels in air, then PowderSnowBlock#entityInside sticks the first move. */
     @ParameterizedTest
     @MethodSource("endings")

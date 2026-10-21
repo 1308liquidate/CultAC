@@ -58,6 +58,10 @@ public final class PassengerRideTick {
     private boolean hasLavaCurrent;
     /** The lowest top the ridden boat's possible boxes allow, from {@link #boatMayBeUnderWater}. */
     private double boatTop;
+    /** The boat the previous ride tick recorded on and its possible boxes, which this tick's boat moves from. */
+    private PacketEntity previousBoat;
+
+    private final SimpleCollisionBox previousBoatBox = new SimpleCollisionBox();
 
     /**
      * Records the velocities the ride tick that started at {@code x, y, z} can leave; {@code touchedPowderSnow} tells
@@ -81,6 +85,7 @@ public final class PassengerRideTick {
         boolean water;
         boolean lava;
         PacketEntity vehicle = self.getRiding();
+        if (vehicle == null || !vehicle.isBoat()) this.previousBoat = null;
         if (vehicle != null && vehicle.isBoat() && !this.boatMayBeUnderWater(player, vehicle)) {
             if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_1)) {
                 // AbstractBoat#modifyPassengerFluidInteractionBox keeps only the part of the box above the boat.
@@ -181,6 +186,11 @@ public final class PassengerRideTick {
                 if (lava) this.lava(self, inputX, inputZ, sin, cos, sprinting, jump, jumpPower);
             }
         }
+    }
+
+    /** A client tick without a ride tick ends the boat the next ride tick could move from. */
+    public void clearBoat() {
+        this.previousBoat = null;
     }
 
     /** A set_entity_motion after the ride tick sets the delta movement the passenger keeps. */
@@ -432,19 +442,32 @@ public final class PassengerRideTick {
     }
 
     /**
-     * AbstractBoat#isUnderwater for any top the boat's possible boxes allow: water in the band over the top rises
-     * past it. Sets {@link #boatTop} to the lowest of those tops.
+     * AbstractBoat#isUnderWater, whose status AbstractBoat#tick takes before the boat moves: either the previous ride
+     * tick's boxes or this tick's can hold it, and a first ride tick may be under water. Sets {@link #boatTop} to the
+     * lowest top this tick's boxes allow.
      */
     private boolean boatMayBeUnderWater(CultPlayer player, PacketEntity boat) {
         boat.getPossibleMovementCollisionBoxes(this.vehicleBox, this.vehicleScratch);
-        this.boatTop = this.vehicleBox.minY + BoundingBoxSize.getHeight(player, boat);
-        double surface = this.boatTop + 0.001D;
-        int minX = CultMath.floor(this.vehicleBox.minX);
-        int maxX = (int) Math.ceil(this.vehicleBox.maxX);
-        int minY = CultMath.floor(this.boatTop);
-        int maxY = (int) Math.ceil(this.vehicleBox.maxY + 0.001D);
-        int minZ = CultMath.floor(this.vehicleBox.minZ);
-        int maxZ = (int) Math.ceil(this.vehicleBox.maxZ);
+        double height = BoundingBoxSize.getHeight(player, boat);
+        this.boatTop = this.vehicleBox.minY + height;
+        boolean underWater = this.previousBoat != boat
+                || this.underWater(player, this.previousBoatBox, height)
+                || this.underWater(player, this.vehicleBox, height);
+        this.previousBoat = boat;
+        this.previousBoatBox.set(this.vehicleBox);
+        return underWater;
+    }
+
+    /** AbstractBoat#isUnderwater for any top {@code boat} allows: water in the band over the top rises past it. */
+    private boolean underWater(CultPlayer player, SimpleCollisionBox boat, double height) {
+        double top = boat.minY + height;
+        double surface = top + 0.001D;
+        int minX = CultMath.floor(boat.minX);
+        int maxX = (int) Math.ceil(boat.maxX);
+        int minY = CultMath.floor(top);
+        int maxY = (int) Math.ceil(boat.maxY + 0.001D);
+        int minZ = CultMath.floor(boat.minZ);
+        int maxZ = (int) Math.ceil(boat.maxZ);
         for (int x = minX; x < maxX; x++) {
             for (int y = minY; y < maxY; y++) {
                 for (int z = minZ; z < maxZ; z++) {
