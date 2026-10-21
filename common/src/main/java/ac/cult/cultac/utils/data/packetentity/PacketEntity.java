@@ -797,8 +797,14 @@ public class PacketEntity {
         if (oldPacketLocation == null
                 && newPacketLocation.interpolatesFromPhysicalAfterClientTick()
                 && hasUsableMountedPhysicalPosition(player)) {
-            SimpleCollisionBox physicalLocation = GetBoundingBox.getPacketEntityBoundingBox(
-                    player, clientPhysicalPosition.x, clientPhysicalPosition.y, clientPhysicalPosition.z, this);
+            if (exactAfterClientTickBox == null) exactAfterClientTickBox = new SimpleCollisionBox();
+            SimpleCollisionBox physicalLocation = GetBoundingBox.getBoundingBoxFromPosAndSize(
+                    exactAfterClientTickBox,
+                    clientPhysicalPosition.x,
+                    clientPhysicalPosition.y,
+                    clientPhysicalPosition.z,
+                    BoundingBoxSize.getWidth(player, this),
+                    BoundingBoxSize.getHeight(player, this));
             return newPacketLocation.getExactMovementLocationAfterClientTickFromPhysical(physicalLocation);
         }
         if (!newPacketLocation.hasExactMovementLocationAfterClientTick()) return null;

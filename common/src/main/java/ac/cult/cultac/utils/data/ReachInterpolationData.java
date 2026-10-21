@@ -545,6 +545,7 @@ public class ReachInterpolationData {
                 && getInterpolationSteps() - interpolationStepsLowBound > 0;
     }
 
+    /** A legacy interpolation writes its answer into {@code physicalLocation}. */
     public SimpleCollisionBox getExactMovementLocationAfterClientTickFromPhysical(SimpleCollisionBox physicalLocation) {
         if (interpolationQueue != null) return steppedBox(nextSteppedTransform().position());
         if (interpolationStepsLowBound != interpolationStepsHighBound || !hasActiveInterpolationTarget()) {
@@ -557,7 +558,7 @@ public class ReachInterpolationData {
         }
 
         double lerpAmount = 1.0D / remainingSteps;
-        return lerpBox(physicalLocation, targetLocation, lerpAmount);
+        return lerpBox(physicalLocation, targetLocation, lerpAmount, physicalLocation);
     }
 
     public SimpleCollisionBox getExactMovementLocation() {
@@ -673,8 +674,10 @@ public class ReachInterpolationData {
         return (exact - (targetFraction * target)) / startFraction;
     }
 
-    private static SimpleCollisionBox lerpBox(SimpleCollisionBox from, SimpleCollisionBox to, double amount) {
-        return new SimpleCollisionBox(
+    /** Writes the lerp into {@code out}, which may be {@code from}. */
+    private static SimpleCollisionBox lerpBox(
+            SimpleCollisionBox from, SimpleCollisionBox to, double amount, SimpleCollisionBox out) {
+        return out.set(
                 lerp(from.minX, to.minX, amount),
                 lerp(from.minY, to.minY, amount),
                 lerp(from.minZ, to.minZ, amount),
