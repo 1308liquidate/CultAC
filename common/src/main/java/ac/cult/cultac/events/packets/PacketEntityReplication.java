@@ -1458,7 +1458,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 : appendTrailingProofTransaction(event);
         int transaction = proof == null ? -1 : proof.transaction();
         if (player.compensatedEntities.mayChangeSelfPassengers(destroyEntityIds))
-            player.compensatedEntities.markSelfPassengersChange(transaction);
+            player.compensatedEntities.markSelfPassengersChange(
+                    transaction >= 0 ? transaction : player.lastTransactionSent.get() + 1);
         boolean sentVelocityReset = resetsVelocity && proof != null;
 
         for (int entityID : destroyEntityIds) {

@@ -17,6 +17,7 @@ import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
 import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRemoveEntities;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
@@ -452,6 +453,21 @@ class JavaEntityPushTest {
             removeEntity(f, 100);
             assertUnanswered(f);
             assertFalse(f.player.compensatedEntities.getSelf().passengers.isEmpty());
+            entity(f, 102, TOUCHING).setClientTickOrder(-1L);
+
+            assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
+        }
+    }
+
+    /** A removal sent without a ping settles at the next one: the client ejects the passenger on receipt. */
+    @Test
+    void aRemovalOfThePassengerWithoutAPingKeepsThePush() throws Exception {
+        try (var f = falling()) {
+            carry(f, true);
+            f.fixture.connection.phase(PacketDirection.CLIENTBOUND, ConnectionPhase.CONFIGURATION);
+            removeEntity(f, 100);
+            f.fixture.connection.phase(PacketDirection.CLIENTBOUND, ConnectionPhase.PLAY);
+            assertFalse(f.player.compensatedEntities.selfCertainlyCarriesPassenger());
             entity(f, 102, TOUCHING).setClientTickOrder(-1L);
 
             assertExact(f.tick(START.add(0, FIRST_FALL, PUSH), false));
