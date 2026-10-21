@@ -370,28 +370,37 @@ class JavaTravelAttributeTest {
         }
     }
 
+    /**
+     * Camel#executeRidersJump at full strength, looking along +z: the look's horizontal direction scaled by 22.2222F,
+     * movement_speed 0.09F and the camel's own getBlockSpeedFactor, soul sand's 0.4F, plus 1.4285F times its jump
+     * power 0.42F up.
+     */
     @Test
     void aFlyingRidersCamelDashesAtItsSoulSandSpeed() throws Exception {
         try (var f = new JavaTickFixture()) {
             PacketEntityCamel camel = (PacketEntityCamel) vehicleOnSoulSand(f, EntityTypeIds.CAMEL);
             camel.horseJump = 1.0F;
-            Vec3 walking = camelDash(f, camel);
+            Vec3 dash = new Vec3(0.0, 1.4285F * (double) 0.42F, 22.2222F * (double) 0.09F * 0.4F);
+            assertDash(dash, camelDash(f, camel));
             f.player.isFlying = true;
-            // Camel#executeRidersJump scales the dash by the camel's own getBlockSpeedFactor.
-            assertEquals(walking, camelDash(f, camel));
+            assertDash(dash, camelDash(f, camel));
         }
     }
 
+    /**
+     * AbstractNautilus#executeRidersJump at full strength out of water, the controller looking along +z: the look
+     * scaled by 0.5F, movement_speed 1.0 and the nautilus's own getBlockSpeedFactor, soul sand's 0.4F.
+     */
     @Test
     void aFlyingRidersNautilusDashesAtItsSoulSandSpeed() throws Exception {
         try (var f = new JavaTickFixture()) {
             PacketEntityNautilus nautilus = (PacketEntityNautilus) vehicleOnSoulSand(
                     f, EntityTypes.defaults().byKey("minecraft:nautilus").id());
             nautilus.pendingJumpScale = 1.0;
-            Vec3 walking = nautilusDash(f, nautilus);
+            Vec3 dash = new Vec3(0.0, 0.0, 0.5F * 1.0 * 0.4F);
+            assertDash(dash, nautilusDash(f, nautilus));
             f.player.isFlying = true;
-            // AbstractNautilus#executeRidersJump scales the dash by the nautilus's own getBlockSpeedFactor.
-            assertEquals(walking, nautilusDash(f, nautilus));
+            assertDash(dash, nautilusDash(f, nautilus));
         }
     }
 
@@ -562,6 +571,12 @@ class JavaTravelAttributeTest {
         return new Vec3(dashed.x, dashed.y, dashed.z);
     }
 
+    private static void assertDash(Vec3 expected, Vec3 dash) {
+        assertEquals(expected.x, dash.x, 0.0);
+        assertEquals(expected.y, dash.y, 0.0);
+        assertEquals(expected.z, dash.z, 0.0);
+    }
+
     private static VelocityTransformer dashing(JavaTickFixture f, PacketEntity vehicle) {
         SimulationContext context = Mockito.mock(SimulationContext.class);
         Mockito.when(context.getVehicle()).thenReturn(vehicle);
@@ -569,6 +584,7 @@ class JavaTravelAttributeTest {
         Mockito.when(context.getLastTickMainSupportingBlockData())
                 .thenReturn(new MainSupportingBlockData(new BlockPos(0, FLOOR_Y - 1, 0), true));
         Mockito.when(context.getLastOnGround()).thenReturn(DesyncStatus.TRUE);
+        Mockito.when(context.getJumpAmplifier()).thenReturn(null);
         Mockito.when(context.getTrig()).thenReturn(new TrigHandler(f.player));
         return new VelocityTransformer(context);
     }

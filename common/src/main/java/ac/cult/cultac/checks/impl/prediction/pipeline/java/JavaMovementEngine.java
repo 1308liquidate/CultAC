@@ -130,13 +130,10 @@ public final class JavaMovementEngine implements MovementEngine {
             PredictionResult lastPrediction,
             Vec3 acceptedDiff,
             NextTickVelocityDeriver.Scratch scratch) {
-        SimulationContext context = result.getSimulationContext();
-        boolean exact = contextUsesExactEffects(context);
-        JavaFallDistance.Moved moved = exact || context.getVehicle() != null
-                ? JavaFallDistance.afterCollision(player, result, acceptedDiff)
-                : null;
-        if (context.getVehicle() != null) settleRiddenSupport(player, result, moved.movement());
-        if (exact) {
+        if (result.getSimulationContext().getVehicle() != null)
+            settleRiddenSupport(player, result, JavaFallDistance.movement(result, acceptedDiff));
+        if (contextUsesExactEffects(result.getSimulationContext())) {
+            var moved = JavaFallDistance.afterCollision(player, result, acceptedDiff);
             result.setJavaCommittedMove(moved);
             Set<Vec3> velocities = NextTickVelocityDeriver.beforeBlockEffects(
                     player, result, lastPrediction, moved.movement(), scratch);
@@ -194,7 +191,7 @@ public final class JavaMovementEngine implements MovementEngine {
     private static void settleRiddenSupport(CultPlayer player, PredictionResult result, Vec3 movement) {
         SimulationContext context = result.getSimulationContext();
         double requestedY = result.getInitialStartingVel().y * context.getLastStuckSpeed().y;
-        boolean collidedBelow = requestedY < 0.0 && Math.abs(movement.y - requestedY) > 1.0E-7D;
+        boolean collidedBelow = requestedY < 0.0 && !JavaFallDistance.sameMoveY(movement.y, requestedY);
         MainSupportingBlockData support = player.checkManager
                 .getSimulationProcessor()
                 .mainSupportingBlockAfter(

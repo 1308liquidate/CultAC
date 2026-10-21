@@ -38,14 +38,22 @@ class HorseSoulSandEdgeTest {
     private static final double GROUNDED_Y = -0.0784000015258789;
     /** The top of honey's 0.9375-tall shape on the y 63 layer. */
     private static final double HONEY_TOP = FLOOR_Y - 0.0625;
+    /**
+     * LivingEntity#moveRelative for the ridden input's 0.98F along the horse's facing on 0.6-friction ground:
+     * getFrictionInfluencedSpeed scales movement_speed by 0.21600002F over the friction cubed.
+     */
+    private static final double GROUND_INPUT = (double) 0.98F * (SPEED * (0.21600002F / (0.6F * 0.6F * 0.6F)));
+    /** The same in the air, where getFlyingSpeed with a controlling player is movement_speed * 0.1F. */
+    private static final double AIR_INPUT = (double) 0.98F * (SPEED * 0.1F);
+    /** LivingEntity#travelInAir's friction after an airborne start. */
+    private static final double AIR_FRICTION = 0.91F;
+    /** Honey's speed factor, which Entity#move applies to the horizontal velocity. */
+    private static final double HONEY_SPEED_FACTOR = 0.4F;
 
     private static final ServerboundPlayerInput FORWARD_SPRINT =
             new ServerboundPlayerInput(true, false, false, false, false, false, true);
 
-    /**
-     * Ticks seq 3139 and 3184. The stone at x 251 supports the horse, so its factor is 1.0; the soul sand's 0.4 under
-     * its center puts the second tick off by (0.1045, 0, -0.007135).
-     */
+    /** Ticks seq 3139 and 3184. The stone at x 251 supports the horse, so its factor is 1.0. */
     @Test
     void aHorseOnGrassAlongSoulSandKeepsItsSpeed() throws Exception {
         try (var f = new JavaTickFixture()) {
@@ -61,10 +69,10 @@ class HorseSoulSandEdgeTest {
     }
 
     /**
-     * A horse falling onto the edge of the soul sand. The landing move's verticalCollisionBelow makes the stone at
-     * x 251 its supporting block on the landing tick itself, so its factor stays 1.0 and these are the moves it makes
-     * on all-stone ground. Read from the tick's airborne start, nothing supports it and the soul sand's 0.4 under its
-     * center slows the next tick.
+     * A horse facing +x falls onto the edge of the soul sand. The landing move's verticalCollisionBelow makes the stone
+     * at x 251 its supporting block on the landing tick itself, so Entity#getBlockSpeedFactor is 1.0 after every move.
+     * Each move adds the ridden input to the velocity LivingEntity#travelInAir carries: 0.91F after the airborne starts,
+     * 0.6F * 0.91F after the grounded one.
      */
     @Test
     void aHorseLandingBesideSoulSandKeepsItsSpeed() throws Exception {
@@ -72,17 +80,25 @@ class HorseSoulSandEdgeTest {
             ground(f, BlockIds.SOUL_SAND);
             mount(f, new Vec3(251.5, 64.25, 164.9), 270F, new Vec3(0.3, -0.1, 0), false);
 
-            assertExact(ride(f, 270F, 0F, new Vec3(251.81451779660154, 64.15, 164.9), false));
-            assertExact(ride(f, 270F, 0F, new Vec3(252.11524679635903, 64.0, 164.9), true));
-            assertExact(ride(f, 270F, 0F, new Vec3(252.53408815456444, 64.0, 164.9), true));
-            assertExact(ride(f, 270F, 0F, new Vec3(252.90795352324642, 64.0, 164.9), true));
+            double velocity = 0.3 + AIR_INPUT;
+            double x = 251.5 + velocity;
+            assertExact(ride(f, 270F, 0F, new Vec3(x, 64.15, 164.9), false));
+            velocity = velocity * AIR_FRICTION + AIR_INPUT;
+            x += velocity;
+            assertExact(ride(f, 270F, 0F, new Vec3(x, 64.0, 164.9), true));
+            velocity = velocity * AIR_FRICTION + GROUND_INPUT;
+            x += velocity;
+            assertExact(ride(f, 270F, 0F, new Vec3(x, 64.0, 164.9), true));
+            velocity = velocity * GROUND_FRICTION + GROUND_INPUT;
+            x += velocity;
+            assertExact(ride(f, 270F, 0F, new Vec3(x, 64.0, 164.9), true));
         }
     }
 
     /**
      * A horse on honey with its center over air at x 251. Honey's 0.9375-tall shape, inset 1/16, supports it from
-     * x 252, so Entity#getBlockSpeedFactor reads air at its feet, then honey's 0.4 in the supporting block's column:
-     * these are the moves it makes on all-honey ground. The column under its center holds air, factor 1.0.
+     * x 252, so Entity#getBlockSpeedFactor reads air at its feet, then honey's 0.4 in the supporting block's column.
+     * Each move adds the ridden input to the velocity scaled by honey's factor and the ground friction.
      */
     @Test
     void aHorseOnHoneyOverAGapKeepsHoneysSlowdown() throws Exception {
@@ -90,17 +106,19 @@ class HorseSoulSandEdgeTest {
             honeyFromX252(f);
             mount(f, new Vec3(251.9, HONEY_TOP, 160.5), 0F, new Vec3(0, GROUNDED_Y, 0));
 
-            assertExact(ride(f, 0F, 0F, new Vec3(251.9, HONEY_TOP, 160.64517796053917)));
-            assertExact(ride(f, 0F, 0F, new Vec3(251.9, HONEY_TOP, 160.8220627918154)));
-            assertExact(ride(f, 0F, 0F, new Vec3(251.9, HONEY_TOP, 161.00587240456812)));
-            assertExact(ride(f, 0F, 0F, new Vec3(251.9, HONEY_TOP, 161.1911943897935)));
+            double velocity = 0.0;
+            double z = 160.5;
+            for (int tick = 0; tick < 4; tick++) {
+                velocity = velocity * HONEY_SPEED_FACTOR * GROUND_FRICTION + GROUND_INPUT;
+                z += velocity;
+                assertExact(ride(f, 0F, 0F, new Vec3(251.9, HONEY_TOP, z)));
+            }
         }
     }
 
     /**
      * Ticks seq 6043 (the step up from soul sand), 6114 and 6252. Stepping up makes the stone at z 168 the supporting
-     * block, so its factor is 1.0; the soul sand's 0.4 under its center puts the last two off by (0.006165, 0,
-     * 0.06051) and (0.007434, 0, 0.080586).
+     * block, so its factor is 1.0.
      */
     @Test
     void aHorseSteppingFromSoulSandOntoGrassKeepsItsSpeed() throws Exception {
