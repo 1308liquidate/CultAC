@@ -1752,6 +1752,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
      * client never does.
      */
     public boolean hasWithheldJavaTeleport() {
+        if (pendingTeleports.isEmpty()) return false;
         int received = player.lastTransactionReceived.get();
         for (TeleportData pending : pendingTeleports) {
             if (isJavaIdTeleport(pending) && !pending.isAnswered() && received > pending.getTransaction()) return true;
