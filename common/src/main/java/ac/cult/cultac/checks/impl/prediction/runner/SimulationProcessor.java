@@ -116,6 +116,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     PredictionResult lastPrediction = null;
     boolean lastWorldEyeInWater = false;
     boolean flightStopBeforeTravelPossible = false;
+    boolean flightStopTimingChosen = false;
     PredCheckRunner flagger = new PredCheckRunner(this.player);
     DesyncStatus lastOnGround = DesyncStatus.FALSE;
     LastInstance lastFlying = new LastInstance(this.player);
@@ -1081,7 +1082,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.player.minPlayerAttackSlow = 0;
             this.player.maxPlayerAttackSlow = 0;
             // A grounded flight stop's tick may have travelled in flight.
-            if (this.player.isFlying || this.flightStopBeforeTravelPossible) {
+            if (this.player.isFlying || this.flightStopTimingChosen) {
                 this.lastFlying.reset();
             }
 
@@ -1350,6 +1351,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     // before travel and can also end on the ground.
     private boolean keepsFlyingThroughTravel(boolean onGround) {
         this.flightStopBeforeTravelPossible = false;
+        this.flightStopTimingChosen = false;
         if (!this.player.packetStateData.flyingStopAfterTravel) return false;
         if (onGround) {
             this.flightStopBeforeTravelPossible = FlightToggle.canToggle(this.player);
@@ -1362,6 +1364,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
 
     private void stopFlyingAfterTravel() {
         this.flightStopBeforeTravelPossible = false;
+        this.flightStopTimingChosen = false;
         this.player.packetStateData.flyingStopAfterTravel = false;
         this.player.isFlying = false;
         this.player.refreshPlayerPose();
@@ -1384,7 +1387,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             return this.predict(target, from, to, testing, xRot, yRot, authoredMovementFrame, movementProfile);
         }
         // A grounded flight stop is the landing after travel or the double-tap toggle before it; the tick travels in
-        // flight, or by its fluid or ground travel without the flight input.
+        // flight, or by its fluid or ground travel without the flight input. Later predictions of the tick keep the
+        // chosen state.
+        this.flightStopBeforeTravelPossible = false;
+        this.flightStopTimingChosen = true;
         this.player.isFlying = true;
         PredictionResult flying =
                 this.predict(target, from, to, testing, xRot, yRot, authoredMovementFrame, movementProfile);
