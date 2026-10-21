@@ -69,6 +69,10 @@ public class FastBreak extends Check implements BlockBreakListener {
         }
 
         if (blockBreak.action == PlayerAction.STOP_DESTROY_BLOCK && targetBlockPosition != null) {
+            // MultiPlayerGameMode#continueDestroyBlock sends STOP only at its target, after adding the state's progress
+            if (blockBreak.position.equals(targetBlockPosition)) {
+                maximumBlockDamage = Math.max(maximumBlockDamage, getClientBlockDamage(blockBreak.block));
+            }
             // Minecraft#startAttack swings once after START; continueAttack swings again in that tick only when
             // continueDestroyBlock ran, the one way progress or a destroyDelay tick happens in the START tick
             double startTickCredit = startTickSwings >= 2 ? 1 : 0;

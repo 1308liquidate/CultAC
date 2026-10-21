@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 
 import ac.cult.blocksim.data.BlockIds;
+import ac.cult.blocksim.data.DataTables;
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
 import ac.cult.cultac.checks.impl.breaking.FastBreak;
 import ac.cult.cultac.checks.impl.verbose.VerboseCodecs;
@@ -33,12 +34,15 @@ import org.junit.jupiter.api.Test;
  */
 class FastBreakClientTickTest {
     private static final BlockPos TARGET = new BlockPos(0, 64, 2);
+    private static final BlockPos ELSEWHERE = new BlockPos(1, 64, 2);
     // A diamond pickaxe on obsidian needs 14 ticks at mining efficiency 100 and 2 ticks at 1024.
     private static final double EFFICIENCY_FOR_14_TICKS = 100.0;
     private static final double EFFICIENCY_FOR_2_TICKS = 1024.0;
     private static final int TICKS_14 = 14;
     private static final int TICKS_2 = 2;
     private static final int DESTROY_DELAY = 5;
+    // Efficiency V: 5 * 5 + 1
+    private static final double EFFICIENCY_V = 26.0;
 
     @BeforeAll
     static void registerVerboseTags() {
@@ -136,11 +140,66 @@ class FastBreakClientTickTest {
         }
     }
 
+    @Test
+    void theStopTickProgressesWithTheBlockTheClientReadsInThatTick() throws Exception {
+        try (var services = new RecordConsumerServices();
+                var f = new Fixture(EFFICIENCY_V)) {
+            f.breakPredictedBarrierReplacedBy(f.mushroomStem);
+            assertEquals(0, f.check.getViolations());
+        }
+    }
+
+    @Test
+    void aStopOnABarrierStillFlags() throws Exception {
+        try (var services = new RecordConsumerServices();
+                var f = new Fixture(EFFICIENCY_V)) {
+            f.breakPredictedBarrierReplacedBy(f.barrier);
+            assertEquals(1, f.check.getViolations());
+        }
+    }
+
+    @Test
+    void aStopAwayFromTheTargetDoesNotCountItsBlock() throws Exception {
+        try (var services = new RecordConsumerServices();
+                var f = new Fixture(EFFICIENCY_V)) {
+            f.player.getInventory().inventory.setHeldItem(OfflineCultTestBootstrap.item("minecraft:netherite_axe"));
+            f.player.compensatedWorld.updateBlock(ELSEWHERE, f.mushroomStem);
+            f.dig(PlayerAction.START_DESTROY_BLOCK);
+            f.swing();
+            f.swing();
+            f.tickEnd();
+            f.dig(PlayerAction.STOP_DESTROY_BLOCK, ELSEWHERE);
+            f.swing();
+            f.tickEnd();
+            assertEquals(1, f.check.getViolations());
+        }
+    }
+
+    @Test
+    void aServerBlockTheClientHasNotReceivedDoesNotProgressTheStop() throws Exception {
+        try (var services = new RecordConsumerServices();
+                var f = new Fixture(EFFICIENCY_V)) {
+            f.breakPredictedBarrierReplacedLateBy(f.mushroomStem, false);
+            assertEquals(1, f.check.getViolations());
+        }
+    }
+
+    @Test
+    void aServerBlockTheClientReceivedBeforeTheStopProgressesIt() throws Exception {
+        try (var services = new RecordConsumerServices();
+                var f = new Fixture(EFFICIENCY_V)) {
+            f.breakPredictedBarrierReplacedLateBy(f.mushroomStem, true);
+            assertEquals(0, f.check.getViolations());
+        }
+    }
+
     private static final class Fixture implements AutoCloseable {
         final RecordReceiveFixture record = new RecordReceiveFixture(ProtocolVersion.V26_3);
         final CultPlayer player = record.player;
         final FastBreak check;
         final int obsidian = BlockIds.OBSIDIAN.defaultState();
+        final int barrier = state("minecraft:barrier");
+        final int mushroomStem = state("minecraft:mushroom_stem");
         final double miningEfficiency;
 
         Fixture(double miningEfficiency) {
@@ -158,6 +217,58 @@ class FastBreakClientTickTest {
                     List.of(new AttributeSnapshot("minecraft:mining_efficiency", miningEfficiency, List.of())));
             player.compensatedWorld.ensureValidationChunkLoaded(TARGET.getX() >> 4, TARGET.getZ() >> 4);
             player.compensatedWorld.updateBlock(TARGET, obsidian);
+        }
+
+        private static int state(String name) {
+            return DataTables.defaults().registry().block(name).defaultState();
+        }
+
+        void setBlock(int state) {
+            player.compensatedWorld.updateBlock(TARGET, state);
+        }
+
+        /**
+         * An Efficiency V netherite axe starts on the barrier the client predicted from its own placement
+         * (hardness -1, no progress); the server's block arrives before the next tick, whose
+         * continueDestroyBlock adds that block's progress and sends STOP.
+         */
+        void breakPredictedBarrierReplacedBy(int serverBlock) {
+            player.getInventory().inventory.setHeldItem(OfflineCultTestBootstrap.item("minecraft:netherite_axe"));
+            setBlock(barrier);
+            dig(PlayerAction.START_DESTROY_BLOCK);
+            swing();
+            swing();
+            tickEnd();
+            setBlock(serverBlock);
+            dig(PlayerAction.STOP_DESTROY_BLOCK);
+            swing();
+            tickEnd();
+        }
+
+        /**
+         * The server sends its block behind a transaction; the client reads it in the STOP tick only when it
+         * answered that transaction before the tick.
+         */
+        void breakPredictedBarrierReplacedLateBy(int serverBlock, boolean answeredBeforeStop) {
+            player.getInventory().inventory.setHeldItem(OfflineCultTestBootstrap.item("minecraft:netherite_axe"));
+            setBlock(barrier);
+            dig(PlayerAction.START_DESTROY_BLOCK);
+            swing();
+            swing();
+            tickEnd();
+            int transaction = player.lastTransactionSent.incrementAndGet();
+            player.compensatedWorld.queueServerBlockUpdate(
+                    TARGET.getX(), TARGET.getY(), TARGET.getZ(), serverBlock, transaction);
+            if (answeredBeforeStop) answer(transaction);
+            dig(PlayerAction.STOP_DESTROY_BLOCK);
+            swing();
+            tickEnd();
+            answer(transaction);
+        }
+
+        void answer(int transaction) {
+            player.lastTransactionReceived.set(transaction);
+            player.latencyUtils.handleNettySyncTransaction(transaction);
         }
 
         /** A LOGIN the client processes before its next tick, into a level with the same block in reach. */
@@ -221,8 +332,14 @@ class FastBreakClientTickTest {
         }
 
         void dig(PlayerAction action) {
+            dig(action, TARGET);
+        }
+
+        /** PacketPlayerDigging reads the block from the client's compensated world at the packet's position. */
+        void dig(PlayerAction action, BlockPos position) {
+            int block = player.compensatedWorld.getBlockStateIdAt(position);
             check.onBlockBreak(new BlockBreak(
-                    player, TARGET, Direction.DOWN, Direction.DOWN.get3DDataValue(), action, 1, obsidian));
+                    player, position, Direction.DOWN, Direction.DOWN.get3DDataValue(), action, 1, block));
         }
 
         void swing() {
