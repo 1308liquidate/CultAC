@@ -119,6 +119,14 @@ public class HorizontalAnalyzer implements EngineCheck {
         if (FlightToggle.flyingBeforeAiStep(player) && pose != Pose.SWIMMING && pose != Pose.FALL_FLYING) {
             isSlowed = false;
         }
+        // LocalPlayer#aiStep crouches only where the crouching pose fits blocks and entities such as boats
+        // (Player#canPlayerFitWithinBlocksAndEntitiesWhen); a player that does not crouch is slowed only crawling.
+        if (isSlowed
+                && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_14)
+                && pose != Pose.SWIMMING
+                && !player.canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING, from.x, from.y, from.z)) {
+            isSlowed = false;
+        }
         // LocalPlayer#aiStep crouches a player in water only when Entity#updateSwimming, which needs the sprint flag,
         // left it not swimming and the crouching pose fits; Entity#isVisuallyCrawling never slows it in water.
         if (isSlowed

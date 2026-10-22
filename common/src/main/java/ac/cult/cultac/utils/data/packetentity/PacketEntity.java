@@ -1102,6 +1102,24 @@ public class PacketEntity {
         return candidates;
     }
 
+    /** The number of {@link #getPossibleMovementCollisionBoxCandidates()}. */
+    public int possibleMovementCollisionBoxCandidateCount() {
+        if (passengerPhysicalBox != null && riding != null) return 1;
+        int count = newPacketLocation.possibleMovementLocationCount();
+        return oldPacketLocation == null ? count : count + oldPacketLocation.possibleMovementLocationCount();
+    }
+
+    /** Writes the {@code index}th of {@link #getPossibleMovementCollisionBoxCandidates()} into {@code out}. */
+    public SimpleCollisionBox possibleMovementCollisionBoxCandidate(int index, SimpleCollisionBox out) {
+        if (passengerPhysicalBox != null && riding != null) return out.set(passengerPhysicalBox);
+        if (oldPacketLocation != null) {
+            int old = oldPacketLocation.possibleMovementLocationCount();
+            if (index < old) return oldPacketLocation.possibleMovementLocation(index, out);
+            index -= old;
+        }
+        return newPacketLocation.possibleMovementLocation(index, out);
+    }
+
     public SimpleCollisionBox getExactMovementCollisionBox() {
         if (passengerPhysicalBox != null && riding != null) return passengerPhysicalBox.copy();
         if (newPacketLocation == null || oldPacketLocation != null) {

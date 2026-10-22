@@ -1081,11 +1081,20 @@ public class CultPlayer implements GrimUser {
                 continue;
             }
 
-            if (entity.getPossibleCollisionBoxes(entityBox, scratch).isIntersected(playerBox)) {
+            if (entity.getPossibleMovementCollisionBoxes(entityBox, scratch).isIntersected(playerBox)
+                    && overlapsAtAPossiblePosition(entity, playerBox, entityBox)) {
                 return false;
             }
         }
         return true;
+    }
+
+    private static boolean overlapsAtAPossiblePosition(
+            PacketEntity entity, SimpleCollisionBox playerBox, SimpleCollisionBox entityBox) {
+        for (int i = 0, count = entity.possibleMovementCollisionBoxCandidateCount(); i < count; i++) {
+            if (entity.possibleMovementCollisionBoxCandidate(i, entityBox).isIntersected(playerBox)) return true;
+        }
+        return false;
     }
 
     /** The box at each possible position of each entity Entity#collide stops this player against. */

@@ -626,6 +626,17 @@ public class ReachInterpolationData {
         return locations;
     }
 
+    /** The number of {@link #getPossibleMovementLocations()}. */
+    public int possibleMovementLocationCount() {
+        return interpolationQueue != null ? 1 : interpolationStepsHighBound - interpolationStepsLowBound + 1;
+    }
+
+    /** Writes the {@code index}th of {@link #getPossibleMovementLocations()} into {@code out}. */
+    public SimpleCollisionBox possibleMovementLocation(int index, SimpleCollisionBox out) {
+        if (interpolationQueue != null) return steppedBox(steppedCurrent.position(), out);
+        return movementLocationAtStep(interpolationStepsLowBound + index, out);
+    }
+
     public boolean hasExactMovementLocationAfterClientTick() {
         return interpolationStepsLowBound == interpolationStepsHighBound;
     }
