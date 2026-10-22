@@ -2412,6 +2412,22 @@ class CultTransportTest {
     }
 
     @Test
+    void transferIsWrittenOutsideTheFlushBundle() {
+        try (var f = new Fixture(false)) {
+            proveCameras(f);
+            f.channel.write(wireCamera(f, 1));
+            var transfer = f.frame(CLIENTBOUND, PLAY, "transfer");
+            Wire.writeString(transfer, "localhost", 32767);
+            Wire.writeVarInt(transfer, 25565);
+            f.channel.write(transfer);
+            f.channel.flush();
+            f.pump();
+            assertEquals(List.of("D", "P41", "minecraft:set_camera", "D", "minecraft:transfer"), f.output());
+            assertFalse(f.connection.flushBundleOpen());
+        }
+    }
+
+    @Test
     void disconnectClosesTheBundleBeforeItsCompletionCanCloseTheChannel() {
         try (var f = new Fixture(false)) {
             proveCameras(f);

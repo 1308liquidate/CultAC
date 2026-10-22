@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.checks.impl.badpackets.BadPacketsVehicle;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerWindow;
 import ac.cult.cultac.network.event.PacketListenerPriority;
@@ -209,6 +210,48 @@ class FlushProofRegressionTest {
         }
     }
 
+    @Test
+    void aMoveVehicleEchoPrecedesTheProofForALaterDismount() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            prepare(f.fixture);
+            f.player.compensatedEntities.addEntity(100, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, .5), 0, 0, 0);
+            f.setPassengers(100, java.util.List.of(f.player.entityID));
+            f.pongThrough(f.player.lastTransactionSent.get());
+            f.fixture.channel.releaseOutbound();
+            open(f.fixture);
+            send(f.fixture, new ClientboundMoveVehicle(new Vec3d(8.5, 64, .5), 0, 0));
+            send(f.fixture, new ClientboundSetPassengers(100, java.util.List.of()));
+            // ClientPacketListener#handleMoveVehicle sends the echo before the client handles any later packet.
+            answerPingsBefore(f.fixture, "minecraft:move_vehicle");
+            var echo = new ServerboundMoveVehicle(new Vec3d(8.5, 64, .5), 0, 0, false, false);
+            var event = f.event(ServerboundPackets.MOVE_VEHICLE, echo);
+            f.listener.onMoveVehicle(event, f.player, echo);
+            assertFalse(event.isCancelled());
+            assertEquals(0, f.player.checkManager.getCheck(BadPacketsVehicle.class).violations);
+            f.pongThrough(f.player.lastTransactionSent.get());
+            assertNull(f.player.compensatedEntities.getSelf().getRiding());
+        }
+    }
+
+    /** Answers, in wire order, each ping written before the first {@code name} packet. */
+    private static void answerPingsBefore(RecordReceiveFixture f, String name) {
+        f.channel.flush();
+        f.channel.runPendingTasks();
+        var packets = f.data.packets(
+                ac.cult.cultac.protocol.ConnectionPhase.PLAY, ac.cult.cultac.protocol.PacketDirection.CLIENTBOUND);
+        ByteBuf frame;
+        while ((frame = f.channel.readOutbound()) != null) {
+            try {
+                String packet = packets.name(Wire.readVarInt(frame));
+                if (name.equals(packet)) return;
+                if ("minecraft:ping".equals(packet)) assertTrue(f.player.addTransactionResponse(frame.readInt()));
+            } finally {
+                frame.release();
+            }
+        }
+        fail(name + " was not written");
+    }
+
     private static void prepare(RecordReceiveFixture f) {
         f.user.bind(mock(PlatformPlayer.class));
         f.player.nettyScheduler.removeScheduler();
@@ -232,6 +275,16 @@ class FlushProofRegressionTest {
                     PacketListenerPriority.LOW,
                     (event, player, packet) ->
                             player.checkManager.getExplosionHandler().onExplode(event, player, packet));
+            routes.send(
+                    ClientboundPackets.MOVE_VEHICLE,
+                    PacketListenerPriority.LOW,
+                    (event, player, packet) ->
+                            new ac.cult.cultac.events.packets.listeners.PacketServerTeleport()
+                                    .onMoveVehicle(event, player, packet));
+            routes.send(
+                    ClientboundPackets.SET_PASSENGERS,
+                    PacketListenerPriority.LOW,
+                    (event, player, packet) -> player.packetEntityReplication.onSetPassengers(event, player, packet));
             routes.send(
                     ClientboundPackets.TELEPORT_ENTITY,
                     PacketListenerPriority.LOW,

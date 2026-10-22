@@ -169,9 +169,14 @@ public class PacketServerTeleport {
             return;
         }
 
-        if (!player.getSetbackTeleportUtil().isSendingSetback) {
-            player.sendTransaction();
-        }
+        // ClientPacketListener#handleMoveVehicle sends the vehicle's MoveVehicle from the handler. Only a ping after
+        // the packet orders its pong after that echo, so a later packet in the flush, such as a dismount, never
+        // shares an earlier ping. A setback's echo keeps the transaction of the setback it completes.
+        int lastSent = player.lastTransactionSent.get();
+        CultPlayer.TrackedTransaction response = player.appendResponseProofTransaction(event);
+        int proofTransaction = player.getSetbackTeleportUtil().isSendingSetback || response == null
+                ? lastSent
+                : response.transaction();
         trackClientboundMoveVehicle(
                 player,
                 rootVehicleId,
@@ -179,7 +184,7 @@ public class PacketServerTeleport {
                 expectedResponsePosition,
                 finalYaw,
                 finalPitch,
-                player.lastTransactionSent.get(),
+                proofTransaction,
                 snaps);
     }
 
