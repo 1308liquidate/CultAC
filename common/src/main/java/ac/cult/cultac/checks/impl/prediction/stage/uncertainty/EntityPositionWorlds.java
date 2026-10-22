@@ -1,6 +1,7 @@
 package ac.cult.cultac.checks.impl.prediction.stage.uncertainty;
 
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
@@ -17,7 +18,7 @@ import org.jetbrains.annotations.Nullable;
  * the move's region, and no box for an entity the client may hold outside it.
  */
 public final class EntityPositionWorlds {
-    public static final int MAX_WORLDS = 16;
+    public static final int MAX_POSITION_SETS = 16;
 
     private EntityPositionWorlds() {}
 
@@ -60,7 +61,7 @@ public final class EntityPositionWorlds {
             if (boxes.isEmpty()) continue;
             if (outside) boxes.add(null);
             worlds *= boxes.size();
-            if (worlds > MAX_WORLDS) return null;
+            if (worlds > MAX_POSITION_SETS) return null;
             choices.add(boxes);
         }
 
@@ -77,6 +78,18 @@ public final class EntityPositionWorlds {
             result.add(world);
         }
         return result;
+    }
+
+    /**
+     * Raises {@code region}, the move Entity#collide sweeps, to the region whose entities it collides with: up to
+     * maxUpStep above the move (26.3, Entity.java:1323), or along the move only for a Java client before 26.3 (26.2,
+     * Entity.java:1276). The step collides with the same entities.
+     */
+    public static SimpleCollisionBox withStepEntities(CultPlayer player, SimpleCollisionBox region) {
+        if (player.isBedrockMovement() || player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
+            region.maxY += Math.max(0.0D, player.getMaxUpStep());
+        }
+        return region;
     }
 
     /** Whether {@code worlds} is the one empty world. */

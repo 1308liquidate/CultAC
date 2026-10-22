@@ -156,8 +156,7 @@ final class ReportedKeyInput {
         for (int far = 0; far <= 3; far++) {
             region.expandToCoordinate((far & 1) != 0 ? farX : deltaX, start.y, (far & 2) != 0 ? farZ : deltaZ);
         }
-        region.maxY += Math.max(0.0D, player.getMaxUpStep());
-        region.expand(SimpleCollisionBox.COLLISION_EPSILON);
+        EntityPositionWorlds.withStepEntities(player, region).expand(SimpleCollisionBox.COLLISION_EPSILON);
         List<List<SimpleCollisionBox>> worlds = EntityPositionWorlds.of(player, context, context.getStart(), region);
         if (worlds == null) return 0.0D;
         for (List<SimpleCollisionBox> colliders : worlds) {

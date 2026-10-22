@@ -112,9 +112,74 @@ class JavaWalkBesideBoatTest {
         }
     }
 
-    private static void boatBeside(JavaTickFixture f, double gap) {
+    @Test
+    void aBoatTickingBeforeThePlayerPushesItAway() throws Exception {
+        for (double gap : new double[] {0.0, 0.1}) {
+            try (var f = new JavaTickFixture()) {
+                double boatX = boatBeside(f, gap);
+                f.player.compensatedEntities.appendSelfToClientTickOrder();
+                start(f, NONE, ALONG, false);
+                Vec3 position = START;
+                double velocity = 0.0;
+                for (int tick = 0; tick < 6; tick++) {
+                    double delta = velocity + boatPush(position.x, boatX);
+                    position = position.add(delta, 0.0, 0.0);
+                    PredictionResult result = f.tick(position, true);
+                    assertTrue(exact(result), gap + " tick " + tick + ": " + describe(result));
+                    velocity = delta * GROUND_FRICTION;
+                }
+            }
+        }
+    }
+
+    @Test
+    void walkingIntoABoatWhilePushedStepsOntoIt() throws Exception {
+        for (boolean boatFirst : new boolean[] {false, true}) {
+            for (double gap : new double[] {0.3, 0.45}) {
+                try (var f = new JavaTickFixture()) {
+                    double boatX = boatBeside(f, gap);
+                    if (boatFirst) f.player.compensatedEntities.appendSelfToClientTickOrder();
+                    start(f, FORWARD, TOWARDS, false);
+                    Vec3 position = START;
+                    double velocity = 0.0;
+                    boolean onBoat = false;
+                    for (int tick = 0; tick < TICKS; tick++) {
+                        if (boatFirst && !onBoat) velocity += boatPush(position.x, boatX);
+                        double delta = velocity + ClientMoveInput.of(f, FORWARD, 1.0F, SPEED, TOWARDS).x;
+                        double rise = 0.0;
+                        if (!onBoat && position.x + 0.3 + delta > boatX - BOAT_HALF_WIDTH) {
+                            rise = BOAT_TOP;
+                            onBoat = true;
+                        }
+                        position = position.add(delta, rise, 0.0);
+                        PredictionResult result = f.tick(position, true);
+                        assertTrue(exact(result), boatFirst + " " + gap + " tick " + tick + ": " + describe(result));
+                        velocity = delta * GROUND_FRICTION;
+                        if (!boatFirst && !onBoat) velocity += boatPush(position.x, boatX);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The x impulse Entity#push gives a player at {@code x} from a boat centred at {@code boatX} on the same floor,
+     * when AbstractBoat#tick's box, the boat inflated by 0.2 horizontally, reaches the player's.
+     */
+    private static double boatPush(double x, double boatX) {
+        if (boatX - BOAT_HALF_WIDTH - 0.2 >= x + 0.3 || boatX + BOAT_HALF_WIDTH + 0.2 <= x - 0.3) return 0.0;
+        double dx = x - boatX;
+        double distance = Math.abs(dx);
+        if (distance < 0.01F) return 0.0;
+        distance = Math.sqrt(distance);
+        return dx / distance * Math.min(1.0, 1.0 / distance) * 0.05F;
+    }
+
+    /** Adds the boat {@code gap} east of the player's box and returns its centre's x. */
+    private static double boatBeside(JavaTickFixture f, double gap) {
         Vec3 boat = new Vec3(START.x + 0.3F + gap + BOAT_HALF_WIDTH, FLOOR_Y, START.z);
         f.player.compensatedEntities.addEntity(BOAT, EntityTypeIds.OAK_BOAT, boat, 0, 0, 0);
+        return boat.x;
     }
 
     private static void start(JavaTickFixture f, ServerboundPlayerInput keys, float yaw, boolean sneaking)

@@ -56,6 +56,8 @@ final class BaseCollisionProbe {
 
         if (attemptedMovementExtents != null) {
             expandToAttemptedMovement(grabBoxesBB, attemptedMovementExtents, stuckSpeed);
+            // Entity#collide gathers entities along the attempted movement, which a step does not raise.
+            probeEntityRegion.set(grabBoxesBB);
             expandToPacketMovement(grabBoxesBB, target);
         } else {
             grabBoxesBB.expandToCoordinate(target.x, 0, target.z);
@@ -82,8 +84,13 @@ final class BaseCollisionProbe {
         if (!found.isEmpty()) found.removeIf(unknownBox -> !unknownBox.isIntersected(grabBoxesBB));
 
         if (!found.isEmpty()) {
-            SimpleCollisionBox region = probeEntityRegion.set(blockQuery);
-            region.maxY += Math.max(0.0D, player.getMaxUpStep());
+            SimpleCollisionBox region = attemptedMovementExtents == null
+                    ? probeEntityRegion.set(blockQuery)
+                    : probeEntityRegion.expand(maxEpsilon(dimensions.epsilon()));
+            if (attemptedMovementExtents != null && horizontalInputReach > 0.0D) {
+                region.expand(horizontalInputReach * stuckSpeed.x, 0.0D, horizontalInputReach * stuckSpeed.z);
+            }
+            EntityPositionWorlds.withStepEntities(player, region);
             List<List<SimpleCollisionBox>> worlds = EntityPositionWorlds.of(player, context, playerPos, region);
             if (worlds == null) {
                 return new CollideAxisData(
