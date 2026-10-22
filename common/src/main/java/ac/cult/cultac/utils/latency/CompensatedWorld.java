@@ -825,7 +825,7 @@ public class CompensatedWorld {
         if (openShulkerBoxes.isEmpty()) return;
 
         for (ShulkerData data : openShulkerBoxes) {
-            if (!data.isAnimationActive()) {
+            if (!data.isAnimationActive() || isShovedAtTickEnd(data)) {
                 continue;
             }
 
@@ -848,6 +848,32 @@ public class CompensatedWorld {
 
     private SimpleCollisionBox openShulkerCollisionBox(ShulkerData data) {
         return data.getCollision().copy().expand(data.getFacing(player));
+    }
+
+    /**
+     * Before 26.3, Minecraft#tick sends the movement packet before Level#tickBlockEntities, so the tick end proves
+     * each shulker box lid's exact shove and the block entity holds the exact lid shape.
+     */
+    public boolean shovesShulkerBoxesAtTickEnd() {
+        return !player.isBedrockMovement() && !pistons.reportsAfterBlockEntities();
+    }
+
+    private boolean isShovedAtTickEnd(ShulkerData data) {
+        return data.blockPos != null && shovesShulkerBoxesAtTickEnd();
+    }
+
+    /** The ShulkerBoxBlockEntity#moveCollidedEntities shoves of the block-entity pass that just ran. */
+    public List<ShulkerBoxShove> clientShulkerBoxShoves() {
+        var steps = clientBlockEntities.openedLidSteps();
+        if (steps.isEmpty()) return List.of();
+        List<ShulkerBoxShove> shoves = new ArrayList<>(steps.size());
+        for (var step : steps) {
+            int state = getBlockStateIdAt(step.pos());
+            if (!ClientBlockProperties.isShulkerBox(state)) continue;
+            shoves.add(ShulkerBoxShove.of(
+                    step.pos(), ClientBlockProperties.facing(state), step.progressOld(), step.progress()));
+        }
+        return shoves;
     }
 
     void markRecentClientCollisionChange(BlockPos pos) {
@@ -1054,6 +1080,8 @@ public class CompensatedWorld {
                         || player.packetStateData.serverFrozenTickStepsRemaining > 0)) {
             clientClocks.tick(++clientGameTime);
             clientBlockEntities.tick();
+        } else {
+            clientBlockEntities.skipTick();
         }
         clientEnvironment.tick();
         removeInvalidPistonLikeStuff();
@@ -1236,7 +1264,7 @@ public class CompensatedWorld {
     private SimpleCollisionBox accumulateShulkerPushes(SimpleCollisionBox queryBox) {
         SimpleCollisionBox shulkerPushes = new SimpleCollisionBox();
         for (ShulkerData data : openShulkerBoxes) {
-            if (!data.canPushEntities()) {
+            if (!data.canPushEntities() || isShovedAtTickEnd(data)) {
                 continue;
             }
 

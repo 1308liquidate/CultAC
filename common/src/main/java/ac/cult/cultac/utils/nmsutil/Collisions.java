@@ -45,6 +45,27 @@ public class Collisions {
         return collide(player, box, desiredX, desiredY, desiredZ, getAxisStepOrder(desiredX, desiredZ), true);
     }
 
+    /** Entity#collide for {@code box}, whose step-up reads the entity's current {@code onGround}. */
+    public static Vec3 collide(
+            CultPlayer player,
+            SimpleCollisionBox box,
+            double desiredX,
+            double desiredY,
+            double desiredZ,
+            boolean onGroundForStep) {
+        return collide(
+                player,
+                box,
+                desiredX,
+                desiredY,
+                desiredZ,
+                getAxisStepOrder(desiredX, desiredZ),
+                true,
+                box.minY,
+                null,
+                onGroundForStep);
+    }
+
     public static Vec3 collideWithAdditionalCollisionBoxes(
             CultPlayer player,
             SimpleCollisionBox box,

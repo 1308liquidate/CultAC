@@ -10,7 +10,9 @@ import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.data.ModelBlockStates;
 import ac.cult.cultac.protocol.value.BlockPos;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.function.Supplier;
 
 /** Sparse packet inputs applied at the existing compensated transaction boundary. */
@@ -119,13 +121,37 @@ public final class CompensatedBlockEntities {
                             entry.state()));
     }
 
+    /** The progress step of a shulker box lid that opened during the block-entity pass that just ran. */
+    public record ShulkerLidStep(BlockPos pos, float progressOld, float progress) {}
+
+    private final ArrayList<ShulkerLidStep> openedLidSteps = new ArrayList<>();
+
+    /**
+     * ShulkerBoxBlockEntity#updateAnimation calls moveCollidedEntities only from its OPENING branch, which is the only
+     * branch that raises progress above progressOld. Empty when the last client tick ran no block entities.
+     */
+    public List<ShulkerLidStep> openedLidSteps() {
+        return openedLidSteps;
+    }
+
+    public void skipTick() {
+        openedLidSteps.clear();
+    }
+
     public void tick() {
+        openedLidSteps.clear();
         if (entries == null) return;
         var iterator = entries.long2ObjectEntrySet().fastIterator();
         while (iterator.hasNext()) {
             var slot = iterator.next();
             var entry = slot.getValue();
             var next = ac.cult.blocksim.engine.ShulkerAnimation.tick(entry.data());
+            if (next.type().equals("minecraft:shulker_box")) {
+                float progressOld = next.data().get("progress_old").getAsFloat();
+                float progress = next.data().get("progress").getAsFloat();
+                if (progress > progressOld)
+                    openedLidSteps.add(new ShulkerLidStep(BlockPos.of(slot.getLongKey()), progressOld, progress));
+            }
             if (next.type().equals("minecraft:jukebox")
                     && Rules.DATA.registry().value(entry.state(), "has_record").equals("true"))
                 next = ac.cult.blocksim.engine.JukeboxPlayback.tick(next);

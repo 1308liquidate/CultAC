@@ -33,6 +33,8 @@ import ac.cult.cultac.checks.impl.prediction.checks.psuedo.NoFallPseudo;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngines;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaPredictionCarry;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaShulkerBoxShoves;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfile;
 import ac.cult.cultac.checks.impl.prediction.profile.MovementProfiles;
 import ac.cult.cultac.checks.impl.prediction.stage.MovementModifiers;
@@ -63,6 +65,7 @@ import ac.cult.cultac.utils.data.HeadRotation;
 import ac.cult.cultac.utils.data.LastInstance;
 import ac.cult.cultac.utils.data.MainSupportingBlockData;
 import ac.cult.cultac.utils.data.SetbackPosWithVector;
+import ac.cult.cultac.utils.data.ShulkerBoxShove;
 import ac.cult.cultac.utils.data.StuckSpeedData;
 import ac.cult.cultac.utils.data.TeleportAcceptData;
 import ac.cult.cultac.utils.data.TeleportData;
@@ -313,11 +316,47 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                                         this.player, this.player.x, this.player.y, this.player.z))) {
                     this.lastOnGround = DesyncStatus.UNKNOWN;
                 }
+                if (this.currentPredictionVehicle() == null
+                        && this.player.compensatedWorld.shovesShulkerBoxesAtTickEnd()) {
+                    this.applyShulkerBoxShoves();
+                }
             }
         }
         if (this.player.packetStateData.flyingStopAfterTravel) {
             this.stopFlyingAfterTravel();
         }
+    }
+
+    private void applyShulkerBoxShoves() {
+        List<ShulkerBoxShove> shoves = this.player.compensatedWorld.clientShulkerBoxShoves();
+        if (shoves.isEmpty()) return;
+        MainSupportingBlockData support = this.lastPrediction == null
+                ? new MainSupportingBlockData(null, false)
+                : this.lastPrediction.getSimulationContext().getWorldData().getMainSupportingBlockPos();
+        JavaShulkerBoxShoves.Moved moved = JavaShulkerBoxShoves.apply(
+                this.player,
+                shoves,
+                new Vec3(this.player.x, this.player.y, this.player.z),
+                this.lastOnGround.determineOptimistically(),
+                support,
+                this.profileCarry instanceof JavaPredictionCarry carry ? carry : null,
+                this.validPlayerStartingVels,
+                this.lastPrediction);
+        if (moved == null) return;
+        Vec3 position = moved.position();
+        this.player.x = position.x;
+        this.player.y = position.y;
+        this.player.z = position.z;
+        this.player.boundingBox =
+                GetBoundingBox.getCollisionBoxForPlayer(this.player, position.x, position.y, position.z);
+        this.player.packetStateData.clientSidePosition = position;
+        this.player.onGround = moved.onGround();
+        this.lastOnGround = DesyncStatus.fromBoolean(moved.onGround());
+        if (this.lastPrediction != null) {
+            this.lastPrediction.getSimulationContext().getWorldData().setMainSupportingBlockPos(moved.support());
+        }
+        this.applyProfileCommit(
+                new PredictionCommit(moved.carry() == null ? this.profileCarry : moved.carry(), moved.velocities()));
     }
 
     private void handleMovePlayer(ServerboundMovePlayer packet) {
