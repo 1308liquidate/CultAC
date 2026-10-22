@@ -9,18 +9,22 @@ import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.events.packets.listeners.PacketEntityAction;
+import ac.cult.cultac.events.packets.listeners.PacketServerTeleport;
 import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.network.packet.WorldPackets.TimeUpdate;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundAcceptTeleportation;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMoveVehicle;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
 import ac.cult.cultac.protocol.value.Vec3d;
+import ac.cult.cultac.utils.data.TeleportData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
 import ac.cult.cultac.utils.math.Vec3;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -46,6 +50,8 @@ class CamelDashCooldownTest {
     private static final double GROUND_FRICTION = 0.6F * 0.91F;
     /** LivingEntity#moveRelative for the ridden input's 0.98F on 0.6-friction ground. */
     private static final double GROUND_INPUT = (double) 0.98F * (SPEED * (0.21600002F / (0.6F * 0.6F * 0.6F)));
+    private static final ServerboundPlayerInput IDLE =
+            new ServerboundPlayerInput(false, false, false, false, false, false, false);
     private static final ServerboundPlayerInput FORWARD_SPRINT =
             new ServerboundPlayerInput(true, false, false, false, false, false, true);
 
@@ -74,6 +80,70 @@ class CamelDashCooldownTest {
         }
     }
 
+    /**
+     * The rider's own dash arms the cooldown, the rider dismounts before it runs out and the camel's client ticks run
+     * it out while nobody rides it: the first ridden tick after the remount carries the sprint bonus.
+     */
+    @Test
+    void aCooldownLeftAtTheDismountRunsOutBeforeTheRemount() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.player.compensatedWorld.applyClientTime(new TimeUpdate(GAME_TIME, Map.of()));
+            f.place(ON_FOOT, Vec3.ZERO);
+            f.player.compensatedEntities.addEntity(CAMEL, EntityTypeIds.CAMEL, START, 0, 0, 0);
+            PacketEntityCamel camel = (PacketEntityCamel) f.player.compensatedEntities.getEntity(CAMEL);
+            camel.hasSaddle = true;
+            camel.onGround = true;
+            metadata(f, false);
+            assertExact(f.tick(ON_FOOT, true));
+
+            board(f, IDLE);
+            command(f, PlayerCommandAction.START_JUMPING_WITH_HORSE, 0);
+            // LocalPlayer#aiStep sends the riding jump after the camel's tick, so it arms the next one.
+            assertExact(ride(f, START, true));
+            Vec3 landed = dash(f, START);
+
+            List<Integer> teleports = teleportIds(f);
+            f.setPassengers(CAMEL, List.of());
+            f.pongThrough(f.player.lastTransactionSent.get());
+            acceptNewTeleports(f, teleports);
+            Vec3 dismounted = new Vec3(f.player.x, f.player.y, f.player.z);
+            for (int tick = 0; tick < DASH_COOLDOWN; tick++) assertExact(f.tick(dismounted, true));
+
+            board(f, FORWARD_SPRINT);
+            command(f, PlayerCommandAction.START_SPRINTING, 0);
+            assertExact(ride(f, new Vec3(landed.x, landed.y, landed.z + GROUND_INPUT), true));
+        }
+    }
+
+    /**
+     * Camel#executeRidersJump at a tapped charge, AbstractHorse#onPlayerJump's 0.4 scale, from rest facing +z, then
+     * LivingEntity#travelInAir with no ridden input until the camel lands and slows; the camel's resting position.
+     */
+    private static Vec3 dash(JavaTickFixture f, Vec3 from) {
+        final float amount = 0.4F;
+        double y = from.y;
+        double z = from.z;
+        double vy = GROUNDED_Y + 1.4285F * amount * (double) 0.42F;
+        double vz = 22.2222F * amount * (double) 0.09F;
+        boolean onGround = true;
+        for (int tick = 0; tick < 12; tick++) {
+            if (Math.abs(vy) < 0.003) vy = 0.0;
+            if (Math.abs(vz) < 0.003) vz = 0.0;
+            double friction = (onGround ? 0.6F : 1.0F) * 0.91F;
+            z += vz;
+            y += vy;
+            onGround = y <= from.y;
+            if (onGround) {
+                y = from.y;
+                vy = 0.0;
+            }
+            assertExact(ride(f, new Vec3(from.x, y, z), onGround));
+            vz *= friction;
+            vy = (vy - 0.08) * 0.98F;
+        }
+        return new Vec3(from.x, y, z);
+    }
+
     /** The server's camel DASH and a standing LAST_POSE_CHANGE_TICK, delivered. */
     private static void metadata(JavaTickFixture f, boolean dashing) {
         f.player.compensatedEntities.updateEntityMetadata(
@@ -89,20 +159,60 @@ class CamelDashCooldownTest {
         f.setPassengers(CAMEL, List.of(f.player.entityID));
         f.pongThrough(f.player.lastTransactionSent.get());
         f.input(FORWARD_SPRINT);
-        var command = new ServerboundPlayerCommand(f.player.entityID, PlayerCommandAction.START_SPRINTING, 0);
-        new PacketEntityAction()
-                .onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, command), f.player, command);
+        command(f, PlayerCommandAction.START_SPRINTING, 0);
         f.tickEnd();
         f.player.checkManager.getSimulationProcessor().seedStartingVelocity(new Vec3(0.0, GROUNDED_Y, 0.0));
         f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
     }
 
+    /** The rider boards the still camel holding {@code keys}. */
+    private static void board(JavaTickFixture f, ServerboundPlayerInput keys) {
+        f.setPassengers(CAMEL, List.of(f.player.entityID));
+        f.pongThrough(f.player.lastTransactionSent.get());
+        f.input(keys);
+        f.tickEnd();
+        f.player.checkManager.getSimulationProcessor().seedStartingVelocity(new Vec3(0.0, GROUNDED_Y, 0.0));
+        f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
+    }
+
+    private static void command(JavaTickFixture f, PlayerCommandAction action, int data) {
+        var command = new ServerboundPlayerCommand(f.player.entityID, action, data);
+        new PacketEntityAction()
+                .onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, command), f.player, command);
+    }
+
+    private static void acceptNewTeleports(JavaTickFixture f, List<Integer> before) {
+        for (TeleportData teleport : f.player.getSetbackTeleportUtil().pendingTeleports) {
+            if (before.contains(teleport.getTeleportId())) continue;
+            Vec3 target = teleport.getLocation();
+            var packet = new ServerboundAcceptTeleportation(
+                    teleport.getTeleportId(),
+                    new Vec3d(target.x, target.y, target.z),
+                    teleport.getFinalYaw(),
+                    teleport.getFinalPitch());
+            new PacketServerTeleport()
+                    .onAcceptTeleportation(f.event(ServerboundPackets.ACCEPT_TELEPORTATION, packet), f.player, packet);
+        }
+    }
+
+    private static List<Integer> teleportIds(JavaTickFixture f) {
+        List<Integer> ids = new ArrayList<>();
+        for (TeleportData teleport : f.player.getSetbackTeleportUtil().pendingTeleports) {
+            ids.add(teleport.getTeleportId());
+        }
+        return ids;
+    }
+
     /** One client tick facing +z: the rider's Rot, the camel's grounded move and the tick end. */
     private static PredictionResult ride(JavaTickFixture f, Vec3 to) {
+        return ride(f, to, true);
+    }
+
+    private static PredictionResult ride(JavaTickFixture f, Vec3 to, boolean onGround) {
         PredictionResult before = f.player.checkManager.getSimulationProcessor().getLastPrediction();
         var rot = new ServerboundMovePlayer(0, 0, 0, 0F, 0F, false, false, false, true);
         f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
-        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), 0F, 0F, true, true);
+        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), 0F, 0F, onGround, true);
         f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, move), f.player, move);
         f.tickEnd();
         PredictionResult result = f.player.checkManager.getSimulationProcessor().getLastPrediction();
