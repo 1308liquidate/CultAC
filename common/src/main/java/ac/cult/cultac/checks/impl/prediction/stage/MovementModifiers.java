@@ -16,6 +16,7 @@ import java.util.Set;
 
 public class MovementModifiers {
     public static final String FLUID_HOP_REASON = "swim hop";
+    public static final String SLIME_BLOCK_LAUNCH = "Slime Block";
     public static final double FLUID_HOP_Y = (double) 0.3F;
 
     // Keep fluid-hop values centralized so Bedrock prediction and Java-shaped
@@ -216,7 +217,7 @@ public class MovementModifiers {
                 double x = direction.getModX() == 0 ? vector.getX() : direction.getModX();
                 double y = direction.getModY() == 0 ? vector.getY() : direction.getModY();
                 double z = direction.getModZ() == 0 ? vector.getZ() : direction.getModZ();
-                start.add(vector.withXYZ(x, y, z, "Slime Block"));
+                start.add(vector.withXYZ(x, y, z, SLIME_BLOCK_LAUNCH));
             }
         }
     }
