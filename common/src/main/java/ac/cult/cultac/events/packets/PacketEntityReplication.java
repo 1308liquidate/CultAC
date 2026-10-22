@@ -399,11 +399,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     && entity
                             == ac.cult.cultac.bedrock.prediction.integration.BedrockVehicleControl.controlledVehicle(
                                     player)) return;
-            if (!player.isBedrockMovement()
-                    && entity == velocityVehicle
-                    && (player.compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(entity)
-                            || player.packetStateData.clientTickVehicleMovePacketsThisClientTick > 0
-                            || player.packetStateData.localAuthoritativeVehicleMovePacketsThisClientTick > 0)) {
+            if (entity == velocityVehicle && player.compensatedEntities.vehicles.isLocallyTickedVelocityRoot(entity)) {
                 return;
             }
             entity.onMovement(player, tickingReliably);

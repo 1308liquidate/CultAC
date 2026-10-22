@@ -52,6 +52,13 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
         }
         PacketEntityHorse horse = player.compensatedEntities.vehicles.getClientVisibleHorseRoot();
         if (horse != null) {
+            // MCP-Reborn AbstractHorse#tick ends with the standCounter/allowStandSliding tail after travel.
+            // End-of-tick interpolation skips the locally ticked root, so run that tail here, before the
+            // passenger's staged release.
+            boolean locallyTicked = player.compensatedEntities.vehicles.isLocallyTickedVelocityRoot(horse);
+            if (locallyTicked) {
+                horse.tickStandTail();
+            }
             // LocalPlayer#jumpableVehicle releases a camel rider's jump only while Camel#canJump holds after the
             // camel's tick, and Camel#canJump is false while the camel refuses to move.
             if (horse instanceof PacketEntityCamel camel
@@ -74,6 +81,8 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
                 horse.allowStandSliding = true;
                 horse.nextAllowStandSliding = false;
             }
+            // The same onPlayerJump calls standIfPossible(), which only stands a horse the client ticks itself.
+            horse.promoteClientRidingJumpStand(locallyTicked);
         }
 
         promoteInputAfterClientTickEnd();

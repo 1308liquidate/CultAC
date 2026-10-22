@@ -567,6 +567,19 @@ public final class CompensatedVehicleState implements Debuggable {
         return canServerPlayerVehicleBeLocalAuthoritative();
     }
 
+    /**
+     * Whether the Java client's own movement tick moves this velocity root, so end-of-tick interpolation skips it and
+     * VehiclePredictionRunner runs its per-tick tail instead.
+     */
+    public boolean isLocallyTickedVelocityRoot(@Nullable PacketEntity vehicle) {
+        return !player.isBedrockMovement()
+                && vehicle != null
+                && vehicle == getVelocityMovementVehicle()
+                && (canClientAuthoritativelyMoveVisibleRoot(vehicle)
+                        || player.packetStateData.clientTickVehicleMovePacketsThisClientTick > 0
+                        || player.packetStateData.localAuthoritativeVehicleMovePacketsThisClientTick > 0);
+    }
+
     public boolean canClientAuthoritativelyMoveVisibleRoot(@Nullable PacketEntity vehicle) {
         return vehicle != null && passengerIndex(vehicle) == 0 && canLocalClientAuthoritativelyMove(vehicle);
     }
