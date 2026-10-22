@@ -229,6 +229,59 @@ class JavaSneakEdgeWaterTest {
         }
     }
 
+    /**
+     * A sprint-swimmer on the floor holds shift into its x = 9 edge and lets go. LocalPlayer#aiStep never crouches a
+     * swimming player, so the input the edge hides keeps the full scale and the release moves on all of it.
+     */
+    @Test
+    void aSwimmerHeldAtAnEdgeMovesOnWithTheFullInput() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            for (int x = -8; x <= 12; x++) {
+                for (int z = -8; z <= 8; z++) {
+                    for (int y = FLOOR_Y; y <= FLOOR_Y + 3; y++) water(f, x, y, z);
+                    if (x >= 9) {
+                        water(f, x, FLOOR_Y - 1, z);
+                        water(f, x, FLOOR_Y - 2, z);
+                    }
+                }
+            }
+            for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
+            float yaw = -90.0F;
+            rotate(f, yaw, 20.0F);
+            double x = 8.8;
+            f.place(new Vec3(x, FLOOR_Y, 0.5), Vec3.ZERO);
+            f.input(SWIM);
+            var sprint = new ServerboundPlayerCommand(f.player.entityID, PlayerCommandAction.START_SPRINTING, 0);
+            new PacketEntityAction()
+                    .onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, sprint), f.player, sprint);
+
+            Vec3 input = ClientMoveInput.of(f, SWIM, 1.0F, 0.02F, yaw);
+            double velocityX = 0.0;
+            double velocityZ = 0.0;
+            double z = 0.5;
+            int hidden = 0;
+            for (int tick = 0; tick < 15; tick++) {
+                boolean shift = tick >= 3 && tick < 14;
+                f.input(shift ? SWIM_SHIFT : SWIM);
+                double deltaX = velocityX + input.x;
+                double movedX = deltaX;
+                // Player#maybeBackOffFromEdge steps the move back by 0.05 while the deflated box could fall.
+                while (shift && movedX != 0.0 && x - 0.3 + 1.0E-7 + movedX >= 9.0) {
+                    movedX = Math.abs(movedX) <= 0.05 ? 0.0 : movedX - 0.05;
+                }
+                if (shift && movedX == 0.0) hidden++;
+                x += movedX;
+                z += velocityZ + input.z;
+                PredictionResult result = f.tick(new Vec3(x, FLOOR_Y, z), true);
+                assertTrue(exact(result), "tick " + tick + " " + describe(result));
+                // LivingEntity#travelInWater slows a sprinting player by 0.9F.
+                velocityX = deltaX * 0.9F;
+                velocityZ = (velocityZ + input.z) * 0.9F;
+            }
+            assertTrue(hidden >= 3, "hidden ticks " + hidden);
+        }
+    }
+
     /** Still water four blocks deep over the stone floor, with a one-block water trench at x = 1 and 2. */
     private static void trench(JavaTickFixture f) {
         for (int x = -8; x <= 8; x++) {
