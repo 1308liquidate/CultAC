@@ -47,8 +47,8 @@ public class PacketEntityAction {
                 player.checkManager.getCheck(ElytraA.class).onStartGliding(event);
 
                 if (canGlideUsingEquippedItem(player)) {
+                    // The pose follows in Player#updatePlayerPose, after this tick's aiStep.
                     player.isGliding = true;
-                    player.refreshPlayerPose();
                 } else {
                     rejectGlideStart(event, player);
                 }
