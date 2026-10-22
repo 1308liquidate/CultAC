@@ -41,7 +41,8 @@ class SourceCache(
     /** Returns the per-class patches from [from] to [to], diffing them unless the cache already holds this pair. */
     fun patches(from: VersionEntry, to: VersionEntry): Path {
         val names = if (obfuscated(from) || obfuscated(to)) LocalNames.GENERATED else LocalNames.MOJANG
-        val target = root.resolve("patches/${names.dir}/${from.id}_to_${to.id}")
+        // The pair alone decides the names, so patch sets need no further key.
+        val target = root.resolve("patches/${from.id}_to_${to.id}")
         val stamp = "$PATCH_FORMAT\n${treeStamp(from, names)}\n${treeStamp(to, names)}"
         if (stampOf(target) == stamp) return target
 
