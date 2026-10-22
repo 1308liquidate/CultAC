@@ -95,6 +95,8 @@ public class PacketEntity {
     public Vec3 clientPhysicalPosition;
     public boolean clientPhysicalPositionExact = true;
     public float clientPhysicalYaw = 0.0F;
+    // Whether clientPhysicalYaw is the yaw LinearInterpolationHandler#interpolate gave the client's entity.
+    public boolean clientPhysicalYawCurrent = true;
     public float clientPhysicalPitch = 0.0F;
 
     public ReachInterpolationData oldPacketLocation;
@@ -678,12 +680,16 @@ public class PacketEntity {
         float exactYawAfterClientTick = exactYawAfterClientTick();
         float exactPitchAfterClientTick = exactPitchAfterClientTick();
         boolean exactRotationAfterClientTick = exactRotationAfterClientTick();
+        boolean rotationMayStep = oldPacketLocation != null || newPacketLocation.hasActiveInterpolationTarget();
         newPacketLocation.tickMovement(oldPacketLocation == null, tickingReliably);
         alignExactInterpolatedLocation(exactAfterClientTick);
         if (exactRotationAfterClientTick) {
             newPacketLocation.setExactRotation(exactYawAfterClientTick, exactPitchAfterClientTick);
             clientPhysicalYaw = exactYawAfterClientTick;
             clientPhysicalPitch = exactPitchAfterClientTick;
+            clientPhysicalYawCurrent = true;
+        } else if (rotationMayStep) {
+            clientPhysicalYawCurrent = false;
         }
         if (exactAfterClientTick != null) {
             clientPhysicalPosition = positionFromCollisionBox(exactAfterClientTick, clientPhysicalPosition);
@@ -973,6 +979,7 @@ public class PacketEntity {
     public void setClientPhysicalRotation(float yaw, float pitch) {
         this.clientPhysicalYaw = yaw;
         this.clientPhysicalPitch = pitch;
+        this.clientPhysicalYawCurrent = true;
     }
 
     private Vec3 positionFromCollisionBox(SimpleCollisionBox box) {

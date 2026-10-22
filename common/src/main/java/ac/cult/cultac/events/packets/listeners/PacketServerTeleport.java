@@ -209,6 +209,9 @@ public class PacketServerTeleport {
                         yawTrackedRoot.interpYaw = finalYaw;
                         yawTrackedRoot.steps = 0;
                     }
+                    // The snapped yaw is the one AbstractBoat#controlBoat turns in the client's next tick.
+                    PacketEntity riding = player.compensatedEntities.getSelf().getRiding();
+                    if (controlledRoot.isBoat() && controlledRoot == riding) player.boatYawBeforeTurn = finalYaw;
                 }
             }
         });

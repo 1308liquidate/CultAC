@@ -62,6 +62,7 @@ import ac.cult.cultac.utils.latency.LatencyUtils;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.TrigHandler;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.BoatRiderYaw;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
@@ -442,8 +443,7 @@ public class CultPlayer implements GrimUser {
     // AbstractBoat#clampRotation's yaw for a player passenger, in its float operations, which need not return an
     // unclamped yaw unchanged.
     private static float clampToBoat(float yaw, float boatYaw) {
-        float delta = CultMath.wrapDegrees(yaw - boatYaw);
-        return yaw + CultMath.clamp(delta, -105.0F, 105.0F) - delta;
+        return BoatRiderYaw.clampRotation(yaw, boatYaw);
     }
 
     public void onPacketCancel() {
