@@ -2,6 +2,9 @@ package ac.cult.cultac.checks.impl.prediction.stage.world;
 
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.BlockProps;
+import ac.cult.blocksim.data.BlockRegistry;
+import ac.cult.blocksim.data.DataTables;
+import ac.cult.blocksim.data.StateFacts;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
@@ -49,6 +52,7 @@ public class WorldStageBuilder {
     // floating point inprecision is any decent way... perhaps looking at the many bounding boxes that can send
     // the position and picking the one at the end of the tick that doesn't intersect with any new block collisions?
     private static final double BEDROCK_PUSH_OUT_INSET = 0.002D;
+    private static final BlockRegistry BLOCKS = DataTables.defaults().registry();
     private static final Direction[] HORIZONTAL_ESCAPES = {
         Direction.WEST, Direction.EAST, Direction.NORTH, Direction.SOUTH
     };
@@ -1048,7 +1052,15 @@ public class WorldStageBuilder {
     private BlockPos findSupportingBlock(CultPlayer player, SimpleCollisionBox searchBox) {
         SupportScan scan = supportScan.inUse ? new SupportScan() : supportScan;
         try {
-            Collisions.hasState(player, searchBox, scan.start(player, searchBox));
+            // The cells BlockCollisions visits: one layer past the search box on each axis.
+            SimpleCollisionBox cells = new SimpleCollisionBox(
+                    Math.floor(searchBox.minX - 1.0E-7) - 1,
+                    Math.floor(searchBox.minY - 1.0E-7) - 1,
+                    Math.floor(searchBox.minZ - 1.0E-7) - 1,
+                    Math.floor(searchBox.maxX + 1.0E-7) + 1,
+                    Math.floor(searchBox.maxY + 1.0E-7) + 1,
+                    Math.floor(searchBox.maxZ + 1.0E-7) + 1);
+            Collisions.hasState(player, cells, scan.start(player, searchBox, cells));
             return scan.best;
         } finally {
             scan.clear();
@@ -1060,14 +1072,16 @@ public class WorldStageBuilder {
         private boolean inUse;
         private CultPlayer player;
         private SimpleCollisionBox searchBox;
+        private SimpleCollisionBox cells;
         private double playerX, playerY, playerZ;
         private BlockPos best;
         private double bestDistance;
 
-        private SupportScan start(CultPlayer player, SimpleCollisionBox searchBox) {
+        private SupportScan start(CultPlayer player, SimpleCollisionBox searchBox, SimpleCollisionBox cells) {
             inUse = true;
             this.player = player;
             this.searchBox = searchBox;
+            this.cells = cells;
             playerX = player.x;
             playerY = player.y;
             playerZ = player.z;
@@ -1079,12 +1093,22 @@ public class WorldStageBuilder {
         private void clear() {
             player = null;
             searchBox = null;
+            cells = null;
             best = null;
             inUse = false;
         }
 
         @Override
         public boolean test(int block, BlockPos blockPos) {
+            // BlockCollisions#computeNext: an outer cell on one axis holds only a block with a large collision
+            // shape, on two axes only a moving piston, and on all three none.
+            int outer = (blockPos.getX() == cells.minX || blockPos.getX() == cells.maxX ? 1 : 0)
+                    + (blockPos.getY() == cells.minY || blockPos.getY() == cells.maxY ? 1 : 0)
+                    + (blockPos.getZ() == cells.minZ || blockPos.getZ() == cells.maxZ ? 1 : 0);
+            if (outer == 3
+                    || outer == 1 && !BLOCKS.facts(block).has(StateFacts.LARGE_COLLISION)
+                    || outer == 2 && !BlockIds.is(block, BlockIds.MOVING_PISTON)) return false;
+
             CollisionBox collision =
                     ClientBlockShapes.movement(player, block, blockPos.getX(), blockPos.getY(), blockPos.getZ());
             if (!collision.isIntersected(searchBox)) return false;
@@ -1095,40 +1119,13 @@ public class WorldStageBuilder {
             double distance = distanceX * distanceX + distanceY * distanceY + distanceZ * distanceZ;
 
             if (distance < bestDistance
-                    || distance == bestDistance && (best == null || firstHasPriorityOverSecond(blockPos, best))) {
+                    // CollisionGetter#findSupportingBlock keeps the greatest BlockPos#compareTo among equal distances.
+                    || distance == bestDistance && (best == null || best.compareTo(blockPos) < 0)) {
                 best = blockPos;
                 bestDistance = distance;
             }
 
             return false;
         }
-    }
-
-    private boolean firstHasPriorityOverSecond(BlockPos first, BlockPos second) {
-        // Order of loop is X, Y, and Z
-        // We prioritize lowest Y axis, then lowest X axis, then lowest Z axis
-        // Ties among the X and Z positions are broken by the order of looping being X
-        //
-        // X O O
-        // 0 X 0
-        // 0 0 X
-        // If the three blocks were this, the lowest right would win because of iteration order
-        //
-        // X 0 0
-        // 0 0 X
-        // But the upper left would win here because of prioritizing negative X and negative Z
-        if (first.getY() < second.getY()) return true;
-
-        double sumX = second.getX() - first.getX();
-        double sumY = second.getZ() - first.getZ();
-
-        double horizontalSumTotal = sumX + sumY;
-        if (horizontalSumTotal == 0) {
-            // If X is farther in the X direction, then it was found later and therefore won't override
-            return sumX < 0;
-        }
-
-        // Otherwise, lower X and lower Z have priority
-        return horizontalSumTotal < 0;
     }
 }
