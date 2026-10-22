@@ -33,7 +33,9 @@ import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.network.protocol.util.viaversion.ViaVersionUtil;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
+import ac.cult.cultac.protocol.ConnectionLifecycle;
 import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.PacketBundlePolicy;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPing;
 import ac.cult.cultac.protocol.value.GameMode;
@@ -113,7 +115,8 @@ public class CultPlayer implements GrimUser {
     }
 
     /** A transaction and the ping that carries it; a {@code null} packet shares a ping already written. */
-    public record TrackedTransaction(int transaction, @Nullable CultWrite packet) {
+    public record TrackedTransaction(
+            int transaction, @Nullable CultWrite packet) {
         public int id() {
             return ((ClientboundPing) packet.packet()).id();
         }
@@ -247,7 +250,8 @@ public class CultPlayer implements GrimUser {
     public boolean isSneaking;
     // The client's last START/STOP_SPRINTING (LocalPlayer#wasSprinting)
     public boolean isSprinting;
-    // LocalPlayer#aiStep cleared the sprint flag of a passenger without a STOP_SPRINTING; the next START_SPRINTING ends it.
+    // LocalPlayer#aiStep cleared the sprint flag of a passenger without a STOP_SPRINTING; the next START_SPRINTING ends
+    // it.
     public boolean sprintClearedAsPassenger;
     public final ClientSprintState sprintState = new ClientSprintState();
     public final ClientSwimState swimState = new ClientSwimState();
@@ -774,11 +778,11 @@ public class CultPlayer implements GrimUser {
      * inside it, so the update shares the latest CultAC ping already in that bundle. Without one, a ping is
      * written directly before the update and opens the bundle, or makes the host bundle it is in the flush bundle.
      * A Bedrock player's flush group shares its ping the same way, to keep one ping per flush, though Geyser does
-     * not hand the client the group as one task.
+     * not hand the client the group as one task. Standalone level/player packets require a trailing proof instead.
      */
     public int appendFlushProofTransaction(PacketSendEvent<?> event) {
         var connection = user.getCultConnection();
-        if (!connection.isPreparingWrites()) {
+        if (!connection.isPreparingWrites() || PacketBundlePolicy.requiresStandalone(event.getPacketType())) {
             TrackedTransaction proof = appendTrailingProofTransaction(event);
             return proof == null ? -1 : proof.transaction();
         }
@@ -806,13 +810,16 @@ public class CultPlayer implements GrimUser {
      * encoder bundles a packet that expands to several frames, and ClientPacketListener#handleBundlePacket
      * handles the sub-packets in order in one task, so the pong proves the packet was applied before the
      * client's next tick. In a Java flush bundle that already holds a CultAC ping, that ping is handled in the
-     * same task and proves the packet without another. Returns null, writing nothing, when no transaction can be
-     * sent.
+     * same task and proves the packet without another. Standalone packets instead retain a FIFO trailing proof,
+     * without claiming bundle atomicity or application before the next client tick. Protocol transitions cannot
+     * carry an old-phase proof. Returns null, writing nothing, when no transaction can be sent.
      */
     @Nullable
     public TrackedTransaction appendTrailingProofTransaction(
             PacketSendEvent<?> event, List<CultWrite> packetsBeforeProof) {
-        int shared = isBedrockMovement() ? 0 : event.flushPing();
+        int shared = isBedrockMovement() || PacketBundlePolicy.requiresStandalone(event.getPacketType())
+                ? 0
+                : event.flushPing();
         if (shared > 0) {
             event.getWritesAfterSend().addAll(packetsBeforeProof);
             return new TrackedTransaction(shared, null);
@@ -834,6 +841,7 @@ public class CultPlayer implements GrimUser {
     @Nullable
     private TrackedTransaction writeTrailingProofTransaction(
             PacketSendEvent<?> event, List<CultWrite> packetsBeforeProof) {
+        if (ConnectionLifecycle.handles(event.getPacketType())) return null;
         TrackedTransaction proof = createTrackedTransactionPacketForDeferredSend();
         if (proof == null) {
             return null;
@@ -1502,7 +1510,8 @@ public class CultPlayer implements GrimUser {
             return false;
         }
         latencyUtils.addRealTimeTask(proof.transaction(), task);
-        if (!MovementProfiles.forPlayer(this).shouldUseBundledPacketProof(this)) return false;
+        if (PacketBundlePolicy.requiresStandalone(event.getPacketType())
+                || !MovementProfiles.forPlayer(this).shouldUseBundledPacketProof(this)) return false;
         if (!event.isInsideBundle()) event.bundle();
         return true;
     }

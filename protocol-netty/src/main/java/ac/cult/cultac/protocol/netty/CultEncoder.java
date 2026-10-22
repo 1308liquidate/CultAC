@@ -7,6 +7,7 @@ import ac.cult.cultac.network.PacketDispatcher;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.protocol.ConnectionLifecycle;
 import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.PacketBundlePolicy;
 import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.UnsupportedOnVersionException;
@@ -53,6 +54,10 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     private int closeQueuedFor = -1;
     // The flush bundle holds a host bundle whose closing delimiter it has not reached.
     private boolean heldHostBundle;
+    // Delimiter frames retain their preparation generation across a protocol-changing terminal.
+    private int protocolGeneration;
+    // Only the known closing marker of this retired source scope may be consumed; never a new-phase opener.
+    private int retiredBundleGeneration = -1;
     // The output of the outermost write being prepared; its frames precede the packet being expanded.
     private Output processing;
     private boolean removed;
@@ -120,7 +125,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 && !connection.isPreparingWrites()
                 && !connection.packets().translated()
                 && message instanceof ByteBuf frame
-                && wireType(frame) != ClientboundPackets.KEEP_ALIVE) {
+                && !PacketBundlePolicy.requiresStandalone(wireType(frame))) {
             try {
                 var phase = connection.phase(PacketDirection.CLIENTBOUND);
                 var route = connection.dispatcher().get(PacketDirection.CLIENTBOUND, phase, Wire.peekVarInt(frame));
@@ -141,7 +146,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         if (emission == null
                 && !connection.isPreparingWrites()
                 && message instanceof ByteBuf frame
-                && wireType(frame) != ClientboundPackets.KEEP_ALIVE
+                && !PacketBundlePolicy.requiresStandalone(wireType(frame))
                 && unroutedTranslated(frame)) {
             if (removed || !ctx.channel().isActive()) {
                 new Pending(frame, promise).discard(new ClosedChannelException());
@@ -186,7 +191,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             flushBundle(ctx);
         } else {
             // A recursive flush happens after the frames already in emission.
-            emission.addLast(new Frame(null, null, null));
+            emission.addLast(frame(null, null, null));
         }
     }
 
@@ -256,7 +261,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             CultNetworkManager.reportFailure("outbound packet expansion", failure);
             if (fallback != null) {
                 PacketType<?> type = fallbackType(fallback);
-                output.addLast(new Frame(fallback, promise, type));
+                output.addLast(frame(fallback, promise, type));
                 fallback = null;
                 connection.placedClientbound(type);
             } else promise.tryFailure(failure);
@@ -428,7 +433,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                             connection.user(), phase, type, (ClientboundPacket) value, batch.inside);
                     if (authored) event.authored();
                     // Emission closes the flush bundle before a structural packet, so its ping cannot prove one.
-                    event.sharedPing(structural(type) ? 0 : sharedPing(batch));
+                    event.sharedPing(PacketBundlePolicy.requiresStandalone(type) ? 0 : sharedPing(batch));
                     connection.dispatcher().send(event, route.send());
                     if (event.isCancelled()) {
                         promise.trySuccess();
@@ -455,7 +460,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                             appendReplacement(ctx, replacement, promise, type, batch, leadPing);
                         } else {
                             int ping = leadPing != 0 ? leadPing : event.trackedPing();
-                            batch.add(new Frame(bytes, promise, type, ping, leadPing != 0));
+                            batch.add(frame(bytes, promise, type, ping, leadPing != 0));
                             bytes = null;
                         }
                         connection.placedClientbound(type);
@@ -475,7 +480,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             // Unknown/cancelled model packets still retain their physical representation.
             if (bytes != null) {
                 PacketType<?> placed = forwardedType != null ? forwardedType : fallbackType(bytes);
-                batch.add(new Frame(bytes, promise, forwardedType, leadPing, leadPing != 0));
+                batch.add(frame(bytes, promise, forwardedType, leadPing, leadPing != 0));
                 bytes = null;
                 connection.placedClientbound(placed);
             }
@@ -549,7 +554,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 var part = replacement.frames().size() == 1 ? promise : ctx.newPromise();
                 if (parts != null) parts.add(part);
                 boolean first = transferred == 0;
-                batch.add(new Frame(frame, part, first ? type : null, first ? leadPing : 0, first && leadPing != 0));
+                batch.add(frame(frame, part, first ? type : null, first ? leadPing : 0, first && leadPing != 0));
                 transferred++;
             }
             if (replacement.frames().size() > 1) batch.addGroup(new GroupCompletion(List.copyOf(parts), promise));
@@ -570,21 +575,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         ByteBuf bytes = connection
                 .packets()
                 .encodeBundleDelimiter(connection.phase(PacketDirection.CLIENTBOUND), ctx.alloc(), connection);
-        return new Frame(bytes, ctx.newPromise(), type);
-    }
-
-    /**
-     * Another bundle, a protocol transition or a new level cannot be inside the flush bundle.
-     * ClientPacketListener#handleLogin and #handleRespawn replace the level and render a
-     * LevelLoadingScreen frame from the handler, which vanilla never runs inside a bundle.
-     * Keepalives normally reply on the network thread; bundling one defers it to the main thread,
-     * where a later standalone keepalive can overtake it (ClientCommonPacketListenerImpl#handleKeepAlive).
-     */
-    private static boolean structural(PacketType<?> type) {
-        return type == ClientboundPackets.KEEP_ALIVE
-                || type == ClientboundPackets.LOGIN
-                || type == ClientboundPackets.RESPAWN
-                || ConnectionLifecycle.handles(type);
+        return frame(bytes, ctx.newPromise(), type);
     }
 
     /**
@@ -624,6 +615,9 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             flushBundleMembers = 0;
         } else if (frame.type != null) {
             try {
+                var phase = connection.phase(PacketDirection.CLIENTBOUND);
+                if (ConnectionLifecycle.nextPhase(PacketDirection.CLIENTBOUND, phase, frame.type, null) != phase)
+                    protocolGeneration++;
                 connection.forwarded(frame.type, null);
             } catch (Throwable failure) {
                 CultNetworkManager.reportFailure("outbound protocol transition", failure);
@@ -643,15 +637,14 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     /** A frame forwarded without expansion; inside an open flush bundle it is an ordinary member. */
     private void writeRaw(ChannelHandlerContext ctx, ByteBuf frame, ChannelPromise promise) {
         PacketType<?> type = wireType(frame);
-        if (type == ClientboundPackets.KEEP_ALIVE) {
+        if (PacketBundlePolicy.requiresStandalone(type)) {
             // Even a model-context fallback must serialize the close/write/resume sequence against reentry.
             var output = new Output();
-            output.addLast(new Frame(frame, promise, type));
+            output.addLast(frame(frame, promise, type));
             if (emission == null) emit(ctx, output);
             else emission.append(output);
             return;
         }
-        if (connection.flushBundleOpen() && structural(type)) closeFlushBundle(ctx);
         countFlushBundleMember(ctx);
         ctx.write(frame, promise);
         outrunProvingPing();
@@ -753,12 +746,12 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     }
 
     /**
-     * Leave the physical stream outside a bundle for a keepalive, without moving it past earlier frames.
-     * Unlike a structural flush close, a held host (or explicit write-group) continuation must reopen only
-     * after the keepalive. Its original closing delimiter still owns the resumed bundle. A pure flush bundle
-     * needs no continuation: the next packet that needs a proof will lead with a fresh ping.
+     * Leave the physical stream outside a bundle without moving the standalone packet past earlier frames.
+     * A held source/explicit continuation may reopen only after the packet, and only in the same protocol.
+     * Its original closing delimiter still owns the resumed bundle. A pure flush bundle needs no continuation:
+     * the next packet that needs a proof will lead with a fresh ping.
      */
-    private boolean suspendBundleForKeepAlive(ChannelHandlerContext ctx) {
+    private boolean suspendBundle(ChannelHandlerContext ctx) {
         boolean resumeBundle = insideBundle;
         if (connection.flushBundleOpen() && delimitsFlushBundle()) {
             resumeBundle = heldHostBundle;
@@ -800,17 +793,33 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                         flushBundle(ctx);
                         continue;
                     }
+                    if (frame.type == ClientboundPackets.BUNDLE_DELIMITER
+                            && frame.generation == retiredBundleGeneration) {
+                        // This marker was identified while the old protocol still owned the source bundle.
+                        // Raw packet IDs received after a switch are never guessed to be old delimiters.
+                        retiredBundleGeneration = -1;
+                        frame.bytes.release();
+                        frame.promise.trySuccess();
+                        continue;
+                    }
                     if (joinsFlushBundle(ctx, frame)) continue;
                     // Unlistened authored/translated frames can have no dispatch type; their wire identity
-                    // still determines whether they may join a bundle.
+                    // still determines whether they may join a bundle and advance the protocol.
                     PacketType<?> type = frame.type != null ? frame.type : wireType(frame.bytes);
+                    boolean standalone = PacketBundlePolicy.requiresStandalone(type);
+                    if (standalone && frame.type == null)
+                        frame = new Frame(frame.bytes, frame.promise, type, frame.ping, frame.lead, frame.generation);
                     boolean resumeBundle = false;
-                    if (type == ClientboundPackets.KEEP_ALIVE) resumeBundle = suspendBundleForKeepAlive(ctx);
+                    if (standalone) resumeBundle = suspendBundle(ctx);
                     else if (frame.lead) openFlushBundle(ctx);
-                    else if (structural(type)) closeFlushBundle(ctx);
+                    var phase = connection.phase(PacketDirection.CLIENTBOUND);
+                    int generation = protocolGeneration;
                     countFlushBundleMember(ctx);
                     writeFrame(ctx, frame);
-                    if (resumeBundle) writeFrame(ctx, delimiter(ctx));
+                    if (resumeBundle) {
+                        if (connection.phase(PacketDirection.CLIENTBOUND) == phase) writeFrame(ctx, delimiter(ctx));
+                        else retiredBundleGeneration = generation;
+                    }
                 }
                 if (output.flush) {
                     output.flush = false;
@@ -851,6 +860,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         connection.flushBundleOpen(false);
         flushPing = 0;
         heldHostBundle = false;
+        retiredBundleGeneration = -1;
     }
 
     private record Pending(Object message, ChannelPromise promise) {
@@ -860,12 +870,17 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
     }
 
-    /** {@code ping} is the transaction of a CultAC ping frame; a {@code lead} ping opens the flush bundle. */
-    private record Frame(ByteBuf bytes, ChannelPromise promise, PacketType<?> type, int ping, boolean lead) {
-        Frame(ByteBuf bytes, ChannelPromise promise, PacketType<?> type) {
-            this(bytes, promise, type, 0, false);
-        }
+    private Frame frame(ByteBuf bytes, ChannelPromise promise, PacketType<?> type) {
+        return frame(bytes, promise, type, 0, false);
     }
+
+    private Frame frame(ByteBuf bytes, ChannelPromise promise, PacketType<?> type, int ping, boolean lead) {
+        return new Frame(bytes, promise, type, ping, lead, protocolGeneration);
+    }
+
+    /** {@code ping} is a CultAC transaction; {@code generation} identifies prepared old-protocol delimiters. */
+    private record Frame(
+            ByteBuf bytes, ChannelPromise promise, PacketType<?> type, int ping, boolean lead, int generation) {}
 
     private record GroupCompletion(List<ChannelPromise> parts, ChannelPromise promise) {}
 
