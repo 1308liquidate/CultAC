@@ -1848,21 +1848,19 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         int entityId = movement.entityId();
         MovementKind kind = movement.kind();
         int deltaMovementSequence = movement.deltaMovement().packetHandlerSequence();
-        player.latencyUtils.addRealTimeTaskWithNextTransaction(
-                proofTransaction,
-                () -> {
-                    PacketEntity entity = applicableMovementEntity(movement);
-                    if (entity == null) {
-                        return;
-                    }
-                    applyEntityRotationAndGround(entity, movement);
-                    applyBundleFirstMovement(entity, movement);
-                    markUncertainPosition(entity, movement);
-                    applyDeltaMovementUpdate(entity, movement.deltaMovement());
-                    clearPacketHandlerDeltaMovement(movement);
-                    player.compensatedEntities.updatePassengerPositions();
-                },
-                () -> applySecondMovement(entityId, kind, deltaMovementSequence, true));
+        // The trailing proof follows the movement in the stream, so its pong proves the handler applied it.
+        player.latencyUtils.addRealTimeTask(proofTransaction, () -> {
+            PacketEntity entity = applicableMovementEntity(movement);
+            if (entity == null) {
+                return;
+            }
+            applyEntityRotationAndGround(entity, movement);
+            applyBundleFirstMovement(entity, movement);
+            markUncertainPosition(entity, movement);
+            applyDeltaMovementUpdate(entity, movement.deltaMovement());
+            clearPacketHandlerDeltaMovement(movement);
+            applySecondMovement(entityId, kind, deltaMovementSequence, true);
+        });
     }
 
     private void scheduleTransactionBoundMovement(EntityMovement movement, int firstTransaction) {

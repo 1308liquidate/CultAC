@@ -237,11 +237,9 @@ public class PacketEntity {
             @Nullable Float pitch,
             CultPlayer player) {
         // MCP-Reborn ClientPacketListener#handleBundlePacket handles bundled
-        // sub-packets in order. The first bundled ClientboundPingPacket proves
-        // that any later client movement was produced after the packet handler
-        // reached this entity movement, but an external delimiter can still cut
-        // the bundle short. Keep old and new packet boxes possible until the
-        // post-entity ping closes that protocol-valid ambiguity.
+        // sub-packets in order, so the trailing ping's pong proves the handler
+        // applied this movement before the client's next tick; the caller drops
+        // the old packet box with onSecondTransaction at that same pong.
         onFirstTransaction(relative, hasPos, relX, relY, relZ, yaw, pitch, player, false);
     }
 

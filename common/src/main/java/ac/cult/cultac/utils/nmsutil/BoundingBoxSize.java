@@ -141,8 +141,12 @@ public class BoundingBoxSize {
             PacketEntity vehicle, CultPlayer player, int passengerIndex) {
         int index = Math.max(passengerIndex, 0);
         float vehicleYaw = getAttachmentYaw(vehicle, player);
-        Vec3 passengerAttachment =
-                nativeVector(baseDimensions(vehicle).passengerAttachment(index, vehicle.scale, vehicleYaw));
+        Vec3 passengerAttachment = nativeVector(baseDimensions(vehicle)
+                .passengerAttachment(
+                        index,
+                        defaultDimensionsScale(vehicle, player.getClientVersion(), player.isBedrockMovement()),
+                        vehicle.scale,
+                        vehicleYaw));
         if (vehicle instanceof PacketEntityHorse horse) {
             // MCP-Reborn AbstractHorse#getPassengerAttachmentPoint adds this rearing offset to the default point.
             passengerAttachment = passengerAttachment.add(
@@ -342,6 +346,22 @@ public class BoundingBoxSize {
     /** From 1.20.5 AbstractCubeMob#getDefaultDimensions scales the type's 0.52 by the size. */
     private static boolean scalesCubeMobType(ClientVersion version, boolean bedrock) {
         return !bedrock && version.isNewerThanOrEquals(ClientVersion.V_1_20_5);
+    }
+
+    /**
+     * The factor Phantom#getDefaultDimensions and AbstractCubeMob#getDefaultDimensions scale the type's dimensions,
+     * attachments included, by; 1 for every other entity and for the sizings that do not scale attachments.
+     */
+    private static float defaultDimensionsScale(PacketEntity entity, ClientVersion version, boolean bedrock) {
+        if (bedrock || !(entity instanceof PacketEntitySizeable sizeable)) return 1.0F;
+        if (entity.type == EntityTypeIds.PHANTOM && version.isNewerThanOrEquals(ClientVersion.V_1_20_2)) {
+            return 1.0F + 0.15F * sizeable.size;
+        }
+        if ((entity.type == EntityTypeIds.MAGMA_CUBE || entity.type == EntityTypeIds.SLIME)
+                && scalesCubeMobType(version, false)) {
+            return sizeable.size;
+        }
+        return 1.0F;
     }
 
     /** The size {@code getDefaultDimensions} scales by. Bedrock sizing keeps a floor of 1. */
