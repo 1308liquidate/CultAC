@@ -1005,6 +1005,18 @@ public class WorldStageBuilder {
             SimpleCollisionBox from,
             SimpleCollisionBox to,
             boolean powderSnowCanApply) {
+        ClientVersion version = player.getClientVersion();
+        if (player.bedrockState == null
+                && version.isNewerThanOrEquals(ClientVersion.V_1_21_2)
+                && version.isOlderThan(ClientVersion.V_1_21_9)) {
+            return Collisions.checkStuckSpeedAlongMovementBefore1Dot21Dot9(
+                    player,
+                    from,
+                    to,
+                    version.isNewerThanOrEquals(ClientVersion.V_1_21_5),
+                    version.isOlderThan(ClientVersion.V_1_21_4),
+                    powderSnowCanApply);
+        }
         Vec3 endpoint = Collisions.checkStuckSpeed(player, to, powderSnowCanApply);
         boolean ordered =
                 player.bedrockState == null && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_2);

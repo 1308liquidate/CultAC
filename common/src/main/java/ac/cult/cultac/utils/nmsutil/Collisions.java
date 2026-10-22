@@ -984,6 +984,170 @@ public class Collisions {
     }
 
     /**
+     * Replays {@code Entity#checkInsideBlocks} for 1.21.2-1.21.8 clients. Each movement segment visits the blocks of
+     * the entity box at the segment end, through {@code BlockGetter#boxTraverseBlocks} up to 1.21.4 and
+     * {@code BlockGetter#forEachBlockIntersectedBetween} from 1.21.5; one visited set spans the segments, and the last
+     * stuck block visited sets {@code Entity#stuckSpeedMultiplier}. 1.21.5-1.21.8 split the movement into axis steps
+     * in {@code Entity#axisStepOrder}; 1.21.2 and 1.21.3 extend the travel ray by 1.0E-7 at both ends.
+     */
+    public static Vec3 checkStuckSpeedAlongMovementBefore1Dot21Dot9(
+            CultPlayer player,
+            SimpleCollisionBox fromAabb,
+            SimpleCollisionBox toAabb,
+            boolean axisSteps,
+            boolean nudgedTravel,
+            boolean powderSnowCanApply) {
+        int minX = CultMath.floor(Math.min(fromAabb.minX, toAabb.minX));
+        int minY = CultMath.floor(Math.min(fromAabb.minY, toAabb.minY));
+        int minZ = CultMath.floor(Math.min(fromAabb.minZ, toAabb.minZ));
+        int maxX = CultMath.floor(Math.max(fromAabb.maxX, toAabb.maxX));
+        int maxY = CultMath.floor(Math.max(fromAabb.maxY, toAabb.maxY));
+        int maxZ = CultMath.floor(Math.max(fromAabb.maxZ, toAabb.maxZ));
+        if (CheckIfChunksLoaded.isChunksUnloadedAt(player, minX, minY, minZ, maxX, maxY, maxZ)) {
+            return null;
+        }
+
+        return resolveStuckSpeedBefore1Dot21Dot9(
+                fromAabb,
+                toAabb,
+                axisSteps,
+                nudgedTravel,
+                (x, y, z) -> getStuckSpeedForBlock(
+                        player, player.compensatedWorld.getBlockStateIdAt(x, y, z), powderSnowCanApply));
+    }
+
+    static Vec3 resolveStuckSpeedBefore1Dot21Dot9(
+            SimpleCollisionBox fromAabb,
+            SimpleCollisionBox toAabb,
+            boolean axisSteps,
+            boolean nudgedTravel,
+            StuckSpeedLookup lookup) {
+        LongSet visited = new LongOpenHashSet();
+        Vec3[] result = new Vec3[1];
+        BlockVisitor visitor = (x, y, z) -> {
+            Vec3 speed = lookup.get(x, y, z);
+            if (speed != null && visited.add(BlockPos.asLong(x, y, z))) result[0] = speed;
+        };
+        Vec3 delta = boxCenter(toAabb).subtract(boxCenter(fromAabb));
+        if (axisSteps && delta.lengthSqr() > 0.0) {
+            Vec3 remaining = delta;
+            for (Axis axis : getAxisStepOrder(delta)) {
+                double amount = getAxisValue(delta, axis);
+                if (amount == 0.0) continue;
+                Vec3 step = switch (axis) {
+                    case X -> new Vec3(amount, 0.0, 0.0);
+                    case Y -> new Vec3(0.0, amount, 0.0);
+                    case Z -> new Vec3(0.0, 0.0, amount);
+                };
+                remaining = remaining.subtract(step);
+                SimpleCollisionBox stepEnd = toAabb.move(-remaining.x, -remaining.y, -remaining.z);
+                boxTraverseBlocks(step, stepEnd.deflate(1.0E-5F), nudgedTravel, visitor);
+            }
+        } else {
+            boxTraverseBlocks(delta, toAabb.deflate(1.0E-5F), nudgedTravel, visitor);
+        }
+        return result[0];
+    }
+
+    /** The block traversal before 1.21.9: a movement shorter than 0.99999 visits only the end box. */
+    private static void boxTraverseBlocks(
+            Vec3 travel, SimpleCollisionBox endBox, boolean nudgedTravel, BlockVisitor visitor) {
+        int minX = CultMath.floor(endBox.minX);
+        int minY = CultMath.floor(endBox.minY);
+        int minZ = CultMath.floor(endBox.minZ);
+        int maxX = CultMath.floor(endBox.maxX);
+        int maxY = CultMath.floor(endBox.maxY);
+        int maxZ = CultMath.floor(endBox.maxZ);
+        if (travel.lengthSqr() < CultMath.square(0.99999F)) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int y = minY; y <= maxY; y++) {
+                    for (int x = minX; x <= maxX; x++) visitor.visit(x, y, z);
+                }
+            }
+            return;
+        }
+
+        LongSet traversed = new LongOpenHashSet();
+        Vec3 end = new Vec3(endBox.minX, endBox.minY, endBox.minZ);
+        Vec3 start = end.subtract(travel);
+        if (nudgedTravel) {
+            Vec3 nudge = travel.normalize().scale(1.0E-7);
+            end = end.add(nudge);
+            start = start.subtract(nudge);
+        }
+        addCollisionsAlongTravel(traversed, start, end, endBox, visitor);
+        for (int z = minZ; z <= maxZ; z++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int x = minX; x <= maxX; x++) {
+                    if (traversed.add(BlockPos.asLong(x, y, z))) visitor.visit(x, y, z);
+                }
+            }
+        }
+    }
+
+    private static void addCollisionsAlongTravel(
+            LongSet traversed, Vec3 from, Vec3 to, SimpleCollisionBox box, BlockVisitor visitor) {
+        Vec3 travel = to.subtract(from);
+        int x = CultMath.floor(from.x);
+        int y = CultMath.floor(from.y);
+        int z = CultMath.floor(from.z);
+        int signX = (int) Math.signum(travel.x);
+        int signY = (int) Math.signum(travel.y);
+        int signZ = (int) Math.signum(travel.z);
+        double stepX = signX == 0 ? Double.MAX_VALUE : signX / travel.x;
+        double stepY = signY == 0 ? Double.MAX_VALUE : signY / travel.y;
+        double stepZ = signZ == 0 ? Double.MAX_VALUE : signZ / travel.z;
+        double tX = stepX * (signX > 0 ? 1.0 - CultMath.frac(from.x) : CultMath.frac(from.x));
+        double tY = stepY * (signY > 0 ? 1.0 - CultMath.frac(from.y) : CultMath.frac(from.y));
+        double tZ = stepZ * (signZ > 0 ? 1.0 - CultMath.frac(from.z) : CultMath.frac(from.z));
+        int iterations = 0;
+
+        while (tX <= 1.0 || tY <= 1.0 || tZ <= 1.0) {
+            if (tX < tY) {
+                if (tX < tZ) {
+                    x += signX;
+                    tX += stepX;
+                } else {
+                    z += signZ;
+                    tZ += stepZ;
+                }
+            } else if (tY < tZ) {
+                y += signY;
+                tY += stepY;
+            } else {
+                z += signZ;
+                tZ += stepZ;
+            }
+
+            if (iterations++ > 16) break;
+
+            Optional<Vec3> hit = SimpleCollisionBox.clip(x, y, z, x + 1, y + 1, z + 1, from, to);
+            if (hit.isEmpty()) continue;
+            Vec3 point = hit.get();
+            double clampedX = CultMath.clamp(point.x, x + 1.0E-5F, x + 1.0 - 1.0E-5F);
+            double clampedY = CultMath.clamp(point.y, y + 1.0E-5F, y + 1.0 - 1.0E-5F);
+            double clampedZ = CultMath.clamp(point.z, z + 1.0E-5F, z + 1.0 - 1.0E-5F);
+            int lastX = CultMath.floor(clampedX + (box.maxX - box.minX));
+            int lastY = CultMath.floor(clampedY + (box.maxY - box.minY));
+            int lastZ = CultMath.floor(clampedZ + (box.maxZ - box.minZ));
+            for (int blockX = x; blockX <= lastX; blockX++) {
+                for (int blockY = y; blockY <= lastY; blockY++) {
+                    for (int blockZ = z; blockZ <= lastZ; blockZ++) {
+                        if (traversed.add(BlockPos.asLong(blockX, blockY, blockZ))) {
+                            visitor.visit(blockX, blockY, blockZ);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @FunctionalInterface
+    private interface BlockVisitor {
+        void visit(int x, int y, int z);
+    }
+
+    /**
      * Replays the 26.2 {@code Entity#checkInsideBlocks} traversal used after a
      * movement. Unlike the legacy approximation above, the visited-block set is
      * shared by every axis and block effects retain vanilla's visit order. This
