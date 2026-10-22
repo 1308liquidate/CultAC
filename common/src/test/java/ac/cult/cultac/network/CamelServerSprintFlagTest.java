@@ -3,6 +3,7 @@ package ac.cult.cultac.network;
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
@@ -47,6 +48,7 @@ class CamelServerSprintFlagTest {
     private static final Vec3 REST = new Vec3(0.5, FLOOR_Y, 0.5);
     private static final int OTHER_CAMEL = 125;
     private static final Vec3 OTHER_REST = new Vec3(5.5, FLOOR_Y, 0.5);
+    private static final int DRIVER = 300;
     /** Camel#getRiddenSpeed: movement_speed 0.09, plus 0.1 for a sprinting controller with no dash cooldown. */
     private static final float WALK = 0.09F;
 
@@ -126,6 +128,42 @@ class CamelServerSprintFlagTest {
             velocity = velocity * GROUND_FRICTION + strafeInput(WALK);
             x += velocity;
             assertExact(ride(f, 0F, 0F, 0F, new Vec3(x, REST.y, REST.z)));
+        }
+    }
+
+    /**
+     * A back-seat rider has its flag cleared by LocalPlayer#aiStep. Until the client applies the passenger list that
+     * moves it to the front, its ticks stay back-seat ticks, so the first travel it controls has no bonus.
+     */
+    @Test
+    void aBackSeatRiderMovedToTheFrontKeepsItsClearedFlagUntilTheClientSeesTheMove() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.player.compensatedWorld.applyClientTime(new TimeUpdate(GAME_TIME, Map.of()));
+            f.place(REST, Vec3.ZERO);
+            standingCamel(f, CAMEL, REST).hasSaddle = true;
+            f.player.compensatedEntities.addEntity(DRIVER, EntityTypeIds.ZOMBIE, REST, 0, 0, 0);
+            f.input(FORWARD_SPRINT);
+            command(f, PlayerCommandAction.START_SPRINTING);
+            f.tickEnd();
+
+            f.setPassengers(CAMEL, List.of(DRIVER, f.player.entityID));
+            f.pongThrough(f.player.lastTransactionSent.get());
+            f.rideTick();
+            f.rideTick();
+
+            f.setPassengers(CAMEL, List.of(f.player.entityID));
+            f.rideTick();
+            assertFalse(f.player.isClientSprinting());
+
+            f.pongThrough(f.player.lastTransactionSent.get());
+            f.player.checkManager.getSimulationProcessor().seedStartingVelocity(new Vec3(0.0, GROUNDED_Y, 0.0));
+            f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
+            double velocity = forwardInput(WALK);
+            double z = REST.z + velocity;
+            assertExact(ride(f, 0F, 0F, 0F, new Vec3(REST.x, REST.y, z)));
+            velocity = velocity * GROUND_FRICTION + forwardInput(SPRINT);
+            z += velocity;
+            assertExact(ride(f, 0F, 0F, 0F, new Vec3(REST.x, REST.y, z)));
         }
     }
 

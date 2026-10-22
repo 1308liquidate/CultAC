@@ -1548,11 +1548,12 @@ public class CultPlayer implements GrimUser {
 
     /**
      * A client tick mounted on {@code vehicle}. Every other vehicle ends the tick with the flag cleared (only
-     * Camel#canSprint); a camel the player controls ends it in LocalPlayer#sendIsSprintingIfNeeded.
+     * Camel#canSprint); a camel the player controls ends it in LocalPlayer#sendIsSprintingIfNeeded. Control follows
+     * the passenger list the client has applied.
      */
     public void onMountedClientTick(PacketEntity vehicle) {
         sprintClearedAsPassenger = !EntityTypeUtil.isCamelFamily(vehicle.type)
-                || !compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(vehicle);
+                || !compensatedEntities.vehicles.mayLocalPlayerControl(vehicle);
     }
 
     /** A client tick on foot: LocalPlayer#sendPosition ends it in LocalPlayer#sendIsSprintingIfNeeded. */
