@@ -2,11 +2,15 @@ package ac.cult.cultac.network;
 
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.assertRejected;
+import static ac.cult.cultac.network.JavaTickFixture.describe;
+import static ac.cult.cultac.network.JavaTickFixture.exact;
 import static ac.cult.cultac.network.JavaTickFixture.setField;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
+import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
@@ -69,6 +73,22 @@ class JavaBoatPositionsTest {
                 f.input(NONE);
                 assertRejected(f.tick(hover, true), "GroundSpoof");
             }
+        }
+    }
+
+    @Test
+    void driftingBelowABoatAwaitingAPositionWithoutInputIsRejected() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 boat = new Vec3(START.x, FLOOR_Y + PLAYER_HEIGHT + 0.05, START.z);
+            f.player.compensatedEntities.addEntity(BOAT, EntityTypeIds.OAK_BOAT, boat, 0, 0, 0);
+            PacketEntity entity = f.player.compensatedEntities.getEntity(BOAT);
+            entity.onFirstTransaction(false, true, boat.x, boat.y - 0.01, boat.z + 0.003, f.player);
+            start(f, NONE, 0.0F);
+            PredictionResult still = f.tick(START, true);
+            assertTrue(exact(still), describe(still));
+            entity.onFirstTransaction(false, true, boat.x, boat.y - 0.02, boat.z + 0.006, f.player);
+            PredictionResult drift = f.tick(START.add(0.0, 0.0, 0.05), true);
+            assertRejected(drift, "InputKeys");
         }
     }
 

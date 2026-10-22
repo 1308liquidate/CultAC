@@ -63,6 +63,7 @@ public class WorldStageBuilder {
 
     private final SupportScan supportScan = new SupportScan();
     private int collidingTickingBeforePlayer;
+    private int pushingTickingAfterPlayer;
     private int ridersTickingAfterPlayer;
 
     public WorldData generateWorldData(
@@ -265,7 +266,7 @@ public class WorldStageBuilder {
                 climbingAtStart,
                 climbing,
                 numColliding,
-                pushable ? numColliding - collidingTickingBeforePlayer : 0,
+                pushable ? pushingTickingAfterPlayer : 0,
                 pushable ? ridersTickingAfterPlayer : 0,
                 numPushing,
                 numCarriedPushing,
@@ -531,13 +532,15 @@ public class WorldStageBuilder {
     private int getNumEntitiesCollidingWith(CultPlayer player, SimulationContext context) {
         int numColliding = 0;
         collidingTickingBeforePlayer = 0;
+        pushingTickingAfterPlayer = 0;
         ridersTickingAfterPlayer = 0;
         List<SimpleCollisionBox> entityCollisionBoxes = null;
         List<HardCollidingEntityCollision> hardCollidingEntityCollisions = null;
 
         // Players in vehicles do not have collisions
         if (context.getVehicle() == null) {
-            SimpleCollisionBox playerBox = pusherContactBox(context);
+            SimpleCollisionBox sweep = playerSweep(context);
+            SimpleCollisionBox playerBox = pusherContactBox(sweep);
             SimpleCollisionBox entityBounds = new SimpleCollisionBox();
             SimpleCollisionBox entityScratch = new SimpleCollisionBox();
             CompensatedEntities entities = context.getEntities();
@@ -559,9 +562,13 @@ public class WorldStageBuilder {
                         entityScratch);
                 if (entityBox == null) continue;
                 numColliding++;
-                if (entities.clientTickOrder(entity) < playerTickOrder) collidingTickingBeforePlayer++;
-                else if (entities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot))
-                    ridersTickingAfterPlayer++;
+                if (entities.clientTickOrder(entity) < playerTickOrder) {
+                    if (pushesPlayer(entity, entityBox, sweep)) collidingTickingBeforePlayer++;
+                } else {
+                    if (pushesPlayer(entity, entityBox, sweep)) pushingTickingAfterPlayer++;
+                    if (entities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot))
+                        ridersTickingAfterPlayer++;
+                }
                 boolean boatLike = entity.isBoat();
                 boolean minecartLike = entity.isMinecart();
                 if (boatLike || minecartLike || isBedrockHardCollidingEntity(entity)) {
@@ -582,13 +589,41 @@ public class WorldStageBuilder {
         return numColliding;
     }
 
-    /** The box an entity must touch to push or collide with the player through the context's movement. */
-    private static SimpleCollisionBox pusherContactBox(SimulationContext context) {
+    /** The boxes the player's own box may hold through the context's movement. */
+    private static SimpleCollisionBox playerSweep(SimulationContext context) {
         Vec3 from = context.getStart();
         SimpleCollisionBox playerBox = GetBoundingBox.getBoundingBoxFromPosAndSize(from.x, from.y, from.z, 0.6f, 1.8f);
         playerBox.union(context.getToMaximumExtent());
+        return playerBox;
+    }
+
+    /** The box an entity must touch to push or collide with the player through the movement {@code sweep} holds. */
+    private static SimpleCollisionBox pusherContactBox(SimpleCollisionBox sweep) {
+        SimpleCollisionBox playerBox = sweep.copy();
         playerBox.expand(0.2); // bit more because why not
         return playerBox;
+    }
+
+    /**
+     * Whether {@code entity}, colliding within {@code entityBox}, may push a player whose box lies within
+     * {@code sweep}. A boat pushes the entities its box inflated by 0.2, -0.01, 0.2 intersects
+     * (AbstractBoat#tick, AbstractBoat.java:325), and the player pushes the entities its own box intersects
+     * (LivingEntity#pushEntities).
+     */
+    private static boolean pushesPlayer(PacketEntity entity, SimpleCollisionBox entityBox, SimpleCollisionBox sweep) {
+        if (!entity.isBoat()) return true;
+        return intersects(entityBox, 0.2F, -0.01F, sweep) || intersects(entityBox, 0.0D, 0.0D, sweep);
+    }
+
+    /** AABB#intersects of {@code box} inflated by {@code horizontal}, {@code vertical}, {@code horizontal}. */
+    private static boolean intersects(
+            SimpleCollisionBox box, double horizontal, double vertical, SimpleCollisionBox other) {
+        return box.minX - horizontal < other.maxX
+                && box.maxX + horizontal > other.minX
+                && box.minY - vertical < other.maxY
+                && box.maxY + vertical > other.minY
+                && box.minZ - horizontal < other.maxZ
+                && box.maxZ + horizontal > other.minZ;
     }
 
     /**
@@ -601,7 +636,8 @@ public class WorldStageBuilder {
         if (context == null
                 || context.getVehicle() != null
                 || !context.getWorldData().isPushable()) return;
-        SimpleCollisionBox playerBox = pusherContactBox(context);
+        SimpleCollisionBox sweep = playerSweep(context);
+        SimpleCollisionBox playerBox = pusherContactBox(sweep);
         SimpleCollisionBox entityBounds = new SimpleCollisionBox();
         SimpleCollisionBox entityScratch = new SimpleCollisionBox();
         CompensatedEntities entities = context.getEntities();
@@ -614,17 +650,17 @@ public class WorldStageBuilder {
             if (!entity.mayPushOrCollide() || entities.clientTickOrder(entity) < playerTickOrder) continue;
             // A rider pushes from the seat its vehicle gave it before this tick: the movement's own count holds it.
             if (entities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot)) continue;
-            if (collidingPusherBox(
-                            player,
-                            entities,
-                            entity,
-                            rootOfSelf,
-                            selfRidingRoot,
-                            serverVehicleRoot,
-                            playerBox,
-                            entityBounds,
-                            entityScratch)
-                    != null) tickingAfterPlayer++;
+            SimpleCollisionBox entityBox = collidingPusherBox(
+                    player,
+                    entities,
+                    entity,
+                    rootOfSelf,
+                    selfRidingRoot,
+                    serverVehicleRoot,
+                    playerBox,
+                    entityBounds,
+                    entityScratch);
+            if (entityBox != null && pushesPlayer(entity, entityBox, sweep)) tickingAfterPlayer++;
         }
         WorldData world = context.getWorldData();
         world.setNumCollidingTickingAfterPlayer(tickingAfterPlayer + world.getNumRidersTickingAfterPlayer());

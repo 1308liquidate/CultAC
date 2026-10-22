@@ -116,8 +116,13 @@ class EntityScanParityTest {
                 SimpleCollisionBox.class,
                 SimpleCollisionBox.class);
         pusherBox.setAccessible(true);
-        Method contactBox = WorldStageBuilder.class.getDeclaredMethod("pusherContactBox", SimulationContext.class);
+        Method sweepBox = WorldStageBuilder.class.getDeclaredMethod("playerSweep", SimulationContext.class);
+        sweepBox.setAccessible(true);
+        Method contactBox = WorldStageBuilder.class.getDeclaredMethod("pusherContactBox", SimpleCollisionBox.class);
         contactBox.setAccessible(true);
+        Method pushes = WorldStageBuilder.class.getDeclaredMethod(
+                "pushesPlayer", PacketEntity.class, SimpleCollisionBox.class, SimpleCollisionBox.class);
+        pushes.setAccessible(true);
         try (var f = new JavaTickFixture()) {
             f.place(START, Vec3.ZERO);
             f.input(NONE);
@@ -136,28 +141,28 @@ class EntityScanParityTest {
             rider.mount(riddenBoat);
 
             SimulationContext context = prediction.getSimulationContext();
-            SimpleCollisionBox playerBox = (SimpleCollisionBox) contactBox.invoke(null, context);
+            SimpleCollisionBox sweep = (SimpleCollisionBox) sweepBox.invoke(null, context);
+            SimpleCollisionBox playerBox = (SimpleCollisionBox) contactBox.invoke(null, sweep);
             long playerTickOrder = entities.getSelf().getClientTickOrder();
             int expected = 0;
             int colliding = 0;
             for (PacketEntity entity : entities.entityMap.values()) {
-                boolean collides = pusherBox.invoke(
-                                null,
-                                f.player,
-                                entities,
-                                entity,
-                                entities.rootOfSelf(),
-                                entities.selfRidingRoot(),
-                                entities.serverVehicleRoot(),
-                                playerBox,
-                                new SimpleCollisionBox(),
-                                new SimpleCollisionBox())
-                        != null;
-                if (collides) colliding++;
+                SimpleCollisionBox entityBox = (SimpleCollisionBox) pusherBox.invoke(
+                        null,
+                        f.player,
+                        entities,
+                        entity,
+                        entities.rootOfSelf(),
+                        entities.selfRidingRoot(),
+                        entities.serverVehicleRoot(),
+                        playerBox,
+                        new SimpleCollisionBox(),
+                        new SimpleCollisionBox());
+                if (entityBox != null) colliding++;
                 if (entities.clientTickOrder(entity) < playerTickOrder) continue;
                 // The recount keeps the movement's own count of riders outside the player's riding trees.
                 if (entities.isUntrackedRider(entity)) continue;
-                if (collides) expected++;
+                if (entityBox != null && (boolean) pushes.invoke(null, entity, entityBox, sweep)) expected++;
             }
             WorldStageBuilder.recountCollidingTickingAfterPlayer(f.player, prediction);
             assertEquals(
