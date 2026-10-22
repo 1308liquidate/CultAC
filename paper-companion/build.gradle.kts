@@ -13,6 +13,7 @@ repositories {
     maven("https://maven.grim.ac/public/releases")
     maven("https://maven.grim.ac/public/snapshots")
     maven("https://repo.grim.ac/snapshots")
+    maven("https://repo.lunarclient.dev")
     mavenCentral()
 }
 
@@ -37,6 +38,8 @@ dependencies {
     implementation(libs.cult.api)
     implementation(libs.cult.internal) { isTransitive = false }
     implementation(libs.cult.bukkit.internal) { isTransitive = false }
+    // Present only on backends running Apollo-Bukkit; the apollo package loads only then.
+    compileOnly(libs.apollo.api) { isTransitive = false }
 
     testImplementation(testlibs.junitJupiter)
     testRuntimeOnly(testlibs.junitPlatformLauncher)

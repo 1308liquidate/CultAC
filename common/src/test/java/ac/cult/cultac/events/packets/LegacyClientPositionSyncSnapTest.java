@@ -53,6 +53,60 @@ class LegacyClientPositionSyncSnapTest {
         }
     }
 
+    /**
+     * Entity#snapTo leaves the InterpolationHandler running: its next interpolate shifts the target by the jump from
+     * the position its last step left, then lerps on from the synced position.
+     */
+    @Test
+    void farSyncKeepsTheInterpolationItInterrupts() throws Exception {
+        CultPlayer player = player();
+        try {
+            PacketEntity entity = added(player);
+            sync(player, new Vec3d(0, 37, 0.9));
+            entity.onMovement(player, true);
+            assertEquals(0.3D, entity.clientPhysicalPosition.z, 1.0E-9D);
+
+            sync(player, new Vec3d(20, 100, 6));
+            entity.onMovement(player, true);
+            assertEquals(20.0D, entity.clientPhysicalPosition.x, 1.0E-9D);
+            assertEquals(100.0D, entity.clientPhysicalPosition.y, 1.0E-9D);
+            assertEquals(6.3D, entity.clientPhysicalPosition.z, 1.0E-9D);
+            entity.onMovement(player, true);
+            assertEquals(6.6D, entity.clientPhysicalPosition.z, 1.0E-9D);
+            entity.onMovement(player, true);
+            assertEquals(6.6D, entity.clientPhysicalPosition.z, 1.0E-9D);
+        } finally {
+            close(player);
+        }
+    }
+
+    /**
+     * Before 1.21.5, Entity#moveTo leaves LivingEntity's lerp target where it was, and LivingEntity#aiStep lerps from
+     * the synced position toward it.
+     */
+    @Test
+    void farSyncBefore1215LerpsTowardTheUnshiftedTarget() throws Exception {
+        CultPlayer player = player(ProtocolVersion.V1_21_4);
+        try {
+            PacketEntity entity = added(player);
+            sync(player, new Vec3d(0, 37, 0.9));
+            entity.onMovement(player, true);
+            assertEquals(0.3D, entity.clientPhysicalPosition.z, 1.0E-9D);
+
+            sync(player, new Vec3d(20, 100, 6));
+            entity.onMovement(player, true);
+            assertEquals(10.0D, entity.clientPhysicalPosition.x, 1.0E-9D);
+            assertEquals(68.5D, entity.clientPhysicalPosition.y, 1.0E-9D);
+            assertEquals(3.45D, entity.clientPhysicalPosition.z, 1.0E-9D);
+            entity.onMovement(player, true);
+            assertEquals(0.0D, entity.clientPhysicalPosition.x, 1.0E-9D);
+            assertEquals(37.0D, entity.clientPhysicalPosition.y, 1.0E-9D);
+            assertEquals(0.9D, entity.clientPhysicalPosition.z, 1.0E-9D);
+        } finally {
+            close(player);
+        }
+    }
+
     @Test
     void nearSyncInterpolates() throws Exception {
         CultPlayer player = player();
@@ -81,10 +135,20 @@ class LegacyClientPositionSyncSnapTest {
     }
 
     private static PacketEntity syncedFrom(CultPlayer player, Vec3d target) {
+        PacketEntity entity = added(player);
+        sync(player, target);
+        return entity;
+    }
+
+    private static PacketEntity added(CultPlayer player) {
         player.packetEntityReplication.addEntity(ID, EntityTypeIds.PLAYER, new Vec3(0, 37, 0), 0, 0, 0, -1);
         PacketEntity entity = player.compensatedEntities.getEntity(ID);
         assertNotNull(entity);
         for (int tick = 0; tick < 5; tick++) entity.onMovement(player, true);
+        return entity;
+    }
+
+    private static void sync(CultPlayer player, Vec3d target) {
         var sync = new ClientboundEntityPositionSync(ID, new PositionPath.Linear(target), 0.0F, 0.0F, false);
         var event = new PacketSendEvent<>(
                 player.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_POSITION_SYNC, sync, false);
@@ -93,10 +157,13 @@ class LegacyClientPositionSyncSnapTest {
         for (var write : event.writesAfter()) {
             if (write.packet() instanceof ClientboundPing ping) assertTrue(player.addTransactionResponse(ping.id()));
         }
-        return entity;
     }
 
     private static CultPlayer player() {
+        return player(ProtocolVersion.V26_2);
+    }
+
+    private static CultPlayer player(ProtocolVersion version) {
         OfflineCultTestBootstrap.installConfig();
         PlatformConnection platform = new PlatformConnection() {
             @Override
@@ -111,12 +178,12 @@ class LegacyClientPositionSyncSnapTest {
 
             @Override
             public ProtocolVersion getObservedProtocol() {
-                return ProtocolVersion.V26_2;
+                return version;
             }
 
             @Override
             public ProtocolVersion getClientProtocol() {
-                return ProtocolVersion.V26_2;
+                return version;
             }
 
             @Override

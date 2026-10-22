@@ -692,6 +692,7 @@ public final class GeyserBedrockBridgeRuntime {
             io.netty.util.ReferenceCountUtil.retain(packet);
             connection.ensureInEventLoop(() -> inModel(currentPlayer(), () -> {
                 try {
+                    GeyserInventoryActions.rejectCreativeRequests(connection, currentPlayer(), packet);
                     if (detached.get()) {
                         // Cloudburst may have accepted this packet on I/O just before the swap.
                         // Process it on the new tap in this same tick-loop slot, especially latency

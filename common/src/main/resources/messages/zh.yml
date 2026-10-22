@@ -47,7 +47,7 @@ experimental-symbol: "*"
 
 profile:
     - "&7======================"
-    - "%prefix% &f%player% &b 的信息"
+    - "&f%player% &b 的信息"
     - "&b延迟: &f%ping%"
     - "&b版本: &f%version%"
     - "&b客户端型号: &f%brand%"

@@ -47,7 +47,7 @@ experimental-symbol: "*"
 
 profile:
     - "&7======================"
-    - "%prefix% &bProfil de &f%player%"
+    - "&bProfil de &f%player%"
     - "&bPing: &f%ping%"
     - "&bVersion du client : &f%version%"
     - "&bNature du client : &f%brand%"

@@ -6,6 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.experimental.UtilityClass;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -284,9 +286,47 @@ public final class CultConfigSpecs {
         };
     }
 
+    /**
+     * Spec for {@code discord.yml}.
+     *
+     * <p>v1 → v2: the alert names the player, check and violations in its title and puts every value in a code span.
+     * A title or {@code violation-content} still in a shipped v1 shape, in any language, takes the new default; one
+     * the operator wrote stays. {@code include-state} is added by the default rewrite.
+     */
     public static @NotNull ConfigUpdater.Spec discord() {
-        return ConfigUpdater.Spec.builder("/discord/", 1, ConfigUpdater.ConfigFlavor.V2)
+        return ConfigUpdater.Spec.builder("/discord/", 2, ConfigUpdater.ConfigFlavor.V2)
+                .migration(2, CultConfigSpecs::discordAlertLayout)
                 .build();
+    }
+
+    private static final Pattern SHIPPED_DISCORD_TITLE = Pattern.compile("\\*\\*(?:Cult|Grim) [^%*]+\\*\\*");
+    private static final Pattern SHIPPED_DISCORD_LINE = Pattern.compile("\\*\\*[^*]+\\*\\*: (`?)%([a-z_]+)%\\1");
+    private static final List<String> SHIPPED_DISCORD_PLACEHOLDERS =
+            List.of("player", "check", "violations", "version", "brand", "ping", "tps");
+
+    static void discordAlertLayout(MigrationContext ctx) {
+        String title = ctx.input().getString("embed-title");
+        String newTitle = ctx.defaults().getString("embed-title");
+        if (title != null
+                && newTitle != null
+                && SHIPPED_DISCORD_TITLE.matcher(title).matches()) {
+            ctx.output().put("embed-title", newTitle);
+        }
+        List<?> content = ctx.input().getList("violation-content");
+        List<?> newContent = ctx.defaults().getList("violation-content");
+        if (content != null && newContent != null && isShippedDiscordContent(content)) {
+            ctx.output().put("violation-content", newContent);
+        }
+    }
+
+    private static boolean isShippedDiscordContent(List<?> content) {
+        if (content.size() != SHIPPED_DISCORD_PLACEHOLDERS.size()) return false;
+        for (int i = 0; i < content.size(); i++) {
+            if (!(content.get(i) instanceof String line)) return false;
+            Matcher matcher = SHIPPED_DISCORD_LINE.matcher(line);
+            if (!matcher.matches() || !matcher.group(2).equals(SHIPPED_DISCORD_PLACEHOLDERS.get(i))) return false;
+        }
+        return true;
     }
 
     public static @NotNull ConfigUpdater.Spec messages() {

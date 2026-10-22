@@ -148,7 +148,11 @@ public final class Friction {
         boolean skeletonHorse =
                 context.getVehicle() != null && context.getVehicle().type == EntityTypeIds.SKELETON_HORSE;
         boolean dolphinsGrace = context.getEntities().getPotionLevelForPlayer(MovementEffect.DOLPHINS_GRACE) != null;
-        return getSwimFriction(skeletonHorse, dolphinsGrace, context.getWaterMovementEfficiency());
+        List<Double> frictions = getSwimFriction(skeletonHorse, dolphinsGrace, context.getWaterMovementEfficiency());
+        List<Boolean> sprinting = context.getIsSprinting().getStates();
+        if (context.getVehicle() != null || frictions.size() != 2 || sprinting.size() != 1) return frictions;
+        // LivingEntity#travelInWater slows a player sprinting at travel by 0.9F and any other by 0.8F.
+        return Collections.singletonList(frictions.get(sprinting.getFirst() ? 0 : 1));
     }
 
     public static List<Double> getSwimFriction(
@@ -162,8 +166,7 @@ public final class Friction {
             return Collections.singletonList(applyWaterMovementEfficiency(waterMovementEfficiency, 0.96));
         }
 
-        // Keep the existing broad candidate set; narrowing this to DesyncStatus changes
-        // movement prediction behavior under latency.
+        // The sprinting and the non-sprinting slowdown, in that order.
         return Arrays.asList(
                 applyWaterMovementEfficiency(waterMovementEfficiency, 0.9),
                 applyWaterMovementEfficiency(waterMovementEfficiency, 0.8));

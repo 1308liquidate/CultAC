@@ -1013,7 +1013,14 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 this.player.getSetbackTeleportUtil().executeNonSimulatingSetback();
             }
 
-            this.commitPredictionState(result, to, diff, xRot, yRot, movementProfile, preparedCommit);
+            this.commitPredictionState(
+                    result,
+                    to,
+                    this.player.compensatedEntities.vehicles.committedVehicleMovement(result, diff),
+                    xRot,
+                    yRot,
+                    movementProfile,
+                    preparedCommit);
             if (flyingThroughTravel) {
                 this.stopFlyingAfterTravel();
             }
@@ -1095,6 +1102,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.lastSneaking = this.player.isSneaking;
             this.lastGliding = this.player.isGliding;
             this.player.packetStateData.riptideLevel = 0;
+            this.player.packetStateData.riptideReleaseCertain = false;
             this.player.riptideSpinAttackTicks = Math.max(0, this.player.riptideSpinAttackTicks - 1);
             this.couldPotentiallyTickSkip = false;
             this.player.compensatedEntities.fishingRodPulls.clear();
@@ -1607,7 +1615,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         List<ValidMovements> valid = new ArrayList<>();
         MovementEngine engine = MovementEngines.requireForProfile(movementProfile);
 
-        for (SimulationContext curSimulationContext : this.createSimulationContexts(
+        for (SimulationContext curSimulationContext : this.createReleaseSimulationContexts(
                 player,
                 lastPrediction,
                 target,
@@ -1855,6 +1863,92 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 canStep);
     }
 
+    /**
+     * The carried contexts, each split by TridentItem#releaseUsing's outcome on a release tick: the release spins
+     * only when Entity#isInWaterOrRain holds, and a spin leaves onGround false for the tick's LivingEntity#aiStep.
+     */
+    private List<SimulationContext> createReleaseSimulationContexts(
+            CultPlayer player,
+            PredictionResult lastPrediction,
+            Vec3 target,
+            Vec3 start,
+            Vec3 end,
+            LastInstance lastTickSkip,
+            boolean testing,
+            float xRot,
+            float yRot,
+            AuthoredMovementFrame authoredMovementFrame,
+            MovementProfile movementProfile) {
+        List<SimulationContext> contexts = this.createSimulationContexts(
+                player,
+                lastPrediction,
+                target,
+                start,
+                end,
+                lastTickSkip,
+                testing,
+                xRot,
+                yRot,
+                authoredMovementFrame,
+                movementProfile);
+        if (player.packetStateData.riptideLevel == 0
+                || player.isBedrockMovement()
+                || this.currentPredictionVehicle() != null) return contexts;
+        boolean certain = player.packetStateData.riptideReleaseCertain;
+        List<SimulationContext> released = new ArrayList<>(contexts.size() * 2);
+        if (!certain) {
+            for (SimulationContext context : contexts) context.setRiptideLevel(0);
+            released.addAll(contexts);
+        }
+        // A spin context builds its own world: the spin leaves onGround false for the tick's LivingEntity#aiStep.
+        player.packetStateData.riptideReleaseCertain = true;
+        try {
+            List<SimulationContext> spins = certain
+                    ? contexts
+                    : this.createSimulationContexts(
+                            player,
+                            lastPrediction,
+                            target,
+                            start,
+                            end,
+                            lastTickSkip,
+                            testing,
+                            xRot,
+                            yRot,
+                            authoredMovementFrame,
+                            movementProfile);
+            for (SimulationContext spin : spins) {
+                spin.setWaterMovementEfficiency(
+                        getWaterMovementEfficiency(player.compensatedEntities.getSelf(), DesyncStatus.FALSE));
+                released.add(spin);
+                if (!spin.consumesStuckSpeed()
+                        || !spin.getWorldData().getCarriedOnGround().getStates().contains(true)) continue;
+                SimulationContext lift = this.createSimulationContext(
+                        player,
+                        lastPrediction,
+                        target,
+                        start,
+                        end,
+                        lastTickSkip,
+                        testing,
+                        xRot,
+                        yRot,
+                        authoredMovementFrame,
+                        movementProfile,
+                        false,
+                        null,
+                        null);
+                lift.setProfileCarry(spin.getProfileCarry());
+                lift.setRiptideLiftStuck(spin.getLastStuckSpeed());
+                lift.setWaterMovementEfficiency(spin.getWaterMovementEfficiency());
+                released.add(lift);
+            }
+        } finally {
+            player.packetStateData.riptideReleaseCertain = certain;
+        }
+        return released;
+    }
+
     private List<SimulationContext> createSimulationContexts(
             CultPlayer player,
             PredictionResult lastPrediction,
@@ -2091,6 +2185,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         PacketEntity traveller = riding == null ? player.compensatedEntities.getSelf() : riding;
         context.setWaterMovementEfficiency(getWaterMovementEfficiency(traveller, contextLastOnGround));
         context.setBoatInputs(player.boatData.vehicleKeys);
+        context.setRiptideReleaseCertain(player.packetStateData.riptideReleaseCertain);
         context.setProfileCarry(this.profileCarry);
         context.setBedrockTeleport(player.isBedrockMovement() ? this.bedrockTeleport : null);
         context = movementProfile.createContext(player, context, authoredMovementFrame);

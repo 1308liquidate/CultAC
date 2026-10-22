@@ -13,6 +13,7 @@ import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.blocksim.entity.EntityTypes;
 import ac.cult.cultac.checks.impl.scaffolding.FarPlace;
+import ac.cult.cultac.events.packets.PacketEntityReplication;
 import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -166,9 +167,11 @@ class EntityQueryUncertaintyTest {
         assertFalse(player.isClientUsingItem());
     }
 
-    /** A cow whose candidates straddle PLACED once its move's proof pong is answered and before the next one. */
+    /** A cow whose candidates straddle PLACED once its move's first transaction is answered and before the next one. */
     private void straddlingCow(Vec3 standing) throws Exception {
         JavaTickFixture.setField(CultPlayer.class, player, "resolvedClientVersion", ClientVersion.V_1_21_11);
+        JavaTickFixture.setField(
+                PacketEntityReplication.class, player.packetEntityReplication, "useReachBundleDelimiter", false);
         int stone = DataTables.defaults().registry().block("minecraft:stone").defaultState();
         player.compensatedWorld.updateBlock(CLICKED.getX(), CLICKED.getY(), CLICKED.getZ(), stone);
         stand(standing);

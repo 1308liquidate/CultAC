@@ -1,22 +1,31 @@
 package ac.cult.cultac.utils.latency;
 
 import ac.cult.blocksim.behavior.BehaviorRegistry;
+import ac.cult.blocksim.data.Box;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.InteractionRegistries;
 import ac.cult.blocksim.data.nbt.NbtValue;
 import ac.cult.blocksim.engine.BlockEntityData;
 import ac.cult.blocksim.engine.BlockEntityPrototypes;
+import ac.cult.blocksim.engine.Direction;
 import ac.cult.blocksim.engine.JukeboxPlayback;
 import ac.cult.blocksim.engine.ShulkerAnimation;
+import ac.cult.blocksim.engine.ShulkerGeometry;
+import ac.cult.blocksim.engine.Vec3;
 import ac.cult.cultac.network.packet.WorldPackets.BlockEntityUpdate;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.data.ModelBlockStates;
 import ac.cult.cultac.protocol.value.BlockPos;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrays;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -38,6 +47,11 @@ public final class CompensatedBlockEntities {
     private Long2ObjectOpenHashMap<Entry> entries;
     // Every key whose entry the next tick may change; the rest are fixed points of tick.
     private LongOpenHashSet ticking;
+    // Level#blockEntityTickers order: LevelChunk#updateBlockEntityTicker appends a new block entity's ticker and
+    // rebinds a replaced one in place, and LevelChunk#removeBlockEntityTicker drops it.
+    private Long2LongOpenHashMap added;
+    private long nextAdded;
+    private final List<ShulkerShove> lastTickShoves = new ArrayList<>(0);
     private final Supplier<InteractionRegistries> registries;
     private final ModelBlockStates states;
 
@@ -123,23 +137,82 @@ public final class CompensatedBlockEntities {
             put(pos.asLong(), new Entry(ShulkerAnimation.event(entry.data(), action, parameter), entry.state()));
     }
 
+    /** Level#tickBlockEntities, which records each ShulkerBoxBlockEntity#moveCollidedEntities call it makes. */
     public void tick() {
-        if (ticking == null) return;
-        var keys = ticking.iterator();
-        while (keys.hasNext()) {
-            long key = keys.nextLong();
+        lastTickShoves.clear();
+        if (ticking == null || ticking.isEmpty()) return;
+        for (long key : tickerOrder()) {
             var entry = entries.get(key);
             if (entry == null) {
-                keys.remove();
+                ticking.remove(key);
                 continue;
             }
             var next = ShulkerAnimation.tick(entry.data());
+            if (opening(entry.data())) lastTickShoves.add(shove(key, entry.state(), next));
             if (next.type().equals("minecraft:jukebox")
                     && Rules.DATA.registry().value(entry.state(), "has_record").equals("true"))
                 next = JukeboxPlayback.tick(next);
             if (next != entry.data()) entries.put(key, new Entry(next, entry.state()));
-            else keys.remove();
+            else ticking.remove(key);
         }
+    }
+
+    /** The {@code ticking} keys in Level#tickBlockEntities order. */
+    private long[] tickerOrder() {
+        long[] keys = ticking.toLongArray();
+        if (keys.length > 1) LongArrays.quickSort(keys, (a, b) -> Long.compare(added.get(a), added.get(b)));
+        return keys;
+    }
+
+    /**
+     * A ShulkerBoxBlockEntity#moveCollidedEntities call: the progress step's Shulker#getProgressDeltaAabb, and the
+     * movement it gives every entity that box intersects.
+     */
+    public record ShulkerShove(SimpleCollisionBox area, double x, double y, double z) {}
+
+    /** A client tick whose TickRateManager#runsNormally is false: Level#tickBlockEntities ticks no block entity. */
+    public void skipTick() {
+        lastTickShoves.clear();
+    }
+
+    /**
+     * Adds the ShulkerBoxBlockEntity#moveCollidedEntities calls of the client tick that ended last, or with
+     * {@code next} those of the client tick that runs next, whose block entities tick when {@code runsNormally}.
+     */
+    public void shulkerShoves(boolean next, boolean runsNormally, List<ShulkerShove> shoves) {
+        if (!next) {
+            shoves.addAll(lastTickShoves);
+            return;
+        }
+        if (ticking == null || ticking.isEmpty() || !runsNormally) return;
+        for (long key : tickerOrder()) {
+            var entry = entries.get(key);
+            if (entry != null && opening(entry.data()))
+                shoves.add(shove(key, entry.state(), ShulkerAnimation.tick(entry.data())));
+        }
+    }
+
+    /** ShulkerBoxBlockEntity#updateAnimation calls moveCollidedEntities in every OPENING update. */
+    private static boolean opening(BlockEntityData data) {
+        if (!data.type().equals("minecraft:shulker_box")) return false;
+        var status = data.data().get("animation_status");
+        return status != null && status.getAsString().equals("OPENING");
+    }
+
+    private static ShulkerShove shove(long key, int state, BlockEntityData updated) {
+        var fields = updated.data();
+        float progressOld = fields.get("progress_old").getAsFloat();
+        float progress = fields.get("progress").getAsFloat();
+        Direction facing =
+                Direction.valueOf(Rules.DATA.registry().value(state, "facing").toUpperCase(Locale.ROOT));
+        BlockPos pos = BlockPos.of(key);
+        Box area = ShulkerGeometry.progressDeltaBounds(
+                1.0F, facing, progressOld, progress, new Vec3(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5));
+        return new ShulkerShove(
+                new SimpleCollisionBox(area.minX(), area.minY(), area.minZ(), area.maxX(), area.maxY(), area.maxZ()),
+                (area.maxX() - area.minX() + 0.01) * facing.x(),
+                (area.maxY() - area.minY() + 0.01) * facing.y(),
+                (area.maxZ() - area.minZ() + 0.01) * facing.z());
     }
 
     /** Preserve same-block and copper-family entities exactly as LevelChunk does. */
@@ -181,6 +254,7 @@ public final class CompensatedBlockEntities {
             if (((int) (key >> 38) >> 4) == x && ((int) (key << 26 >> 38) >> 4) == z) {
                 iterator.remove();
                 ticking.remove(key);
+                added.remove(key);
             }
         }
     }
@@ -188,6 +262,7 @@ public final class CompensatedBlockEntities {
     public void clear() {
         entries = null;
         ticking = null;
+        added = null;
     }
 
     private Entry get(long key) {
@@ -198,6 +273,7 @@ public final class CompensatedBlockEntities {
         if (entries != null) {
             entries.remove(key);
             ticking.remove(key);
+            added.remove(key);
         }
     }
 
@@ -205,8 +281,9 @@ public final class CompensatedBlockEntities {
         if (entries == null) {
             entries = new Long2ObjectOpenHashMap<>(2);
             ticking = new LongOpenHashSet(2);
+            added = new Long2LongOpenHashMap(2);
         }
-        entries.put(key, entry);
+        if (entries.put(key, entry) == null) added.put(key, nextAdded++);
         ticking.add(key);
     }
 }

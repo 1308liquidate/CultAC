@@ -63,6 +63,7 @@ import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
+import ac.grim.grimac.api.event.events.FlagEvent;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import java.lang.reflect.Field;
@@ -132,6 +133,27 @@ class ReachInteractionRangeTest {
             assertTrue(setup.attack(6.5));
             setup.self().entityInteractionRange.replace(10.0, List.of());
             assertTrue(setup.attack(6.5));
+        }
+    }
+
+    @Test
+    void hitboxVerboseNamesOnlyANonPlayerTargetsType() throws Exception {
+        try (var setup = new Setup()) {
+            List<String> verbose = new ArrayList<>();
+            FlagEvent.Channel flags = CultAPI.INSTANCE.getEventBus().get(FlagEvent.class);
+            FlagEvent.SupplierHandler record = (user, flagged, text, cancelled) -> {
+                if (flagged.getCheckName().endsWith("Hitboxes"))
+                    verbose.add(flagged.getCheckName() + ": " + text.get());
+                return cancelled;
+            };
+            flags.onFlagSupplier(CultAPI.INSTANCE.getGrimPlugin(), record, 0, false);
+            try {
+                assertEquals(List.of("PlayerHitboxes"), setup.attack(EntityTypeIds.PLAYER, .9, 2.5));
+                assertEquals(List.of("EntityHitboxes"), setup.attack(EntityTypeIds.ZOMBIE, .9, 2.5));
+            } finally {
+                flags.unsubscribe(record);
+            }
+            assertEquals(List.of("PlayerHitboxes: ", "EntityHitboxes: type=minecraft:zombie"), verbose);
         }
     }
 

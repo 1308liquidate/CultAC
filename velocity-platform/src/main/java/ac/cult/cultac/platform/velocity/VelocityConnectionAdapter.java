@@ -151,6 +151,15 @@ final class VelocityConnectionAdapter implements PlatformConnection {
         return protocols == null ? null : protocols.client();
     }
 
+    /**
+     * A 1.20.2+ client sends its brand as soon as it enters configuration, which Velocity reads before the PostLogin
+     * attach installs Cult's decoder. Velocity keeps it and only replays it to backends.
+     */
+    @Override
+    public String clientBrand() {
+        return nativePlayer.getClientBrand();
+    }
+
     /** Velocity sets the current server before it forwards that server's login. */
     @Override
     public String backendName() {

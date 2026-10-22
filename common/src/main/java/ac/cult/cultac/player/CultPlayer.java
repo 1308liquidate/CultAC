@@ -64,6 +64,7 @@ import ac.cult.cultac.utils.latency.LatencyUtils;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.TrigHandler;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.BoatRiderYaw;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
@@ -251,8 +252,8 @@ public class CultPlayer implements GrimUser {
     public boolean isSneaking;
     // The client's last START/STOP_SPRINTING (LocalPlayer#wasSprinting)
     public boolean isSprinting;
-    // LocalPlayer#aiStep cleared the sprint flag of a passenger without a STOP_SPRINTING; the next START_SPRINTING ends
-    // it.
+    // LocalPlayer#aiStep cleared the sprint flag of a passenger without a STOP_SPRINTING; the next tick that reaches
+    // LocalPlayer#sendIsSprintingIfNeeded ends it.
     public boolean sprintClearedAsPassenger;
     public final ClientSprintState sprintState = new ClientSprintState();
     public final ClientSwimState swimState = new ClientSwimState();
@@ -296,6 +297,9 @@ public class CultPlayer implements GrimUser {
     public final @NotNull ExplosionHandler explosionHandler;
     public final @NotNull KeepSprint keepSprint;
     public final @NotNull PluginChannelManager pluginChannelManager;
+    /** The Lunar Client mods the player's server last reported through Apollo; null before any report. */
+    public volatile ac.cult.cultac.bridge.protocol.BridgeMessage.@Nullable ClientMods clientMods;
+
     public final @NotNull PacketEntityReplication packetEntityReplication;
     private final @NotNull GhostBlockMitigator ghostBlockMitigator;
     private final @NotNull ItemUseDesync itemUseDesync;
@@ -320,6 +324,8 @@ public class CultPlayer implements GrimUser {
     public int minPlayerAttackSlow = 0;
     public int maxPlayerAttackSlow = 0;
     public @MonotonicNonNull GameMode gamemode;
+    /** The mode of the last packet the server sent, which the client only adopts once it acknowledges that packet. */
+    public @MonotonicNonNull GameMode serverGamemode;
     public @MonotonicNonNull String dimension;
     public @Nullable String world;
     public @Nullable Vec3 bedPosition;
@@ -442,8 +448,7 @@ public class CultPlayer implements GrimUser {
     // AbstractBoat#clampRotation's yaw for a player passenger, in its float operations, which need not return an
     // unclamped yaw unchanged.
     private static float clampToBoat(float yaw, float boatYaw) {
-        float delta = CultMath.wrapDegrees(yaw - boatYaw);
-        return yaw + CultMath.clamp(delta, -105.0F, 105.0F) - delta;
+        return BoatRiderYaw.clampRotation(yaw, boatYaw);
     }
 
     public void onPacketCancel() {
@@ -1102,7 +1107,12 @@ public class CultPlayer implements GrimUser {
     }
 
     private Pose determineCurrentPoseLikeVanilla() {
-        Pose desiredPose = getDesiredPoseLikeVanilla();
+        return updatedPose(swimState.swimming(), x, y, z);
+    }
+
+    /** Player#updatePlayerPose with the player at {@code (x, y, z)} and Entity#isSwimming {@code swimming}. */
+    public Pose updatedPose(boolean swimming, double x, double y, double z) {
+        Pose desiredPose = getDesiredPoseLikeVanilla(swimming);
         if (compensatedWorld == null || compensatedEntities == null) {
             return desiredPose;
         }
@@ -1110,29 +1120,29 @@ public class CultPlayer implements GrimUser {
         // The vanilla local player only evaluates pose fallback when it can fit the
         // swimming box, then falls back from the desired pose to crouching and finally
         // to swimming based on exact collision tests at the current position.
-        if (!canPlayerFitWithinBlocksAndEntitiesWhen(Pose.SWIMMING)) {
+        if (!canPlayerFitWithinBlocksAndEntitiesWhen(Pose.SWIMMING, x, y, z)) {
             return desiredPose;
         }
 
         if (gamemode == GameMode.SPECTATOR
                 || compensatedEntities.getSelf().inVehicle()
-                || canPlayerFitWithinBlocksAndEntitiesWhen(desiredPose)) {
+                || canPlayerFitWithinBlocksAndEntitiesWhen(desiredPose, x, y, z)) {
             return desiredPose;
         }
 
-        if (canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING)) {
+        if (canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING, x, y, z)) {
             return Pose.CROUCHING;
         }
 
         return Pose.SWIMMING;
     }
 
-    private Pose getDesiredPoseLikeVanilla() {
+    private Pose getDesiredPoseLikeVanilla(boolean swimming) {
         if (isInBed) {
             return Pose.SLEEPING;
         }
         // Player#isSwimming
-        if (swimState.swimming() && !isFlying && gamemode != GameMode.SPECTATOR) {
+        if (swimming && !isFlying && gamemode != GameMode.SPECTATOR) {
             return Pose.SWIMMING;
         }
         if (isGliding) {
@@ -1144,16 +1154,39 @@ public class CultPlayer implements GrimUser {
         return isSneaking && !isFlying ? Pose.CROUCHING : Pose.STANDING;
     }
 
-    private boolean canPlayerFitWithinBlocksAndEntitiesWhen(Pose newPose) {
-        return canPlayerFitWithinBlocksAndEntitiesWhen(newPose, x, y, z);
-    }
-
     /** Player#canPlayerFitWithinBlocksAndEntitiesWhen with the player at {@code (x, y, z)}. */
     public boolean canPlayerFitWithinBlocksAndEntitiesWhen(Pose newPose, double x, double y, double z) {
         SimpleCollisionBox box = GetBoundingBox.getBoundingBoxFromPosAndSize(
                         x, y, z, newPose.width * getScale(), newPose.height * getScale())
                 .expand(-1.0E-7D);
         return Collisions.isEmpty(this, box, y) && hasNoEntityCollision(box);
+    }
+
+    /**
+     * Whether the {@code newPose} box at the position may fit within blocks and entities: false when blocks or an
+     * entity at each of its possible positions overlap it.
+     */
+    public boolean mayPlayerFitWithinBlocksAndEntitiesWhen(Pose newPose, double x, double y, double z) {
+        SimpleCollisionBox box = GetBoundingBox.getBoundingBoxFromPosAndSize(
+                        x, y, z, newPose.width * getScale(), newPose.height * getScale())
+                .expand(-1.0E-7D);
+        if (!Collisions.isEmpty(this, box, y)) return false;
+        PacketEntity riding = compensatedEntities.getSelf().getRiding();
+        SimpleCollisionBox entityBox = new SimpleCollisionBox();
+        for (PacketEntity entity : compensatedEntities.poseCollisionCandidates()) {
+            if (canCollideWithForPoseCheck(riding, entity) && overlapsAtEachPossiblePosition(entity, box, entityBox)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean overlapsAtEachPossiblePosition(
+            PacketEntity entity, SimpleCollisionBox playerBox, SimpleCollisionBox entityBox) {
+        for (int i = 0, count = entity.possibleMovementCollisionBoxCandidateCount(); i < count; i++) {
+            if (!entity.possibleMovementCollisionBoxCandidate(i, entityBox).isIntersected(playerBox)) return false;
+        }
+        return true;
     }
 
     private boolean hasNoEntityCollision(SimpleCollisionBox playerBox) {
@@ -1165,11 +1198,32 @@ public class CultPlayer implements GrimUser {
                 continue;
             }
 
-            if (entity.getPossibleCollisionBoxes(entityBox, scratch).isIntersected(playerBox)) {
+            if (entity.getPossibleMovementCollisionBoxes(entityBox, scratch).isIntersected(playerBox)
+                    && overlapsAtAPossiblePosition(entity, playerBox, entityBox)) {
                 return false;
             }
         }
         return true;
+    }
+
+    private static boolean overlapsAtAPossiblePosition(
+            PacketEntity entity, SimpleCollisionBox playerBox, SimpleCollisionBox entityBox) {
+        for (int i = 0, count = entity.possibleMovementCollisionBoxCandidateCount(); i < count; i++) {
+            if (entity.possibleMovementCollisionBoxCandidate(i, entityBox).isIntersected(playerBox)) return true;
+        }
+        return false;
+    }
+
+    /** The box at each possible position of each entity Entity#collide stops this player against. */
+    public List<SimpleCollisionBox> entityCollisionBoxes() {
+        PacketEntity riding = compensatedEntities.getSelf().getRiding();
+        List<SimpleCollisionBox> boxes = new ArrayList<>();
+        for (PacketEntity entity : compensatedEntities.poseCollisionCandidates()) {
+            if (canCollideWithForPoseCheck(riding, entity)) {
+                boxes.addAll(entity.getPossibleMovementCollisionBoxCandidates());
+            }
+        }
+        return boxes;
     }
 
     private boolean canCollideWithForPoseCheck(@Nullable PacketEntity riding, PacketEntity entity) {
@@ -1624,17 +1678,26 @@ public class CultPlayer implements GrimUser {
     /**
      * Whether the client's sprint flag is set. LocalPlayer#aiStep clears it for a passenger whose vehicle cannot
      * sprint or that it does not control, and LocalPlayer#sendChanges sends no STOP_SPRINTING for a vehicle it does
-     * not control, so {@link #isSprinting} keeps the last START_SPRINTING until the client sprints or dismounts.
+     * not control, so {@link #isSprinting} keeps the last START_SPRINTING. A tick on foot or on a camel the player
+     * controls ends in LocalPlayer#sendIsSprintingIfNeeded, after which the flag is the last command sent.
      */
     public boolean isClientSprinting() {
         return isSprinting && !sprintClearedAsPassenger;
     }
 
-    /** A client tick mounted on {@code vehicle}: only a camel the player controls (Camel#canSprint) keeps the flag. */
+    /**
+     * A client tick mounted on {@code vehicle}. Every other vehicle ends the tick with the flag cleared (only
+     * Camel#canSprint); a camel the player controls ends it in LocalPlayer#sendIsSprintingIfNeeded. Control follows
+     * the passenger list the client has applied.
+     */
     public void onMountedClientTick(PacketEntity vehicle) {
-        if (EntityTypeUtil.isCamelFamily(vehicle.type)
-                && compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(vehicle)) return;
-        sprintClearedAsPassenger = true;
+        sprintClearedAsPassenger = !EntityTypeUtil.isCamelFamily(vehicle.type)
+                || !compensatedEntities.vehicles.mayLocalPlayerControl(vehicle);
+    }
+
+    /** A client tick on foot: LocalPlayer#sendPosition ends it in LocalPlayer#sendIsSprintingIfNeeded. */
+    public void onFootClientTick() {
+        sprintClearedAsPassenger = false;
     }
 
     @Override

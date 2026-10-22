@@ -25,9 +25,7 @@ public class PacketConfigurationListener {
         String channelName = packet.channel();
         byte[] data = event.getPacket().data();
         final PluginChannelManager pluginChannels = player.checkManager.getListener(PluginChannelManager.class);
-        if (!channelName.equalsIgnoreCase("minecraft:brand")) {
-            pluginChannels.handleChannelRegistered(channelName);
-        } else {
+        if (channelName.equalsIgnoreCase("minecraft:brand")) {
             final ClientBrand clientBrand = player.checkManager.getListener(ClientBrand.class);
             clientBrand.handle(channelName, data);
         }

@@ -56,15 +56,10 @@ final class SneakEdgeBackoff {
             return deltaMovementFrom(
                     player, result, context, accepted, context.isLastSneaking() ? sneakingSpeed : 1.0F);
         }
-        if (!context.isLastSneaking()) return deltaMovementFrom(player, result, context, accepted, 1.0F);
-        // LocalPlayer#aiStep crouches a shift-holding player unless it swims. Entity#updateSwimming, in baseTick before
-        // aiStep, swims only a player whose sprint flag is set, and its eye state is local, so with the flag set a
-        // crouch-held water move is proven with either scale and kept when one alone reproduces it.
-        Vec3 crouching = deltaMovementFrom(player, result, context, accepted, sneakingSpeed);
-        if (!player.sprintState.flagBeforeAiStep()) return crouching;
-        Vec3 full = deltaMovementFrom(player, result, context, accepted, 1.0F);
-        if (full == null) return crouching;
-        return crouching == null || crouching.equals(full) ? full : null;
+        // LocalPlayer#aiStep crouches a shift-holding player unless Entity#updateSwimming, earlier in this tick's
+        // baseTick, left the player swimming.
+        boolean crouching = context.isLastSneaking() && !context.getWorldData().isSwimming();
+        return deltaMovementFrom(player, result, context, accepted, crouching ? sneakingSpeed : 1.0F);
     }
 
     /**
@@ -123,6 +118,7 @@ final class SneakEdgeBackoff {
         double startZ = current == null ? start.z : start.z + current.z;
         // LocalPlayer#aiStep's goDownInWater adds -0.04F while shift is held in water, before travel.
         double deltaY = water ? startY + (double) -0.04F : startY;
+        if (water && context.getWorldData().isSwimming()) deltaY = swimPull(player, context, deltaY);
         Vec3 delta = new Vec3(startX + input.x, deltaY, startZ + input.z);
         if (!(Math.abs(delta.x) <= MAX_PROBED_AXIS) || !(Math.abs(delta.z) <= MAX_PROBED_AXIS)) return null;
 
@@ -136,9 +132,6 @@ final class SneakEdgeBackoff {
         boolean moved = movementLength > 1.0E-7 || backedOff.lengthSqr() - movementLength < 1.0E-7;
         Vec3 position = moved ? movement : Vec3.ZERO;
         if (position.distanceToSqr(accepted) > 1.0E-14) return null;
-        // Player#travel's swim pitch pull changes the vertical delta after goDownInWater; only a move the floor stops
-        // leaves a vertical delta that does not depend on it.
-        if (water && (movement.y != 0.0D || !(backedOff.y < 0.0D))) return null;
 
         // Entity#restituteMovementAfterCollisions zeroes each collided axis of a player suppressing bounce.
         return new Vec3(
@@ -178,6 +171,25 @@ final class SneakEdgeBackoff {
                 && !IsUsingItem.isUsingItem(player)
                 && result.getValidMovements() != null
                 && result.getValidMovements().getPositionOnlyDelta().lengthSqr() <= 1.0E-14;
+    }
+
+    /**
+     * Player#travel's pull of a swimming player's vertical delta toward its look, after LocalPlayer#aiStep's
+     * goDownInWater and before LivingEntity#travelInWater's move.
+     */
+    private static double swimPull(CultPlayer player, SimulationContext context, double deltaY) {
+        double lookY =
+                ReachUtils.getLook(player, context.getXRot(), context.getYRot()).getY();
+        Vec3 from = context.getStart();
+        if (!(lookY <= 0.0D)
+                && !player.packetStateData.knownInput.jump()
+                && player.compensatedWorld.getFluidLevelAt(
+                                CultMath.floor(from.x), CultMath.floor(from.y + 1.0D - 0.1D), CultMath.floor(from.z))
+                        == 0.0D) {
+            return deltaY;
+        }
+        double multiplier = lookY < -0.2D ? 0.085D : 0.06D;
+        return deltaY + (lookY - deltaY) * multiplier;
     }
 
     /**

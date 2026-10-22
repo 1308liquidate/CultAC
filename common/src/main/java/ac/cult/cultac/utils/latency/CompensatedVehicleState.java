@@ -4,6 +4,8 @@ import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.bedrock.prediction.integration.BedrockVehiclePredictionState;
 import ac.cult.cultac.bedrock.prediction.state.BedrockHorseProperties;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.checks.psuedo.VehicleOffset;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.NumFormatter;
 import ac.cult.cultac.utils.anticheat.StringReturner;
@@ -18,6 +20,7 @@ import ac.cult.cultac.utils.debug.Debuggable;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import org.jetbrains.annotations.Nullable;
@@ -29,6 +32,7 @@ public final class CompensatedVehicleState implements Debuggable {
     private static final double VEHICLE_SWITCH_BUFFER_REFILL_PER_PREDICTION = 0.01D;
     private static final double VEHICLE_SWITCH_BUFFER_MAX_PER_CLIENT_TICK = 0.05D;
     private static final double VEHICLE_SWITCH_BUFFER_EPSILON = 1.0E-9D;
+    private static final double SADDLE_HAND_OVER_REPORT_EPSILON = 1.0E-6D;
 
     private final CultPlayer player;
     private final CompensatedEntities entities;
@@ -42,6 +46,18 @@ public final class CompensatedVehicleState implements Debuggable {
 
     @Nullable
     private PredictionResult lastVehicleSwitchBufferRefillPrediction;
+
+    @Nullable
+    private Integer saddleHandOverVehicleId;
+
+    private int saddleHandOverLastClientTick;
+    private int saddleHandOverTravelClientTick = Integer.MIN_VALUE;
+
+    @Nullable
+    private Vec3 saddleHandOverTravel;
+
+    @Nullable
+    private Vec3 saddleHandOverPhysicalEnd;
 
     @Nullable
     public Integer serverPlayerVehicle;
@@ -80,12 +96,42 @@ public final class CompensatedVehicleState implements Debuggable {
                 && !hasActiveInterpolationTarget(root)) {
             snapToTrackedServerPosition(root);
         }
+        if (!player.isBedrockMovement()
+                && root != null
+                && root.isLivingEntity()
+                && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)
+                && !canClientAuthoritativelyMoveVisibleRoot(root)) {
+            decayUncontrolledRootVelocity(root);
+        }
 
         entities.updatePassengerPositions();
         Vec3 provenPassengerDelta = player.packetStateData.lastPacketProvenVehiclePhysicalMovement;
         if (provenPassengerDelta != null && entities.playerEntity.getRiding() != null) {
             entities.playerEntity.deltaMovement = provenPassengerDelta;
         }
+    }
+
+    /**
+     * LivingEntity#aiStep of a living root the client does not move: it scales the delta movement by 0.98 while the
+     * root is not interpolating, then zeroes each component below 0.003.
+     */
+    private void decayUncontrolledRootVelocity(PacketEntity root) {
+        boolean interpolating = hasActiveInterpolationTarget(root);
+        root.deltaMovement = uncontrolledLivingAiStep(root.deltaMovement, interpolating);
+        List<Vec3> velocities = new ArrayList<>();
+        for (Vec3 velocity : player.checkManager.getSimulationProcessor().getValidPlayerStartingVels()) {
+            Vec3 decayed = uncontrolledLivingAiStep(velocity, interpolating);
+            if (!velocities.contains(decayed)) velocities.add(decayed);
+        }
+        player.checkManager.getSimulationProcessor().seedStartingVelocities(velocities);
+    }
+
+    private static Vec3 uncontrolledLivingAiStep(Vec3 velocity, boolean interpolating) {
+        Vec3 scaled = interpolating ? velocity : velocity.multiply(0.98D, 0.98D, 0.98D);
+        return new Vec3(
+                Math.abs(scaled.x) < 0.003D ? 0.0D : scaled.x,
+                Math.abs(scaled.y) < 0.003D ? 0.0D : scaled.y,
+                Math.abs(scaled.z) < 0.003D ? 0.0D : scaled.z);
     }
 
     public void updateServerControlledSafeSetbackPositionOnTickEnd() {
@@ -191,6 +237,8 @@ public final class CompensatedVehicleState implements Debuggable {
             if (onGround != null) {
                 entity.onGround = onGround;
             }
+            // ClientPacketListener#setValuesFromPositionPacket sets the yaw AbstractBoat#controlBoat turns next tick.
+            if (entity.isBoat() && entity == entities.getSelf().getRiding()) player.boatYawBeforeTurn = yaw;
         }
 
         if (player.isBedrockMovement()
@@ -247,8 +295,9 @@ public final class CompensatedVehicleState implements Debuggable {
             return;
         }
 
+        Vec3 physical = isSaddleHandOverTravelFor(vehicle) ? saddleHandOverPhysicalEnd : to;
         vehicle.moveLocallyControlledRoot(
-                GetBoundingBox.getPacketEntityBoundingBox(player, to.x, to.y, to.z, vehicle),
+                GetBoundingBox.getPacketEntityBoundingBox(player, physical.x, physical.y, physical.z, vehicle),
                 physicalYaw,
                 physicalPitch);
         vehicle.onGround = onGround;
@@ -311,9 +360,88 @@ public final class CompensatedVehicleState implements Debuggable {
      * tick, as a mount does.
      */
     public void markSaddleControlSwitch(PacketEntity vehicle, boolean controlledBefore) {
-        if (canClientAuthoritativelyMoveVisibleRoot(vehicle) != controlledBefore) {
+        boolean controlled = canClientAuthoritativelyMoveVisibleRoot(vehicle);
+        if (controlled != controlledBefore) {
             markVehicleSwitchBufferWindow(vehicle);
         }
+        if (controlled && !controlledBefore) {
+            startSaddleHandOver(vehicle);
+        }
+    }
+
+    /**
+     * Control passes to the client while the root still follows a stepped server path. The client stops reading server
+     * moves for a root it controls (ClientPacketListener#handleMoveEntity), so that path ends after its queued ticks.
+     */
+    private void startSaddleHandOver(PacketEntity vehicle) {
+        if (!hasActiveSteppedInterpolation(vehicle)) {
+            return;
+        }
+        int lastClientTick =
+                player.packetStateData.acceptedClientTick + vehicle.newPacketLocation.remainingSteppedTicks();
+        if (isSaddleHandOverActiveFor(vehicle) && saddleHandOverLastClientTick >= lastClientTick) {
+            return;
+        }
+        saddleHandOverVehicleId = vehicle.getEntityId();
+        saddleHandOverLastClientTick = lastClientTick;
+    }
+
+    /**
+     * The yaw the root travels at: its tickRidden turns it to the controller's yaw before LivingEntity#travel, while a
+     * move sent during the hand-over carries the interpolation target's rotation.
+     */
+    public float saddleHandOverTravelYaw(@Nullable PacketEntity vehicle, float reportedYaw) {
+        return isSaddleHandOverActiveFor(vehicle) && hasActiveSteppedInterpolation(vehicle) ? player.xRot : reportedYaw;
+    }
+
+    private boolean isSaddleHandOverActiveFor(@Nullable PacketEntity vehicle) {
+        return vehicle != null
+                && saddleHandOverVehicleId != null
+                && saddleHandOverVehicleId == vehicle.getEntityId()
+                && player.packetStateData.acceptedClientTick <= saddleHandOverLastClientTick;
+    }
+
+    /**
+     * ServerboundMoveVehiclePacket#fromEntity sends Entity#getClientPositionAndRotation, which is the interpolation
+     * target while the root still follows the server path; the root itself moved by its own travel from the
+     * interpolated position, and AbstractInterpolationHandler#adjustInterpolationTargetFromDeltas carries that travel
+     * into the target on the next tick.
+     */
+    private void acceptSaddleHandOverMove(PredictionResult result, @Nullable PacketEntity vehicle) {
+        if (!isSaddleHandOverActiveFor(vehicle)
+                || !hasActiveSteppedInterpolation(vehicle)
+                || result.getSimulationContext().getStart() == null) {
+            return;
+        }
+        Vec3 start = result.getSimulationContext().getStart();
+        Vec3 report = start.add(result.getTarget());
+        if (report.distanceTo(vehicle.newPacketLocation.targetPosition()) > SADDLE_HAND_OVER_REPORT_EPSILON) {
+            return;
+        }
+        result.removeFlags(VehicleOffset.class);
+        Vec3 travel = result.getAcceptedClosestToTarget();
+        result.setProfilePredictionVector(travel);
+        saddleHandOverTravelClientTick = player.packetStateData.acceptedClientTick;
+        saddleHandOverTravel = new Vec3(travel.x, travel.y, travel.z);
+        saddleHandOverPhysicalEnd = start.add(saddleHandOverTravel);
+    }
+
+    private boolean isSaddleHandOverTravelFor(PacketEntity vehicle) {
+        return saddleHandOverTravel != null
+                && saddleHandOverTravelClientTick == player.packetStateData.acceptedClientTick
+                && saddleHandOverVehicleId != null
+                && saddleHandOverVehicleId == vehicle.getEntityId();
+    }
+
+    /**
+     * The movement to commit for {@code result} in place of {@code acceptedMovement}: the root's own travel when its
+     * move reported the interpolation target.
+     */
+    public Vec3 committedVehicleMovement(PredictionResult result, Vec3 acceptedMovement) {
+        PacketEntity vehicle = result == null || result.getSimulationContext() == null
+                ? null
+                : result.getSimulationContext().getVehicle();
+        return vehicle != null && isSaddleHandOverTravelFor(vehicle) ? saddleHandOverTravel : acceptedMovement;
     }
 
     public void markVehicleSwitchMovementPacketBoundary() {
@@ -355,6 +483,7 @@ public final class CompensatedVehicleState implements Debuggable {
         PacketEntity vehicle = result.getSimulationContext() == null
                 ? null
                 : result.getSimulationContext().getVehicle();
+        acceptSaddleHandOverMove(result, vehicle);
         if (!isVehicleSwitchBufferActiveFor(vehicle)) {
             return;
         }
@@ -759,5 +888,9 @@ public final class CompensatedVehicleState implements Debuggable {
 
     private boolean hasActiveInterpolationTarget(PacketEntity vehicle) {
         return vehicle.newPacketLocation != null && vehicle.newPacketLocation.hasActiveInterpolationTarget();
+    }
+
+    private boolean hasActiveSteppedInterpolation(PacketEntity vehicle) {
+        return hasActiveInterpolationTarget(vehicle) && vehicle.newPacketLocation.usesSteppedInterpolation();
     }
 }

@@ -105,6 +105,28 @@ public final class UnknownCollisionProvider {
         }
     }
 
+    /**
+     * Whether {@code entity} collides with a player outside a vehicle at each of its possible positions: a boat, or a
+     * happy ghast that HappyGhast#canBeCollidedWith admits. {@code envelope} and {@code scratch} are working space
+     * owned by the caller.
+     */
+    public static boolean collidesAtPossiblePositions(
+            CultPlayer player,
+            Vec3 playerPos,
+            PacketEntity entity,
+            SimpleCollisionBox envelope,
+            SimpleCollisionBox scratch) {
+        if (entity.isBoat()) return true;
+        return entity instanceof PacketEntityHappyGhast happyGhast
+                && !happyGhast.isBaby
+                && !happyGhast.isDead
+                && !happyGhast.hasPassenger(player.compensatedEntities.getSelf())
+                && (happyGhast.staysStill
+                        || playerPos.y
+                                >= happyGhast.getPossibleMovementCollisionBoxes(envelope, scratch).maxY
+                                        - SimpleCollisionBox.COLLISION_EPSILON);
+    }
+
     private static void addIntersecting(
             List<SimpleCollisionBox> boxes, SimpleCollisionBox box, SimpleCollisionBox queryBox) {
         if (box.isIntersected(queryBox)) boxes.add(box.copy());

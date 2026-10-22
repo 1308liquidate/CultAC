@@ -1,0 +1,120 @@
+package ac.cult.cultac.network;
+
+import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
+import static ac.cult.cultac.network.JavaTickFixture.describe;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
+import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.network.protocol.ClientVersion;
+import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundMoveVehicle;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.Vec3d;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
+import ac.cult.cultac.utils.math.Vec3;
+import java.lang.reflect.Field;
+import java.util.List;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+
+/**
+ * A saddled horse ridden forward from rest on 0.6-friction ground (CultAC issue #75). Before 1.21.5,
+ * LivingEntity#aiStep scales the delta movement by 0.98 when the entity is not interpolating and
+ * Entity#isEffectiveAi is false, which Mob#isEffectiveAi is on every client, including for a horse the local player
+ * controls. From 1.21.5 the branch tests canSimulateMovement, which is true for a locally controlled horse.
+ */
+class LegacyHorseDragTest {
+    private static final int HORSE = 100;
+    /** The reported horse's movement_speed: its move from rest covers 0.98F of it. */
+    private static final float SPEED = 0.225F;
+    /** LivingEntity#travelInAir on a 0.6-friction block. */
+    private static final double GROUND_FRICTION = 0.6F * 0.91F;
+    /** LivingEntity#travelInAir: a grounded horse's (0 - 0.08) * 0.98F. */
+    private static final double GROUNDED_Y = -0.0784000015258789;
+    /**
+     * LivingEntity#moveRelative for the ridden input's 0.98F along the horse's facing on 0.6-friction ground:
+     * getFrictionInfluencedSpeed scales movement_speed by 0.21600002F over the friction cubed.
+     */
+    private static final double GROUND_INPUT = (double) 0.98F * (SPEED * (0.21600002F / (0.6F * 0.6F * 0.6F)));
+
+    private static final ServerboundPlayerInput FORWARD =
+            new ServerboundPlayerInput(true, false, false, false, false, false, false);
+
+    /**
+     * Each move scales the carried velocity by the client's drag, zeroes it under LivingEntity#aiStep's 0.003
+     * threshold, adds the ridden input, and carries the move times the ground friction. The reported 1.21.4 moves
+     * follow this with the 0.98 drag, settling at 0.4743 per tick for a 0.225 horse.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({"V_1_21_2, 0.98", "V_1_21_4, 0.98", "V_1_21_5, 1.0", "V_26_3, 1.0"})
+    void aRiddenHorseCarriesTheClientsDrag(ClientVersion version, double drag) throws Exception {
+        try (var f = new JavaTickFixture()) {
+            setClientVersion(f.player, version);
+            Vec3 start = new Vec3(0.5, FLOOR_Y, 0.5);
+            mount(f, start);
+
+            double velocity = 0.0;
+            double z = start.z;
+            for (int tick = 0; tick < 12; tick++) {
+                double move = velocity * drag;
+                if (Math.abs(move) < 0.003) move = 0.0;
+                move += GROUND_INPUT;
+                z += move;
+                assertVehicleExact(ride(f, new Vec3(start.x, FLOOR_Y, z)), tick);
+                velocity = move * GROUND_FRICTION;
+            }
+        }
+    }
+
+    /** The saddled horse at rest at {@code start} facing +z, ridden with forward held. */
+    private static void mount(JavaTickFixture f, Vec3 start) {
+        f.player.compensatedEntities.addEntity(HORSE, EntityTypeIds.HORSE, start, 0F, 0, 0);
+        PacketEntityHorse horse = (PacketEntityHorse) f.player.compensatedEntities.getEntity(HORSE);
+        horse.hasSaddle = true;
+        horse.isTame = true;
+        horse.movementSpeedAttribute = SPEED;
+        horse.onGround = true;
+        f.setPassengers(HORSE, List.of(f.player.entityID));
+        f.pongThrough(f.player.lastTransactionSent.get());
+        // AbstractHorse#tick runs before LocalPlayer#rideTick hands it this tick's keys.
+        f.input(FORWARD);
+        f.tickEnd();
+        f.player.checkManager.getSimulationProcessor().seedStartingVelocity(new Vec3(0, GROUNDED_Y, 0));
+        f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
+    }
+
+    /** One client tick: the rider's Rot, the horse's move and the tick end. */
+    private static PredictionResult ride(JavaTickFixture f, Vec3 to) {
+        PredictionResult before = f.player.checkManager.getSimulationProcessor().getLastPrediction();
+        var rot = new ServerboundMovePlayer(0, 0, 0, 0F, 0F, false, false, false, true);
+        f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
+        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), 0F, 0F, true, true);
+        f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, move), f.player, move);
+        f.tickEnd();
+        PredictionResult result = f.player.checkManager.getSimulationProcessor().getLastPrediction();
+        assertTrue(result != null && result != before, "the vehicle move was not predicted");
+        return result;
+    }
+
+    /** VehicleOffset's own comparison: the reported move against the closest simulated one, input included. */
+    private static void assertVehicleExact(PredictionResult result, int tick) {
+        double offset =
+                result.getTarget().subtract(result.getAcceptedClosestToTarget()).length();
+        StringBuilder report =
+                new StringBuilder("tick " + tick + " vehicle offset " + offset + " ").append(describe(result));
+        for (PredictionResult.Flag flag : result.getFlags()) {
+            report.append(' ').append(flag.getVerbose().getString());
+        }
+        assertTrue(offset < 1.0E-5 && result.getFlags().isEmpty() && !result.isExempt(), report.toString());
+    }
+
+    private static void setClientVersion(CultPlayer player, ClientVersion version) throws ReflectiveOperationException {
+        Field field = CultPlayer.class.getDeclaredField("resolvedClientVersion");
+        field.setAccessible(true);
+        field.set(player, version);
+    }
+}

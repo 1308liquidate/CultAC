@@ -238,6 +238,11 @@ public class ReachInterpolationData {
             interpolationStepsHighBound = getInterpolationSteps();
     }
 
+    /** Whether this follows the 26.3 client's InterpolationHandler, which Entity#commonTick runs for every entity. */
+    public boolean followsInterpolationHandler() {
+        return interpolationPlayer != null;
+    }
+
     public boolean usesSteppedInterpolation() {
         return interpolationQueue != null;
     }
@@ -621,6 +626,17 @@ public class ReachInterpolationData {
         return locations;
     }
 
+    /** The number of {@link #getPossibleMovementLocations()}. */
+    public int possibleMovementLocationCount() {
+        return interpolationQueue != null ? 1 : interpolationStepsHighBound - interpolationStepsLowBound + 1;
+    }
+
+    /** Writes the {@code index}th of {@link #getPossibleMovementLocations()} into {@code out}. */
+    public SimpleCollisionBox possibleMovementLocation(int index, SimpleCollisionBox out) {
+        if (interpolationQueue != null) return steppedBox(steppedCurrent.position(), out);
+        return movementLocationAtStep(interpolationStepsLowBound + index, out);
+    }
+
     public boolean hasExactMovementLocationAfterClientTick() {
         return interpolationStepsLowBound == interpolationStepsHighBound;
     }
@@ -688,6 +704,14 @@ public class ReachInterpolationData {
 
     public int getTotalInterpolationSteps() {
         return getInterpolationSteps();
+    }
+
+    /**
+     * Client ticks the queued stepped path can still take. SteppedInterpolationHandler.InterpolationData#advance
+     * consumes at least one tick of the path per client tick.
+     */
+    public int remainingSteppedTicks() {
+        return interpolationQueue == null || interpolationQueue.isEmpty() ? 0 : (int) Math.ceil(remainingTicks);
     }
 
     public SimpleCollisionBox getTargetLocation() {
@@ -890,6 +914,9 @@ public class ReachInterpolationData {
             return physicalYaw;
         }
 
+        // LinearInterpolationHandler#doInterpolate lerps the yaw in double.
+        if (followsInterpolationHandler() && !usesSteppedInterpolation())
+            return (float) CultMath.rotLerp(1.0 / remainingSteps, physicalYaw, targetYaw);
         return CultMath.rotLerp(1.0F / remainingSteps, physicalYaw, targetYaw);
     }
 
@@ -900,6 +927,9 @@ public class ReachInterpolationData {
             return physicalPitch;
         }
 
+        // LinearInterpolationHandler#doInterpolate lerps the pitch in double.
+        if (followsInterpolationHandler())
+            return (float) CultMath.lerp(1.0 / remainingSteps, physicalPitch, targetPitch);
         return lerp(physicalPitch, targetPitch, 1.0F / remainingSteps);
     }
 

@@ -21,6 +21,7 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityNautilus;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
+import java.util.List;
 import java.util.Set;
 
 public class VehiclePredictionRunner extends CultProcessor implements VehicleListener, ClientTickEndListener {
@@ -30,17 +31,24 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
 
     @Override
     public void onPlayerTickEnd(final PacketReceiveEvent event) {
-        if (player.vehicleData.camelSprintingState == SprintingState.STOPPING) {
-            player.vehicleData.camelSprintingState = SprintingState.STOPPED;
-        } else if (player.vehicleData.camelSprintingState == SprintingState.STOPPED && player.isSprinting) {
-            player.vehicleData.camelSprintingState = SprintingState.STARTED;
+        // LocalPlayer#sendChanges ends a controlling rider's tick with its sprint flag equal to the last command sent.
+        // LocalPlayer#aiStep ends a passenger's tick with the flag cleared unless the input it sent holds forward
+        // impulse (LocalPlayer#canStartSprinting, LocalPlayer#shouldStopRunSprinting).
+        boolean riderSprinting = player.isClientSprinting();
+        if (player.compensatedEntities.getSelf().inVehicle()
+                && player.packetStateData.clientMovementInputKnown
+                && !player.isBedrockMovement()) {
+            riderSprinting &= player.boatData.nextVehicleKeys.forwardImpulse() > 0;
         }
+        player.vehicleData.camelSprintingState = riderSprinting ? SprintingState.STARTED : SprintingState.STOPPED;
         PacketEntity root = player.compensatedEntities.vehicles.getVelocityMovementVehicle();
         if (root instanceof PacketEntityNautilus nautilus) {
             nautilus.tickClientState();
         }
-        if (root instanceof PacketEntityCamel camel) {
-            camel.tickDashCooldown();
+        // ClientLevel#tickEntities runs Camel#tick for every camel, ridden or not.
+        List<PacketEntityCamel> camels = player.compensatedEntities.camels();
+        for (int i = 0, size = camels.size(); i < size; i++) {
+            camels.get(i).tickDashCooldown();
         }
         PacketEntityHorse horse = player.compensatedEntities.vehicles.getClientVisibleHorseRoot();
         if (horse != null) {
@@ -177,6 +185,11 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
                 nautilus.dashCooldown = 40;
                 nautilus.dashing = true;
             }
+        }
+
+        if (riding instanceof PacketEntityCamel camel && camel.actionAlive) {
+            // LocalPlayer#aiStep set zza from the keys this tick's root reads.
+            camel.tickRidden(player.boatData.vehicleForward > 0.0F, player.compensatedWorld.clientGameTime());
         }
 
         // For performance reasons - and to make debugging less painful - don't try spamming jumps

@@ -1240,6 +1240,15 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
      * @return - Whether the player has completed a teleport by being at this position
      */
     public TeleportAcceptData checkVehicleTeleportQueue(Integer vehicleId, double x, double y, double z) {
+        return checkVehicleTeleportQueue(vehicleId, x, y, z, false);
+    }
+
+    /**
+     * @param tickMove whether LocalPlayer#sendChanges sent the packet after the rider's Rot, which no
+     *     ClientPacketListener response is
+     */
+    public TeleportAcceptData checkVehicleTeleportQueue(
+            Integer vehicleId, double x, double y, double z, boolean tickMove) {
         TeleportAcceptData acceptData = new TeleportAcceptData();
 
         int lastTransaction = player.lastTransactionReceived.get();
@@ -1266,8 +1275,17 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
             }
 
             if (matchesVehicleTeleportPosition(position, x, y, z, teleportPos.responseDistanceTolerance())) {
-                final VehicleTeleport matchedEntry = vehicleTeleports.poll();
-                return completeVehicleTeleport(teleportPos);
+                if (!tickMove) {
+                    final VehicleTeleport matchedEntry = vehicleTeleports.poll();
+                    return completeVehicleTeleport(teleportPos);
+                }
+                // A ticking boat interpolates onto a TELEPORT_ENTITY target and the client sends no response for it.
+                if (teleportPos.state() != null
+                        && !isRequiredSetbackVehicleTeleport(teleportPos)
+                        && lastTransaction >= teleportPos.transaction()) {
+                    vehicleTeleports.poll();
+                    continue;
+                }
             }
 
             // MCP-Reborn sends exact MoveVehicle responses from the packet

@@ -95,12 +95,16 @@ public class PacketEntity {
     public Vec3 clientPhysicalPosition;
     public boolean clientPhysicalPositionExact = true;
     public float clientPhysicalYaw = 0.0F;
+    // Whether clientPhysicalYaw is the yaw LinearInterpolationHandler#interpolate gave the client's entity.
+    public boolean clientPhysicalYawCurrent = true;
     public float clientPhysicalPitch = 0.0F;
 
     public ReachInterpolationData oldPacketLocation;
     public ReachInterpolationData newPacketLocation;
     // Set by an unproven receipt, fold, teleport, far sync, seat placement or uncertain vehicle; holds for life.
     private boolean trackedPositionInexact;
+    // Unbundled position paths received but not yet proven by the transaction after them.
+    private int unprovenUnbundledPaths;
     private long clientTickOrder = Long.MAX_VALUE;
     // Reused: valid only until the client tick that computed it applies it.
     private SimpleCollisionBox exactAfterClientTickBox;
@@ -235,11 +239,9 @@ public class PacketEntity {
             @Nullable Float pitch,
             CultPlayer player) {
         // MCP-Reborn ClientPacketListener#handleBundlePacket handles bundled
-        // sub-packets in order. The first bundled ClientboundPingPacket proves
-        // that any later client movement was produced after the packet handler
-        // reached this entity movement, but an external delimiter can still cut
-        // the bundle short. Keep old and new packet boxes possible until the
-        // post-entity ping closes that protocol-valid ambiguity.
+        // sub-packets in order, so the trailing ping's pong proves the handler
+        // applied this movement before the client's next tick; the caller drops
+        // the old packet box with onSecondTransaction at that same pong.
         onFirstTransaction(relative, hasPos, relX, relY, relZ, yaw, pitch, player, false);
     }
 
@@ -365,7 +367,7 @@ public class PacketEntity {
             newPacketLocation.setPhysicalBeforePathAppend(
                     actualPath, targetYaw, targetPitch, clientPhysicalPosition, clientPhysicalYaw, clientPhysicalPitch);
             newPacketLocation.appendPath(actualPath, targetYaw, targetPitch);
-            if (!bundled) trackedPositionInexact = true;
+            if (!bundled) unprovenUnbundledPaths++;
             keepPositionCertainty();
             return;
         }
@@ -559,6 +561,26 @@ public class PacketEntity {
         this.oldPacketLocation = null;
     }
 
+    public int unprovenUnbundledPaths() {
+        return unprovenUnbundledPaths;
+    }
+
+    /**
+     * The transaction after an unbundled position path proves the client handled it. With no client tick since the one
+     * before it, the client handled the path between the same two client ticks as both pings.
+     */
+    public void onUnbundledPathProven() {
+        if (unprovenUnbundledPaths > 0) unprovenUnbundledPaths--;
+    }
+
+    /**
+     * Minecraft#runTick handles queued packets before each frame's client ticks, so a client tick between an unbundled
+     * path's two transactions leaves the path handled before or after that tick.
+     */
+    private void tickWithUnprovenUnbundledPath() {
+        if (unprovenUnbundledPaths > 0) markPositionInexact();
+    }
+
     /** Entity data replacing the pose, which the client has applied once it answers provenAt. */
     public void onPose(EntityPose pose, int provenAt) {
         if (pose == actionPose) return;
@@ -636,6 +658,7 @@ public class PacketEntity {
             }
             return;
         }
+        tickWithUnprovenUnbundledPath();
         ReachInterpolationData interpolation = newPacketLocation;
         Vec3 physicalBefore = clientPhysicalPosition;
         boolean idleProbe = false;
@@ -678,12 +701,16 @@ public class PacketEntity {
         float exactYawAfterClientTick = exactYawAfterClientTick();
         float exactPitchAfterClientTick = exactPitchAfterClientTick();
         boolean exactRotationAfterClientTick = exactRotationAfterClientTick();
+        boolean rotationMayStep = oldPacketLocation != null || newPacketLocation.hasActiveInterpolationTarget();
         newPacketLocation.tickMovement(oldPacketLocation == null, tickingReliably);
         alignExactInterpolatedLocation(exactAfterClientTick);
         if (exactRotationAfterClientTick) {
             newPacketLocation.setExactRotation(exactYawAfterClientTick, exactPitchAfterClientTick);
             clientPhysicalYaw = exactYawAfterClientTick;
             clientPhysicalPitch = exactPitchAfterClientTick;
+            clientPhysicalYawCurrent = true;
+        } else if (rotationMayStep) {
+            clientPhysicalYawCurrent = false;
         }
         if (exactAfterClientTick != null) {
             clientPhysicalPosition = positionFromCollisionBox(exactAfterClientTick, clientPhysicalPosition);
@@ -696,10 +723,11 @@ public class PacketEntity {
     /**
      * Entity#commonTick for the root of a client tick's ServerboundMoveVehiclePacket, whether or not the server accepts
      * that packet: InterpolationHandler#interpolate advances the server path the root still follows before
-     * LivingEntity#aiStep reaches travelRidden. Covers the 26.3 stepped interpolation only.
+     * LivingEntity#aiStep reaches travelRidden. Covers 26.3's stepped interpolation and a boat's LinearInterpolationHandler.
      */
     public void interpolateBeforeLocalTravel(CultPlayer player) {
-        if (!hasActiveSteppedInterpolation()) {
+        tickWithUnprovenUnbundledPath();
+        if (!hasActiveLocalRootInterpolation()) {
             return;
         }
         stepInterpolation(player, true);
@@ -707,6 +735,18 @@ public class PacketEntity {
             oldPacketLocation.tickMovement(true, true);
             widenStartingLocationByOldLocation();
         }
+        // AbstractBoat#controlBoat turns the yaw this step leaves.
+        if (boat && this == player.compensatedEntities.getSelf().getRiding()) {
+            player.boatYawBeforeTurn = clientPhysicalYawCurrent ? clientPhysicalYaw : Float.NaN;
+        }
+    }
+
+    private boolean hasActiveLocalRootInterpolation() {
+        return hasActiveSteppedInterpolation()
+                || (boat
+                        && newPacketLocation != null
+                        && newPacketLocation.followsInterpolationHandler()
+                        && newPacketLocation.hasActiveInterpolationTarget());
     }
 
     private boolean hasActiveSteppedInterpolation() {
@@ -726,6 +766,7 @@ public class PacketEntity {
 
     private void tickPacketInterpolationPreservingPhysical(
             CultPlayer player, Vec3 physicalPosition, float physicalYaw, float physicalPitch, boolean carryTarget) {
+        tickWithUnprovenUnbundledPath();
         if (carryTarget) {
             carryInterpolationTargetByLocalPhysics(player);
         }
@@ -956,12 +997,38 @@ public class PacketEntity {
     }
 
     /**
-     * Moves a root the client moves itself to {@code box}. A 26.3 stepped path it still follows keeps its steps and
+     * Entity#snapTo (Entity#moveTo before 1.21.5), which leaves the running interpolation in place: the entity sits at
+     * {@code box} and its next step lerps on from there. From 1.21.5, InterpolationHandler#interpolate first shifts the
+     * path it still follows by the jump from where its last step left the entity, where the shifted target is collision
+     * free; before it, LivingEntity#aiStep lerps toward the unshifted lerp target. A path whose current location is not
+     * exact is replaced by {@code box}.
+     */
+    public void snapTo(CultPlayer player, SimpleCollisionBox box, float yaw, float pitch) {
+        if (newPacketLocation == null
+                || !newPacketLocation.hasActiveInterpolationTarget()
+                || newPacketLocation.getExactMovementLocation() == null) {
+            setPositionRaw(box, yaw, pitch);
+            return;
+        }
+        Vec3 snappedPosition = positionFromCollisionBox(box);
+        clientPhysicalPosition = snappedPosition;
+        clientPhysicalPositionExact = true;
+        setClientPhysicalRotation(yaw, pitch);
+        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_5)) {
+            carryInterpolationTargetByLocalPhysics(player);
+        }
+        newPacketLocation.setExactMovementLocation(box);
+        newPacketLocation.setExactRotation(yaw, pitch);
+        desyncClientPos = snappedPosition;
+    }
+
+    /**
+     * Moves a root the client moves itself to {@code box}. A 26.3 path it still follows keeps its steps and
      * codec base, since ClientPacketListener#handleMoveVehicle alone cancels it; without one this is
      * {@link #setPositionRaw(SimpleCollisionBox, float, float)}.
      */
     public void moveLocallyControlledRoot(SimpleCollisionBox box, float yaw, float pitch) {
-        if (!hasActiveSteppedInterpolation()) {
+        if (!hasActiveLocalRootInterpolation()) {
             setPositionRaw(box, yaw, pitch);
             return;
         }
@@ -973,6 +1040,7 @@ public class PacketEntity {
     public void setClientPhysicalRotation(float yaw, float pitch) {
         this.clientPhysicalYaw = yaw;
         this.clientPhysicalPitch = pitch;
+        this.clientPhysicalYawCurrent = true;
     }
 
     private Vec3 positionFromCollisionBox(SimpleCollisionBox box) {
@@ -1057,6 +1125,24 @@ public class PacketEntity {
         }
         candidates.addAll(newPacketLocation.getPossibleMovementLocations());
         return candidates;
+    }
+
+    /** The number of {@link #getPossibleMovementCollisionBoxCandidates()}. */
+    public int possibleMovementCollisionBoxCandidateCount() {
+        if (passengerPhysicalBox != null && riding != null) return 1;
+        int count = newPacketLocation.possibleMovementLocationCount();
+        return oldPacketLocation == null ? count : count + oldPacketLocation.possibleMovementLocationCount();
+    }
+
+    /** Writes the {@code index}th of {@link #getPossibleMovementCollisionBoxCandidates()} into {@code out}. */
+    public SimpleCollisionBox possibleMovementCollisionBoxCandidate(int index, SimpleCollisionBox out) {
+        if (passengerPhysicalBox != null && riding != null) return out.set(passengerPhysicalBox);
+        if (oldPacketLocation != null) {
+            int old = oldPacketLocation.possibleMovementLocationCount();
+            if (index < old) return oldPacketLocation.possibleMovementLocation(index, out);
+            index -= old;
+        }
+        return newPacketLocation.possibleMovementLocation(index, out);
     }
 
     public SimpleCollisionBox getExactMovementCollisionBox() {

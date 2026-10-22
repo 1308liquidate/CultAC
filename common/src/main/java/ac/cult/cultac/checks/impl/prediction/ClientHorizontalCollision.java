@@ -4,8 +4,10 @@ import ac.cult.cultac.checks.impl.prediction.checks.HorizontalAnalyzer;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.data.KnownInput;
+import ac.cult.cultac.utils.math.VanillaMath;
 import ac.cult.cultac.utils.math.Vec3;
 
 /**
@@ -19,7 +21,9 @@ import ac.cult.cultac.utils.math.Vec3;
  * attempted delta is unknown. KeyboardInput's move vector only points in the eight key directions, which
  * LocalPlayer#modifyInput scales without turning, so each direction is tested with any input length up to the
  * accepted input allowance. LocalPlayer#sendChanges reports in PLAYER_INPUT the keys KeyboardInput#tick read for the
- * tick's travel before it sends the move, and their direction alone decides whether the collision is minor.
+ * tick's travel before it sends the move, and their direction alone decides whether the collision is minor. The
+ * input direction takes the yaw in float radians through Mth's sine table, as isHorizontalCollisionMinor and
+ * LivingEntity#moveRelative do.
  */
 public final class ClientHorizontalCollision {
     private static final double TOLERANCE = HorizontalAnalyzer.HORIZONTAL_INPUT_UNCERTAINTY;
@@ -47,7 +51,8 @@ public final class ClientHorizontalCollision {
         if (wallX == 0 && wallZ == 0) return DesyncStatus.FALSE;
 
         Vec3 stuck = trace.position().collisionStuckSpeedMultiplier(context);
-        double yaw = context.getXRot() * (Math.PI / 180.0);
+        float yaw = context.getXRot() * (float) (Math.PI / 180.0);
+        CultPlayer player = result.getPlayer();
         Move move = new Move(
                 trace.preCollisionMovement(),
                 target,
@@ -56,12 +61,20 @@ public final class ClientHorizontalCollision {
                 stuck == null ? 1 : stuck.x,
                 stuck == null ? 1 : stuck.z,
                 result.getHorizontalInputRadius(),
-                Math.sin(yaw),
-                Math.cos(yaw));
+                player == null ? VanillaMath.sin(yaw) : VanillaMath.sin(player.getClientVersion(), yaw),
+                player == null ? VanillaMath.cos(yaw) : VanillaMath.cos(player.getClientVersion(), yaw));
 
-        KnownInput keys = reportedKeys(result.getPlayer());
+        KnownInput keys = reportedKeys(player);
         if (keys != null) {
-            int reported = move.collisions((int) keys.strafeImpulse(), (int) keys.forwardImpulse());
+            int strafe = (int) keys.strafeImpulse();
+            int forward = (int) keys.forwardImpulse();
+            // A minor collision never stops the sprint, from whichever accepted start the keys reach the delta.
+            if (move.minor(strafe, forward)
+                    && move.reaches(
+                            strafe, forward, result.getValidMovements().getCollisionIgnoredMaxStartingVelExtents())) {
+                return DesyncStatus.FALSE;
+            }
+            int reported = move.collisions(strafe, forward);
             if (reported != 0) return verdict(reported);
         }
         int collisions = 0;
@@ -127,8 +140,7 @@ public final class ClientHorizontalCollision {
             double high = consistent[1];
 
             int collisions = 0;
-            // The minor angle is measured on the collided movement, which the reported delta fixes.
-            boolean minor = length != 0 && isMinor(dirX, dirZ, target.x, target.z);
+            boolean minor = minor(strafe, forward);
             // Collision is certain where a wall axis overshoots by more than the tolerance, else it may not exist.
             double[] noCollision = {low, high};
             if (minor || x.reachesWithin(noCollision) && z.reachesWithin(noCollision)) collisions |= SOFT;
@@ -136,6 +148,36 @@ public final class ClientHorizontalCollision {
                 collisions |= HARD;
             }
             return collisions;
+        }
+
+        /**
+         * Whether the key direction (strafe, forward) reaches the reported delta with an input length up to the
+         * allowance from some starting movement within {@code starts}, the accepted starting velocities with their
+         * uncertainties, scaled by the stuck multiplier as Entity#move scales its attempted delta, or from the closest
+         * trace's.
+         */
+        boolean reaches(int strafe, int forward, SimpleCollisionBox starts) {
+            double length = Math.sqrt(strafe * strafe + forward * forward);
+            if (length == 0) return false;
+            double dirX = (strafe * cos - forward * sin) / length;
+            double dirZ = (forward * cos + strafe * sin) / length;
+            double[] consistent = {0, maxInput};
+            Axis x = new Axis(base.x, dirX * stuckX, target.x, wallX);
+            Axis z = new Axis(base.z, dirZ * stuckZ, target.z, wallZ);
+            if (starts == null) return x.consistent(consistent) && z.consistent(consistent);
+            return x.consistentFrom(consistent, starts.minX * stuckX, starts.maxX * stuckX)
+                    && z.consistentFrom(consistent, starts.minZ * stuckZ, starts.maxZ * stuckZ);
+        }
+
+        /**
+         * Whether a collision with the key direction (strafe, forward) is minor. The angle is measured on the collided
+         * movement, which the reported delta fixes.
+         */
+        boolean minor(int strafe, int forward) {
+            double length = Math.sqrt(strafe * strafe + forward * forward);
+            if (length == 0) return false;
+            return isMinor(
+                    (strafe * cos - forward * sin) / length, (forward * cos + strafe * sin) / length, target.x, target.z);
         }
     }
 
@@ -158,6 +200,23 @@ public final class ClientHorizontalCollision {
             double min = wall == 0 ? target - TOLERANCE : wall > 0 ? target - TOLERANCE : Double.NEGATIVE_INFINITY;
             double max = wall == 0 ? target + TOLERANCE : wall > 0 ? Double.POSITIVE_INFINITY : target + TOLERANCE;
             return clamp(range, min, max);
+        }
+
+        /**
+         * Narrows {@code range} to the input lengths that reach the reported delta from some start between this
+         * axis's base and the span {@code [low, high]}, false if none do.
+         */
+        boolean consistentFrom(double[] range, double low, double high) {
+            double from = Math.min(base, Math.min(low, high));
+            double to = Math.max(base, Math.max(low, high));
+            double min = wall == 0 ? target - TOLERANCE : wall > 0 ? target - TOLERANCE : Double.NEGATIVE_INFINITY;
+            double max = wall == 0 ? target + TOLERANCE : wall > 0 ? Double.POSITIVE_INFINITY : target + TOLERANCE;
+            if (input == 0) return to >= min && from <= max && range[0] <= range[1];
+            double first = (min - to) / input;
+            double second = (max - from) / input;
+            range[0] = Math.max(range[0], Math.min(first, second));
+            range[1] = Math.min(range[1], Math.max(first, second));
+            return range[0] <= range[1];
         }
 
         /** Narrows {@code range} to the input lengths that stay within the tolerance of a wall, false if none do. */

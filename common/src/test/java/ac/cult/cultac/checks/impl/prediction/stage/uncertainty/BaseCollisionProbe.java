@@ -14,7 +14,7 @@ import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
-/** CollisionModifier#probeCollisions as of 515d08404, before probes reused resolved axis steps. */
+/** CollisionModifier#probeCollisions without the reuse of resolved axis steps. */
 final class BaseCollisionProbe {
     // Fixed global iteration orders, preserving the existing candidate order without per-probe lists.
     private static final Collisions.Axis[][] PROBE_ORDERS = {
@@ -30,6 +30,7 @@ final class BaseCollisionProbe {
     private final SimpleCollisionBox probeBox = new SimpleCollisionBox();
     private final SimpleCollisionBox probeEntityBox = new SimpleCollisionBox();
     private final SimpleCollisionBox probeEntityScratch = new SimpleCollisionBox();
+    private final SimpleCollisionBox probeEntityRegion = new SimpleCollisionBox();
     private final AxisResult positiveResult = new AxisResult(0, false);
     private final AxisResult negativeResult = new AxisResult(0, false);
 
@@ -55,6 +56,8 @@ final class BaseCollisionProbe {
 
         if (attemptedMovementExtents != null) {
             expandToAttemptedMovement(grabBoxesBB, attemptedMovementExtents, stuckSpeed);
+            // Entity#collide gathers entities along the attempted movement, which a step does not raise.
+            probeEntityRegion.set(grabBoxesBB);
             expandToPacketMovement(grabBoxesBB, target);
         } else {
             grabBoxesBB.expandToCoordinate(target.x, 0, target.z);
@@ -81,13 +84,65 @@ final class BaseCollisionProbe {
         if (!found.isEmpty()) found.removeIf(unknownBox -> !unknownBox.isIntersected(grabBoxesBB));
 
         if (!found.isEmpty()) {
-            return new CollideAxisData(
-                    new CollideAxisData.CollideResult(true, 0),
-                    new CollideAxisData.CollideResult(true, 0),
-                    new CollideAxisData.CollideResult(true, 0),
-                    new CollideAxisData.CollideResult(true, 0),
-                    List.copyOf(found));
+            SimpleCollisionBox region = attemptedMovementExtents == null
+                    ? probeEntityRegion.set(blockQuery)
+                    : probeEntityRegion.expand(maxEpsilon(dimensions.epsilon()));
+            if (attemptedMovementExtents != null && horizontalInputReach > 0.0D) {
+                region.expand(horizontalInputReach * stuckSpeed.x, 0.0D, horizontalInputReach * stuckSpeed.z);
+            }
+            EntityPositionWorlds.withStepEntities(player, region);
+            List<List<SimpleCollisionBox>> worlds = EntityPositionWorlds.of(player, context, playerPos, region);
+            if (worlds == null) {
+                return new CollideAxisData(
+                        new CollideAxisData.CollideResult(true, 0),
+                        new CollideAxisData.CollideResult(true, 0),
+                        new CollideAxisData.CollideResult(true, 0),
+                        new CollideAxisData.CollideResult(true, 0),
+                        List.copyOf(found));
+            }
+            if (!EntityPositionWorlds.noEntities(worlds)) {
+                int blocks = collisions.size();
+                List<CollideAxisData> results = new ArrayList<>(worlds.size());
+                for (int w = 0; w < worlds.size(); w++) {
+                    collisions.addAll(worlds.get(w));
+                    results.add(probeAxes(
+                            context,
+                            minY,
+                            candidateY,
+                            target,
+                            playerPos,
+                            attemptedMovementExtents,
+                            dimensions,
+                            followCandidateVerticalMovement,
+                            collisions));
+                    collisions.subList(blocks, collisions.size()).clear();
+                }
+                return EntityWorldCollisions.of(results, worlds);
+            }
         }
+        return probeAxes(
+                context,
+                minY,
+                candidateY,
+                target,
+                playerPos,
+                attemptedMovementExtents,
+                dimensions,
+                followCandidateVerticalMovement,
+                collisions);
+    }
+
+    private CollideAxisData probeAxes(
+            SimulationContext context,
+            double minY,
+            double candidateY,
+            Vec3 target,
+            Vec3 playerPos,
+            SimpleCollisionBox attemptedMovementExtents,
+            ProbeDimensions dimensions,
+            boolean followCandidateVerticalMovement,
+            List<SimpleCollisionBox> collisions) {
+        Vec3 stuckSpeed = context.getLastStuckSpeed();
         List<SimpleCollisionBox> unknown = List.of();
         CollideAxisData result = new CollideAxisData(null, null, null, null, unknown);
 

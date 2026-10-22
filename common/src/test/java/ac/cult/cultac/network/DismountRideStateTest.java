@@ -21,6 +21,8 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRemoveEntities;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRemoveMobEffect;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundTeleportEntity;
@@ -30,11 +32,13 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundAcceptTeleportation
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.BlockPos;
+import ac.cult.cultac.protocol.value.EntityDelta;
 import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.TeleportData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.data.packetentity.PacketEntitySizeable;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
@@ -574,6 +578,79 @@ class DismountRideStateTest {
             int contacts = contact.scan(f.player, vehicle, priorSeat, false);
             assertEquals(0b0011, contacts & 0b0011, "a seat the prior boxes allowed reaches the cobweb");
         }
+    }
+
+    /**
+     * Phantom#getDefaultDimensions scales the type's 0.3375 passenger attachment by 1 + 0.15 * size, and the removed
+     * phantom's rider keeps the seat Entity#positionRider gave it, less Avatar's 0.6 vehicle attachment.
+     */
+    @Test
+    void aRemovedSizedPhantomLeavesItsRiderAtTheScaledSeat() throws Exception {
+        try (var f = fixture(ClientVersion.V_26_2)) {
+            Vec3 phantom = SEAT.add(0, 3, 0);
+            mountPhantom(f, phantom, 3);
+            f.rideTick();
+            f.rideTick();
+            dismount(f, true);
+            PredictionResult first = f.tick(phantomSeat(phantom, 3), false);
+            assertTrue(exact(first), describe(first));
+        }
+    }
+
+    /**
+     * The trailing proof ping follows a bundled move_entity, so its pong proves ClientPacketListener#handleMoveEntity
+     * started the vehicle's three-step interpolation before the next client tick, even when that tick runs before the
+     * following ping is answered: three ride ticks put the rider at the seat over the move's target.
+     */
+    @Test
+    void aBundledVehicleMoveSeatsItsRiderAtTheTargetThreeRideTicksAfterItsProof() throws Exception {
+        try (var f = fixture(ClientVersion.V_26_2)) {
+            Vec3 phantom = SEAT.add(0, 3, 0);
+            mountPhantom(f, phantom, 0);
+            f.rideTick();
+            f.rideTick();
+            short dz = 4541;
+            var move = new ClientboundMoveEntity(
+                    VEHICLE, new EntityDelta.Linear((short) 0, (short) 0, dz), 0.0F, 0.0F, false, true, false);
+            var event = new PacketSendEvent<>(
+                    f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.MOVE_ENTITY, move, false);
+            f.player.packetEntityReplication.onMoveEntity(event, f.player, move);
+            event.tasksAfter().forEach(Runnable::run);
+            f.pongThrough(f.player.lastTransactionSent.get());
+            f.rideTick();
+            f.pongThrough(f.player.sendTransactionAndGetId());
+            f.rideTick();
+            f.rideTick();
+            dismount(f, true);
+            Vec3 target = new Vec3(phantom.x, phantom.y, phantom.z + dz / 4096.0);
+            PredictionResult first = f.tick(phantomSeat(target, 0), false);
+            assertTrue(exact(first), describe(first));
+        }
+    }
+
+    private static void mountPhantom(JavaTickFixture f, Vec3 phantom, int size) {
+        f.place(SEAT, Vec3.ZERO);
+        PredictionResult standing = f.tick(SEAT, true);
+        assertTrue(exact(standing), describe(standing));
+        var add = new ClientboundAddEntity(
+                VEHICLE, "minecraft:phantom", new Vec3d(phantom.x, phantom.y, phantom.z), 0, 0, 0);
+        var addEvent = new PacketSendEvent<>(
+                f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ADD_ENTITY, add, false);
+        f.player.packetEntityReplication.onAddEntity(addEvent, f.player, add);
+        addEvent.tasksAfter().forEach(Runnable::run);
+        f.pongThrough(f.player.lastTransactionSent.get());
+        PacketEntitySizeable tracked = (PacketEntitySizeable) f.player.compensatedEntities.getEntity(VEHICLE);
+        tracked.size = size;
+        tracked.refreshDimensions(f.player);
+        f.setPassengers(VEHICLE, List.of(f.player.entityID));
+        f.pongThrough(f.player.lastTransactionSent.get());
+        assertTrue(f.player.compensatedEntities.getSelf().inVehicle());
+    }
+
+    /** Entity#positionRider for a player on a phantom of {@code size} at {@code phantom}. */
+    private static Vec3 phantomSeat(Vec3 phantom, int size) {
+        double attachment = (double) 0.3375F * (double) (1.0F + 0.15F * size);
+        return new Vec3(phantom.x, phantom.y + attachment - 0.6, phantom.z);
     }
 
     /** The first free move after a {@link #LIFT} Y set_entity_motion, scaled by {@code multiplier}. */

@@ -5,9 +5,12 @@ import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.runner.ExplosionHandler;
+import ac.cult.cultac.checks.impl.prediction.runner.KnockbackHandler;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
+import ac.cult.cultac.utils.data.TransactionVel;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.FluidFallingAdjustedMovement;
@@ -68,12 +71,13 @@ public class Ladder implements UncertaintyHandler {
                     Vec3 modified = start.withY(0.2D * 0.8F);
                     modified = FluidFallingAdjustedMovement.getFluidFallingAdjustedMovement(
                             player, grav, falling, modified);
-                    maximumPossibleY = Math.max(maximumPossibleY, modified.y);
-                    minimumPossibleY = Math.min(minimumPossibleY, modified.y);
+                    double carried = afterPacketsThisTick(player, start, modified.y);
+                    maximumPossibleY = Math.max(maximumPossibleY, carried);
+                    minimumPossibleY = Math.min(minimumPossibleY, carried);
                 } else if (!lastResult.getSimulationContext().getWorldData().mustBeInLiquid()) {
-                    Vec3 modified = start.withY((0.2D - grav) * 0.98F);
-                    maximumPossibleY = Math.max(maximumPossibleY, modified.y);
-                    minimumPossibleY = Math.min(minimumPossibleY, modified.y);
+                    double carried = afterPacketsThisTick(player, start, (0.2D - grav) * 0.98F);
+                    maximumPossibleY = Math.max(maximumPossibleY, carried);
+                    minimumPossibleY = Math.min(minimumPossibleY, carried);
                 }
             }
 
@@ -100,6 +104,23 @@ public class Ladder implements UncertaintyHandler {
             clampedZ = CultMath.clamp(end.z, Math.min(start.z, clampedZ), Math.max(start.z, clampedZ));
         }
         return start.withXYZ(clampedX, clampedY, clampedZ, "ladder");
+    }
+
+    /**
+     * The y of {@code start} when the last tick left {@code carriedY}: ClientPacketListener handles this tick's
+     * set_entity_motion, which replaces deltaMovement, and explode, which adds to it, in order after that tick.
+     */
+    private static double afterPacketsThisTick(CultPlayer player, PredVector start, double carriedY) {
+        KnockbackHandler knockback = player.checkManager.getKnockbackHandler();
+        ExplosionHandler explosion = player.checkManager.getExplosionHandler();
+        for (TransactionVel packet : start.getPacketModifiers()) {
+            if (packet != knockback.firstBread
+                    && packet != knockback.secondBread
+                    && packet != explosion.firstBread
+                    && packet != explosion.secondBread) continue;
+            carriedY = packet.isVelocity() ? packet.getVel().y : carriedY + packet.getVel().y;
+        }
+        return carriedY;
     }
 
     /**

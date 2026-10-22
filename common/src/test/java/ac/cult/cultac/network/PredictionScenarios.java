@@ -85,6 +85,12 @@ final class PredictionScenarios {
                         f.teleport(position, new RelativeFlag(0));
                     }
                 }
+                case 3 -> {
+                    if (!riding) release(f, true);
+                }
+                case 4 -> {
+                    if (!riding) release(f, false);
+                }
                 default -> {}
             }
             f.input(new ServerboundPlayerInput(
@@ -115,6 +121,13 @@ final class PredictionScenarios {
             position = riding ? to : new Vec3(f.player.x, f.player.y, f.player.z);
             delta = committed && after.getValidMovements() != null ? after.getAcceptedClosestToTarget() : Vec3.ZERO;
         }
+    }
+
+    /** A riptide release this tick: {@code inWater} when the last move left Entity#wasTouchingWater set. */
+    private static void release(JavaTickFixture f, boolean inWater) {
+        f.player.packetStateData.riptideLevel = 3;
+        f.player.packetStateData.riptideReleaseCertain = inWater;
+        f.player.riptideSpinAttackTicks = 20;
     }
 
     private static void build(JavaTickFixture f, Terrain terrain) {

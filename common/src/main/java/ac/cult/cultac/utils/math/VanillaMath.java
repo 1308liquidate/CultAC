@@ -26,6 +26,12 @@ public class VanillaMath {
                 : MODERN_SIN[(int) ((long) (angle * 10430.378350470453D) & 65535L)];
     }
 
+    public static float cos(ClientVersion version, float angle) {
+        return version.isOlderThan(ClientVersion.V_1_21_11)
+                ? cos(angle)
+                : MODERN_SIN[(int) ((long) (angle * 10430.378350470453D + 16384.0D) & 65535L)];
+    }
+
     public static float sin(float f) {
         return SIN[(int) (f * 10430.378f) & 0xFFFF];
     }

@@ -429,6 +429,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             return;
         }
         if (player.compensatedEntities.getSelf().inVehicle()) return;
+        player.onFootClientTick();
         player.sprintState.onClientTick(player.isSprinting);
     }
 
@@ -782,7 +783,11 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                                 && player.compensatedEntities.vehicles.isVehicleSwitchBufferActiveFor(packetRoot));
         TeleportAcceptData teleportData = player.getSetbackTeleportUtil()
                 .checkVehicleTeleportQueue(
-                        packetRoot == null ? null : packetRoot.getEntityId(), newPos.x, newPos.y, newPos.z);
+                        packetRoot == null ? null : packetRoot.getEntityId(),
+                        newPos.x,
+                        newPos.y,
+                        newPos.z,
+                        pairedRiddenTick);
         boolean checkableClientTick =
                 fromClientTick && packetRoot != null && canAuthoritativelyMove && !teleportData.isTeleport();
 
@@ -852,7 +857,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             player.boatData.tick(player);
         }
         Vec3 physicalMovementStart = oldPosition;
-        float physicalYaw = vehiclePacket.yaw();
+        float physicalYaw = player.compensatedEntities.vehicles.saddleHandOverTravelYaw(packetRoot, vehiclePacket.yaw());
         float physicalPitch = vehiclePacket.pitch();
         Vec3 physicalNewPos = newPos;
         player.packetStateData.lastPacketProvenVehiclePhysicalMovement =
@@ -1057,9 +1062,10 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
 
         dispatchReceiveHandlers(event, player);
-        if (reachesServer(event)
-                && (action == PlayerAction.START_DESTROY_BLOCK || action == PlayerAction.STOP_DESTROY_BLOCK)) {
-            player.blockActionReconciler.forwarded(packet.sequence());
+        if (action == PlayerAction.START_DESTROY_BLOCK || action == PlayerAction.STOP_DESTROY_BLOCK) {
+            // BlockStatePredictionHandler keeps the predicted break until a block-changed ack reaches its sequence
+            if (reachesServer(event)) player.blockActionReconciler.forwarded(packet.sequence());
+            else player.blockActionReconciler.rejectDig(packet);
         }
         clearTransientPacketState(player);
     }

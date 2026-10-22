@@ -63,6 +63,7 @@ public class CompensatedEntities {
     private int typeViewsAt = -1;
     private List<PacketEntity> pushOrCollideCandidates = List.of();
     private List<PacketEntity> boats = List.of();
+    private List<PacketEntityCamel> camels = List.of();
     private List<PacketEntity> poseCollisionCandidates = List.of();
     private List<PacketEntity> unknownCollisionCandidates = List.of();
 
@@ -129,6 +130,12 @@ public class CompensatedEntities {
         return boats;
     }
 
+    /** The camels, in entityMap iteration order. Read only. */
+    public List<PacketEntityCamel> camels() {
+        refreshTypeViews();
+        return camels;
+    }
+
     /** The boats, minecarts, shulkers and happy ghasts, in entityMap iteration order. Read only. */
     public List<PacketEntity> poseCollisionCandidates() {
         refreshTypeViews();
@@ -145,6 +152,7 @@ public class CompensatedEntities {
         if (typeViewsAt == entityMap.mutations) return;
         List<PacketEntity> pushOrCollide = presized(pushOrCollideCandidates);
         List<PacketEntity> boatList = presized(boats);
+        List<PacketEntityCamel> camelList = new ArrayList<>(camels.size());
         List<PacketEntity> pose = presized(poseCollisionCandidates);
         List<PacketEntity> unknown = presized(unknownCollisionCandidates);
         for (PacketEntity entity : entityMap.values()) {
@@ -152,11 +160,13 @@ public class CompensatedEntities {
             boolean boat = entity.isBoat();
             boolean shulker = entity.type == EntityTypeIds.SHULKER;
             if (boat) boatList.add(entity);
+            if (entity instanceof PacketEntityCamel camel) camelList.add(camel);
             if (boat || entity.isMinecart() || shulker || entity.isHappyGhast()) pose.add(entity);
             if (boat || shulker || entity instanceof PacketEntityHappyGhast) unknown.add(entity);
         }
         pushOrCollideCandidates = pushOrCollide;
         boats = boatList;
+        camels = camelList;
         poseCollisionCandidates = pose;
         unknownCollisionCandidates = unknown;
         typeViewsAt = entityMap.mutations;
@@ -1235,6 +1245,11 @@ public class CompensatedEntities {
             EntityMetadata.Entry dashData = WatchableIndexUtil.getIndex(watchableObjects, layout.camelDash());
             if (dashData != null && dashData.value() instanceof Boolean dashing) {
                 camel.setDashingFromMetadata(dashing);
+            }
+            // Camel defines LAST_POSE_CHANGE_TICK directly after DASH.
+            EntityMetadata.Entry poseTickData = WatchableIndexUtil.getIndex(watchableObjects, layout.camelDash() + 1);
+            if (poseTickData != null && poseTickData.value() instanceof Number poseTick) {
+                camel.lastPoseChangeTick = poseTick.longValue();
             }
         }
     }

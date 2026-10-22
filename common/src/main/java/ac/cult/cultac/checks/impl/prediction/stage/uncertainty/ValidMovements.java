@@ -114,10 +114,14 @@ public class ValidMovements {
     private MovementTrace transformTraceTowards(
             UncertaintyHandler[] handlers, int count, Vec3 end, PredictionResult lastResult) {
         MovementTrace trace = startTrace;
+        SimulationContext context = result.getSimulationContext();
+        Vec3 target =
+                isTestingMaxStartingVelExtents(end) ? end : Riptide.movementTarget(context, initialStartingVel, end);
 
         for (int i = 0; i < count; i++) {
+            if (handlers[i] instanceof Riptide) target = end;
             trace = handlers[i].handleMovementTrace(
-                    player, result.getValidMovements(), result, result.getSimulationContext(), lastResult, trace, end);
+                    player, result.getValidMovements(), result, context, lastResult, trace, target);
         }
 
         return trace;

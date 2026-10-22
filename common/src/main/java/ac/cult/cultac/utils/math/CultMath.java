@@ -119,6 +119,10 @@ public class CultMath {
         return start + amount * wrapDegrees(end - start);
     }
 
+    public static double rotLerp(double amount, double start, double end) {
+        return start + amount * wrapDegrees(end - start);
+    }
+
     @Contract(pure = true)
     public static double frac(double p_14186_) {
         return p_14186_ - lfloor(p_14186_);

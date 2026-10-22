@@ -3,10 +3,15 @@ package ac.cult.cultac.checks.impl.prediction.stage.uncertainty;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.CollisionBoxPool;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
+import ac.cult.cultac.utils.data.PistonPushes;
+import ac.cult.cultac.utils.data.ShulkerBoxShoveResult;
+import ac.cult.cultac.utils.enums.Pose;
+import ac.cult.cultac.utils.latency.CompensatedBlockEntities;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.Collisions;
@@ -33,6 +38,7 @@ public class CollisionModifier implements UncertaintyHandler {
     private final SimpleCollisionBox probeEntityBox = new SimpleCollisionBox();
     private final SimpleCollisionBox probeBlockQuery = new SimpleCollisionBox();
     private final SimpleCollisionBox probeEntityScratch = new SimpleCollisionBox();
+    private final SimpleCollisionBox probeEntityRegion = new SimpleCollisionBox();
     private final AxisResult positiveResult = new AxisResult(0, false);
     private final AxisResult negativeResult = new AxisResult(0, false);
     // An axis step's tests and move depend only on its axis, position and movements within one probe.
@@ -69,6 +75,52 @@ public class CollisionModifier implements UncertaintyHandler {
                 stuckSpeed == null || stuckSpeed.x == 1.0D && stuckSpeed.y == 1.0D && stuckSpeed.z == 1.0D
                         ? trace.position()
                         : trace.position().multiply(stuckSpeed));
+        List<CompensatedBlockEntities.ShulkerShove> shoves = shulkerBoxShovesAfterTravel(context);
+        if (shoves == null || trace.shulkerBoxShove() != null) return collide(result, context, trace, end);
+        return collide(result, context, shoveAfterTravel(player, context, trace, shoves), end);
+    }
+
+    /**
+     * {@code trace} moved by the shulker box block shoves after its travel: Entity#collide clips the travel from the
+     * packet's start, which Entity#onGround as the travel starts lets step up, and the shoves start from its end and
+     * from the onGround its vertical collision below sets.
+     */
+    private static MovementTrace shoveAfterTravel(
+            CultPlayer player,
+            SimulationContext context,
+            MovementTrace trace,
+            List<CompensatedBlockEntities.ShulkerShove> shoves) {
+        Vec3 stuckSpeed = context.getLastStuckSpeed();
+        Vec3 delta = trace.preCollisionMovement();
+        Vec3 travel = Collisions.collide(
+                player,
+                context.getFromActualPose(),
+                delta.x,
+                delta.y,
+                delta.z,
+                context.getLastOnGround().determineOptimistically());
+        double travelLength = travel.lengthSqr();
+        Vec3 end = travelLength > 1.0E-7D || delta.lengthSqr() - travelLength < 1.0E-7D
+                ? context.getStart().add(travel)
+                : context.getStart();
+        boolean onGround = delta.y < 0.0D && delta.y != travel.y;
+        // Player#tick ends with updatePlayerPose (26.3 :284), at the travel's end, before Level#tickBlockEntities.
+        Pose pose = player.updatedPose(context.getWorldData().isSwimming(), end.x, end.y, end.z);
+        ShulkerBoxShoveResult shove =
+                player.compensatedWorld.shoveByShulkerBoxes(context, shoves, end, pose, onGround, true);
+        if (shove == null) return trace;
+        Vec3 movement = shove.movement();
+        return new MovementTrace(
+                trace.position(),
+                trace.positionOnlyDelta().add(movement),
+                trace.collisionBaseOffset()
+                        .add(movement.multiply(1.0D / stuckSpeed.x, 1.0D / stuckSpeed.y, 1.0D / stuckSpeed.z)),
+                trace.preCollisionVelocity(),
+                trace.preCollisionMovement(),
+                shove);
+    }
+
+    private MovementTrace collide(PredictionResult result, SimulationContext context, MovementTrace trace, Vec3 end) {
         Vec3 collisionBaseOffset = trace.collisionBaseOffset();
         if (collisionBaseOffset.lengthSqr() <= 1.0E-14) {
             return trace.withPosition(transformWithCollisions(
@@ -78,7 +130,7 @@ public class CollisionModifier implements UncertaintyHandler {
         // Piston/shulker shoves are separate position-only Entity#move calls.
         // Collision clipping applies to the player's movement vector, then the
         // already-proven external base displacement is re-applied once.
-        Vec3 movementOnlyTarget = end.subtract(collisionBaseOffset);
+        Vec3 movementOnlyTarget = withoutPositionRounding(end.subtract(collisionBaseOffset), context.getEnd());
         PredVector clippedMovement = transformWithCollisions(
                 context, result.getCollideAxisData(), trace.position(), movementOnlyTarget, inputSource(result));
         return trace.withPosition(clippedMovement.add(collisionBaseOffset, "external movement collision base"));
@@ -98,6 +150,18 @@ public class CollisionModifier implements UncertaintyHandler {
         return transformWithCollisions(context, result.getCollideAxisData(), start, end, inputSource(result));
     }
 
+    /**
+     * Zeroes each axis of {@code movement} smaller than one ulp of the reported position there: Entity#setPos adds the
+     * shove to the travel's end, and that rounding is all a stationary travel leaves after the shove is subtracted.
+     */
+    private static Vec3 withoutPositionRounding(Vec3 movement, Vec3 position) {
+        if (position == null) return movement;
+        boolean x = Math.abs(movement.x) < Math.ulp(position.x);
+        boolean y = Math.abs(movement.y) < Math.ulp(position.y);
+        boolean z = Math.abs(movement.z) < Math.ulp(position.z);
+        return x || y || z ? new Vec3(x ? 0.0D : movement.x, y ? 0.0D : movement.y, z ? 0.0D : movement.z) : movement;
+    }
+
     private PredictionResult inputSource(PredictionResult result) {
         return javaTravelInput ? result : null;
     }
@@ -113,6 +177,20 @@ public class CollisionModifier implements UncertaintyHandler {
             PredVector start,
             Vec3 end,
             PredictionResult inputSource) {
+        if (collide instanceof EntityWorldCollisions entityWorlds) {
+            // The client holds each entity at one position, so one world clips the whole move.
+            PredVector nearest = null;
+            double nearestDistance = Double.POSITIVE_INFINITY;
+            for (CollideAxisData world : entityWorlds.worlds()) {
+                PredVector moved = transformWithCollisions(context, world, start, end, inputSource);
+                double distance = moved.distanceToSqr(end);
+                if (nearest == null || distance < nearestDistance) {
+                    nearest = moved;
+                    nearestDistance = distance;
+                }
+            }
+            return nearest;
+        }
         PredVector attempted = start;
         // Collisions mean that movement from the start of the collision to the max extent is possible
         if (isValidCollision(collide.getX(), start.x, end.x)) {
@@ -285,6 +363,24 @@ public class CollisionModifier implements UncertaintyHandler {
         }
     }
 
+    /** The shulker box block shoves a client from 26.3 applies after this travel: PistonPushes's, when set. */
+    private static List<CompensatedBlockEntities.ShulkerShove> shulkerBoxShovesAfterTravel(SimulationContext context) {
+        WorldData worldData = context.getWorldData();
+        PistonPushes pushes = worldData == null ? null : worldData.getPistonPushes();
+        return pushes == null ? null : pushes.getShulkerBoxShovesAfterTravel();
+    }
+
+    /**
+     * The shulker box shove a client before 26.3 applies between its reported position and this travel: PistonPushes's,
+     * when set and moving the player.
+     */
+    private static Vec3 shoveBeforeTravel(SimulationContext context) {
+        WorldData worldData = context.getWorldData();
+        PistonPushes pushes = worldData == null ? null : worldData.getPistonPushes();
+        ShulkerBoxShoveResult shove = pushes == null ? null : pushes.getShulkerBoxShoveResult();
+        return shove == null || shove.movement().lengthSqr() == 0.0D ? null : shove.movement();
+    }
+
     /** Native colliders come from {@code pool}; none of them outlives this call. */
     private CollideAxisData probeCollisions(
             CultPlayer player,
@@ -303,12 +399,27 @@ public class CollisionModifier implements UncertaintyHandler {
 
         Vec3 stuckSpeed = context.getLastStuckSpeed();
 
+        Vec3 shove = shoveBeforeTravel(context);
+        Vec3 clientShove = shove == null ? null : shove.multiply(stuckSpeed.x, stuckSpeed.y, stuckSpeed.z);
+        if (shove != null) {
+            // The travel's Entity#move starts where the shulker box shove left the player.
+            playerPos = playerPos.add(clientShove);
+            grabBoxesBB.offset(clientShove);
+            target = target.subtract(shove);
+            minY -= shove.y;
+            if (attemptedMovementExtents != null)
+                attemptedMovementExtents = attemptedMovementExtents.copy().offset(-shove.x, -shove.y, -shove.z);
+        }
+
         double candidateY = target.y * stuckSpeed.y;
         target = context.getPacketMovement();
+        if (clientShove != null) target = target.subtract(clientShove);
         minY *= stuckSpeed.y;
 
         if (attemptedMovementExtents != null) {
             expandToAttemptedMovement(grabBoxesBB, attemptedMovementExtents, stuckSpeed);
+            // Entity#collide gathers entities along the attempted movement, which a step does not raise.
+            probeEntityRegion.set(grabBoxesBB);
             expandToPacketMovement(grabBoxesBB, target);
         } else {
             grabBoxesBB.expandToCoordinate(target.x, 0, target.z);
@@ -336,13 +447,66 @@ public class CollisionModifier implements UncertaintyHandler {
         if (!found.isEmpty()) found.removeIf(unknownBox -> !unknownBox.isIntersected(grabBoxesBB));
 
         if (!found.isEmpty()) {
-            return new CollideAxisData(
-                    new CollideAxisData.CollideResult(true, 0),
-                    new CollideAxisData.CollideResult(true, 0),
-                    new CollideAxisData.CollideResult(true, 0),
-                    new CollideAxisData.CollideResult(true, 0),
-                    List.copyOf(found));
+            SimpleCollisionBox region = attemptedMovementExtents == null
+                    ? probeEntityRegion.set(blockQuery)
+                    : probeEntityRegion.expand(maxEpsilon(dimensions.epsilon()));
+            if (attemptedMovementExtents != null && horizontalInputReach > 0.0D) {
+                region.expand(horizontalInputReach * stuckSpeed.x, 0.0D, horizontalInputReach * stuckSpeed.z);
+            }
+            EntityPositionWorlds.withStepEntities(player, region);
+            List<List<SimpleCollisionBox>> worlds = EntityPositionWorlds.of(player, context, playerPos, region);
+            if (worlds == null) {
+                return new CollideAxisData(
+                        new CollideAxisData.CollideResult(true, 0),
+                        new CollideAxisData.CollideResult(true, 0),
+                        new CollideAxisData.CollideResult(true, 0),
+                        new CollideAxisData.CollideResult(true, 0),
+                        List.copyOf(found));
+            }
+            if (!EntityPositionWorlds.noEntities(worlds)) {
+                // Entity#collide stops the move against the blocks and each entity's box at once.
+                int blocks = collisions.size();
+                List<CollideAxisData> results = new ArrayList<>(worlds.size());
+                for (int w = 0; w < worlds.size(); w++) {
+                    collisions.addAll(worlds.get(w));
+                    results.add(probeAxes(
+                            context,
+                            minY,
+                            candidateY,
+                            target,
+                            playerPos,
+                            attemptedMovementExtents,
+                            dimensions,
+                            followCandidateVerticalMovement,
+                            collisions));
+                    collisions.subList(blocks, collisions.size()).clear();
+                }
+                return EntityWorldCollisions.of(results, worlds);
+            }
         }
+        return probeAxes(
+                context,
+                minY,
+                candidateY,
+                target,
+                playerPos,
+                attemptedMovementExtents,
+                dimensions,
+                followCandidateVerticalMovement,
+                collisions);
+    }
+
+    private CollideAxisData probeAxes(
+            SimulationContext context,
+            double minY,
+            double candidateY,
+            Vec3 target,
+            Vec3 playerPos,
+            SimpleCollisionBox attemptedMovementExtents,
+            ProbeDimensions dimensions,
+            boolean followCandidateVerticalMovement,
+            List<SimpleCollisionBox> collisions) {
+        Vec3 stuckSpeed = context.getLastStuckSpeed();
         List<SimpleCollisionBox> unknown = List.of();
         CollideAxisData result = new CollideAxisData(null, null, null, null, unknown);
 

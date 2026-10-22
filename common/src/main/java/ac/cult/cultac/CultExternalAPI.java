@@ -5,6 +5,7 @@ import ac.cult.cultac.manager.config.ConfigManagerFileImpl;
 import ac.cult.cultac.manager.init.start.StartableInitable;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.runtime.RuntimeEnvironment;
+import ac.cult.cultac.utils.anticheat.AlertDetails;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.cultac.utils.anticheat.MessageUtil;
 import ac.cult.cultac.utils.common.ConfigReloadObserver;
@@ -267,6 +268,14 @@ public class CultExternalAPI implements GrimAbstractAPI, ConfigReloadObserver, S
                 user -> String.format(
                         "%.2f", CultAPI.INSTANCE.getPlatformServer().getTPS(user.getUniqueId())));
         variableReplacements.putIfAbsent("%version%", GrimUser::getVersionName);
+        variableReplacements.putIfAbsent(
+                "%server%", user -> user instanceof CultPlayer player ? AlertDetails.server(player) : "unknown");
+        variableReplacements.putIfAbsent(
+                "%world%", user -> user instanceof CultPlayer player ? AlertDetails.world(player) : "unknown");
+        variableReplacements.putIfAbsent(
+                "%world_type%", user -> user instanceof CultPlayer player ? AlertDetails.worldType(player) : "unknown");
+        variableReplacements.putIfAbsent(
+                "%gamemode%", user -> user instanceof CultPlayer player ? AlertDetails.gamemode(player) : "unknown");
         staticReplacements.put(
                 "%prefix%",
                 MessageUtil.translateAlternateColorCodes(

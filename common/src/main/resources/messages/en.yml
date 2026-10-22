@@ -47,7 +47,7 @@ experimental-symbol: "*"
 
 profile:
     - "&7======================"
-    - "%prefix% &bProfile for &f%player%"
+    - "&bProfile for &f%player%"
     - "&bPing: &f%ping%"
     - "&bVersion: &f%version%"
     - "&bClient Brand: &f%brand%"
@@ -55,6 +55,30 @@ profile:
     - "&bVertical Sensitivity: &f%v_sensitivity%%"
     - "&bFastMath Enabled: &f%fast_math%"
     - "&7======================"
+# /cult profile for a player this instance does not hold: the last stored session.
+# %player% %status% %server% %version% %brand% %timeago%
+profile-stored:
+    - "&7======================"
+    - "&bProfile for &f%player% &7(last session)"
+    - "&bStatus: &f%status%"
+    - "&bServer: &f%server%"
+    - "&bVersion: &f%version%"
+    - "&bClient Brand: &f%brand%"
+    - "&bLast seen: &f%timeago% ago"
+    - "&7======================"
+# The player is online through another instance (proxy) that did not answer in time. %player% %instance%
+profile-remote-unanswered: "%prefix% &f%player% &7is online on &f%instance%&7, which did not answer; showing their last session."
+profile-unknown-player: "%prefix% &c%player% is not online on this instance and has no stored session."
+# /cult debug channels <player> — %player%, %count%, %channel%
+debug-channels-header: "%prefix% &b%player% has &f%count% &bplugin channels open"
+debug-channels-entry: "&8- &f%channel%"
+debug-channels-none: "%prefix% &f%player% &bhas no plugin channels open"
+# /cult debug mods <player> — %player%, %count%, %type%, %mod%, %name%, %version%
+debug-mods-header: "%prefix% &b%player% has &f%count% &bLunar Client mods"
+debug-mods-type: "&b%type%:"
+debug-mods-entry: "&8- &f%name% &7(%mod%) &8%version%"
+debug-mods-not-lunar: "%prefix% &f%player% &bis not connected to Apollo; not a Lunar Client player"
+debug-mods-unavailable: "%prefix% &cNo Apollo data for &f%player%&c; their server needs Apollo-Bukkit and the CultAC companion"
 help:
     - "&7======================"
     - "/%command% alerts &f- &7Toggle alerts"

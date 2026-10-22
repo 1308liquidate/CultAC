@@ -16,7 +16,7 @@ public final class ItemUseInput {
         var context = result.getSimulationContext();
         Vec3 residual =
                 result.getTarget().subtract(result.getAcceptedClosestToTarget()).multiply(1, 0, 1);
-        Vec3 input = HorizontalAnalyzer.getBestTheoreticalPlayerInput(residual, context.getXRot());
+        Vec3 input = HorizontalAnalyzer.getBestTheoreticalPlayerInput(residual, context.getXRot(), context.getVersion());
         return new ItemUseBurstResult(
                 input.x,
                 input.z,

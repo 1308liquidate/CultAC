@@ -49,7 +49,9 @@ import org.slf4j.Logger;
             @Dependency(id = "floodgate", optional = true),
             @Dependency(id = "viaversion", optional = true),
             @Dependency(id = "viabackwards", optional = true),
-            @Dependency(id = "luckperms", optional = true)
+            @Dependency(id = "luckperms", optional = true),
+            // Cross-proxy /cult profile uses its pub/sub once it has started.
+            @Dependency(id = "redisbungee", optional = true)
         })
 public final class CultVelocityPlugin {
     private static final Component REFUSED = Component.text(RuntimeInstance.CONNECTION_REFUSED);

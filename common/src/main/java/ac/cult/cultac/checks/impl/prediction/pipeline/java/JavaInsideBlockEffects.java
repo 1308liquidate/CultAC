@@ -124,8 +124,10 @@ public final class JavaInsideBlockEffects {
         SimulationContext context = result.getSimulationContext();
         if (!carriesStepOn(player, context)
                 || !BlockIds.is(context.getWorldData().getOnBlock(), BlockIds.SLIME_BLOCK)
-                // Entity#isSteppingCarefully: the vehicle's shared crouching flag.
-                || (context.getVehicle().actionSharedFlags & 2) != 0
+                // Entity#isSteppingCarefully: the client's shift key, or the vehicle's shared crouching flag.
+                || (context.getVehicle() == null
+                        ? context.isSneaking()
+                        : (context.getVehicle().actionSharedFlags & 2) != 0)
                 || !JavaFallDistance.collidesBelow(attemptedMovement(result).y, moved)) return velocity;
         double absDeltaY = Math.abs(velocity.y);
         if (absDeltaY >= 0.1) return velocity;
@@ -133,12 +135,14 @@ public final class JavaInsideBlockEffects {
         return velocity.multiply(scale, 1.0, scale);
     }
 
-    /** Whether the velocity carried out of {@code context}'s move holds {@link #stepOn}: a Java living vehicle's. */
+    /**
+     * Whether the velocity carried out of {@code context}'s move holds {@link #stepOn}: a Java client's own or its
+     * living vehicle's.
+     */
     public static boolean carriesStepOn(CultPlayer player, SimulationContext context) {
         return !player.isBedrockMovement()
                 && JavaMovementEngine.contextUsesExactEffects(context)
-                && context.getVehicle() != null
-                && context.getVehicle().isLivingEntity();
+                && (context.getVehicle() == null || context.getVehicle().isLivingEntity());
     }
 
     /**

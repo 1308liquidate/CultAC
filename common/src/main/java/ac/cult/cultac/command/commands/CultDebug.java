@@ -2,6 +2,8 @@ package ac.cult.cultac.command.commands;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.cultac.CultAPI;
+import ac.cult.cultac.bridge.protocol.BridgeMessage.ClientMod;
+import ac.cult.cultac.bridge.protocol.BridgeMessage.ClientMods;
 import ac.cult.cultac.bridge.protocol.ServerCapability;
 import ac.cult.cultac.command.BuildableCommand;
 import ac.cult.cultac.command.CloudCommandService;
@@ -51,6 +53,20 @@ public class CultDebug implements BuildableCommand {
                 .permission("cult.debug")
                 .optional("target", arguments.singlePlayerSelectorParser())
                 .handler(this::handleDebugPlaces));
+
+        commandManager.command(cultCommand
+                .literal("debug")
+                .literal("channels", Description.of("List the plugin channels a player's client opened"))
+                .permission("cult.debug")
+                .required("target", arguments.singlePlayerSelectorParser())
+                .handler(this::handleDebugChannels));
+
+        commandManager.command(cultCommand
+                .literal("debug")
+                .literal("mods", Description.of("List a player's Lunar Client mods reported through Apollo"))
+                .permission("cult.debug")
+                .required("target", arguments.singlePlayerSelectorParser())
+                .handler(this::handleDebugMods));
 
         commandManager.command(cultCommand
                 .literal("debug")
@@ -212,6 +228,116 @@ public class CultDebug implements BuildableCommand {
                             + ", mode=" + ticks.mode(),
                     NamedTextColor.GRAY));
         });
+    }
+
+    private void handleDebugChannels(@NotNull CommandContext<Sender> context) {
+        Sender sender = context.sender();
+        PlayerSelector selector = context.get("target");
+        CultPlayer target = parseTarget(sender, selector.getSinglePlayer());
+        if (target == null) return;
+        target.runSafely(() -> {
+            var channels = target.pluginChannelManager.channels();
+            if (channels.isEmpty()) {
+                sender.sendMessage(
+                        line(target, "debug-channels-none", "%prefix% &f%player% &bhas no plugin channels open"));
+                return;
+            }
+            sender.sendMessage(line(
+                    target,
+                    "debug-channels-header",
+                    "%prefix% &b%player% has &f%count% &bplugin channels open",
+                    "%count%",
+                    Integer.toString(channels.size())));
+            for (String channel : channels) {
+                sender.sendMessage(line(target, "debug-channels-entry", "&8- &f%channel%", "%channel%", channel));
+            }
+        });
+    }
+
+    private void handleDebugMods(@NotNull CommandContext<Sender> context) {
+        Sender sender = context.sender();
+        PlayerSelector selector = context.get("target");
+        CultPlayer target = parseTarget(sender, selector.getSinglePlayer());
+        if (target == null) return;
+        PlatformPlayer platformPlayer = target.platformPlayer;
+        var request = platformPlayer == null
+                ? java.util.concurrent.CompletableFuture.<ClientMods>completedFuture(null)
+                : platformPlayer.requestClientMods();
+        request.whenComplete((fresh, failure) -> {
+            if (fresh != null) target.clientMods = fresh;
+            sendMods(sender, target, fresh != null ? fresh : target.clientMods);
+        });
+    }
+
+    private static void sendMods(Sender sender, CultPlayer target, @Nullable ClientMods mods) {
+        if (mods == null) {
+            sender.sendMessage(line(
+                    target,
+                    "debug-mods-unavailable",
+                    "%prefix% &cNo Apollo data for &f%player%&c; their server needs Apollo-Bukkit and the CultAC"
+                            + " companion"));
+            return;
+        }
+        if (!mods.lunar()) {
+            sender.sendMessage(line(
+                    target,
+                    "debug-mods-not-lunar",
+                    "%prefix% &f%player% &bis not connected to Apollo; not a Lunar Client player"));
+            return;
+        }
+        sender.sendMessage(line(
+                target,
+                "debug-mods-header",
+                "%prefix% &b%player% has &f%count% &bLunar Client mods",
+                "%count%",
+                Integer.toString(mods.mods().size())));
+        var byType = new java.util.TreeMap<String, java.util.List<ClientMod>>();
+        for (ClientMod mod : mods.mods()) {
+            byType.computeIfAbsent(mod.type(), ignored -> new java.util.ArrayList<>())
+                    .add(mod);
+        }
+        for (var group : byType.entrySet()) {
+            sender.sendMessage(line(target, "debug-mods-type", "&b%type%:", "%type%", group.getKey()));
+            group.getValue()
+                    .sort(java.util.Comparator.comparing(mod -> modName(mod).toLowerCase(Locale.ROOT)));
+            for (ClientMod mod : group.getValue()) {
+                sender.sendMessage(line(
+                        target,
+                        "debug-mods-entry",
+                        "&8- &f%name% &7(%mod%) &8%version%",
+                        "%name%",
+                        modName(mod),
+                        "%mod%",
+                        mod.id(),
+                        "%version%",
+                        mod.version()));
+            }
+        }
+    }
+
+    private static String modName(ClientMod mod) {
+        return mod.name().isEmpty() ? mod.id() : mod.name();
+    }
+
+    private static final java.util.regex.Pattern LINE_PLACEHOLDER = java.util.regex.Pattern.compile("%[a-z_]+%");
+
+    /** The configured line for {@code key} about {@code target}; client-supplied values cannot inject tags. */
+    private static Component line(CultPlayer target, String key, String fallback, String... values) {
+        String message = MessageUtil.replacePlaceholders(
+                target, CultAPI.INSTANCE.getConfigManager().getConfig().getStringElse(key, fallback));
+        var replacements = new java.util.HashMap<String, String>();
+        for (int i = 0; i + 1 < values.length; i += 2) replacements.put(values[i], values[i + 1]);
+        // One pass, so a value holding a placeholder name is shown as it is.
+        var matcher = LINE_PLACEHOLDER.matcher(message);
+        var replaced = new StringBuilder(message.length());
+        while (matcher.find()) {
+            String value = replacements.get(matcher.group());
+            matcher.appendReplacement(
+                    replaced,
+                    java.util.regex.Matcher.quoteReplacement(
+                            value == null ? matcher.group() : MessageUtil.miniMessageSafe(value)));
+        }
+        return MessageUtil.miniMessage(matcher.appendTail(replaced).toString());
     }
 
     private void handleDebugPlaces(@NotNull CommandContext<Sender> context) {

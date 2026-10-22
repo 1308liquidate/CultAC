@@ -82,7 +82,7 @@ public class Embed implements JsonSerializable {
         EmbedField[] newFields = new EmbedField[fields().length + fields.length];
 
         System.arraycopy(fields(), 0, newFields, 0, fields().length);
-        System.arraycopy(fields, fields().length, newFields, fields().length, fields.length);
+        System.arraycopy(fields, 0, newFields, fields().length, fields.length);
 
         return fields(newFields);
     }

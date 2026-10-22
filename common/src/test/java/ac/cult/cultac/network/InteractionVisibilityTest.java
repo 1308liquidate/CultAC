@@ -1,9 +1,19 @@
 package ac.cult.cultac.network;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.impl.combat.EntityReach;
@@ -11,8 +21,10 @@ import ac.cult.cultac.checks.impl.combat.PlayerReach;
 import ac.cult.cultac.checks.impl.visibility.AttackMobVisibility;
 import ac.cult.cultac.checks.impl.visibility.AttackPlayerVisibility;
 import ac.cult.cultac.checks.impl.visibility.BreakVisibility;
+import ac.cult.cultac.checks.impl.visibility.InteractEntityVisibility;
 import ac.cult.cultac.checks.impl.visibility.PlaceVisibility;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
+import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.ProtocolVersion;
@@ -34,8 +46,14 @@ import ac.cult.cultac.utils.latency.ClientComponentRegistries;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.visibility.ClientVisibility;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
+import ac.grim.grimac.api.config.ConfigManager;
+import ac.grim.grimac.api.event.events.FlagEvent;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import net.kyori.adventure.text.Component;
 import org.junit.jupiter.api.Test;
 
 class InteractionVisibilityTest {
@@ -143,6 +161,87 @@ class InteractionVisibilityTest {
             assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
             assertTrue(setup.route(ServerboundPackets.INTERACT, attack(43)).isCancelled());
         }
+    }
+
+    @Test
+    void aFailingAlertNeitherStopsTheCancelNorTheNextAlert() throws Exception {
+        try (var setup = new Setup()) {
+            setup.wall("stone");
+            var player = setup.fixture.player;
+            ConfigManager config = mock(ConfigManager.class);
+            when(config.getBooleanElse(anyString(), anyBoolean())).thenAnswer(invocation -> invocation.getArgument(1));
+            when(config.getStringElse(anyString(), anyString())).thenAnswer(invocation -> invocation.getArgument(1));
+            when(config.getBooleanElse("test-mode", false)).thenReturn(true);
+            when(config.getStringElse(eq("alerts-format"), anyString())).thenReturn("alert");
+            when(config.getStringListElse(eq("Punishments"), any())).thenReturn((List)
+                    List.of(new LinkedHashMap<>(Map.of(
+                            "checks",
+                            List.of("AttackPlayerVisibility"),
+                            "commands",
+                            List.of("1:0 [alert]", "1:0 [alert]")))));
+            player.punishmentManager.reload(config);
+            var visibility = player.checkManager.getCheck(AttackPlayerVisibility.class);
+            PlatformPlayer platform = mock(PlatformPlayer.class);
+            doThrow(new IllegalStateException("alert"))
+                    .doNothing()
+                    .when(platform)
+                    .sendMessage(any(Component.class));
+            player.platformPlayer = platform;
+            player.compensatedEntities.addEntity(42, EntityTypeIds.PLAYER, new Vec3(.5, 64, 1.5), 0, 0, 0);
+
+            assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
+            assertEquals(1, visibility.violations);
+            verify(platform, times(2)).sendMessage(any(Component.class));
+        }
+    }
+
+    @Test
+    void verboseNamesNonPlayerTargetTypesAndTheJudgedBlock() throws Exception {
+        try (var setup = new Setup()) {
+            setup.wall("stone");
+            setup.check(AttackPlayerVisibility.class);
+            setup.check(AttackMobVisibility.class);
+            setup.check(InteractEntityVisibility.class);
+            setup.check(PlaceVisibility.class);
+            setup.check(BreakVisibility.class);
+            var entities = setup.fixture.player.compensatedEntities;
+            entities.addEntity(42, EntityTypeIds.PLAYER, new Vec3(.5, 64, 1.5), 0, 0, 0);
+            entities.addEntity(43, EntityTypeIds.COW, new Vec3(.5, 64, 1.5), 0, 0, 0);
+            List<String> verbose = new ArrayList<>();
+            FlagEvent.Channel flags = CultAPI.INSTANCE.getEventBus().get(FlagEvent.class);
+            FlagEvent.SupplierHandler record = (user, flagged, text, cancelled) -> {
+                if (flagged.getCheckName().endsWith("Visibility"))
+                    verbose.add(flagged.getCheckName() + ": " + text.get());
+                return cancelled;
+            };
+            flags.onFlagSupplier(CultAPI.INSTANCE.getGrimPlugin(), record, 0, false);
+            try {
+                assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
+                assertTrue(setup.route(ServerboundPackets.INTERACT, attack(43)).isCancelled());
+                assertTrue(
+                        setup.route(ServerboundPackets.INTERACT, interactAt(42)).isCancelled());
+                assertTrue(
+                        setup.route(ServerboundPackets.INTERACT, interactAt(43)).isCancelled());
+                assertTrue(setup.route(ServerboundPackets.USE_ITEM_ON, use()).isCancelled());
+                assertTrue(setup.route(ServerboundPackets.PLAYER_ACTION, dig()).isCancelled());
+            } finally {
+                flags.unsubscribe(record);
+            }
+            assertEquals(
+                    List.of(
+                            "AttackPlayerVisibility: ",
+                            "AttackMobVisibility: type=minecraft:cow",
+                            "InteractEntityVisibility: action=INTERACT_AT, type=minecraft:player",
+                            "InteractEntityVisibility: action=INTERACT_AT, type=minecraft:cow",
+                            "PlaceVisibility: block=minecraft:stone, pos=0, 64, 2, face=NORTH",
+                            "BreakVisibility: action=START_DESTROY_BLOCK, block=minecraft:stone, pos=0, 64, 2, face=NORTH"),
+                    verbose);
+        }
+    }
+
+    private static ServerboundInteract interactAt(int entityId) {
+        return new ServerboundInteract(
+                entityId, InteractAction.INTERACT_AT, Hand.MAIN_HAND, Optional.of(new Vec3d(0, .5, -.3)), false);
     }
 
     private static ServerboundInteract attack(int entityId) {

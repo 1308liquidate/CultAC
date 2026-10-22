@@ -47,7 +47,7 @@ experimental-symbol: "*"
 
 profile:
     - "&7======================"
-    - "%prefix% &f%player% &badlı oyuncunun profili:"
+    - "&f%player% &badlı oyuncunun profili:"
     - "&bGecikme: &f%ping%"
     - "&bVersiyon: &f%version%"
     - "&bKullanılan Client: &f%brand%"
