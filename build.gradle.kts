@@ -46,23 +46,23 @@ tasks.register("printVersion") {
     }
 }
 
-// ---------- Decompiled Minecraft sources ----------
-// ./gradlew mcsrc [-Pmcsrc.version=<snapshot>] [-Pmcsrc.min=<release>] [-Pmcsrc.max=<release>]
-// Per-class patches of the decompiled client from the max release back to every release down to the min, in mc-sources/.
-// A version outside that release range (a newer snapshot) only gets a patch from the max release.
-tasks.register<mcsrc.GenerateMinecraftPatches>("mcsrc") {
-    group = "minecraft"
-    description = "Writes patches of the decompiled Minecraft client from the pinned release back to older releases into mc-sources/"
-    minVersion.set(providers.gradleProperty("mcsrc.min").orElse(providers.gradleProperty("runtimeHostMinVersion")))
-    // The pinned max is the Minecraft version of the Paper dev bundle (26.3.build.N-beta -> 26.3).
-    maxVersion.set(
-        providers.gradleProperty("mcsrc.max")
-            .orElse(providers.gradleProperty("paperDevBundleVersion").map { it.substringBefore(".build") })
-    )
-    selectedVersion.set(providers.gradleProperty("mcsrc.version"))
+// ---------- Decompiled Minecraft patches ----------
+// ./gradlew mcsrc: per-class patches from the latest Minecraft release back to every release down to
+// runtimeHostMinVersion, in mc-sources/releases/. ./gradlew mcsrcSnapshot: patches from the latest release to every
+// snapshot since, in mc-sources/snapshots/. The latest versions come from Mojang's version manifest; both tasks share
+// one cache across worktrees, so a version is only decompiled and a pair of versions only diffed once.
+tasks.register<mcsrc.GenerateReleasePatches>("mcsrc") {
+    description = "Writes patches of the decompiled Minecraft client from the latest release back to older releases"
+    minVersion.set(providers.gradleProperty("runtimeHostMinVersion"))
+    outputDir.set(layout.projectDirectory.dir("mc-sources/releases"))
+}
+tasks.register<mcsrc.GenerateSnapshotPatches>("mcsrcSnapshot") {
+    description = "Writes patches of the decompiled Minecraft client from the latest release to every snapshot since"
+    outputDir.set(layout.projectDirectory.dir("mc-sources/snapshots"))
+}
+tasks.withType<mcsrc.MinecraftPatchTask>().configureEach {
     decompilerMaxHeap.set(providers.gradleProperty("mcsrc.decompilerHeap").orElse("8g"))
     cacheDir.set(gradle.gradleUserHomeDir.resolve("caches/cultac-mcsrc"))
-    outputDir.set(layout.projectDirectory.dir("mc-sources"))
 }
 
 // ---------- Java Compile Optimization ----------

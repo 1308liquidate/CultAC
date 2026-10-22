@@ -57,9 +57,12 @@ class MojangMeta(private val cacheDir: Path) {
         return json.decodeFromString(file.readText())
     }
 
-    /** Downloads [url] to [target] unless a copy with the expected [sha1] is already there. */
+    /**
+     * Downloads [url] to [target] unless it is already there. Published versions never change and a download is only
+     * moved into place once it matches [sha1], so a file that exists is the right one.
+     */
     fun ensure(url: String, target: Path, sha1: String) {
-        if (target.exists() && sha1(target) == sha1) return
+        if (target.exists()) return
         download(url, target, sha1)
     }
 
