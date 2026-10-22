@@ -75,6 +75,29 @@ public class Collisions {
                 null);
     }
 
+    /** {@link #collide(CultPlayer, SimpleCollisionBox, double, double, double, boolean)} with more colliders. */
+    public static Vec3 collideWithAdditionalCollisionBoxes(
+            CultPlayer player,
+            SimpleCollisionBox box,
+            double desiredX,
+            double desiredY,
+            double desiredZ,
+            List<SimpleCollisionBox> additionalCollisionBoxes,
+            boolean onGroundForStep) {
+        return collide(
+                player,
+                box,
+                desiredX,
+                desiredY,
+                desiredZ,
+                getAxisStepOrder(desiredX, desiredZ),
+                true,
+                box.minY,
+                additionalCollisionBoxes,
+                onGroundForStep,
+                null);
+    }
+
     public static Vec3 collideWithAdditionalCollisionBoxes(
             CultPlayer player,
             SimpleCollisionBox box,

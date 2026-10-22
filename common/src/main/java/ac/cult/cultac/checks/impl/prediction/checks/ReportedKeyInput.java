@@ -4,6 +4,7 @@ import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.EntityPositionWorlds;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.UnknownCollisionProvider;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.network.protocol.ClientVersion;
@@ -43,15 +44,7 @@ final class ReportedKeyInput {
 
         KnownInput keys = player.packetStateData.knownInput;
         ClientItemUseState.Snapshot use = context.getItemUse();
-        // LocalPlayer#isMovingSlowly: crouching, exactly when the previous keys held shift, or
-        // Entity#isVisuallyCrawling, which out of water is a SWIMMING pose or, through
-        // LivingEntity#isVisuallySwimming, a FALL_FLYING pose without fall flying. Player#updatePlayerPose sets the
-        // pose only after LocalPlayer#aiStep.
-        float slow = context.isLastSneaking()
-                        || context.getPose() == Pose.SWIMMING
-                        || context.getPose() == Pose.FALL_FLYING
-                ? (float) player.compensatedEntities.getSelf().sneakingSpeed.value()
-                : 1.0F;
+        float[] slows = slows(player, context);
         float walk = context.getMoveRelativeSpeed(player, true, false, false);
         // LivingEntity#getFrictionInfluencedSpeed reads getSpeed(), which carries minecraft:sprinting while applied.
         // ClientSprintState can still hold the modifier after one aiStep started and stopped a wall sprint.
@@ -67,20 +60,44 @@ final class ReportedKeyInput {
         // tick's LocalPlayer#aiStep, so a use slows the tick that sends its USE_ITEM.
         float[] itemUses = {use.legalMultiplier(), use.requiredMultiplier(), use.slowestMultiplier()};
         double best = Double.MAX_VALUE;
-        for (int s = 0; s < speeds.length; s++) {
-            float speed = speeds[s];
-            // A repeated speed or multiplier gives the same input and offset as its first occurrence.
-            if (repeats(speeds, s)) continue;
-            for (int u = 0; u < itemUses.length; u++) {
-                float itemUse = itemUses[u];
-                if (repeats(itemUses, u)) continue;
-                Vec3 input = ClientKeyInput.travelInput(player, context, keys, itemUse, slow, speed);
-                if (input == null) return 0.0D;
-                best = Math.min(best, offset(player, result, extents, input));
-                if (best == 0.0D) return 0.0D;
+        for (float slow : slows) {
+            for (int s = 0; s < speeds.length; s++) {
+                float speed = speeds[s];
+                // A repeated speed or multiplier gives the same input and offset as its first occurrence.
+                if (repeats(speeds, s)) continue;
+                for (int u = 0; u < itemUses.length; u++) {
+                    float itemUse = itemUses[u];
+                    if (repeats(itemUses, u)) continue;
+                    Vec3 input = ClientKeyInput.travelInput(player, context, keys, itemUse, slow, speed);
+                    if (input == null) return 0.0D;
+                    best = Math.min(best, offset(player, result, extents, input));
+                    if (best == 0.0D) return 0.0D;
+                }
             }
         }
         return best;
+    }
+
+    /**
+     * LocalPlayer#modifyInput's slow multipliers: LocalPlayer#isMovingSlowly is crouching or Entity#isVisuallyCrawling,
+     * which out of water is a SWIMMING pose or, through LivingEntity#isVisuallySwimming, a FALL_FLYING pose without
+     * fall flying. Player#updatePlayerPose sets the pose only after LocalPlayer#aiStep, which crouches a player whose
+     * previous keys held shift only where the crouching pose fits blocks and entities
+     * (Player#canPlayerFitWithinBlocksAndEntitiesWhen).
+     */
+    private static float[] slows(CultPlayer player, SimulationContext context) {
+        float sneaking =
+                (float) player.compensatedEntities.getSelf().sneakingSpeed.value();
+        if (context.getPose() == Pose.SWIMMING || context.getPose() == Pose.FALL_FLYING) return new float[] {sneaking};
+        if (!context.isLastSneaking()) return new float[] {1.0F};
+        if (player.getClientVersion().isOlderThan(ClientVersion.V_1_14)) return new float[] {sneaking};
+        Vec3 from = context.getStart();
+        if (player.canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING, from.x, from.y, from.z)) {
+            return new float[] {sneaking};
+        }
+        return player.mayPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING, from.x, from.y, from.z)
+                ? new float[] {sneaking, 1.0F}
+                : new float[] {1.0F};
     }
 
     private static boolean repeats(float[] values, int index) {
@@ -132,7 +149,30 @@ final class ReportedKeyInput {
         List<SimpleCollisionBox> unknown = new ArrayList<>();
         UnknownCollisionProvider.addMovementUnknownCollisions(
                 player, context, context.getStart(), rest, unknown, new SimpleCollisionBox(), new SimpleCollisionBox());
-        return unknown.isEmpty() ? offset : 0.0D;
+        if (unknown.isEmpty()) return offset;
+
+        // Entity#collide collides with each entity at the one position the client holds it.
+        SimpleCollisionBox region = box.copy();
+        for (int far = 0; far <= 3; far++) {
+            region.expandToCoordinate((far & 1) != 0 ? farX : deltaX, start.y, (far & 2) != 0 ? farZ : deltaZ);
+        }
+        region.maxY += Math.max(0.0D, player.getMaxUpStep());
+        region.expand(SimpleCollisionBox.COLLISION_EPSILON);
+        List<List<SimpleCollisionBox>> worlds = EntityPositionWorlds.of(player, context, context.getStart(), region);
+        if (worlds == null) return 0.0D;
+        for (List<SimpleCollisionBox> colliders : worlds) {
+            if (colliders.isEmpty()) continue;
+            for (int far = 0; far <= 3; far++) {
+                double x = (far & 1) != 0 ? farX : deltaX;
+                double z = (far & 2) != 0 ? farZ : deltaZ;
+                if (far != 0 && x == deltaX && z == deltaZ) continue;
+                Vec3 clipped =
+                        Collisions.collideWithAdditionalCollisionBoxes(player, box, x, start.y, z, colliders, true);
+                offset = Math.min(offset, Math.hypot(clipped.x - target.x, clipped.z - target.z));
+                if (offset <= HorizontalAnalyzer.HORIZONTAL_INPUT_UNCERTAINTY) return offset;
+            }
+        }
+        return offset;
     }
 
     private static boolean appliesTo(CultPlayer player, PredictionResult result, PredictionResult lastResult) {

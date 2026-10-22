@@ -1072,6 +1072,33 @@ public class CultPlayer implements GrimUser {
         return Collisions.isEmpty(this, box, y) && hasNoEntityCollision(box);
     }
 
+    /**
+     * Whether the {@code newPose} box at the position may fit within blocks and entities: false when blocks or an
+     * entity at each of its possible positions overlap it.
+     */
+    public boolean mayPlayerFitWithinBlocksAndEntitiesWhen(Pose newPose, double x, double y, double z) {
+        SimpleCollisionBox box = GetBoundingBox.getBoundingBoxFromPosAndSize(
+                        x, y, z, newPose.width * getScale(), newPose.height * getScale())
+                .expand(-1.0E-7D);
+        if (!Collisions.isEmpty(this, box, y)) return false;
+        PacketEntity riding = compensatedEntities.getSelf().getRiding();
+        SimpleCollisionBox entityBox = new SimpleCollisionBox();
+        for (PacketEntity entity : compensatedEntities.poseCollisionCandidates()) {
+            if (canCollideWithForPoseCheck(riding, entity) && overlapsAtEachPossiblePosition(entity, box, entityBox)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean overlapsAtEachPossiblePosition(
+            PacketEntity entity, SimpleCollisionBox playerBox, SimpleCollisionBox entityBox) {
+        for (int i = 0, count = entity.possibleMovementCollisionBoxCandidateCount(); i < count; i++) {
+            if (!entity.possibleMovementCollisionBoxCandidate(i, entityBox).isIntersected(playerBox)) return false;
+        }
+        return true;
+    }
+
     private boolean hasNoEntityCollision(SimpleCollisionBox playerBox) {
         PacketEntity riding = compensatedEntities.getSelf().getRiding();
         SimpleCollisionBox entityBox = new SimpleCollisionBox();

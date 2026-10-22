@@ -50,6 +50,10 @@ class JavaSlimeBounceBesideBoatTest {
             new ServerboundPlayerInput(false, false, false, false, false, false, false);
     private static final double JUMP_POWER = 0.42F;
     private static final Vec3 IN_PLACE = new Vec3(0.5, FLOOR_Y, 0.5);
+    // Clear of the player's box on X, 0.0125 from its face.
+    private static final Vec3 BOAT_BESIDE = IN_PLACE.add(1.0, 0.0, 0.0);
+    private static final double[] FALL_HEIGHTS = {1.0D, 2.5D};
+    private static final double[] REPORTED_ABOVE = {2.0E-7D, 1.0E-4D};
     // Boats clear of the player's box, one to two and a half blocks away.
     private static final Vec3[] BOAT_OFFSETS = {
         new Vec3(1.0, 0.0, 0.0),
@@ -154,26 +158,63 @@ class JavaSlimeBounceBesideBoatTest {
      */
     @Test
     void aLandingReportedAboveTheSlimeStillBounces() throws Exception {
-        for (double height : new double[] {1.0D, 2.5D}) {
-            for (double above : new double[] {2.0E-7D, 1.0E-4D}) {
+        for (double height : FALL_HEIGHTS) {
+            for (double above : REPORTED_ABOVE) {
                 try (var f = new JavaTickFixture()) {
                     slimeFloor(f);
-                    Vec3 top = new Vec3(0.5, FLOOR_Y + height, 0.5);
-                    double velocity = (0.0D - GRAVITY) * AIR_DRAG;
-                    f.place(top, new Vec3(0.0D, velocity, 0.0D));
-                    double y = top.y;
-                    while (y + velocity >= FLOOR_Y) {
-                        y += velocity;
-                        PredictionResult falling = f.tick(new Vec3(top.x, y, top.z), false);
-                        assertTrue(exact(falling), height + " " + above + ": " + describe(falling));
-                        velocity = (velocity - GRAVITY) * AIR_DRAG;
-                    }
-                    Vec3 landed = new Vec3(top.x, FLOOR_Y + above, top.z);
-                    f.tick(landed, true);
-                    assertRejected(f.tick(landed, true), "VerticalOffset");
+                    assertRejected(landAndStay(f, IN_PLACE, height, FLOOR_Y + above), "VerticalOffset");
                 }
             }
         }
+    }
+
+    /** A boat clear of the player's box is not under it, so the slime alone clips the fall. */
+    @Test
+    void aLandingReportedAboveTheSlimeBesideABoatStillBounces() throws Exception {
+        for (double height : FALL_HEIGHTS) {
+            for (double above : REPORTED_ABOVE) {
+                try (var f = new JavaTickFixture()) {
+                    slimeFloor(f);
+                    f.player.compensatedEntities.addEntity(BOAT, EntityTypeIds.OAK_BOAT, BOAT_BESIDE, 0, 0, 0);
+                    assertRejected(landAndStay(f, IN_PLACE, height, FLOOR_Y + above), "VerticalOffset");
+                }
+            }
+        }
+    }
+
+    /** Entity#collide clips a fall onto a boat's top, and a boat does not bounce. */
+    @Test
+    void fallingOntoABoatOnSlimeLandsOnItsTop() throws Exception {
+        for (double height : FALL_HEIGHTS) {
+            try (var f = new JavaTickFixture()) {
+                slimeFloor(f);
+                f.player.compensatedEntities.addEntity(BOAT, EntityTypeIds.OAK_BOAT, IN_PLACE, 0, 0, 0);
+                double boatTop = f.player.compensatedEntities.getEntity(BOAT).getPossibleMovementCollisionBoxes().maxY;
+                PredictionResult standing = landAndStay(f, IN_PLACE.add(0.0, boatTop - FLOOR_Y, 0.0), height, boatTop);
+                assertTrue(exact(standing), height + ": " + describe(standing));
+            }
+        }
+    }
+
+    /**
+     * LivingEntity#travelInAir from rest {@code height} above {@code floor}, a landing reported at {@code landedY}, and
+     * the next tick reported at the same height; returns that tick's result.
+     */
+    private static PredictionResult landAndStay(JavaTickFixture f, Vec3 floor, double height, double landedY) {
+        Vec3 top = floor.add(0.0, height, 0.0);
+        double velocity = (0.0D - GRAVITY) * AIR_DRAG;
+        f.place(top, new Vec3(0.0D, velocity, 0.0D));
+        double y = top.y;
+        while (y + velocity >= floor.y) {
+            y += velocity;
+            PredictionResult falling = f.tick(new Vec3(top.x, y, top.z), false);
+            assertTrue(exact(falling), height + ": " + describe(falling));
+            velocity = (velocity - GRAVITY) * AIR_DRAG;
+        }
+        Vec3 landed = new Vec3(top.x, landedY, top.z);
+        PredictionResult landing = f.tick(landed, true);
+        assertTrue(landing.getFlags().isEmpty() && !landing.isExempt(), height + ": " + describe(landing));
+        return f.tick(landed, true);
     }
 
     /**
