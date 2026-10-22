@@ -92,7 +92,8 @@ public class Riptide implements UncertaintyHandler {
 
     /**
      * The velocities TridentItem#releaseUsing leaves: Entity#push along the rotation this tick's move packet sends,
-     * then for a player on ground Entity#move(SELF, (0, 1.1999999F, 0)).
+     * then for a player on ground Entity#move(SELF, (0, 1.1999999F, 0)). That move consumes a carried
+     * Entity#stuckSpeedMultiplier, which only a context with {@link SimulationContext#getRiptideLiftStuck} lifts.
      */
     public static List<PredVector> release(CultPlayer player, SimulationContext context, List<PredVector> velocities) {
         if (context.getRiptideLevel() == 0 || context.getVehicle() != null) return velocities;
@@ -104,14 +105,21 @@ public class Riptide implements UncertaintyHandler {
             context.getTrig().toggleShitMath();
         }
         List<Boolean> onGround = context.getWorldData().getCarriedOnGround().getStates();
-        if (onGround.contains(true)) context.setRiptideGroundLift(groundLift(player, context));
+        Vec3 stuck = context.getRiptideLiftStuck();
+        boolean airborne = onGround.contains(false) && stuck == null;
+        boolean lifted = onGround.contains(true) && (stuck != null || !context.consumesStuckSpeed());
+        if (lifted) context.setRiptideGroundLift(groundLift(player, context, stuck == null ? 1.0 : stuck.y));
 
         List<PredVector> released = new ArrayList<>();
         for (Vec3 push : pushes) {
             for (PredVector velocity : velocities) {
                 PredVector pushed = new Pushed(velocity, push);
-                if (onGround.contains(false)) released.add(pushed);
-                if (!onGround.contains(true)) continue;
+                if (airborne) released.add(pushed);
+                if (!lifted) continue;
+                if (stuck != null) {
+                    released.add(pushed.with(Vec3.ZERO, GROUND_LIFT));
+                    continue;
+                }
                 for (Vec3 moved : afterLift(player, context, pushed)) {
                     released.add(pushed.with(moved, GROUND_LIFT));
                 }
@@ -131,8 +139,8 @@ public class Riptide implements UncertaintyHandler {
         return new Vec3(xd, yd, zd);
     }
 
-    private static double groundLift(CultPlayer player, SimulationContext context) {
-        double lift = Collisions.collide(player, context.getFromActualPose(), 0, LIFT, 0).y;
+    private static double groundLift(CultPlayer player, SimulationContext context, double stuckY) {
+        double lift = Collisions.collide(player, context.getFromActualPose(), 0, LIFT * stuckY, 0).y;
         // Entity#move keeps the position for a collided movement whose squared length is at most 1.0E-7.
         return lift * lift > 1.0E-7 ? lift : 0;
     }

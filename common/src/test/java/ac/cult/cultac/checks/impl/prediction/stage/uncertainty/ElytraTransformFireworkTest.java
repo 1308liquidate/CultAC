@@ -87,6 +87,24 @@ class ElytraTransformFireworkTest {
         });
     }
 
+    /** A grounded release's Entity#move that consumes a stuck multiplier zeroes the boosted velocity. */
+    @Test
+    void aStuckRiptideLiftZeroesTheBoostedVelocity() {
+        withPlayer(player -> {
+            player.compensatedFireworks.addNewFirework(100);
+            SimulationContext context = context(player);
+            when(context.getRiptideLevel()).thenReturn(3);
+            when(context.getRiptideLiftStuck()).thenReturn(new Vec3(0.25D, 0.05F, 0.25D));
+
+            Vec3 stopped = glide(player, Vec3.ZERO);
+            Vec3 boosted = glide(player, boost(Vec3.ZERO, ReachUtils.getLook(player, LAST_YAW, LAST_PITCH)));
+
+            Vec3 transformed = transform(player, context, new PredVector(Vec3.ZERO), boosted);
+            assertEquals(0.0D, stopped.distanceTo(transformed), 1.0E-5D);
+            assertTrue(boosted.distanceTo(transformed) > 0.5D);
+        });
+    }
+
     private static Vec3 boost(Vec3 velocity, Vector3dm look) {
         return velocity.add(
                 look.getX() * 0.1D + (look.getX() * 1.5D - velocity.x) * 0.5D,

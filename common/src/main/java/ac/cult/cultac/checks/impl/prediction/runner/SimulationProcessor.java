@@ -1917,6 +1917,28 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             spin.setWaterMovementEfficiency(
                     getWaterMovementEfficiency(player.compensatedEntities.getSelf(), DesyncStatus.FALSE));
             released.add(spin);
+            if (!spin.consumesStuckSpeed()
+                    || !spin.getWorldData().getCarriedOnGround().getStates().contains(true)) continue;
+            SimulationContext lift = this.createSimulationContext(
+                    player,
+                    lastPrediction,
+                    target,
+                    start,
+                    end,
+                    lastTickSkip,
+                    testing,
+                    xRot,
+                    yRot,
+                    authoredMovementFrame,
+                    movementProfile,
+                    false,
+                    null,
+                    CarryWorld.of(spin));
+            lift.setProfileCarry(spin.getProfileCarry());
+            lift.setRiptideReleaseCertain(true);
+            lift.setRiptideLiftStuck(spin.getLastStuckSpeed());
+            lift.setWaterMovementEfficiency(spin.getWaterMovementEfficiency());
+            released.add(lift);
         }
         return released;
     }

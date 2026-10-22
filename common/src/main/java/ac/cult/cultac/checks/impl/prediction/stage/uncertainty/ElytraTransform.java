@@ -56,13 +56,16 @@ public class ElytraTransform implements UncertaintyHandler {
         // LivingEntity#aiStep applies bubble callbacks after travel. Their existing
         // Y range is therefore input to the next tick's elytra transform, including X/Z.
         PredVector minStart = start, maxStart = start;
-        if (BubbleColumn.beforeElytra(context) && !start.hasReason("Velocity")) {
+        // A server velocity set replaces the stored velocity; a grounded riptide lift that consumes a stuck
+        // multiplier zeroes it.
+        boolean replaced = start.hasReason("Velocity") || context.getRiptideLiftStuck() != null;
+        if (BubbleColumn.beforeElytra(context) && !replaced) {
             minStart = BubbleColumn.apply(context, lastResult, start, Double.NEGATIVE_INFINITY);
             maxStart = BubbleColumn.apply(context, lastResult, start, Double.POSITIVE_INFINITY);
         }
         // FireworkRocketEntity#tick runs after the LocalPlayer's tick and boosts the stored velocity once per
         // attached rocket with that tick's look; a server velocity set is handled after it and replaces it.
-        int fireworks = start.hasReason("Velocity") ? 0 : player.compensatedFireworks.getMaxFireworksAppliedPossible();
+        int fireworks = replaced ? 0 : player.compensatedFireworks.getMaxFireworksAppliedPossible();
         // That boost precedes this tick's TridentItem#releaseUsing push and LivingEntity#aiStep's 0.003 cut.
         Riptide.Pushed pushed = fireworks == 0 ? null : Riptide.pushOf(context, start);
         PredVector minCarried = minStart, maxCarried = maxStart;

@@ -107,6 +107,13 @@ public class SimulationContext {
     @Setter
     double riptideGroundLift;
 
+    /**
+     * The Entity#stuckSpeedMultiplier a release on ground consumes this tick, or null: TridentItem#releaseUsing's
+     * Entity#move scales the lift by it, clears it and zeroes deltaMovement, so the tick's travel is not scaled.
+     */
+    @Setter
+    Vec3 riptideLiftStuck;
+
     LastInstance lastTickSkip;
     boolean isTestingPointThree;
     Vec3 lastStuckSpeed = NO_STUCK_SPEED;
@@ -246,6 +253,11 @@ public class SimulationContext {
     public void cacheHardCollidingEntityCollisionsForMovementTick(
             List<HardCollidingEntityCollision> hardCollidingEntityCollisionsForMovementTick) {
         this.hardCollidingEntityCollisionsForMovementTick = hardCollidingEntityCollisionsForMovementTick;
+    }
+
+    /** Whether the tick's first Entity#move consumes an Entity#stuckSpeedMultiplier. */
+    public boolean consumesStuckSpeed() {
+        return !NO_STUCK_SPEED.equals(lastStuckSpeed);
     }
 
     public double getTargetScalarHoriz() {
