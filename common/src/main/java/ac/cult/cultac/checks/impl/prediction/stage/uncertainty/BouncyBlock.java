@@ -79,9 +79,9 @@ public class BouncyBlock implements UncertaintyHandler {
 
         // The player can bounce this high
         double bounceAmount = minYAmount * -1 * bounceMultiplier * bounceLevel;
-        // Entity#move stops a descending velocity at the floor, so a client that did not move vertically moved as the
-        // carried velocity does, and Entity#move registers the collision below.
-        if (end.y == 0.0 && start.y < 0.0) return start;
+        // Entity#move stops a descending velocity at the floor, so a client that moved down less than the carried
+        // velocity, or not at all, moved as the carried velocity does and Entity#move registers the collision below.
+        if (end.y <= 0.0 && start.y < end.y) return start;
         double bounceY = CultMath.clamp(end.y, start.y, bounceAmount);
         return start.withY(bounceY, "bounce");
     }
