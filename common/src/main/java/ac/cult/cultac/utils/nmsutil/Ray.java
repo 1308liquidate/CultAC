@@ -14,17 +14,10 @@ public class Ray {
         this.direction = calculateDirection(player, xRot, yRot);
     }
 
-    // Account for FastMath by using player's trig handler
-    // Copied from hawk which probably copied it from NMS
+    // xRot is yaw and yRot is pitch here. The client builds the ray with
+    // Entity#calculateViewVector, so use the same signed lookups and float products.
     public static Vector3dm calculateDirection(CultPlayer player, float xRot, float yRot) {
-        Vector3dm vector = new Vector3dm();
-        float rotX = (float) Math.toRadians(xRot);
-        float rotY = (float) Math.toRadians(yRot);
-        vector.setY(-player.trigHandler.sin(rotY));
-        double xz = player.trigHandler.cos(rotY);
-        vector.setX(-xz * player.trigHandler.sin(rotX));
-        vector.setZ(xz * player.trigHandler.cos(rotX));
-        return vector;
+        return ReachUtils.getLook(player, xRot, yRot);
     }
 
     public Vector3dm getPointAtDistance(double distance) {

@@ -441,10 +441,10 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     private int addLook(int count, float yaw, float pitch) {
         float pitchRadians = pitch * ((float) Math.PI / 180F);
         float yawRadians = -yaw * ((float) Math.PI / 180F);
-        float cosPitch = player.trigHandler.cos(pitchRadians);
-        looks[count * 3] = player.trigHandler.sin(yawRadians) * cosPitch;
-        looks[count * 3 + 1] = -player.trigHandler.sin(pitchRadians);
-        looks[count * 3 + 2] = player.trigHandler.cos(yawRadians) * cosPitch;
+        float cosPitch = player.trigHandler.clientCos(pitchRadians);
+        looks[count * 3] = player.trigHandler.clientSin(yawRadians) * cosPitch;
+        looks[count * 3 + 1] = -player.trigHandler.clientSin(pitchRadians);
+        looks[count * 3 + 2] = player.trigHandler.clientCos(yawRadians) * cosPitch;
         return count + 1;
     }
 

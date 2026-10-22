@@ -168,14 +168,15 @@ public class ReachUtils {
                 && vec.getY() <= self.maxY;
     }
 
-    // Look vector accounting for optifine FastMath.
+    // Entity#calculateViewVector, accounting for optifine FastMath. Yaw is negated before
+    // the table lookup and the products stay float, as in every client from 1.21.2 to 26.3.
     public static Vector3dm getLook(CultPlayer player, float yaw, float pitch) {
         float f = pitch * ((float) Math.PI / 180F);
         float f1 = -yaw * ((float) Math.PI / 180F);
-        float f2 = player.trigHandler.cos(f1);
-        float f3 = player.trigHandler.sin(f1);
-        float f4 = player.trigHandler.cos(f);
-        float f5 = player.trigHandler.sin(f);
+        float f2 = player.trigHandler.clientCos(f1);
+        float f3 = player.trigHandler.clientSin(f1);
+        float f4 = player.trigHandler.clientCos(f);
+        float f5 = player.trigHandler.clientSin(f);
         return new Vector3dm(f3 * f4, -f5, (double) (f2 * f4));
     }
 
