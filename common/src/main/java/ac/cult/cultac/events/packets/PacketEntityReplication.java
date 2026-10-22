@@ -923,6 +923,22 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         PacketEntity entity = player.compensatedEntities.getEntity(packet.id());
         TrackerData tracked = player.compensatedEntities.getTrackedEntity(packet.id());
         int type = entity == null ? (tracked == null ? -1 : tracked.getEntityType()) : entity.type;
+        if (!player.isBedrockMovement()
+                && packet.id() == player.entityID
+                && WatchableIndexUtil.getIndex(metadata, WatchableIndexUtil.LIVING_HEALTH) != null) {
+            // DATA_HEALTH_ID controls LivingEntity#isImmobile, independently of SET_HEALTH. A leading
+            // ping cannot prove that the local player's next aiStep must clear its movement input.
+            var proof = appendTrailingProofTransaction(event, List.of(), true);
+            if (proof != null) {
+                int proven = proof.transaction();
+                player.latencyUtils.addRealTimeTask(
+                        proven, () -> player.compensatedEntities.updateEntityMetadata(packet.id(), metadata, proven));
+                if (WatchableIndexUtil.getIndex(metadata, WatchableIndexUtil.ENTITY_POSE) != null) {
+                    retireSizeAt(packet.id(), proven);
+                }
+                return;
+            }
+        }
         WatchableIndexUtil.Layout layout = WatchableIndexUtil.forModel(player.user.getCultConnection());
         boolean updatesBoost =
                 (type == EntityTypeIds.PIG && WatchableIndexUtil.getIndex(metadata, layout.pigBoostTime()) != null)

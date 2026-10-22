@@ -62,6 +62,102 @@ class InputKeysTest {
     private static final double FRICTION = 0.6F * 0.91F;
 
     @Test
+    void zeroHealthClearsTravelInputOnlyAfterItsReceipt() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 position = new Vec3(.5, FLOOR_Y, .5);
+            f.place(position, GROUNDED);
+            f.input(NONE);
+            assertExact(f.tick(position, true));
+            f.player.compensatedEntities.getSelf().setHealth(20);
+            int before = f.player.sendTransactionAndGetId();
+            int receipt = metadataHealth(f, 0);
+            f.pongThrough(before);
+            // The preceding ping does not prove metadata health. The client still travels on its keys.
+            f.input(BACK);
+            position = position.add(0, 0, -WALK);
+            assertExact(f.tick(position, true));
+            assertTrue(f.player.compensatedEntities.getSelf().actionAlive);
+
+            f.pongThrough(receipt);
+            f.place(position, GROUNDED);
+            assertFalse(f.player.compensatedEntities.getSelf().actionAlive);
+            // LivingEntity#aiStep clears xxa/zza after applyInput when health <= 0.
+            assertExact(f.tick(position, true));
+        }
+    }
+
+    @Test
+    void aDeadPlayerCannotMoveFromReportedKeys() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 position = new Vec3(.5, FLOOR_Y, .5);
+            f.place(position, GROUNDED);
+            f.input(NONE);
+            assertExact(f.tick(position, true));
+            f.pongThrough(metadataHealth(f, 0));
+            f.input(BACK);
+            PredictionResult moved = f.tick(position.add(0, 0, -WALK), true);
+            assertTrue(moved.hasFlag(InputKeys.class), describe(moved));
+        }
+    }
+
+    @Test
+    void zeroHealthStillCarriesPacketVelocityWithHeldKeys() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 position = new Vec3(.5, FLOOR_Y, .5);
+            f.place(position, GROUNDED);
+            f.input(NONE);
+            assertExact(f.tick(position, true));
+            f.pongThrough(metadataHealth(f, 0));
+            f.input(BACK);
+            f.pongThrough(f.velocity(new Vec3(.25, GROUNDED.y, 0)));
+            assertExact(f.tick(position.add(.25, 0, 0), true));
+        }
+    }
+
+    @Test
+    void metadataAndSetHealthWriteTheSameClientHealthState() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 position = new Vec3(.5, FLOOR_Y, .5);
+            f.place(position, GROUNDED);
+            f.input(NONE);
+            assertExact(f.tick(position, true));
+            f.pongThrough(metadataHealth(f, 0));
+            assertFalse(f.player.compensatedEntities.getSelf().actionAlive);
+            assertEquals(0, f.player.compensatedEntities.getSelf().getHealth());
+            f.input(BACK);
+            assertExact(f.tick(position, true));
+
+            f.pongThrough(health(f, 20));
+            assertTrue(f.player.compensatedEntities.getSelf().actionAlive);
+            assertTrue(f.tick(position, true).hasFlag(InputKeys.class), "living keys must move the player again");
+        }
+    }
+
+    private static int metadataHealth(JavaTickFixture f, float health) {
+        var packet = new EntityMetadata(
+                f.player.entityID,
+                List.of(EntityMetadata.Entry.health(
+                        WatchableIndexUtil.LIVING_HEALTH, f.fixture.data.version(), health)));
+        var event = new PacketSendEvent<>(f.fixture.user, ConnectionPhase.PLAY, metadataType(), packet, false);
+        f.player.packetEntityReplication.onSetEntityData(event, f.player, packet);
+        event.tasksAfter().forEach(Runnable::run);
+        return f.player.lastTransactionSent.get();
+    }
+
+    private static int health(JavaTickFixture f, float health) {
+        var packet = new ac.cult.cultac.protocol.packet.clientbound.ClientboundSetHealth(health, 20, 5);
+        var event = new PacketSendEvent<>(
+                f.fixture.user,
+                ConnectionPhase.PLAY,
+                ac.cult.cultac.protocol.packet.ClientboundPackets.SET_HEALTH,
+                packet,
+                false);
+        new ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn().onSetHealth(event, f.player, packet);
+        event.tasksAfter().forEach(Runnable::run);
+        return f.player.lastTransactionSent.get();
+    }
+
+    @Test
     void safeWalkStandingStillAtTheEdgeWithoutShiftIsFlaggedAndSetBack() throws Exception {
         try (var f = new JavaTickFixture()) {
             f.place(new Vec3(0.5, FLOOR_Y, EDGE_Z), GROUNDED);
