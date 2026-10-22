@@ -516,6 +516,21 @@ public final class VelocityCandidates {
      */
     public static double afterVerticalCollision(
             CultPlayer player, int onBlock, boolean suppressingBounce, boolean living, double deltaY, double clippedY) {
+        return afterVerticalCollision(player, onBlock, suppressingBounce, living, deltaY < 0.0D, deltaY, clippedY);
+    }
+
+    /**
+     * Entity#move's vertical deltaMovement {@code deltaY} after a vertical collision clipped the move to
+     * {@code clippedY}; {@code below} is Entity#verticalCollisionBelow, whether the move went down.
+     */
+    public static double afterVerticalCollision(
+            CultPlayer player,
+            int onBlock,
+            boolean suppressingBounce,
+            boolean living,
+            boolean below,
+            double deltaY,
+            double clippedY) {
         if (player != null && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_2)) {
             // MCP-Reborn 26.2 Entity#restituteMovementAfterCollisions (Entity.java:803-844):
             // sneaking zeroes restitution; otherwise a downward collision bounces
@@ -528,7 +543,7 @@ public final class VelocityCandidates {
             double gravity = effectiveGravity(player);
             double bounciness = player.compensatedEntities.getEntityInControl().bounciness;
             double restitution = bounciness;
-            if (deltaY < 0.0D) {
+            if (below) {
                 // #suppresses_bounce (vanilla: honey block) and the impact-speed
                 // gate both force restitution to zero.
                 if (suppressesBounceAtGravity(player.getClientVersion(), deltaY, gravity)

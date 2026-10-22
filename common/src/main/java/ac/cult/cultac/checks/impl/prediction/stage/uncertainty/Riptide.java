@@ -1,6 +1,5 @@
 package ac.cult.cultac.checks.impl.prediction.stage.uncertainty;
 
-import ac.cult.blocksim.data.BlockIds;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
@@ -10,8 +9,8 @@ import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.TrigHandler;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
-import ac.cult.cultac.utils.nmsutil.ClientBlockProperties;
 import ac.cult.cultac.utils.nmsutil.Collisions;
+import ac.cult.cultac.utils.nmsutil.VelocityCandidates;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -146,27 +145,23 @@ public class Riptide implements UncertaintyHandler {
     }
 
     /**
-     * The velocity after the lift's Entity#move: a lift that collides runs Block#updateEntityMovementAfterFallOn of
-     * the block at Entity#getOnPosLegacy, then LivingEntity#getBlockSpeedFactor scales X and Z.
+     * The velocity after the lift's Entity#move: a lift that collides restitutes it as Entity#move does an upward
+     * vertical collision with the block at Entity#getOnPosLegacy, then LivingEntity#getBlockSpeedFactor scales X and
+     * Z. Entity#isSuppressingBounce reads the shift key of the last LocalPlayer#aiStep.
      */
     private static List<Vec3> afterLift(CultPlayer player, SimulationContext context, Vec3 velocity) {
         double lift = context.getRiptideGroundLift();
         Vec3 position = context.getStart().add(0, lift, 0);
-        List<Vec3> moved = new ArrayList<>(2);
+        List<Vec3> moved = new ArrayList<>(1);
         if (lift == LIFT) {
             moved.add(velocity);
         } else {
             int state = player.compensatedWorld.getBlockStateIdAt(
                     CultMath.floor(position.x), CultMath.floor(position.y - 0.2F), CultMath.floor(position.z));
-            boolean slime = BlockIds.is(state, BlockIds.SLIME_BLOCK);
-            boolean bed = ClientBlockProperties.isBed(state);
-            moved.add(new Vec3(velocity.x, 0, velocity.z));
-            if (slime || bed) {
-                moved.add(
-                        velocity.y < 0
-                                ? new Vec3(velocity.x, -velocity.y * (slime ? 1.0F : 0.66F), velocity.z)
-                                : velocity);
-            }
+            double clipped = Collisions.collide(player, context.getFromActualPose(), 0, LIFT, 0).y;
+            double y = VelocityCandidates.afterVerticalCollision(
+                    player, state, context.isLastSneaking(), true, false, velocity.y, clipped);
+            moved.add(new Vec3(velocity.x, y, velocity.z));
         }
         // Entity#checkSupportingBlock clears the supporting block of a move that ends off the ground.
         float speedFactor = CultMath.lerp(
