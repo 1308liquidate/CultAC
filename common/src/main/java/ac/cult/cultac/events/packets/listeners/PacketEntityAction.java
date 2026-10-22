@@ -10,13 +10,14 @@ import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
 import ac.cult.cultac.protocol.value.EquipmentSlot;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.SprintingState;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityNautilus;
 import ac.cult.cultac.utils.inventory.ClientGlider;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
-import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
+import ac.cult.cultac.utils.nmsutil.RiptideUtil;
 
 public class PacketEntityAction {
 
@@ -37,7 +38,12 @@ public class PacketEntityAction {
                 player.vehicleData.camelSprintingState = SprintingState.STOPPED;
                 break;
             case START_FLYING_WITH_ELYTRA:
-                if (player.onGround || player.lastOnGround || lavaPreventsGlideActivation(player)) {
+                boolean grounded = player.onGround || player.lastOnGround;
+                // Only a TridentItem#releaseUsing spin lifts a player on ground before LocalPlayer#aiStep reads
+                // onGround, so a glide start after a release on the ground follows a spin.
+                boolean released = RiptideUtil.releasedOnTheGround(player);
+                if (released) player.packetStateData.riptideReleaseCertain = true;
+                if (grounded && !released || lavaPreventsGlideActivation(player)) {
                     rejectGlideStart(event, player);
                     break;
                 }
@@ -97,11 +103,10 @@ public class PacketEntityAction {
         if (!ClientFluidQueries.usesTagBasedFluidRules(player)) return false;
         // Entity#baseTick refreshes fluids before LocalPlayer#aiStep attempts
         // gliding. The previous prediction sampled the preceding tick's start.
-        return ClientFluidQueries.depth(
-                        player,
-                        GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z),
-                        FluidTags.LAVA)
-                > 0.0D;
+        for (SimpleCollisionBox box : RiptideUtil.glideStartBoxes(player)) {
+            if (ClientFluidQueries.depth(player, box, FluidTags.LAVA) <= 0.0D) return false;
+        }
+        return true;
     }
 
     private void rejectGlideStart(PacketReceiveEvent event, CultPlayer player) {

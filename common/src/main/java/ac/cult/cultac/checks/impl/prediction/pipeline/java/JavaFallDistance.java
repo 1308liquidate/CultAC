@@ -10,6 +10,7 @@ import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
@@ -109,10 +110,12 @@ public final class JavaFallDistance {
     }
 
     private static boolean touchesWater(CultPlayer player, SimulationContext context, Vec3 end) {
-        var box = context.getToActualPose()
-                .copy()
-                .offset(end.subtract(context.getEnd()))
-                .expand(-0.001);
+        return touchesWater(player, context.getToActualPose().copy().offset(end.subtract(context.getEnd())));
+    }
+
+    /** Entity#updateFluidHeightAndDoFluidPushing for water: whether {@code box} touches it. */
+    public static boolean touchesWater(CultPlayer player, SimpleCollisionBox entityBox) {
+        var box = entityBox.copy().expand(-0.001);
         for (int x = (int) Math.floor(box.minX); x < Math.ceil(box.maxX); x++)
             for (int y = (int) Math.floor(box.minY); y < Math.ceil(box.maxY); y++)
                 for (int z = (int) Math.floor(box.minZ); z < Math.ceil(box.maxZ); z++) {

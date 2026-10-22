@@ -4,6 +4,7 @@ import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.MainSupportingBlockData;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.TrigHandler;
@@ -139,7 +140,12 @@ public class Riptide implements UncertaintyHandler {
     }
 
     private static double groundLift(CultPlayer player, SimulationContext context, double stuckY) {
-        double lift = Collisions.collide(player, context.getFromActualPose(), 0, LIFT * stuckY, 0).y;
+        return groundLift(player, context.getFromActualPose(), stuckY);
+    }
+
+    /** How far the grounded lift moves {@code box}, scaled by a consumed stuck multiplier's {@code stuckY}. */
+    public static double groundLift(CultPlayer player, SimpleCollisionBox box, double stuckY) {
+        double lift = Collisions.collide(player, box, 0, LIFT * stuckY, 0).y;
         // Entity#move keeps the position for a collided movement whose squared length is at most 1.0E-7.
         return lift * lift > 1.0E-7 ? lift : 0;
     }

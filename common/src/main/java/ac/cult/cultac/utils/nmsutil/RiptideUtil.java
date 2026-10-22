@@ -4,10 +4,14 @@ import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaFallDistance;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.Riptide;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.StuckSpeedData;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class RiptideUtil {
     private static final int MIN_CHARGE_TICKS = 10;
@@ -109,5 +113,39 @@ public final class RiptideUtil {
     public static void clearTrackedUse(CultPlayer player) {
         player.packetStateData.riptideUseHand = null;
         player.packetStateData.riptideUseStartClientTick = Integer.MIN_VALUE;
+    }
+
+    /** Whether TridentItem#releaseUsing runs this tick for a player on ground that is not a passenger. */
+    public static boolean releasedOnTheGround(CultPlayer player) {
+        return player.packetStateData.riptideLevel > 0
+                && player.packetStateData.packetPlayerOnGround
+                && !player.compensatedEntities.getSelf().inVehicle();
+    }
+
+    /**
+     * The boxes LivingEntity#baseTick refreshes fluids at before this tick's LocalPlayer#aiStep, for a client that
+     * starts gliding: after a release on the ground that is the box TridentItem#releaseUsing's spin lifted, by a lift
+     * that consumes a carried Entity#stuckSpeedMultiplier.
+     */
+    public static List<SimpleCollisionBox> glideStartBoxes(CultPlayer player) {
+        SimpleCollisionBox box = GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z);
+        if (!releasedOnTheGround(player)) return List.of(box);
+        PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
+        StuckSpeedData stuck =
+                last == null ? null : last.getSimulationContext().getWorldData().getStuckSpeed();
+        List<Double> stuckY = new ArrayList<>(2);
+        if (stuck != null && stuck.getStuckSpeedMultiplier() != null) {
+            stuckY.add(stuck.getStuckSpeedMultiplier().y);
+        } else {
+            stuckY.add(1.0);
+            if (stuck != null && stuck.getUnknownStuckSpeedMultiplier() != null) {
+                stuckY.add(stuck.getUnknownStuckSpeedMultiplier().y);
+            }
+        }
+        List<SimpleCollisionBox> lifted = new ArrayList<>(stuckY.size());
+        for (double y : stuckY) {
+            lifted.add(box.copy().offset(0, Riptide.groundLift(player, box.copy(), y), 0));
+        }
+        return lifted;
     }
 }
