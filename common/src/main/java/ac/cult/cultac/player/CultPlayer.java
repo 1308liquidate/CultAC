@@ -1088,6 +1088,18 @@ public class CultPlayer implements GrimUser {
         return true;
     }
 
+    /** The box at each possible position of each entity Entity#collide stops this player against. */
+    public List<SimpleCollisionBox> entityCollisionBoxes() {
+        PacketEntity riding = compensatedEntities.getSelf().getRiding();
+        List<SimpleCollisionBox> boxes = new ArrayList<>();
+        for (PacketEntity entity : compensatedEntities.poseCollisionCandidates()) {
+            if (canCollideWithForPoseCheck(riding, entity)) {
+                boxes.addAll(entity.getPossibleMovementCollisionBoxCandidates());
+            }
+        }
+        return boxes;
+    }
+
     private boolean canCollideWithForPoseCheck(@Nullable PacketEntity riding, PacketEntity entity) {
         if (entity == null
                 || !(entity.isBoat()

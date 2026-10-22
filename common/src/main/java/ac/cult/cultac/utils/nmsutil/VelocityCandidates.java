@@ -6,8 +6,10 @@ import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.Ladder;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHappyGhast;
 import ac.cult.cultac.utils.math.CultMath;
@@ -229,7 +231,46 @@ public final class VelocityCandidates {
             bounceY = -deltaY;
         }
         double packetVisibleThreshold = player == null ? 2.0E-4D : player.getMovementThreshold();
-        return bounceY > packetVisibleThreshold ? OptionalDouble.of(bounceY) : OptionalDouble.empty();
+        return bounceY > packetVisibleThreshold && mayHaveClippedVertically(result)
+                ? OptionalDouble.of(bounceY)
+                : OptionalDouble.empty();
+    }
+
+    /**
+     * Whether Entity#collide may have changed the accepted move's vertical movement. Entity#move sets
+     * verticalCollision only when it did (Entity.java:800, 770 in 26.2, {@code delta.y != movement.y}), and
+     * Entity#restituteMovementAfterCollisions bounces only on a vertical collision.
+     */
+    private static boolean mayHaveClippedVertically(PredictionResult result) {
+        MovementTrace trace = result.getValidMovements().getClosestTrace();
+        if (trace == null
+                || trace.preCollisionMovement() == null
+                || trace.collisionBaseOffset().lengthSqr() > 1.0E-14) {
+            return true;
+        }
+        Vec3 stuck = trace.position().collisionStuckSpeedMultiplier(result.getSimulationContext());
+        if (stuck != null && stuck.y != 1.0D) {
+            return true;
+        }
+        return trace.position().y != trace.preCollisionMovement().y && restsOnCollider(result, trace);
+    }
+
+    /**
+     * Whether the box that {@code trace}'s move ends in rests on a block or a possible entity box. Entity#collide
+     * clips a downward move only onto a collider's top, so after that clip the box cannot move down at all.
+     */
+    private static boolean restsOnCollider(PredictionResult result, MovementTrace trace) {
+        CultPlayer player = result.getPlayer();
+        SimulationContext context = result.getSimulationContext();
+        if (player == null || context == null) {
+            return true;
+        }
+        SimpleCollisionBox end = context.getFromActualPose().copy().offset(trace.position());
+        double probe = -SimpleCollisionBox.COLLISION_EPSILON;
+        return Collisions.collideWithAdditionalCollisionBoxes(
+                                player, end, 0.0D, probe, 0.0D, player.entityCollisionBoxes())
+                        .y
+                != probe;
     }
 
     private static Vec3 preCollisionVelocity(PredictionResult result) {
