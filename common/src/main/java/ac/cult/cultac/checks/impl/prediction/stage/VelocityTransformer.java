@@ -411,13 +411,15 @@ public class VelocityTransformer {
                 // only narrow the mount to maybe-fluid, preserve the non-fluid travel branch too.
                 for (boolean onGround :
                         simulationContext.getWorldData().getLastOnGround().getStates()) {
+                    // A grounded camel's dash sets its cooldown in tickRidden before getRiddenSpeed reads it.
+                    boolean dashes = onGround && horse instanceof PacketEntityCamel && horse.horseJump > 0.0F;
                     addDistinctInputVector(
                             vectors,
                             inputVectorForSpeed(
                                     player,
                                     riddenInput,
                                     simulationContext.getMoveRelativeSpeed(
-                                            player, onGround, false, false, riderSprinting)));
+                                            player, onGround, false, false, riderSprinting && !dashes)));
                 }
             }
         }
