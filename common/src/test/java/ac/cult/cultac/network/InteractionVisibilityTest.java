@@ -1,6 +1,15 @@
 package ac.cult.cultac.network;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.entity.EntityTypeIds;
@@ -13,6 +22,7 @@ import ac.cult.cultac.checks.impl.visibility.AttackPlayerVisibility;
 import ac.cult.cultac.checks.impl.visibility.BreakVisibility;
 import ac.cult.cultac.checks.impl.visibility.PlaceVisibility;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
+import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.ProtocolVersion;
@@ -34,8 +44,12 @@ import ac.cult.cultac.utils.latency.ClientComponentRegistries;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.visibility.ClientVisibility;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
+import ac.grim.grimac.api.config.ConfigManager;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import net.kyori.adventure.text.Component;
 import org.junit.jupiter.api.Test;
 
 class InteractionVisibilityTest {
@@ -142,6 +156,38 @@ class InteractionVisibilityTest {
             assertTrue(setup.route(ServerboundPackets.PLAYER_ACTION, dig()).isCancelled());
             assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
             assertTrue(setup.route(ServerboundPackets.INTERACT, attack(43)).isCancelled());
+        }
+    }
+
+    @Test
+    void aFailingAlertNeitherStopsTheCancelNorTheNextAlert() throws Exception {
+        try (var setup = new Setup()) {
+            setup.wall("stone");
+            var player = setup.fixture.player;
+            ConfigManager config = mock(ConfigManager.class);
+            when(config.getBooleanElse(anyString(), anyBoolean())).thenAnswer(invocation -> invocation.getArgument(1));
+            when(config.getStringElse(anyString(), anyString())).thenAnswer(invocation -> invocation.getArgument(1));
+            when(config.getBooleanElse("test-mode", false)).thenReturn(true);
+            when(config.getStringElse(eq("alerts-format"), anyString())).thenReturn("alert");
+            when(config.getStringListElse(eq("Punishments"), any())).thenReturn((List)
+                    List.of(new LinkedHashMap<>(Map.of(
+                            "checks",
+                            List.of("AttackPlayerVisibility"),
+                            "commands",
+                            List.of("1:0 [alert]", "1:0 [alert]")))));
+            player.punishmentManager.reload(config);
+            var visibility = player.checkManager.getCheck(AttackPlayerVisibility.class);
+            PlatformPlayer platform = mock(PlatformPlayer.class);
+            doThrow(new IllegalStateException("alert"))
+                    .doNothing()
+                    .when(platform)
+                    .sendMessage(any(Component.class));
+            player.platformPlayer = platform;
+            player.compensatedEntities.addEntity(42, EntityTypeIds.PLAYER, new Vec3(.5, 64, 1.5), 0, 0, 0);
+
+            assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
+            assertEquals(1, visibility.violations);
+            verify(platform, times(2)).sendMessage(any(Component.class));
         }
     }
 

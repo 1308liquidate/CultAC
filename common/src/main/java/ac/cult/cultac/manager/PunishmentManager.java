@@ -159,11 +159,16 @@ public class PunishmentManager implements ConfigReloadable {
                     if (command.command.equals("[alert]")
                             && CultAPI.INSTANCE.getAlertManager().hasVerboseListeners()) {
                         sentDebug = true;
-                        String verboseForListeners = safeGet(verbose);
-                        String listenerCmd = replaceAlertPlaceholders(command.command, vl, check, verboseForListeners);
-                        verboseListeners = CultAPI.INSTANCE
-                                .getAlertManager()
-                                .sendVerbose(MessageUtil.miniMessage(listenerCmd), null);
+                        try {
+                            String verboseForListeners = safeGet(verbose);
+                            String listenerCmd =
+                                    replaceAlertPlaceholders(command.command, vl, check, verboseForListeners);
+                            verboseListeners = CultAPI.INSTANCE
+                                    .getAlertManager()
+                                    .sendVerbose(MessageUtil.miniMessage(listenerCmd), null);
+                        } catch (RuntimeException e) {
+                            logDeliveryFailure(command, check, e);
+                        }
                     }
                     if (violationCount >= command.threshold) {
                         boolean shouldRun = command.interval == 0
@@ -190,54 +195,58 @@ public class PunishmentManager implements ConfigReloadable {
                             }
                             if (canceled) continue;
 
-                            switch (command.command) {
-                                case "[webhook]" ->
-                                    CultAPI.INSTANCE
-                                            .getDiscordManager()
-                                            .sendAlert(player, renderedVerbose, check.getDisplayName(), vl);
-                                case "[log]" -> {
-                                    // Binary flags already stored a row; avoid an extra legacy text row.
-                                    if (!check.isLastFlagStoredBinaryVerbose()) {
-                                        String verboseWithoutGl = renderedVerbose.replaceAll(" /gl .*", "");
+                            try {
+                                switch (command.command) {
+                                    case "[webhook]" ->
                                         CultAPI.INSTANCE
-                                                .getDataStoreLifecycle()
-                                                .liveWriteHooks()
-                                                .recordFlagFromCheck(player, check, vl, verboseWithoutGl);
-                                    }
-                                }
-                                case "[proxy]" ->
-                                    CultAPI.INSTANCE.getPlatformServer().forwardAlert(cmd);
-                                case "[alert]" -> {
-                                    sentDebug = true;
-                                    Component message = MessageUtil.miniMessage(cmd);
-                                    if (testMode) { // secret test mode
-                                        if (verboseListeners == null
-                                                || verboseListeners.contains(player.platformPlayer)) {
-                                            player.sendMessage(message);
+                                                .getDiscordManager()
+                                                .sendAlert(player, renderedVerbose, check.getDisplayName(), vl);
+                                    case "[log]" -> {
+                                        // Binary flags already stored a row; avoid an extra legacy text row.
+                                        if (!check.isLastFlagStoredBinaryVerbose()) {
+                                            String verboseWithoutGl = renderedVerbose.replaceAll(" /gl .*", "");
+                                            CultAPI.INSTANCE
+                                                    .getDataStoreLifecycle()
+                                                    .liveWriteHooks()
+                                                    .recordFlagFromCheck(player, check, vl, verboseWithoutGl);
                                         }
-                                    } else {
-                                        CultAPI.INSTANCE.getAlertManager().sendAlert(message, verboseListeners);
+                                    }
+                                    case "[proxy]" ->
+                                        CultAPI.INSTANCE.getPlatformServer().forwardAlert(cmd);
+                                    case "[alert]" -> {
+                                        sentDebug = true;
+                                        Component message = MessageUtil.miniMessage(cmd);
+                                        if (testMode) { // secret test mode
+                                            if (verboseListeners == null
+                                                    || verboseListeners.contains(player.platformPlayer)) {
+                                                player.sendMessage(message);
+                                            }
+                                        } else {
+                                            CultAPI.INSTANCE.getAlertManager().sendAlert(message, verboseListeners);
+                                        }
+                                    }
+                                    default -> {
+                                        double violations = check.getViolations();
+                                        CultAPI.INSTANCE
+                                                .getScheduler()
+                                                .getGlobalRegionScheduler()
+                                                .run(
+                                                        CultAPI.INSTANCE.getGrimPlugin(),
+                                                        () -> CultAPI.INSTANCE
+                                                                .getPlatformServer()
+                                                                .dispatchCommand(
+                                                                        CultAPI.INSTANCE
+                                                                                .getPlatformServer()
+                                                                                .getConsoleSender(),
+                                                                        cmd,
+                                                                        player.platformPlayer,
+                                                                        check,
+                                                                        violations,
+                                                                        renderedVerbose));
                                     }
                                 }
-                                default -> {
-                                    double violations = check.getViolations();
-                                    CultAPI.INSTANCE
-                                            .getScheduler()
-                                            .getGlobalRegionScheduler()
-                                            .run(
-                                                    CultAPI.INSTANCE.getGrimPlugin(),
-                                                    () -> CultAPI.INSTANCE
-                                                            .getPlatformServer()
-                                                            .dispatchCommand(
-                                                                    CultAPI.INSTANCE
-                                                                            .getPlatformServer()
-                                                                            .getConsoleSender(),
-                                                                    cmd,
-                                                                    player.platformPlayer,
-                                                                    check,
-                                                                    violations,
-                                                                    renderedVerbose));
-                                }
+                            } catch (RuntimeException e) {
+                                logDeliveryFailure(command, check, e);
                             }
                         }
 
@@ -252,6 +261,10 @@ public class PunishmentManager implements ConfigReloadable {
         }
 
         return sentDebug;
+    }
+
+    private static void logDeliveryFailure(ParsedCommand command, Check check, RuntimeException e) {
+        LogUtil.error("Failed to run " + command.command + " for " + check.getCheckName(), e);
     }
 
     private static String safeGet(Supplier<String> supplier) {
