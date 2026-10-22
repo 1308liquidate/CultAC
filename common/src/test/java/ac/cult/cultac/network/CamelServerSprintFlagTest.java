@@ -43,6 +43,14 @@ class CamelServerSprintFlagTest {
     /** LivingEntity#travelInAir: a grounded camel's (0 - 0.08) * 0.98F. */
     private static final double GROUNDED_Y = -0.0784000015258789;
     private static final double GROUND_FRICTION = 0.6F * 0.91F;
+    private static final Vec3 REST = new Vec3(0.5, FLOOR_Y, 0.5);
+    /** Camel#getRiddenSpeed: movement_speed 0.09, plus 0.1 for a sprinting controller with no dash cooldown. */
+    private static final float WALK = 0.09F;
+    private static final float SPRINT = 0.09F + 0.1F;
+    private static final ServerboundPlayerInput FORWARD_SPRINT =
+            new ServerboundPlayerInput(true, false, false, false, false, false, true);
+    private static final ServerboundPlayerInput LEFT =
+            new ServerboundPlayerInput(false, false, true, false, false, false, false);
     private static final ServerboundPlayerInput FORWARD_LEFT_SPRINT =
             new ServerboundPlayerInput(true, false, true, false, false, false, true);
     private static final ServerboundPlayerInput RIGHT_SPRINT =
@@ -59,6 +67,76 @@ class CamelServerSprintFlagTest {
             assertExact(ride(
                     f, 502.96863F, 142.96863F, 44.017624F, new Vec3(4.46178671554094, FLOOR_Y, 4.92901112445836)));
         }
+    }
+
+    /**
+     * The server's sprint stop reaches a rider still holding forward and sprint: LocalPlayer#aiStep sprints again in
+     * the same tick and LocalPlayer#sendIsSprintingIfNeeded sends nothing, so only one travel lacks the bonus.
+     */
+    @Test
+    void aRiderHoldingSprintSprintsAgainAfterTheServersStop() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            mountAtRest(f, FORWARD_SPRINT, true);
+            sharedFlags(f, (byte) 0);
+
+            double velocity = forwardInput(WALK);
+            double z = REST.z + velocity;
+            assertExact(ride(f, 0F, 0F, 0F, new Vec3(REST.x, REST.y, z)));
+            velocity = velocity * GROUND_FRICTION + forwardInput(SPRINT);
+            z += velocity;
+            assertExact(ride(f, 0F, 0F, 0F, new Vec3(REST.x, REST.y, z)));
+        }
+    }
+
+    /**
+     * The server's sprint start reaches a rider strafing without forward: one travel has the bonus, then
+     * LocalPlayer#aiStep stops sprinting and LocalPlayer#sendIsSprintingIfNeeded sends nothing.
+     */
+    @Test
+    void aStrafingRiderStopsAgainAfterTheServersStart() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            mountAtRest(f, LEFT, false);
+            sharedFlags(f, (byte) 0x08);
+
+            double velocity = strafeInput(SPRINT);
+            double x = REST.x + velocity;
+            assertExact(ride(f, 0F, 0F, 0F, new Vec3(x, REST.y, REST.z)));
+            velocity = velocity * GROUND_FRICTION + strafeInput(WALK);
+            x += velocity;
+            assertExact(ride(f, 0F, 0F, 0F, new Vec3(x, REST.y, REST.z)));
+        }
+    }
+
+    /** LivingEntity#moveRelative of the full forward zza at {@code speed} on 0.6-friction ground. */
+    private static double forwardInput(float speed) {
+        return (double) 0.98F * (speed * (0.21600002F / (0.6F * 0.6F * 0.6F)));
+    }
+
+    /** LivingEntity#moveRelative of AbstractHorse#getRiddenInput's halved xxa at {@code speed}. */
+    private static double strafeInput(float speed) {
+        return (double) (0.98F * 0.5F) * (speed * (0.21600002F / (0.6F * 0.6F * 0.6F)));
+    }
+
+    /** The saddled, standing camel at rest at {@code REST}, ridden on {@code keys}, the rider sprinting or not. */
+    private static void mountAtRest(JavaTickFixture f, ServerboundPlayerInput keys, boolean sprinting) {
+        f.player.compensatedWorld.applyClientTime(new TimeUpdate(GAME_TIME, Map.of()));
+        f.place(REST, Vec3.ZERO);
+        f.player.compensatedEntities.addEntity(CAMEL, EntityTypeIds.CAMEL, REST, 0, 0, 0);
+        PacketEntityCamel camel = (PacketEntityCamel) f.player.compensatedEntities.getEntity(CAMEL);
+        camel.hasSaddle = true;
+        camel.onGround = true;
+        f.player.compensatedEntities.updateEntityMetadata(
+                CAMEL,
+                List.of(
+                        new EntityMetadata.Entry(DASH, false, ByteBuffer.allocate(0)),
+                        new EntityMetadata.Entry(LAST_POSE_CHANGE_TICK, GAME_TIME - 1000L, ByteBuffer.allocate(0))));
+        f.setPassengers(CAMEL, List.of(f.player.entityID));
+        f.pongThrough(f.player.lastTransactionSent.get());
+        f.input(keys);
+        if (sprinting) command(f, PlayerCommandAction.START_SPRINTING);
+        f.tickEnd();
+        f.player.checkManager.getSimulationProcessor().seedStartingVelocity(new Vec3(0.0, GROUNDED_Y, 0.0));
+        f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
     }
 
     /** The grounded camel's velocity after it moved {@code moved} unobstructed: LivingEntity#travelInAir's friction. */
