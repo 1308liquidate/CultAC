@@ -186,7 +186,7 @@ public class PredictionResult {
         Vec3 closest = getAcceptedClosestToTarget();
         Vec3 diff = getTarget().subtract(closest);
         Vec3 minimumInputRequired = HorizontalAnalyzer.getBestTheoreticalPlayerInput(
-                diff, getSimulationContext().getXRot());
+                diff, getSimulationContext().getXRot(), getSimulationContext().getVersion());
         return new Vec3(minimumInputRequired.x, closest.y, minimumInputRequired.z);
     }
 

@@ -97,6 +97,7 @@ public class PacketPlayerRespawn {
         var spawnInfo = packet.spawnInfo();
         player.gamemode = ac.cult.cultac.protocol.value.GameMode.valueOf(
                 spawnInfo.gameMode().name());
+        player.serverGamemode = player.gamemode;
         player.canInstabuild = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE;
         player.isInvulnerable = player.gamemode == ac.cult.cultac.protocol.value.GameMode.CREATIVE
                 || player.gamemode == ac.cult.cultac.protocol.value.GameMode.SPECTATOR;
@@ -226,6 +227,7 @@ public class PacketPlayerRespawn {
         String dimension = HolderSets.identifier(spawnInfo.dimension());
         String worldName = spawnInfo.dimension();
         final GameMode respawnMode = GameMode.valueOf(spawnInfo.gameMode().name());
+        player.serverGamemode = respawnMode;
         final boolean instabuild = respawnMode == GameMode.CREATIVE;
         final boolean invulnerable = respawnMode == GameMode.CREATIVE || respawnMode == GameMode.SPECTATOR;
         int preceding = player.lastTransactionSent.get();

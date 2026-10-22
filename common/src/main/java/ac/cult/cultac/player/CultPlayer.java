@@ -317,6 +317,8 @@ public class CultPlayer implements GrimUser {
     public int minPlayerAttackSlow = 0;
     public int maxPlayerAttackSlow = 0;
     public @MonotonicNonNull GameMode gamemode;
+    /** The mode of the last packet the server sent, which the client only adopts once it acknowledges that packet. */
+    public @MonotonicNonNull GameMode serverGamemode;
     public @MonotonicNonNull String dimension;
     public @Nullable String world;
     public @Nullable Vec3 bedPosition;

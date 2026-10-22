@@ -29,6 +29,7 @@ public class PacketChangeGameState extends CultProcessor implements CheckListene
             case 3 -> GameMode.SPECTATOR;
             default -> GameMode.SURVIVAL;
         };
+        player.serverGamemode = next;
         PlayerObserver observer = player.observer;
         if (observer != null) observer.gameModeSent(next);
         // MultiPlayerGameMode#setLocalMode -> GameType#updatePlayerAbilities. An explicit

@@ -976,7 +976,7 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     }
 
     public void setCreativeSlot(int slot, SimItemStack stack) {
-        if (player.gamemode == GameMode.CREATIVE && slot >= 1 && slot <= 45) {
+        if (player.gamemode == GameMode.CREATIVE && player.serverGamemode == GameMode.CREATIVE && slot >= 1 && slot <= 45) {
             inventory.getSlot(slot).set(ItemUtil.copy(stack));
             // ServerGamePacketListenerImpl#handleSetCreativeModeSlot sets the remote slot without echoing.
             observeServerSlot(false, slot, inventory.getSlot(slot), stack);

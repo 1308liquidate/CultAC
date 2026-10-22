@@ -10,6 +10,7 @@ import ac.cult.cultac.checks.impl.prediction.checks.psuedo.OmniSprint;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.Speed;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.Strafe;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.NumFormatter;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
@@ -57,7 +58,10 @@ public class HorizontalAnalyzer implements EngineCheck {
         double horizDiffZ = target.z - closestForSpeed.z;
 
         Vec3 minimumInputRequired = getBestTheoreticalPlayerInput(
-                horizDiffX, horizDiffZ, result.getSimulationContext().getXRot()); // player inputs
+                horizDiffX,
+                horizDiffZ,
+                result.getSimulationContext().getXRot(),
+                result.getSimulationContext().getVersion()); // player inputs
 
         // Can a player have a speed of 0?
         double inputScaledToSpeed = minimumInputRequired.length() / playerSpeed;
@@ -371,8 +375,10 @@ public class HorizontalAnalyzer implements EngineCheck {
         };
         for (float[] table : tables) {
             float sin = table[0], cos = table[1];
-            double x = residualX * cos + residualZ * sin;
-            double z = residualZ * cos - residualX * sin;
+            double scale = (double) sin * sin + (double) cos * cos;
+            if (scale == 0) continue;
+            double x = (residualX * cos + residualZ * sin) / scale;
+            double z = (residualZ * cos - residualX * sin) / scale;
             best = Math.min(best, cost.at(x, z));
             // A world X/Z unit rotates to these input-space directions
             if (sideX != 0) best = Math.min(best, cost.minimumAlong(x, z, sideX * cos, -sideX * sin));
@@ -426,31 +432,55 @@ public class HorizontalAnalyzer implements EngineCheck {
         return best;
     }
 
-    public static Vec3 getBestTheoreticalPlayerInput(Vec3 wantedMovement, float f2) {
-        return getBestTheoreticalPlayerInput(wantedMovement.x, wantedMovement.z, f2);
+    public static Vec3 getBestTheoreticalPlayerInput(Vec3 wantedMovement, float f2, ClientVersion version) {
+        return getBestTheoreticalPlayerInput(wantedMovement.x, wantedMovement.z, f2, version);
     }
 
-    public static Vec3 getBestTheoreticalPlayerInput(double wantedX, double wantedZ, float f2) {
-        float vanillaSin = VanillaMath.sin(f2 * 0.017453292f);
-        float vanillaCos = VanillaMath.cos(f2 * 0.017453292f);
-        double correctX = wantedX * vanillaCos + wantedZ * vanillaSin;
-        double correctZ = wantedZ * vanillaCos - wantedX * vanillaSin;
-        double absX = Math.abs(correctX);
-        double absZ = Math.abs(correctZ);
-        double correctMathDiff = Math.min(Math.min(Math.abs(absX - absZ), absX), absZ);
+    public static Vec3 getBestTheoreticalPlayerInput(double wantedX, double wantedZ, float f2, ClientVersion version) {
+        float radians = f2 * 0.017453292f;
+        Vec3 correctMath = invertInputRotation(
+                wantedX, wantedZ, VanillaMath.sin(version, radians), VanillaMath.cos(version, radians));
+        Vec3 shitMath = invertInputRotation(wantedX, wantedZ, OptifineFastMath.sin(radians), OptifineFastMath.cos(radians));
 
-        float f3 = OptifineFastMath.sin(f2 * 0.017453292f);
-        float f4 = OptifineFastMath.cos(f2 * 0.017453292f);
-        double shitX = wantedX * f4 + wantedZ * f3;
-        double shitZ = wantedZ * f4 - wantedX * f3;
-        absX = Math.abs(shitX);
-        absZ = Math.abs(shitZ);
-        double shitMathDiff = Math.min(Math.min(Math.abs(absX - absZ), absX), absZ);
-
-        if (correctMathDiff < shitMathDiff) {
-            return new Vec3(correctX, 0, correctZ);
-        } else {
-            return new Vec3(shitX, 0, shitZ);
+        if (correctMath == null || shitMath == null) {
+            if (correctMath != null) return correctMath;
+            if (shitMath != null) return shitMath;
+            return unreachableInput(wantedX, wantedZ);
         }
+
+        // Only a table saturated by a huge yaw shrinks its rotation, so the other table needs less input
+        double correctLength = correctMath.lengthSqr();
+        double shitLength = shitMath.lengthSqr();
+        if (Math.abs(correctLength - shitLength) > 1.0E-3 * Math.max(correctLength, shitLength)) {
+            return correctLength < shitLength ? correctMath : shitMath;
+        }
+
+        if (distanceToValidInput(correctMath) < distanceToValidInput(shitMath)) {
+            return correctMath;
+        } else {
+            return shitMath;
+        }
+    }
+
+    // Entity#getInputVector rotates input by [[cos, -sin], [sin, cos]], a rotation scaled by sin^2 + cos^2.
+    // The trig tables only keep that scale at 1 for sane yaws; huge yaws saturate the table index and shrink it
+    // towards 0, so dividing it back out is required for the leftover movement to map to the input that caused it.
+    private static Vec3 invertInputRotation(double movementX, double movementZ, float sin, float cos) {
+        double scale = (double) sin * sin + (double) cos * cos;
+        if (scale == 0) return null; // No input moves the player at this yaw
+        return new Vec3((movementX * cos + movementZ * sin) / scale, 0, (movementZ * cos - movementX * sin) / scale);
+    }
+
+    private static Vec3 unreachableInput(double movementX, double movementZ) {
+        double length = Math.sqrt(movementX * movementX + movementZ * movementZ);
+        if (length == 0) return Vec3.ZERO;
+        // Finite so the flag severity stays usable by setbacks
+        return new Vec3(movementX / length * Float.MAX_VALUE, 0, movementZ / length * Float.MAX_VALUE);
+    }
+
+    private static double distanceToValidInput(Vec3 input) {
+        double absX = Math.abs(input.x);
+        double absZ = Math.abs(input.z);
+        return Math.min(Math.min(Math.abs(absX - absZ), absX), absZ);
     }
 }
