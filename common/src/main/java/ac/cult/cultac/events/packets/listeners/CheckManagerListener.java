@@ -1057,9 +1057,10 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
         }
 
         dispatchReceiveHandlers(event, player);
-        if (reachesServer(event)
-                && (action == PlayerAction.START_DESTROY_BLOCK || action == PlayerAction.STOP_DESTROY_BLOCK)) {
-            player.blockActionReconciler.forwarded(packet.sequence());
+        if (action == PlayerAction.START_DESTROY_BLOCK || action == PlayerAction.STOP_DESTROY_BLOCK) {
+            // BlockStatePredictionHandler keeps the predicted break until a block-changed ack reaches its sequence
+            if (reachesServer(event)) player.blockActionReconciler.forwarded(packet.sequence());
+            else player.blockActionReconciler.rejectDig(packet);
         }
         clearTransientPacketState(player);
     }

@@ -65,9 +65,6 @@ public class PacketPlayerDigging {
             if (blockBreak.isCancelled()) {
                 event.setCancelled(true);
                 player.onPacketCancel();
-                player.getResyncHandler()
-                        .resyncPosition(
-                                blockPosition.getX(), blockPosition.getY(), blockPosition.getZ(), packet.sequence());
                 return;
             }
 

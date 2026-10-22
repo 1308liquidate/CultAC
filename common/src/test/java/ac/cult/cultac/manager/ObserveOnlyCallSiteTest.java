@@ -138,6 +138,7 @@ class ObserveOnlyCallSiteTest {
             [reachesServer(] CheckManagerListener.reachesServer(PacketReceiveEvent) is true in observe-only
             events/packets/listeners/CheckManagerListener.java#handle(PacketReceiveEvent,CultPlayer,Object) rejectEarly
             events/packets/listeners/CheckManagerListener.java#onContainerClick(PacketReceiveEvent,CultPlayer,InventoryClick) resyncCancelledClick
+            events/packets/listeners/CheckManagerListener.java#processPlayerActionReceive(PacketReceiveEvent,CultPlayer,ServerboundPlayerAction) rejectDig
             [] sends the correction its caller decided on; each caller is listed
             events/packets/patch/ResyncWorldUtil.java#sendServerStates(CultPlayer,Collection,int) sendCorrections x2
             utils/latency/BlockActionReconciler.java#rejectEarly(Object) rejectDig
