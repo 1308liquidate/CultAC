@@ -163,7 +163,7 @@ public final class JavaFallDistance {
      * client landed on it. {@code movementY} is client space, so the clip (stored divided by
      * Entity#stuckSpeedMultiplier) must be scaled back first - see CollideAxisData.CollideResult.
      */
-    static boolean landsOnClip(CollideAxisData.CollideResult down, double movementY, double stuckSpeedY) {
+    public static boolean landsOnClip(CollideAxisData.CollideResult down, double movementY, double stuckSpeedY) {
         return down != null && down.isLikelyCollide() && sameMoveY(movementY, down.inMovementSpace(stuckSpeedY));
     }
 

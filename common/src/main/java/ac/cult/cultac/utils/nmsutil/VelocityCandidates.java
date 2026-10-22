@@ -5,6 +5,7 @@ import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaFallDistance;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.Ladder;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
@@ -190,14 +191,20 @@ public final class VelocityCandidates {
     }
 
     private static OptionalDouble requiredPacketVisibleSlimeBounceY(PredictionResult result, double clippedY) {
-        if (result.getInitialStartingVel() == null
-                || result.getCollideAxisData().getYNeg() == null
-                || !result.getCollideAxisData().getYNeg().isLikelyCollide()) {
+        if (result.getInitialStartingVel() == null) {
             return OptionalDouble.empty();
         }
 
         SimulationContext context = result.getSimulationContext();
         if (context == null || context.getVehicle() != null || context.isSneaking() || context.getWorldData() == null) {
+            return OptionalDouble.empty();
+        }
+
+        // Entity#move bounces only on verticalCollisionBelow, so the accepted move must end on the probed downward
+        // clip. A move that stops short of the floor the probe found never reached it.
+        Vec3 stuckSpeed = context.getLastStuckSpeed();
+        if (!JavaFallDistance.landsOnClip(
+                result.getCollideAxisData().getYNeg(), clippedY, stuckSpeed == null ? 1.0D : stuckSpeed.y)) {
             return OptionalDouble.empty();
         }
 
