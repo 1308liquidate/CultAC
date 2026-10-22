@@ -5,7 +5,6 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
-import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.data.BubbleColumnData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
@@ -44,8 +43,7 @@ public class BubbleColumn implements UncertaintyHandler {
     static boolean beforeElytra(SimulationContext context) {
         return context.getVehicle() == null
                 && context.usesFallFlyingMovement()
-                && !context.getWorldData().mustBeInLiquid()
-                && context.getVersion().isNewerThanOrEquals(ClientVersion.V_26_1);
+                && !context.getWorldData().mustBeInLiquid();
     }
 
     static PredVector apply(SimulationContext context, PredictionResult lastResult, PredVector start, double targetY) {
