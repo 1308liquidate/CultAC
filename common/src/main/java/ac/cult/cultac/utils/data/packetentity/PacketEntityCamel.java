@@ -68,6 +68,12 @@ public class PacketEntityCamel extends PacketEntityHorse {
         }
     }
 
+    /** Camel#standUpInstantly, which Camel#tick runs on the client for a sitting camel in water. */
+    public void standUpInstantly(long gameTime) {
+        actionPose = EntityPose.STANDING;
+        lastPoseChangeTick = Math.max(0L, gameTime - 52L - 1L);
+    }
+
     /** Camel#onSyncedDataUpdated: every DASH entry after the first tick sets a spent dash cooldown to 55. */
     public void setDashingFromMetadata(boolean dashing) {
         if (!firstTick && dashCooldown == 0) {

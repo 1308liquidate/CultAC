@@ -190,6 +190,15 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
         if (riding instanceof PacketEntityCamel camel && camel.actionAlive) {
             // LocalPlayer#aiStep set zza from the keys this tick's root reads.
             camel.tickRidden(player.boatData.vehicleForward > 0.0F, player.compensatedWorld.clientGameTime());
+            // Camel#tick then stands a sitting camel up at once in water; Entity#baseTick set isInWater at the start.
+            if (camel.isCamelSitting()
+                    && !result.getSimulationContext()
+                            .getWorldData()
+                            .getInWater()
+                            .getStates()
+                            .contains(false)) {
+                camel.standUpInstantly(player.compensatedWorld.clientGameTime());
+            }
         }
 
         // For performance reasons - and to make debugging less painful - don't try spamming jumps

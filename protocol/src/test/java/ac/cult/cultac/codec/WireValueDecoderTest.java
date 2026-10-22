@@ -623,6 +623,26 @@ class WireValueDecoderTest {
         }
     }
 
+    /** Camel's LAST_POSE_CHANGE_TICK is the only long the model reads. */
+    @Test
+    void metadataLongsAreDecoded() throws Exception {
+        for (var version : ProtocolVersion.values()) {
+            var types = PrivateCodecService.types(version);
+            var entries = List.of(new EntityData(20, field(types.entityDataTypes(), "longType"), -1234L));
+            var input = Unpooled.buffer();
+            try {
+                types.entityDataList().write(input, entries);
+                var decoded = decoder.metadata(version, input, names(version));
+                assertEquals(1, decoded.size());
+                assertEquals("value", decoded.getFirst().kind(), version.toString());
+                assertEquals(-1234L, decoded.getFirst().value(), version.toString());
+                assertFalse(input.isReadable());
+            } finally {
+                input.release();
+            }
+        }
+    }
+
     @Test
     void metadataOfEveryLengthIsAnImmutableListInWireOrder() throws Exception {
         for (var version : ProtocolVersion.values()) {
