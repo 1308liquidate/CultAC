@@ -46,6 +46,25 @@ tasks.register("printVersion") {
     }
 }
 
+// ---------- Decompiled Minecraft sources ----------
+// ./gradlew mcsrc [-Pmcsrc.version=<snapshot>] [-Pmcsrc.min=<release>] [-Pmcsrc.max=<release>]
+// Full client source of the max release plus per-class patches back to the min release, in mc-sources/.
+// A version outside that release range (a newer snapshot) only gets a patch from the max release.
+tasks.register<mcsrc.GenerateMinecraftSources>("mcsrc") {
+    group = "minecraft"
+    description = "Decompiles the pinned Minecraft release and writes patches to older releases into mc-sources/"
+    minVersion.set(providers.gradleProperty("mcsrc.min").orElse(providers.gradleProperty("runtimeHostMinVersion")))
+    // The pinned max is the Minecraft version of the Paper dev bundle (26.3.build.N-beta -> 26.3).
+    maxVersion.set(
+        providers.gradleProperty("mcsrc.max")
+            .orElse(providers.gradleProperty("paperDevBundleVersion").map { it.substringBefore(".build") })
+    )
+    selectedVersion.set(providers.gradleProperty("mcsrc.version"))
+    decompilerMaxHeap.set(providers.gradleProperty("mcsrc.decompilerHeap").orElse("8g"))
+    cacheDir.set(gradle.gradleUserHomeDir.resolve("caches/cultac-mcsrc"))
+    outputDir.set(layout.projectDirectory.dir("mc-sources"))
+}
+
 // ---------- Java Compile Optimization ----------
 subprojects {
     repositories.maven("https://repo.papermc.io/repository/maven-public/") {
