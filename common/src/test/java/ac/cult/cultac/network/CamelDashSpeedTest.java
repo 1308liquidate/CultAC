@@ -39,6 +39,7 @@ class CamelDashSpeedTest {
     private static final long GAME_TIME = 1117419L;
     /** LivingEntity#travelInAir: a grounded camel's (0 - 0.08) * 0.98F. */
     private static final double GROUNDED_Y = -0.0784000015258789;
+
     private static final double GROUND_FRICTION = 0.6F * 0.91F;
     private static final ServerboundPlayerInput FORWARD_SPRINT =
             new ServerboundPlayerInput(true, false, false, false, false, false, true);
@@ -93,7 +94,8 @@ class CamelDashSpeedTest {
 
     /** One client tick: the rider's Rot, the camel's move at half the pitch and the tick end. */
     private static PredictionResult ride(JavaTickFixture f, float yaw, float pitch, Vec3 to) {
-        PredictionResult previous = f.player.checkManager.getSimulationProcessor().getLastPrediction();
+        PredictionResult previous =
+                f.player.checkManager.getSimulationProcessor().getLastPrediction();
         var rot = new ServerboundMovePlayer(0, 0, 0, yaw, pitch, false, false, false, true);
         f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
         var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), yaw, pitch * 0.5F, false, true);

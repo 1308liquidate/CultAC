@@ -38,12 +38,14 @@ class CamelStandUpTest {
     private static final long GAME_TIME = 1090559L;
     /** Camel DASH and LAST_POSE_CHANGE_TICK in the 26.3 metadata layout. */
     private static final int DASH = 19;
+
     private static final int LAST_POSE_CHANGE_TICK = 20;
     private static final Vec3 START = new Vec3(0.35498046875, FLOOR_Y, 0.969970703125);
     /** Camel#getRiddenSpeed: movement_speed 0.09 plus 0.1 for a sprinting controller with no dash cooldown. */
     private static final float SPEED = 0.09F + 0.1F;
     /** LivingEntity#travelInAir: a grounded camel's (0 - 0.08) * 0.98F. */
     private static final double GROUNDED_Y = -0.0784000015258789;
+
     private static final double GROUND_FRICTION = 0.6F * 0.91F;
     /** LivingEntity#moveRelative for the ridden input's 0.98F on 0.6-friction ground. */
     private static final double GROUND_INPUT = (double) 0.98F * (SPEED * (0.21600002F / (0.6F * 0.6F * 0.6F)));
@@ -157,10 +159,7 @@ class CamelStandUpTest {
         f.pongThrough(f.player.lastTransactionSent.get());
         f.input(IDLE);
         f.tickEnd();
-        f.player
-                .checkManager
-                .getSimulationProcessor()
-                .seedStartingVelocity(new Vec3(carried.x, GROUNDED_Y, carried.z));
+        f.player.checkManager.getSimulationProcessor().seedStartingVelocity(new Vec3(carried.x, GROUNDED_Y, carried.z));
         f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
     }
 

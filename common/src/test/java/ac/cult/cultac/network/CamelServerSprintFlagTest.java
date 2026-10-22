@@ -42,10 +42,12 @@ class CamelServerSprintFlagTest {
     private static final long GAME_TIME = 1093579L;
     /** LivingEntity#travelInAir: a grounded camel's (0 - 0.08) * 0.98F. */
     private static final double GROUNDED_Y = -0.0784000015258789;
+
     private static final double GROUND_FRICTION = 0.6F * 0.91F;
     private static final Vec3 REST = new Vec3(0.5, FLOOR_Y, 0.5);
     /** Camel#getRiddenSpeed: movement_speed 0.09, plus 0.1 for a sprinting controller with no dash cooldown. */
     private static final float WALK = 0.09F;
+
     private static final float SPRINT = 0.09F + 0.1F;
     private static final ServerboundPlayerInput FORWARD_SPRINT =
             new ServerboundPlayerInput(true, false, false, false, false, false, true);
@@ -64,8 +66,8 @@ class CamelServerSprintFlagTest {
             mount(f, start, carried(start.subtract(before)));
             sharedFlags(f, (byte) 0);
 
-            assertExact(ride(
-                    f, 502.96863F, 142.96863F, 44.017624F, new Vec3(4.46178671554094, FLOOR_Y, 4.92901112445836)));
+            assertExact(
+                    ride(f, 502.96863F, 142.96863F, 44.017624F, new Vec3(4.46178671554094, FLOOR_Y, 4.92901112445836)));
         }
     }
 
@@ -200,7 +202,8 @@ class CamelServerSprintFlagTest {
 
     /** One client tick: the rider's Rot, the camel's grounded move at half the pitch and the tick end. */
     private static PredictionResult ride(JavaTickFixture f, float riderYaw, float camelYaw, float pitch, Vec3 to) {
-        PredictionResult previous = f.player.checkManager.getSimulationProcessor().getLastPrediction();
+        PredictionResult previous =
+                f.player.checkManager.getSimulationProcessor().getLastPrediction();
         var rot = new ServerboundMovePlayer(0, 0, 0, riderYaw, pitch, false, false, false, true);
         f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
         var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), camelYaw, pitch * 0.5F, true, true);
