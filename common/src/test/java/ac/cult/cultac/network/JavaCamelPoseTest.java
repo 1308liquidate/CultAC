@@ -7,17 +7,24 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.blocksim.data.BlockIds;
+import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.events.packets.listeners.PacketEntityAction;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.EntityMetadata;
 import ac.cult.cultac.network.packet.WorldPackets;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
+import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.EntityPose;
+import ac.cult.cultac.protocol.value.PlayerCommandAction;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
@@ -80,6 +87,39 @@ class JavaCamelPoseTest {
             PredictionResult still = f.rideTick(SEAT, true);
             assertFalse(exact(still), describe(still));
         }
+    }
+
+    @Test
+    void aSittingCamelInWaterStandsUpBeforeItsRiderReleasesAJump() throws Exception {
+        try (var f = sitting()) {
+            shallowWater(f);
+            // Camel#tick stood the camel up instantly before LocalPlayer#aiStep released the jump; onPlayerJump(0)
+            // still arms the minimum 0.4 scale.
+            releaseJump(f);
+            assertEquals(0.4F, camel(f).nextHorseJump);
+        }
+    }
+
+    @Test
+    void aSittingCamelOnDryGroundDropsItsRidersJump() throws Exception {
+        try (var f = sitting()) {
+            releaseJump(f);
+            assertEquals(0.0D, camel(f).nextHorseJump);
+        }
+    }
+
+    private static void releaseJump(JavaTickFixture f) {
+        var jump = new ServerboundPlayerCommand(f.player.entityID, PlayerCommandAction.START_JUMPING_WITH_HORSE, 0);
+        new PacketEntityAction().onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, jump), f.player, jump);
+    }
+
+    /** Level-7 water over the floor under the camel, once its block-change timing uncertainty has expired. */
+    private static void shallowWater(JavaTickFixture f) {
+        int shallow = DataTables.defaults().registry().with(BlockIds.WATER.defaultState(), "level", "7");
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) f.player.compensatedWorld.updateBlock(new BlockPos(x, FLOOR_Y, z), shallow);
+        }
+        for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
     }
 
     /** A saddled camel that sat down long enough ago to have finished its 40-tick sitting transition. */
