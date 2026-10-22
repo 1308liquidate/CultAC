@@ -593,7 +593,7 @@ public class SimulationContext {
      * passenger's LocalPlayer#aiStep then re-sprints before sendIsSprintingIfNeeded, so no STOP_SPRINTING is sent.
      */
     public DesyncStatus getCamelRiderSprinting(CultPlayer player) {
-        if (player.vehicleData.camelSprintingState == SprintingState.STOPPED
+        if (player.vehicleData.camelSprintingState != SprintingState.STARTED
                 || minAttackSlow > 0) {
             return DesyncStatus.FALSE;
         }

@@ -89,8 +89,8 @@ public class PacketSelfMetadataListener {
                         player.packetStateData.swimmingPossible = isSwimming;
                         player.sprintState.onServerFlag(isSprinting);
                         if (!isSprinting) {
-                            // The local client can retain its Camel sprint input for
-                            // the movement tick in which the replicated flag stops.
+                            // Minecraft#runTick applies the flag before the next tick's
+                            // camel travel reads the controller's sprint.
                             player.vehicleData.camelSprintingState = SprintingState.STOPPING;
                         }
                         // Protect this due to players being able to get the server to spam this packet a lot

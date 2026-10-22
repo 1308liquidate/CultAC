@@ -1,0 +1,143 @@
+package ac.cult.cultac.network;
+
+import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
+import static ac.cult.cultac.network.JavaTickFixture.describe;
+import static ac.cult.cultac.network.JavaTickFixture.exact;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
+import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.events.packets.listeners.PacketEntityAction;
+import ac.cult.cultac.events.packets.listeners.PacketSelfMetadataListener;
+import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.packet.EntityMetadata;
+import ac.cult.cultac.network.packet.WorldPackets.TimeUpdate;
+import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.PacketType;
+import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundMoveVehicle;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.PlayerCommandAction;
+import ac.cult.cultac.protocol.value.Vec3d;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
+import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
+import java.nio.ByteBuffer;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+
+/**
+ * A vanilla 26.3 client strafing a camel after it stopped sprinting (CultAC issue #96, second capture, tick seq 7929),
+ * shifted by (-160, -8, -160) onto the fixture's floor. The server's echo of the stop is acknowledged before the next
+ * tick: Minecraft#runTick applies it ahead of the camel's travel, so Camel#getRiddenSpeed has no sprint bonus.
+ */
+class CamelServerSprintFlagTest {
+    private static final int CAMEL = 124;
+    private static final int DASH = 19;
+    private static final int LAST_POSE_CHANGE_TICK = 20;
+    private static final long GAME_TIME = 1093579L;
+    /** LivingEntity#travelInAir: a grounded camel's (0 - 0.08) * 0.98F. */
+    private static final double GROUNDED_Y = -0.0784000015258789;
+    private static final double GROUND_FRICTION = 0.6F * 0.91F;
+    private static final ServerboundPlayerInput FORWARD_LEFT_SPRINT =
+            new ServerboundPlayerInput(true, false, true, false, false, false, true);
+    private static final ServerboundPlayerInput RIGHT_SPRINT =
+            new ServerboundPlayerInput(false, false, false, true, false, false, true);
+
+    @Test
+    void theServersSprintStopHoldsThroughTheNextCamelTravel() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 before = new Vec3(4.68418015415574, FLOOR_Y, 5.06837591517217);
+            Vec3 start = new Vec3(4.51755849908798, FLOOR_Y, 4.99541130541238);
+            mount(f, start, carried(start.subtract(before)));
+            sharedFlags(f, (byte) 0);
+
+            assertExact(ride(
+                    f, 502.96863F, 142.96863F, 44.017624F, new Vec3(4.46178671554094, FLOOR_Y, 4.92901112445836)));
+        }
+    }
+
+    /** The grounded camel's velocity after it moved {@code moved} unobstructed: LivingEntity#travelInAir's friction. */
+    private static Vec3 carried(Vec3 moved) {
+        return new Vec3(moved.x * GROUND_FRICTION, GROUNDED_Y, moved.z * GROUND_FRICTION);
+    }
+
+    /**
+     * The saddled, standing camel at {@code start} carrying {@code carried}. The rider sprints, then LocalPlayer#aiStep
+     * reads right alone and stops sprinting: the tick's STOP_SPRINTING follows its move.
+     */
+    private static void mount(JavaTickFixture f, Vec3 start, Vec3 carried) {
+        f.player.compensatedWorld.applyClientTime(new TimeUpdate(GAME_TIME, Map.of()));
+        f.place(start, Vec3.ZERO);
+        f.player.compensatedEntities.addEntity(CAMEL, EntityTypeIds.CAMEL, start, 142.56598F, 0, 0);
+        PacketEntityCamel camel = (PacketEntityCamel) f.player.compensatedEntities.getEntity(CAMEL);
+        camel.hasSaddle = true;
+        camel.onGround = true;
+        f.player.compensatedEntities.updateEntityMetadata(
+                CAMEL,
+                List.of(
+                        new EntityMetadata.Entry(DASH, false, ByteBuffer.allocate(0)),
+                        new EntityMetadata.Entry(LAST_POSE_CHANGE_TICK, GAME_TIME - 1000L, ByteBuffer.allocate(0))));
+        f.setPassengers(CAMEL, List.of(f.player.entityID));
+        f.pongThrough(f.player.lastTransactionSent.get());
+        f.input(FORWARD_LEFT_SPRINT);
+        command(f, PlayerCommandAction.START_SPRINTING);
+        f.tickEnd();
+        f.input(RIGHT_SPRINT);
+        command(f, PlayerCommandAction.STOP_SPRINTING);
+        f.tickEnd();
+        f.player.checkManager.getSimulationProcessor().seedStartingVelocity(carried);
+        f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
+    }
+
+    private static void command(JavaTickFixture f, PlayerCommandAction action) {
+        var command = new ServerboundPlayerCommand(f.player.entityID, action, 0);
+        new PacketEntityAction()
+                .onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, command), f.player, command);
+    }
+
+    /** The server's shared flags for the player, acknowledged by the client. */
+    private static void sharedFlags(JavaTickFixture f, byte flags) {
+        var packet = new EntityMetadata(
+                f.player.entityID,
+                List.of(new EntityMetadata.Entry(
+                        WatchableIndexUtil.ENTITY_SHARED_FLAGS, flags, ByteBuffer.allocate(0))));
+        var event = new PacketSendEvent<>(f.player.user, ConnectionPhase.PLAY, metadataType(), packet, false);
+        new PacketSelfMetadataListener().onSetEntityData(event, f.player, packet);
+        event.tasksAfter().forEach(Runnable::run);
+        f.pongThrough(f.player.lastTransactionSent.get());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static PacketType<EntityMetadata> metadataType() {
+        return (PacketType<EntityMetadata>) TestProtocolRuntime.catalog().stream()
+                .filter(type -> type.recordClass() == EntityMetadata.class)
+                .findFirst()
+                .orElseThrow();
+    }
+
+    /** One client tick: the rider's Rot, the camel's grounded move at half the pitch and the tick end. */
+    private static PredictionResult ride(JavaTickFixture f, float riderYaw, float camelYaw, float pitch, Vec3 to) {
+        PredictionResult previous = f.player.checkManager.getSimulationProcessor().getLastPrediction();
+        var rot = new ServerboundMovePlayer(0, 0, 0, riderYaw, pitch, false, false, false, true);
+        f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
+        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), camelYaw, pitch * 0.5F, true, true);
+        f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, move), f.player, move);
+        f.tickEnd();
+        PredictionResult result = f.player.checkManager.getSimulationProcessor().getLastPrediction();
+        assertTrue(result != null && result != previous, "the vehicle move was not predicted");
+        return result;
+    }
+
+    private static void assertExact(PredictionResult result) {
+        StringBuilder report = new StringBuilder(describe(result));
+        for (PredictionResult.Flag flag : result.getFlags()) {
+            report.append(' ').append(flag.getVerbose().getString());
+        }
+        assertTrue(exact(result), report.toString());
+    }
+}
