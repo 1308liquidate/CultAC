@@ -179,6 +179,11 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
             }
         }
 
+        if (riding instanceof PacketEntityCamel camel && camel.actionAlive) {
+            // LocalPlayer#aiStep set zza from the keys this tick's root reads.
+            camel.tickRidden(player.boatData.vehicleForward > 0.0F, player.compensatedWorld.clientGameTime());
+        }
+
         // For performance reasons - and to make debugging less painful - don't try spamming jumps
         PacketEntityHorse horse = player.compensatedEntities.vehicles.getClientVisibleHorseRoot();
         if (horse != null) {

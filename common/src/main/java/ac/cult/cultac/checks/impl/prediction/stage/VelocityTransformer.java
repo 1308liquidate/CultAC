@@ -56,6 +56,7 @@ public class VelocityTransformer {
             // LivingEntity#aiStep thresholds deltaMovement before travelRidden runs
             // AbstractHorse#tickRidden's rider jump and travel adds the ridden input.
             input = applyMovementThreshold(input, simulationContext.getVersion(), false);
+            input = applyCamelRefusal(player, input);
             input = applyRideableInput(player, input);
             return applyJumps(player, input);
         }
@@ -201,6 +202,24 @@ public class VelocityTransformer {
         return Double.isFinite(vector.x) && Double.isFinite(vector.y) && Double.isFinite(vector.z);
     }
 
+    /** Camel#travel clears the horizontal deltaMovement of a grounded camel that refuses to move. */
+    private List<PredVector> applyCamelRefusal(CultPlayer player, List<PredVector> input) {
+        if (!(simulationContext.getVehicle() instanceof PacketEntityCamel camel)
+                || !player.packetStateData.isVehicleMovementFromClientTick()
+                || !camel.refuseToMove(player.compensatedWorld.clientGameTime())) {
+            return input;
+        }
+
+        List<PredVector> refused = new ArrayList<>(input.size() * 2);
+        for (PredVector vector : input) {
+            for (boolean onGround : simulationContext.getLastOnGround().getStates()) {
+                addDistinctPredVector(
+                        refused, onGround ? vector.withXYZ(0.0D, vector.y, 0.0D, "camel refuses to move") : vector);
+            }
+        }
+        return refused;
+    }
+
     private List<PredVector> applyRideableInput(CultPlayer player, List<PredVector> input) {
         PacketEntity vehicle = simulationContext.getVehicle();
         // LivingEntity#aiStep runs travelRidden only while the root isAlive() (health > 0, not the dead
@@ -335,6 +354,12 @@ public class VelocityTransformer {
         PacketEntityHorse horse = simulationContext.getVehicle() instanceof PacketEntityHorse packetEntityHorse
                 ? packetEntityHorse
                 : null;
+        // Camel#getRiddenInput runs before Camel#tickRidden can stand the camel up.
+        if (horse instanceof PacketEntityCamel camel && camel.refuseToMove(player.compensatedWorld.clientGameTime())) {
+            addDistinctInputVector(vectors, Vec3.ZERO);
+            return vectors;
+        }
+
         boolean standingHorseCanZeroInput = standingHorseCanZeroInput(horse);
         boolean standingHorseCanUseNormalInput = standingHorseCanUseNormalInput(horse);
 

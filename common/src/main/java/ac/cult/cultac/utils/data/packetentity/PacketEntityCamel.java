@@ -1,6 +1,7 @@
 package ac.cult.cultac.utils.data.packetentity;
 
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.protocol.value.EntityPose;
 
 public class PacketEntityCamel extends PacketEntityHorse {
 
@@ -44,6 +45,24 @@ public class PacketEntityCamel extends PacketEntityHorse {
     /** Camel#getPoseTime at the client game time {@code gameTime}. */
     public long poseTime(long gameTime) {
         return gameTime - Math.abs(lastPoseChangeTick);
+    }
+
+    /** Camel#isInPoseTransition at the client game time {@code gameTime}. */
+    public boolean isInPoseTransition(long gameTime) {
+        return poseTime(gameTime) < (isCamelSitting() ? 40 : 52);
+    }
+
+    /** Camel#refuseToMove at the client game time {@code gameTime}. */
+    public boolean refuseToMove(long gameTime) {
+        return isCamelSitting() || isInPoseTransition(gameTime);
+    }
+
+    /** Camel#tickRidden: a controller with positive zza stands a fully seated camel up at {@code gameTime}. */
+    public void tickRidden(boolean forward, long gameTime) {
+        if (forward && isCamelSitting() && !isInPoseTransition(gameTime)) {
+            actionPose = EntityPose.STANDING;
+            lastPoseChangeTick = gameTime;
+        }
     }
 
     public void setDashingFromMetadata(boolean dashing) {
