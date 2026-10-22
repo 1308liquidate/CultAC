@@ -81,15 +81,52 @@ class VehicleSprintStateTest {
         }
     }
 
+    /** A passenger of a camel nobody controls never reaches LocalPlayer#sendIsSprintingIfNeeded mounted. */
     @Test
-    void gainingControlOfTheVehicleDoesNotRestoreAClearedFlag() throws Exception {
+    void aPassengerOfAnUnsaddledCamelThatMountedSprintingIsNotSprinting() throws Exception {
+        try (var f = ride(EntityTypeIds.CAMEL)) {
+            SprintH check = enabled(f);
+            f.player.isSprinting = true;
+            f.rideTick();
+            f.player.openWindow.onClientOpenOrCloseWindow(true);
+            for (int tick = 0; tick < 3; tick++) f.rideTick();
+
+            assertFalse(f.player.isClientSprinting());
+            assertFalse(MultiActionsC.isVerboseSprinting(f.player));
+            assertEquals(0, check.violations);
+        }
+    }
+
+    /**
+     * A tick controlling the camel ends in LocalPlayer#sendIsSprintingIfNeeded: a rider that no longer sprints sends
+     * STOP_SPRINTING there.
+     */
+    @Test
+    void gainingControlOfACamelSendsTheStopOfAClearedFlag() throws Exception {
+        try (var f = ride(EntityTypeIds.CAMEL)) {
+            f.player.isSprinting = true;
+            f.rideTick();
+            ((PacketEntityHorse) f.player.compensatedEntities.getEntity(VEHICLE)).hasSaddle = true;
+            command(f, PlayerCommandAction.STOP_SPRINTING);
+            f.rideTick();
+
+            assertFalse(f.player.isClientSprinting());
+        }
+    }
+
+    /**
+     * LocalPlayer#aiStep sprints a controlling rider holding forward and sprint again, which matches the last command
+     * sent, so LocalPlayer#sendIsSprintingIfNeeded sends nothing.
+     */
+    @Test
+    void gainingControlOfACamelWithoutAStopSprintsAgain() throws Exception {
         try (var f = ride(EntityTypeIds.CAMEL)) {
             f.player.isSprinting = true;
             f.rideTick();
             ((PacketEntityHorse) f.player.compensatedEntities.getEntity(VEHICLE)).hasSaddle = true;
             f.rideTick();
 
-            assertFalse(f.player.isClientSprinting());
+            assertTrue(f.player.isClientSprinting());
         }
     }
 
@@ -105,6 +142,20 @@ class VehicleSprintStateTest {
             assertFalse(f.player.isClientSprinting());
 
             startSprinting(f);
+
+            assertTrue(f.player.isClientSprinting());
+        }
+    }
+
+    /** LocalPlayer#sendPosition ends a tick on foot in LocalPlayer#sendIsSprintingIfNeeded. */
+    @Test
+    void aDismountedRiderThatSendsNoStopSprintsAgain() throws Exception {
+        try (var f = ride(EntityTypeIds.HORSE)) {
+            f.player.isSprinting = true;
+            f.rideTick();
+            f.setPassengers(VEHICLE, List.of());
+            f.pongThrough(f.player.lastTransactionSent.get());
+            f.tickEnd();
 
             assertTrue(f.player.isClientSprinting());
         }
@@ -139,7 +190,11 @@ class VehicleSprintStateTest {
     }
 
     private static void startSprinting(JavaTickFixture f) {
-        var command = new ServerboundPlayerCommand(f.player.entityID, PlayerCommandAction.START_SPRINTING, 0);
+        command(f, PlayerCommandAction.START_SPRINTING);
+    }
+
+    private static void command(JavaTickFixture f, PlayerCommandAction action) {
+        var command = new ServerboundPlayerCommand(f.player.entityID, action, 0);
         new PacketEntityAction()
                 .onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, command), f.player, command);
     }

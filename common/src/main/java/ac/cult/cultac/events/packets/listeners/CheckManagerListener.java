@@ -429,6 +429,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
             return;
         }
         if (player.compensatedEntities.getSelf().inVehicle()) return;
+        player.onFootClientTick();
         player.sprintState.onClientTick(player.isSprinting);
     }
 

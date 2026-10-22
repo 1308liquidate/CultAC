@@ -246,7 +246,8 @@ public class CultPlayer implements GrimUser {
     public boolean isSneaking;
     // The client's last START/STOP_SPRINTING (LocalPlayer#wasSprinting)
     public boolean isSprinting;
-    // LocalPlayer#aiStep cleared the sprint flag of a passenger without a STOP_SPRINTING; the next START_SPRINTING ends it.
+    // LocalPlayer#aiStep cleared the sprint flag of a passenger without a STOP_SPRINTING; the next tick that reaches
+    // LocalPlayer#sendIsSprintingIfNeeded ends it.
     public boolean sprintClearedAsPassenger;
     public final ClientSprintState sprintState = new ClientSprintState();
     public final ClientSwimState swimState = new ClientSwimState();
@@ -1538,17 +1539,25 @@ public class CultPlayer implements GrimUser {
     /**
      * Whether the client's sprint flag is set. LocalPlayer#aiStep clears it for a passenger whose vehicle cannot
      * sprint or that it does not control, and LocalPlayer#sendChanges sends no STOP_SPRINTING for a vehicle it does
-     * not control, so {@link #isSprinting} keeps the last START_SPRINTING until the client sprints or dismounts.
+     * not control, so {@link #isSprinting} keeps the last START_SPRINTING. A tick on foot or on a camel the player
+     * controls ends in LocalPlayer#sendIsSprintingIfNeeded, after which the flag is the last command sent.
      */
     public boolean isClientSprinting() {
         return isSprinting && !sprintClearedAsPassenger;
     }
 
-    /** A client tick mounted on {@code vehicle}: only a camel the player controls (Camel#canSprint) keeps the flag. */
+    /**
+     * A client tick mounted on {@code vehicle}. Every other vehicle ends the tick with the flag cleared (only
+     * Camel#canSprint); a camel the player controls ends it in LocalPlayer#sendIsSprintingIfNeeded.
+     */
     public void onMountedClientTick(PacketEntity vehicle) {
-        if (EntityTypeUtil.isCamelFamily(vehicle.type)
-                && compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(vehicle)) return;
-        sprintClearedAsPassenger = true;
+        sprintClearedAsPassenger = !EntityTypeUtil.isCamelFamily(vehicle.type)
+                || !compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(vehicle);
+    }
+
+    /** A client tick on foot: LocalPlayer#sendPosition ends it in LocalPlayer#sendIsSprintingIfNeeded. */
+    public void onFootClientTick() {
+        sprintClearedAsPassenger = false;
     }
 
     @Override
