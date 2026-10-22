@@ -25,7 +25,6 @@ import ac.cult.cultac.utils.math.VanillaMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.FlightToggle;
-import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -108,9 +107,8 @@ public class HorizontalAnalyzer implements EngineCheck {
         Vec3 from = result.getSimulationContext().getStart();
 
         // The logic is that if the player has collisions above this, they will simply go into swimming position
-        SimpleCollisionBox oldBox = GetBoundingBox.getBoundingBoxFromPosAndSize(from.x, from.y, from.z, 0.6f, 0.6f)
-                .expand(-SimpleCollisionBox.COLLISION_EPSILON);
-        if (!Collisions.isEmpty(player, oldBox)) {
+        // (the epsilon-shrunk 0.6 x 0.6 box at from, memoized across candidates while the pass is open)
+        if (!result.getSimulationContext().isStartFootprintEmpty(player, true)) {
             isSlowed = false;
         }
         if (player.inVehicle()) isSlowed = false;

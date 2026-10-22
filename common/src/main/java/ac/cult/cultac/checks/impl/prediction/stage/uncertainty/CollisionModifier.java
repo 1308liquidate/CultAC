@@ -13,7 +13,9 @@ import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
@@ -40,6 +42,13 @@ public class CollisionModifier implements UncertaintyHandler {
     private int resolvedStepCount;
     private final boolean javaTravelInput;
 
+    // Prediction-pass reuse, owned by one player's SimulationProcessor. Between beginPredictionPass and
+    // endPredictionPass the world, border, entities and player state are fixed, so a block gather with identical
+    // inputs returns equal boxes in identical order. Pass gathers hold their own colliders, not pooled ones, and
+    // every reader only reads them.
+    private CultPlayer passPlayer;
+    private final Map<GatherKey, List<SimpleCollisionBox>> passGathered = new HashMap<>();
+
     public CollisionModifier() {
         this(true);
     }
@@ -47,6 +56,21 @@ public class CollisionModifier implements UncertaintyHandler {
     /** {@code javaTravelInput}: the setPos guard measures Java LivingEntity#travel's horizontal input. */
     public CollisionModifier(boolean javaTravelInput) {
         this.javaTravelInput = javaTravelInput;
+    }
+
+    /**
+     * Starts a prediction pass for {@code player}: probes until {@link #endPredictionPass} reuse block collision
+     * gathers with identical inputs. Only call this for Java movement while the world, the world border's diameter,
+     * compensated entities and player state cannot change until the pass ends.
+     */
+    public void beginPredictionPass(CultPlayer player) {
+        endPredictionPass();
+        passPlayer = player;
+    }
+
+    public void endPredictionPass() {
+        passPlayer = null;
+        passGathered.clear();
     }
 
     @Override
@@ -323,9 +347,14 @@ public class CollisionModifier implements UncertaintyHandler {
                         .expand(horizontalInputReach * stuckSpeed.x, 0.0D, horizontalInputReach * stuckSpeed.z)
                 : grabBoxesBB;
 
-        List<SimpleCollisionBox> collisions = probeCollisions;
-        collisions.clear();
-        Collisions.getCollisionBoxes(player, blockQuery, collisions, false, playerPos.y, actor, pool);
+        List<SimpleCollisionBox> collisions;
+        if (passPlayer != null && passPlayer == player) {
+            collisions = passGatheredCollisions(player, blockQuery, playerPos.y, actor);
+        } else {
+            collisions = probeCollisions;
+            collisions.clear();
+            Collisions.getCollisionBoxes(player, blockQuery, collisions, false, playerPos.y, actor, pool);
+        }
 
         List<SimpleCollisionBox> found = probeUnknown;
         found.clear();
@@ -478,6 +507,44 @@ public class CollisionModifier implements UncertaintyHandler {
 
         return result;
     }
+
+    /**
+     * The pass's read-only gather for these exact getCollisionBoxes inputs. Its colliders are allocated rather than
+     * pooled, as the pool's colliders do not outlive the probe; a pooled collider equals a new one.
+     */
+    private List<SimpleCollisionBox> passGatheredCollisions(
+            CultPlayer player, SimpleCollisionBox queryBox, double entityBottom, JavaCollisionState actor) {
+        GatherKey key = new GatherKey(
+                queryBox.minX,
+                queryBox.minY,
+                queryBox.minZ,
+                queryBox.maxX,
+                queryBox.maxY,
+                queryBox.maxZ,
+                entityBottom,
+                actor);
+        List<SimpleCollisionBox> gathered = passGathered.get(key);
+        if (gathered == null) {
+            gathered = new ArrayList<>();
+            Collisions.getCollisionBoxes(player, queryBox, gathered, false, entityBottom, actor);
+            passGathered.put(key, gathered);
+        }
+        return gathered;
+    }
+
+    /**
+     * Every input of the probe's getCollisionBoxes call other than the pass-fixed player and world. Record equality
+     * compares the doubles with Double#compare, so only bitwise-equal coordinates (or NaN) share a gather.
+     */
+    private record GatherKey(
+            double minX,
+            double minY,
+            double minZ,
+            double maxX,
+            double maxY,
+            double maxZ,
+            double entityBottom,
+            JavaCollisionState actor) {}
 
     private ResolvedStep findResolvedStep(
             Collisions.Axis axis,

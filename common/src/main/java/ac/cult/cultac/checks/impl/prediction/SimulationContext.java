@@ -23,6 +23,7 @@ import ac.cult.cultac.utils.math.TrigHandler;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
+import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.Friction;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.List;
@@ -138,6 +139,35 @@ public class SimulationContext {
 
     @ToString.Exclude
     List<HardCollidingEntityCollision> hardCollidingEntityCollisionsForMovementTick;
+
+    // Prediction-pass memos, read and written only while SimulationProcessor#getPredictionResult has this
+    // context's pass open: the world, entities, border and player are fixed until that call returns. Outside it
+    // (for example setback or commit code reusing this context) the same accessors compute afresh. Each memo
+    // depends only on start, lastTickMainSupportingBlockData (neither has a setter) and that fixed state, never on
+    // worldData, which uncertainty handlers mutate per candidate.
+    @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    private boolean predictionPassOpen;
+
+    @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    private boolean passStartFrictionKnown;
+
+    @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    private float passStartFriction;
+
+    @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    private Boolean passStartFootprintEmpty;
+
+    @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    private Boolean passStartFootprintInteriorEmpty;
+
+    @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    private Boolean passStartClimbable;
 
     public SimulationContext(
             Vec3 start,
@@ -340,8 +370,58 @@ public class SimulationContext {
     }
 
     public float getMaxSpeed(CultPlayer player) {
-        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        float blockUnderPlayer = startFriction(player);
         return getFrictionInfluencedSpeed(blockUnderPlayer, player);
+    }
+
+    /** Opens this context's prediction pass; see {@link #closePredictionPass}. */
+    public void openPredictionPass() {
+        predictionPassOpen = true;
+    }
+
+    /** Ends the pass: later reads of the pass memos compute afresh, as the world may then change. */
+    public void closePredictionPass() {
+        predictionPassOpen = false;
+        passStartFrictionKnown = false;
+        passStartFootprintEmpty = null;
+        passStartFootprintInteriorEmpty = null;
+        passStartClimbable = null;
+    }
+
+    /** {@code BlockProperties.getFriction} at {@code start}; memoized while the prediction pass is open. */
+    private float startFriction(CultPlayer player) {
+        if (!predictionPassOpen) return BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        if (!passStartFrictionKnown) {
+            passStartFriction = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+            passStartFrictionKnown = true;
+        }
+        return passStartFriction;
+    }
+
+    /**
+     * {@code Collisions.isEmpty(player, box)} of the 0.6 x 0.6 box at {@code start}, shrunk by the collision epsilon
+     * when {@code interior}; memoized while the prediction pass is open.
+     */
+    public boolean isStartFootprintEmpty(CultPlayer player, boolean interior) {
+        Boolean empty =
+                !predictionPassOpen ? null : interior ? passStartFootprintInteriorEmpty : passStartFootprintEmpty;
+        if (empty != null) return empty;
+        SimpleCollisionBox box = GetBoundingBox.getBoundingBoxFromPosAndSize(start.x, start.y, start.z, 0.6f, 0.6f);
+        if (interior) box.expand(-SimpleCollisionBox.COLLISION_EPSILON);
+        boolean computed = Collisions.isEmpty(player, box);
+        if (predictionPassOpen) {
+            if (interior) passStartFootprintInteriorEmpty = computed;
+            else passStartFootprintEmpty = computed;
+        }
+        return computed;
+    }
+
+    /** {@code Collisions.onClimbable(player, start.x, start.y, start.z)}; memoized while the pass is open. */
+    public boolean isStartClimbable(CultPlayer player) {
+        if (predictionPassOpen && passStartClimbable != null) return passStartClimbable;
+        boolean climbable = Collisions.onClimbable(player, start.x, start.y, start.z);
+        if (predictionPassOpen) passStartClimbable = climbable;
+        return climbable;
     }
 
     /** Radius of the circular horizontal input allowance around the input-free movement of {@code candidate}. */
@@ -356,7 +436,7 @@ public class SimulationContext {
      * modifier allows there in {@code outcome}.
      */
     public double getHorizontalInputAllowance(CultPlayer player, ClientSprintState.Outcome outcome) {
-        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        float blockUnderPlayer = startFriction(player);
         double allowance = 0;
         for (boolean onGround : worldData.getLastOnGround().getStates()) {
             for (boolean water : worldData.getInWater().getStates()) {
@@ -388,7 +468,7 @@ public class SimulationContext {
      */
     public double getMaxSprintInputSpeed(CultPlayer player, PredVector candidate) {
         ClientSprintState.Outcome outcome = getSprintOutcome(player, candidate);
-        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        float blockUnderPlayer = startFriction(player);
         double maxSpeed = 0;
         for (boolean onGround : worldData.getLastOnGround().getStates()) {
             for (boolean water : worldData.getInWater().getStates()) {
@@ -424,7 +504,7 @@ public class SimulationContext {
         }
         float[] cached = groundMoveRelativeSpeeds[outcome.ordinal()];
         if (cached == null) {
-            float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+            float blockUnderPlayer = startFriction(player);
             double[] speeds = vehicle == null
                     ? entities.getPossiblePlayerMovementSpeeds(
                             sprintModifier && !player.sprintState.modifier(), outcome)
@@ -448,14 +528,14 @@ public class SimulationContext {
     }
 
     public float getMoveRelativeSpeed(CultPlayer player, boolean onGround, boolean water, boolean lava) {
-        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        float blockUnderPlayer = startFriction(player);
         return getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava);
     }
 
     /** The moveRelative speed of a ridden camel whose controller's sprint flag is {@code riderSprinting}. */
     public float getMoveRelativeSpeed(
             CultPlayer player, boolean onGround, boolean water, boolean lava, boolean riderSprinting) {
-        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        float blockUnderPlayer = startFriction(player);
         return getFrictionInfluencedSpeed(
                 blockUnderPlayer,
                 player,

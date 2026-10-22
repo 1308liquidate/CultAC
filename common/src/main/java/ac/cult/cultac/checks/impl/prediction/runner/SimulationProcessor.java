@@ -151,6 +151,9 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     private final CollisionModifier collisionProbe = new CollisionModifier();
     private final NextTickVelocityDeriver.Scratch velocityScratch = new NextTickVelocityDeriver.Scratch();
     private final StepCollisionMemo stepCollisionMemo = new StepCollisionMemo();
+    // Whether the running getPredictionResult opened its pass memos, and the contexts it opened them on.
+    private boolean predictionPassMemos;
+    private List<SimulationContext> predictionPassContexts = List.of();
 
     public SimulationProcessor(CultPlayer playerData) {
         super(playerData);
@@ -1568,8 +1571,12 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             AuthoredMovementFrame authoredMovementFrame,
             MovementProfile movementProfile) {
         // A time-based border lerp makes every collision read the clock, so a memoised one could go stale.
-        stepCollisionMemo.open(!player.isBedrockMovement()
-                && player.checkManager.getWorldBorder().hasClockIndependentDiameter());
+        boolean memoize = !player.isBedrockMovement()
+                && player.checkManager.getWorldBorder().hasClockIndependentDiameter();
+        stepCollisionMemo.open(memoize);
+        // Like stepCollisionMemo: the world, border, entities and player stay fixed until predict returns.
+        if (memoize) collisionProbe.beginPredictionPass(player);
+        predictionPassMemos = memoize;
         try {
             return predict(
                     player,
@@ -1586,6 +1593,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                     movementProfile);
         } finally {
             stepCollisionMemo.close();
+            collisionProbe.endPredictionPass();
+            predictionPassMemos = false;
+            for (SimulationContext context : predictionPassContexts) context.closePredictionPass();
+            predictionPassContexts = List.of();
         }
     }
 
@@ -1607,7 +1618,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         List<ValidMovements> valid = new ArrayList<>();
         MovementEngine engine = MovementEngines.requireForProfile(movementProfile);
 
-        for (SimulationContext curSimulationContext : this.createSimulationContexts(
+        List<SimulationContext> contexts = this.createSimulationContexts(
                 player,
                 lastPrediction,
                 target,
@@ -1618,7 +1629,14 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 xRot,
                 yRot,
                 authoredMovementFrame,
-                movementProfile)) {
+                movementProfile);
+        if (predictionPassMemos) {
+            // Closed by getPredictionResult's finally block.
+            predictionPassContexts = contexts;
+            for (SimulationContext context : contexts) context.openPredictionPass();
+        }
+
+        for (SimulationContext curSimulationContext : contexts) {
             List<PredVector> contextPacketStart = engine.applyModifiers(
                     new MovementModifiers(),
                     player,
