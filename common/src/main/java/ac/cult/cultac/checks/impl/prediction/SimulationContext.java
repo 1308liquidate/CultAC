@@ -97,6 +97,11 @@ public class SimulationContext {
     WorldData worldData;
 
     int riptideLevel;
+
+    /** TridentItem#releaseUsing spins this tick: it pushes, and lifts a player on ground. */
+    @Setter
+    boolean riptideReleaseCertain;
+
     LastInstance lastTickSkip;
     boolean isTestingPointThree;
     Vec3 lastStuckSpeed = NO_STUCK_SPEED;

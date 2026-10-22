@@ -51,6 +51,7 @@ public class PacketStateData {
     private int slowedByUsingItemSlot = Integer.MIN_VALUE;
     public KnownInput knownInput = KnownInput.DEFAULT;
     public int riptideLevel = 0;
+    public boolean riptideReleaseCertain = false;
     public int acceptedClientTick = 0;
     public int riptideUseStartClientTick = Integer.MIN_VALUE;
     public Hand riptideUseHand = null;

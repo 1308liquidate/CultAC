@@ -1095,6 +1095,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.lastSneaking = this.player.isSneaking;
             this.lastGliding = this.player.isGliding;
             this.player.packetStateData.riptideLevel = 0;
+            this.player.packetStateData.riptideReleaseCertain = false;
             this.player.riptideSpinAttackTicks = Math.max(0, this.player.riptideSpinAttackTicks - 1);
             this.couldPotentiallyTickSkip = false;
             this.player.compensatedEntities.fishingRodPulls.clear();
@@ -2091,6 +2092,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         PacketEntity traveller = riding == null ? player.compensatedEntities.getSelf() : riding;
         context.setWaterMovementEfficiency(getWaterMovementEfficiency(traveller, contextLastOnGround));
         context.setBoatInputs(player.boatData.vehicleKeys);
+        context.setRiptideReleaseCertain(player.packetStateData.riptideReleaseCertain);
         context.setProfileCarry(this.profileCarry);
         context.setBedrockTeleport(player.isBedrockMovement() ? this.bedrockTeleport : null);
         context = movementProfile.createContext(player, context, authoredMovementFrame);

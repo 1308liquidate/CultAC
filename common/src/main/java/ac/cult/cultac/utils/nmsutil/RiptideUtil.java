@@ -73,6 +73,18 @@ public final class RiptideUtil {
     }
 
     /**
+     * Whether the last move left Entity#wasTouchingWater set, so TridentItem#releaseUsing spins this valid release.
+     */
+    public static boolean isCertainRiptideRelease(CultPlayer player) {
+        if (player.compensatedEntities.getSelf().inVehicle()) {
+            return false;
+        }
+        PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
+        JavaFallDistance.Moved moved = last == null ? null : last.getJavaCommittedMove();
+        return moved != null && moved.touchingWater() == DesyncStatus.TRUE;
+    }
+
+    /**
      * Entity#wasTouchingWater as TridentItem#releaseUsing reads it: Minecraft#handleKeybinds runs before the tick's
      * baseTick, so the flag is the one the last move left after LivingEntity#checkFallDamage refreshed fluids.
      */

@@ -37,6 +37,7 @@ public class PacketPlayerDigging {
 
             if (j > 0 && RiptideUtil.isValidRiptideRelease(player, hand)) {
                 player.packetStateData.riptideLevel = j;
+                player.packetStateData.riptideReleaseCertain = RiptideUtil.isCertainRiptideRelease(player);
                 player.riptideSpinAttackTicks = 20;
             } else if (j > 0) {
                 player.packetStateData.invalidRiptideRelease = true;

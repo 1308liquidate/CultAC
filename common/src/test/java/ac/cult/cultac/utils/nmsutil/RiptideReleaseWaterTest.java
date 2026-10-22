@@ -45,7 +45,22 @@ class RiptideReleaseWaterTest {
         assertFalse(withPlayer(false, player -> canRelease(player, null)));
     }
 
+    @Test
+    void onlyAWetLastMoveLeavesWasTouchingWaterForTheRelease() {
+        assertTrue(withPlayer(false, player -> spins(player, DesyncStatus.TRUE)));
+        assertFalse(withPlayer(true, player -> spins(player, DesyncStatus.UNKNOWN)));
+        assertFalse(withPlayer(true, player -> spins(player, null)));
+    }
+
     private static boolean canRelease(CultPlayer player, DesyncStatus touchingWater) {
+        return afterMove(player, touchingWater, RiptideUtil::canUseRiptideAtCurrentState);
+    }
+
+    private static boolean spins(CultPlayer player, DesyncStatus touchingWater) {
+        return afterMove(player, touchingWater, RiptideUtil::isCertainRiptideRelease);
+    }
+
+    private static boolean afterMove(CultPlayer player, DesyncStatus touchingWater, Predicate<CultPlayer> rule) {
         PredictionResult last = mock(PredictionResult.class);
         when(last.getJavaCommittedMove())
                 .thenReturn(
@@ -59,7 +74,7 @@ class RiptideReleaseWaterTest {
         CheckManager real = player.checkManager;
         player.checkManager = checkManager;
         try {
-            return RiptideUtil.canUseRiptideAtCurrentState(player);
+            return rule.test(player);
         } finally {
             player.checkManager = real;
         }

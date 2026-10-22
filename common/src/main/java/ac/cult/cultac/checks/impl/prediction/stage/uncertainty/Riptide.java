@@ -53,7 +53,9 @@ public class Riptide implements UncertaintyHandler {
 
         DesyncStatus releasedOnGround =
                 result.getSimulationContext().getWorldData().getCarriedOnGround();
-        result.getSimulationContext().getWorldData().setLastOnGround(DesyncStatus.UNKNOWN);
+        if (!context.isRiptideReleaseCertain()) {
+            result.getSimulationContext().getWorldData().setLastOnGround(DesyncStatus.UNKNOWN);
+        }
 
         // TODO: Force people to be touching water to use riptide
         // TODO: Rate limit riptide
