@@ -41,6 +41,12 @@ public class PredictionResult {
 
     List<Flag> flags = List.of();
     double flagSeverity = 0; // Cache for performance and to allow exempting
+
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    private double selectionOffset = Double.NaN;
     private Boolean cachedAnyRealityControlsVerticalMovement;
     private Boolean cachedAnyRealityDidTickSkipGravity;
 
@@ -116,6 +122,12 @@ public class PredictionResult {
     public double getOffset() {
         Vec3 predicted = getLegacyLikePredictionVector();
         return predicted.distanceTo(getTarget());
+    }
+
+    /** {@link #getOffset()} read once during candidate selection, after the candidate's movement is final. */
+    public double selectionOffset() {
+        if (Double.isNaN(selectionOffset)) selectionOffset = getOffset();
+        return selectionOffset;
     }
 
     public Vec3 getAcceptedClosestToTarget() {

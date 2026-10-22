@@ -251,6 +251,20 @@ class JavaClientTickTest {
         }
     }
 
+    @Test
+    void aConfirmedVelocityIsCarriedWhenAMoveWithoutItIsNearer() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 high = new Vec3(0.5, FLOOR_Y + 10, 0.5);
+            f.place(high, new Vec3(0, -0.1, 0));
+            f.input(NONE);
+
+            f.pongThrough(f.velocity(new Vec3(0, -0.1005, 0)));
+
+            PredictionResult ignored = f.tick(high.add(0, -0.1, 0), false);
+            assertTrue(ignored.getInitialStartingVel().isKnockback(), describe(ignored));
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(
             value = ClientVersion.class,

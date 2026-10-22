@@ -72,6 +72,20 @@ public final class JavaMovementEngine implements MovementEngine {
         return transformer.generateMovementVectors(player, input);
     }
 
+    /**
+     * Of two equally flagged candidates from the same start (tick skip and packet velocities), the one nearer the
+     * client's move is the movement it ran; across starts the start-velocity sort order stands.
+     */
+    @Override
+    public boolean isBetterCandidate(PredictionResult candidate, PredictionResult currentBest) {
+        if (currentBest == null
+                || candidate.getFlagSeverity() != currentBest.getFlagSeverity()
+                || !candidate.getInitialStartingVel().hasSameStartAs(currentBest.getInitialStartingVel())) {
+            return candidate.isBetterThan(currentBest);
+        }
+        return candidate.selectionOffset() < currentBest.selectionOffset();
+    }
+
     @Override
     public ValidMovements createValidMovements(
             PredVector initialStartingVelocity, CultPlayer player, PredictionResult result, boolean canStep) {

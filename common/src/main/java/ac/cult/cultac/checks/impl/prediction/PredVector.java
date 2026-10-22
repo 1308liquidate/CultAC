@@ -217,6 +217,15 @@ public class PredVector extends Vec3 {
         return packetModifiers == null ? List.of() : Collections.unmodifiableList(packetModifiers);
     }
 
+    /** Same tick-skip state and the same packet velocities, the keys the start-velocity sort orders by first. */
+    public boolean hasSameStartAs(PredVector other) {
+        if (isTickSkip != other.isTickSkip || packetModifiersLength() != other.packetModifiersLength()) return false;
+        for (int i = 0, size = packetModifiersLength(); i < size; i++) {
+            if (!other.packetModifiers.contains(packetModifiers.get(i))) return false;
+        }
+        return true;
+    }
+
     public int tickSkippingComparator() {
         return isTickSkip ? 0 : 1;
     }
