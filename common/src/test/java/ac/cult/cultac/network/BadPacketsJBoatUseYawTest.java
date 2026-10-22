@@ -2,11 +2,13 @@ package ac.cult.cultac.network;
 
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsJ;
+import ac.cult.cultac.checks.impl.badpackets.BadPacketsVehicle;
 import ac.cult.cultac.events.packets.listeners.PacketServerTeleport;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.protocol.ConnectionPhase;
@@ -301,6 +303,47 @@ class BadPacketsJBoatUseYawTest {
     @Test
     void aDriverUsesItemsAfterItsStillBoatInterpolatesOntoTheTarget() throws Exception {
         assertEquals(0, useItemsAfterAStillBoatIsTeleported(false));
+    }
+
+    /**
+     * A ticking boat interpolates onto a teleport_entity target and ClientPacketListener#handleTeleportEntity sends no
+     * response. ClientPacketListener#handleMoveVehicle answers a later server vehicle move from the packet handler.
+     */
+    @Test
+    void aServerVehicleMoveAfterTheStillBoatInterpolatesOntoTheTargetIsAnswered() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            ride(f, 0.0F, false);
+            BadPacketsVehicle check = f.player.checkManager.getListener(BadPacketsVehicle.class);
+            for (int tick = 0; tick < 3; tick++) {
+                rot(f, 0.0F);
+                moveBoat(f, 0.0F);
+                f.tickEnd();
+            }
+            f.pongThrough(f.player.lastTransactionSent.get());
+            Vec3 target = new Vec3(SEAT.x, SEAT.y, SEAT.z + 5.0);
+            teleportBoat(f, target, 0.0F);
+            f.pongThrough(f.player.lastTransactionSent.get());
+            Vec3 boat = SEAT;
+            for (int steps = 3; steps > 0; steps--) {
+                boat = boat.lerp(target, 1.0 / steps);
+                rot(f, 0.0F);
+                moveBoat(f, new Vec3d(boat.x, boat.y, boat.z), 0.0F);
+                f.tickEnd();
+            }
+            assertEquals(target, boat);
+            Vec3d moved = new Vec3d(SEAT.x + 1.0, SEAT.y, SEAT.z + 5.0);
+            var correction = new ClientboundMoveVehicle(moved, 0.0F, 0.0F);
+            var event = new PacketSendEvent<>(
+                    f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.MOVE_VEHICLE, correction, false);
+            new PacketServerTeleport().onMoveVehicle(event, f.player, correction);
+            event.tasksAfter().forEach(Runnable::run);
+            f.pongThrough(f.player.lastTransactionSent.get() - 1);
+            var echo = new ServerboundMoveVehicle(moved, 0.0F, 0, true, true);
+            var echoEvent = f.event(ServerboundPackets.MOVE_VEHICLE, echo);
+            f.listener.onMoveVehicle(echoEvent, f.player, echo);
+            assertFalse(echoEvent.isCancelled());
+            assertEquals(0, check.getViolations());
+        }
     }
 
     /** The ping after a teleport bundle can reach the client after its next tick. */

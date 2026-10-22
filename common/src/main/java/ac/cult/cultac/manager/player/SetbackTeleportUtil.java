@@ -1274,10 +1274,18 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                         + (position.z - z));
             }
 
-            if (!tickMove
-                    && matchesVehicleTeleportPosition(position, x, y, z, teleportPos.responseDistanceTolerance())) {
-                final VehicleTeleport matchedEntry = vehicleTeleports.poll();
-                return completeVehicleTeleport(teleportPos);
+            if (matchesVehicleTeleportPosition(position, x, y, z, teleportPos.responseDistanceTolerance())) {
+                if (!tickMove) {
+                    final VehicleTeleport matchedEntry = vehicleTeleports.poll();
+                    return completeVehicleTeleport(teleportPos);
+                }
+                // A ticking boat interpolates onto a TELEPORT_ENTITY target and the client sends no response for it.
+                if (teleportPos.state() != null
+                        && !isRequiredSetbackVehicleTeleport(teleportPos)
+                        && lastTransaction >= teleportPos.transaction()) {
+                    vehicleTeleports.poll();
+                    continue;
+                }
             }
 
             // MCP-Reborn sends exact MoveVehicle responses from the packet
