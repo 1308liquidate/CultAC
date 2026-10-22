@@ -105,6 +105,12 @@ final class VanillaStepProof {
             double desiredY,
             double desiredZ,
             boolean requireSelectedStep) {
+        // Entity#move scales the delta by the stuck speed before Entity#collide; the target and desired axes are
+        // divided by it.
+        Vec3 stuck = result.getSimulationContext().getLastStuckSpeed();
+        desiredX *= stuck.x;
+        desiredY *= stuck.y;
+        desiredZ *= stuck.z;
         List<Collisions.Axis> order = requireSelectedStep
                 ? (Math.abs(desiredX) < Math.abs(desiredZ)
                         ? List.of(Collisions.Axis.Y, Collisions.Axis.Z, Collisions.Axis.X)
@@ -135,7 +141,7 @@ final class VanillaStepProof {
                     order,
                     true);
         }
-        if (Math.abs(collidedMovement.y - result.getTarget().y) > STEP_Y_MATCH_EPSILON) {
+        if (Math.abs(collidedMovement.y - result.getTarget().y * stuck.y) > STEP_Y_MATCH_EPSILON) {
             return false;
         }
         if (!requireSelectedStep) {
