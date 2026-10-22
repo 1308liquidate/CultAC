@@ -38,7 +38,6 @@ import ac.cult.cultac.utils.math.Vec3;
 import io.netty.channel.embedded.EmbeddedChannel;
 import java.lang.reflect.Field;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import org.junit.Test;
 
@@ -513,7 +512,7 @@ public final class PacketPlayerRespawnLifecycleTest {
                 assertEquals(
                         replacement,
                         !kept,
-                        setField(mitigator, "bucketUseLocations").isEmpty());
+                        mapField(mitigator, "bucketUseLocations").isEmpty());
             } finally {
                 OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
             }
@@ -557,10 +556,10 @@ public final class PacketPlayerRespawnLifecycleTest {
         return field.getBoolean(target);
     }
 
-    private static Set<?> setField(Object target, String name) throws Exception {
+    private static Map<?, ?> mapField(Object target, String name) throws Exception {
         Field field = target.getClass().getDeclaredField(name);
         field.setAccessible(true);
-        return (Set<?>) field.get(target);
+        return (Map<?, ?>) field.get(target);
     }
 
     private static CultPlayer offlineJavaPlayer() {

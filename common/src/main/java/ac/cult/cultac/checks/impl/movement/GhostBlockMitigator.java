@@ -14,11 +14,10 @@ import ac.cult.cultac.utils.inventory.ItemTypes;
 import ac.cult.cultac.utils.latency.CompensatedWorld;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientBlockProperties;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.Data;
 
@@ -27,8 +26,8 @@ import lombok.Data;
 // Additionally, we don't give a shit if we setback too much here accidentally
 // We already would need to setback. lol. so it doesn't matter.
 //
-// The server confirms or rejects each placement through the block updates it sends before the
-// matching block-change acknowledgement (ServerGamePacketListenerImpl#handleUseItemOn).
+// A block-change acknowledgement ends every client prediction up to its sequence
+// (ClientLevel#handleBlockChangedAck), whether or not block updates precede it.
 public class GhostBlockMitigator extends CultProcessor implements PostPredictionListener {
 
     // The server answers an in-range click within a round trip; only dropped or out-of-range clicks wait for the cap.
@@ -45,9 +44,9 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
 
     // If a player uses a bucket in flags in the area of the bucket
     // Setback the player without flagging as cheating, remove this bucket place, then resend slightly around player
-    // This should be persistent, except on chunk unloads (prevent slight memory leak)
-    // Make it a set to cap the limit of this list, to stop crashes
-    private final Set<BlockPos> bucketUseLocations = new HashSet<>();
+    // Kept until the acknowledgement for the use reaches the client, or its chunk unloads
+    // Keyed by position to cap the limit of this list, to stop crashes
+    private final Map<BlockPos, Integer> bucketUseLocations = new HashMap<>();
     private final Map<BlockPos, GhostBlock> pseudoPlaces = new LinkedHashMap<>();
 
     @Override
@@ -68,7 +67,7 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
             movement.expandMin(-0.33, -0.03, -0.33);
 
             final SetbackTeleportUtil setbackUtil = player.getSetbackTeleportUtil();
-            for (BlockPos fuckedLoc : bucketUseLocations) {
+            for (BlockPos fuckedLoc : bucketUseLocations.keySet()) {
                 SimpleCollisionBox bucketBox = new SimpleCollisionBox(fuckedLoc);
                 if (movement.isIntersected(bucketBox)) {
                     result.exempt();
@@ -111,8 +110,10 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
                                 ghost.getPosition().getX() >> 4,
                                 ghost.getPosition().getZ() >> 4)
                         == null);
-        bucketUseLocations.removeIf(
-                location -> player.compensatedWorld.getChunk(location.getX() >> 4, location.getZ() >> 4) == null);
+        bucketUseLocations
+                .keySet()
+                .removeIf(location ->
+                        player.compensatedWorld.getChunk(location.getX() >> 4, location.getZ() >> 4) == null);
     }
 
     /** Forgets every placement; call when the client replaces its level. */
@@ -147,6 +148,7 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
     public void handlePseudoPlace(GhostBlock ghostBlock) {
         GhostBlock existing = pseudoPlaces.remove(ghostBlock.getPosition());
         if (existing != null && isEndCrystal(ghostBlock) && !isEndCrystal(existing)) ghostBlock = existing;
+        ghostBlock.setSequence(player.compensatedWorld.clientPredictionSequence());
         if (pseudoPlaces.size() >= MAX_PSEUDO_PLACES) {
             pseudoPlaces.remove(pseudoPlaces.keySet().iterator().next());
         }
@@ -159,9 +161,9 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
 
     // This method is called if and only if it isn't placed on a known desync pos
     public void handleBlockPlace(BlockPos placeBox, int original, int newState, BlockPlace place) {
-        // Assume permanent desync
+        int sequence = player.compensatedWorld.clientPredictionSequence();
         if (place.isUseItem()) {
-            bucketUseLocations.add(placeBox);
+            bucketUseLocations.put(placeBox, sequence);
         }
 
         GhostData existing = unknownStuff.get(placeBox);
@@ -186,7 +188,8 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
                         placeBox.getZ() + 1),
                 original,
                 newState,
-                place);
+                place,
+                sequence);
         unknownStuff.put(placeBox, ghostData);
 
         // Placing against own valid means the player can't extend their ghost blocks?
@@ -217,6 +220,25 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
         }
     }
 
+    /**
+     * Called once the client has applied a block-change acknowledgement. Positions whose newest action is at or
+     * below the sequence hold the server's state again, unless a later prediction still owns them
+     * (BlockStatePredictionHandler#endPredictionsUpTo).
+     */
+    public void onClientAck(int sequence) {
+        CompensatedWorld world = player.compensatedWorld;
+        unknownStuff
+                .values()
+                .removeIf(data -> data.sequence <= sequence && !world.hasPendingBlockPrediction(data.placedPos));
+        pseudoPlaces
+                .values()
+                .removeIf(ghost ->
+                        ghost.getSequence() <= sequence && !world.hasPendingBlockPrediction(ghost.getPosition()));
+        bucketUseLocations
+                .entrySet()
+                .removeIf(entry -> entry.getValue() <= sequence && !world.hasPendingBlockPrediction(entry.getKey()));
+    }
+
     @Data
     public final class GhostData {
         final BlockPos placedPos;
@@ -224,18 +246,25 @@ public class GhostBlockMitigator extends CultProcessor implements PostPrediction
         int serverState;
         final int clientState;
         final BlockPlace place;
+        final int sequence;
         LinkedList<GhostData> revertIfReverted = null;
 
         boolean isValid;
         boolean isReverted;
 
         public GhostData(
-                BlockPos placedPos, SimpleCollisionBox placedBox, int serverState, int clientState, BlockPlace place) {
+                BlockPos placedPos,
+                SimpleCollisionBox placedBox,
+                int serverState,
+                int clientState,
+                BlockPlace place,
+                int sequence) {
             this.placedPos = placedPos;
             this.placedBox = placedBox;
             this.serverState = serverState;
             this.clientState = clientState;
             this.place = place;
+            this.sequence = sequence;
         }
 
         private void addDependent(GhostData ghostData) {

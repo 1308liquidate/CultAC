@@ -550,6 +550,7 @@ public class CompensatedWorld {
                 it.remove();
             }
         }
+        endGhostPositionsUpTo(prediction, transaction);
     }
 
     public void handlePredictionConfirmation(int prediction, CultPlayer.TrackedTransaction transaction) {
@@ -562,6 +563,19 @@ public class CompensatedWorld {
                 it.remove();
             }
         }
+        endGhostPositionsUpTo(prediction, transaction.transaction());
+    }
+
+    /** ClientLevel#handleBlockChangedAck: the client has ended every prediction up to this sequence. */
+    private void endGhostPositionsUpTo(int prediction, int transaction) {
+        if (player.isBedrockMovement()) return;
+        player.latencyUtils.addRealTimeTask(
+                transaction, () -> player.getGhostBlockMitigator().onClientAck(prediction));
+    }
+
+    /** BlockStatePredictionHandler#currentSequence: the client's local block prediction counter. */
+    public int clientPredictionSequence() {
+        return clientPredictionSequence;
     }
 
     public void handleServerBlockUpdate(BlockPos pos, int state, CultPlayer.TrackedTransaction transaction) {
