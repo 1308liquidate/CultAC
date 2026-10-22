@@ -102,6 +102,10 @@ public class SimulationContext {
     @Setter
     boolean riptideReleaseCertain;
 
+    /** The rise of TridentItem#releaseUsing's Entity#move for a release on ground this tick. */
+    @Setter
+    double riptideGroundLift;
+
     LastInstance lastTickSkip;
     boolean isTestingPointThree;
     Vec3 lastStuckSpeed = NO_STUCK_SPEED;

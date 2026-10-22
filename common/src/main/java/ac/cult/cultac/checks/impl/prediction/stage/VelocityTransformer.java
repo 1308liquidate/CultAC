@@ -3,6 +3,7 @@ package ac.cult.cultac.checks.impl.prediction.stage;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.Riptide;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.data.KnownInput;
@@ -35,6 +36,7 @@ public class VelocityTransformer {
             return input;
         }
 
+        input = Riptide.release(player, simulationContext, input);
         input = applyBaseTickFluidCurrents(player, input);
         input = applyLegacyLivingVehicleDrag(player, input);
         input = applyAttackSlow(input);
@@ -654,6 +656,7 @@ public class VelocityTransformer {
 
         for (PredVector vectorData : velocities) {
             // TODO: Restrict this for not being in shallow water (above some level submerged)
+            if (Riptide.pushed(simulationContext, vectorData)) continue;
             outputs.addAll(applyPossibleJumpStates(player, vectorData));
         }
 

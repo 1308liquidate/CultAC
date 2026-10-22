@@ -51,6 +51,15 @@ class JavaRiptideGroundReleaseTest {
         }
     }
 
+    @Test
+    void theNextTickFallsByItsVelocityAlone() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 position = releaseExactly(f);
+            Vec3 dropped = travelInAir(release(null), 0.91F).subtract(0, 1.0, 0);
+            assertRejected(f.tick(position.add(dropped), false), "VerticalOffset");
+        }
+    }
+
     private static Vec3 releaseExactly(JavaTickFixture f) {
         Vec3 position = START.add(new Vec3(0, LIFT, 0)).add(release(f));
         assertExact(f.tick(position, false));
