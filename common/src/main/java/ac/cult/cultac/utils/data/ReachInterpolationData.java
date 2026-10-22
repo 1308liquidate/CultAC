@@ -706,6 +706,14 @@ public class ReachInterpolationData {
         return getInterpolationSteps();
     }
 
+    /**
+     * Client ticks the queued stepped path can still take. SteppedInterpolationHandler.InterpolationData#advance
+     * consumes at least one tick of the path per client tick.
+     */
+    public int remainingSteppedTicks() {
+        return interpolationQueue == null || interpolationQueue.isEmpty() ? 0 : (int) Math.ceil(remainingTicks);
+    }
+
     public SimpleCollisionBox getTargetLocation() {
         return targetLocation.copy();
     }

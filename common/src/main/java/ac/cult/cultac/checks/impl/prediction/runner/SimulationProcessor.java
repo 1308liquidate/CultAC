@@ -1013,7 +1013,14 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 this.player.getSetbackTeleportUtil().executeNonSimulatingSetback();
             }
 
-            this.commitPredictionState(result, to, diff, xRot, yRot, movementProfile, preparedCommit);
+            this.commitPredictionState(
+                    result,
+                    to,
+                    this.player.compensatedEntities.vehicles.committedVehicleMovement(result, diff),
+                    xRot,
+                    yRot,
+                    movementProfile,
+                    preparedCommit);
             if (flyingThroughTravel) {
                 this.stopFlyingAfterTravel();
             }
