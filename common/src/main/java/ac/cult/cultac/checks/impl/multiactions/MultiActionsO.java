@@ -14,8 +14,7 @@ import org.jetbrains.annotations.NotNull;
 @CheckData(
         name = "MultiActionsO",
         stableKey = "cult.multiactions.inventory_rotation",
-        description = "Rotating while in an inventory",
-        experimental = true)
+        description = "Rotating while in an inventory")
 public class MultiActionsO extends Check implements RotationListener, ClientTickEndListener {
     // A boat rider's Rot awaiting the tick end: the client sends it before the vehicle move that carries the turn
     // AbstractBoat#positionRider gave it this tick.

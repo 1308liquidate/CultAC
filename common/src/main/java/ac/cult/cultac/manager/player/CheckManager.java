@@ -10,6 +10,7 @@ import ac.cult.cultac.checks.impl.badpackets.*;
 import ac.cult.cultac.checks.impl.bedrock.BedrockMovement;
 import ac.cult.cultac.checks.impl.breaking.*;
 import ac.cult.cultac.checks.impl.chat.*;
+import ac.cult.cultac.checks.impl.cloud.Cloud;
 import ac.cult.cultac.checks.impl.combat.EntityHitboxes;
 import ac.cult.cultac.checks.impl.combat.EntityReach;
 import ac.cult.cultac.checks.impl.combat.FairReach;
@@ -27,6 +28,7 @@ import ac.cult.cultac.checks.impl.exploit.ExploitF;
 import ac.cult.cultac.checks.impl.groundspoof.NoFallExecutor;
 import ac.cult.cultac.checks.impl.misc.ClientBrand;
 import ac.cult.cultac.checks.impl.misc.GhostBlockMitigation;
+import ac.cult.cultac.checks.impl.misc.SkinBlinker;
 import ac.cult.cultac.checks.impl.movement.EntityControl;
 import ac.cult.cultac.checks.impl.movement.SetbackBlocker;
 import ac.cult.cultac.checks.impl.movement.VehiclePredictionRunner;
@@ -301,6 +303,7 @@ public class CheckManager {
                 new ChatD(player),
                 new ChatE(player),
                 new ClientBrand(player),
+                new SkinBlinker(player),
                 new NoFallExecutor(player),
                 new PingA(player),
                 new TransactionOrder(player),
@@ -359,6 +362,7 @@ public class CheckManager {
                 new MultiActionsQ(player),
                 new MultiActionsR(player),
                 new MultiActionsS(player),
+                new MultiActionsT(player),
                 new MultiInteractA(player),
                 new MultiInteractB(player),
                 player.openWindow,
@@ -403,7 +407,8 @@ public class CheckManager {
     // baseline. Keeping them out of callback lists preserves registration and
     // configuration without inventing behavior.
     private static ClassToInstanceMap<CheckListener> buildIdentityChecks(CultPlayer player) {
-        return listenerMap(List.<CheckListener>of(new VehicleC(player), new BedrockMovement(player)));
+        return listenerMap(
+                List.<CheckListener>of(new VehicleC(player), new BedrockMovement(player), new Cloud(player)));
     }
 
     private static ClassToInstanceMap<PostPredictionListener> buildPostPredictionChecks(CultPlayer player) {
@@ -522,7 +527,8 @@ public class CheckManager {
                 MultiActionsN.class,
                 MultiActionsP.class,
                 MultiActionsQ.class,
-                MultiActionsR.class)) {
+                MultiActionsR.class,
+                MultiActionsT.class)) {
             registerEarlyReceive(registrations, packetChecks.get(type));
         }
         registerEarlyReceive(registrations, postPredictionCheck.get(SprintH.class));
@@ -583,6 +589,7 @@ public class CheckManager {
         registerReceive(registrations, packetChecks.get(KeepAliveProcessor.class));
         registerReceive(registrations, packetChecks.get(BadPacketsO.class));
         registerReceive(registrations, packetChecks.get(ClientBrand.class));
+        registerReceive(registrations, packetChecks.get(SkinBlinker.class));
         registerReceive(registrations, packetChecks.get(NoFallExecutor.class));
         registerReceive(registrations, prePredictionChecks.get(ExploitA.class));
         registerReceive(registrations, prePredictionChecks.get(ExploitB.class));

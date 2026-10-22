@@ -137,15 +137,35 @@ public final class CultConfigSpecs {
     public static @NotNull ConfigUpdater.Spec cultConfig(String resourceDirectory) {
         ConfigUpdater.Spec.Builder builder = ConfigUpdater.Spec.builder(
                         resourceDirectory,
-                        resourceDirectory.equals("/punishments/") ? 3 : 0,
+                        resourceDirectory.equals("/punishments/") ? 4 : 0,
                         ConfigUpdater.ConfigFlavor.V2)
                 .cultVersioning();
         if (resourceDirectory.equals("/punishments/")) {
             builder.migration(1, CultConfigSpecs::addBedrockPunishment)
                     .migration(2, CultConfigSpecs::addMissingCheckPunishments)
-                    .migration(3, CultConfigSpecs::addNoSneakSlowPunishment);
+                    .migration(3, CultConfigSpecs::addNoSneakSlowPunishment)
+                    .migration(4, CultConfigSpecs::addSkinBlinkerAndCloudPunishments);
         }
         return builder.build();
+    }
+
+    private static void addSkinBlinkerAndCloudPunishments(MigrationContext ctx) {
+        addPunishmentChecks(
+                ctx,
+                "Misc",
+                List.of("Exploit"),
+                List.of("SkinBlinker"),
+                List.of("10:5 [alert]", "1:1 [log]", "20:10 [webhook]", "20:10 [proxy]"),
+                "Exploit");
+        // A finding is a window's verdict, minutes apart rather than ticks, so they count for longer.
+        addPunishmentChecks(
+                ctx,
+                "Cloud",
+                List.of("Cloud"),
+                List.of("Cloud"),
+                List.of("1:1 [alert]", "1:1 [log]", "3:3 [webhook]", "3:3 [proxy]"),
+                null,
+                1800);
     }
 
     private static void addNoSneakSlowPunishment(MigrationContext ctx) {
@@ -182,7 +202,6 @@ public final class CultConfigSpecs {
         addPunishmentChecks(ctx, defaultGroup, selectors, additions, defaultCommands, null);
     }
 
-    /** Inserts additions right after the {@code insertAfter} entry when the target group has it, else appends. */
     private static void addPunishmentChecks(
             MigrationContext ctx,
             String defaultGroup,
@@ -190,6 +209,21 @@ public final class CultConfigSpecs {
             List<String> additions,
             List<String> defaultCommands,
             @Nullable String insertAfter) {
+        addPunishmentChecks(ctx, defaultGroup, selectors, additions, defaultCommands, insertAfter, 300);
+    }
+
+    /**
+     * Inserts additions right after the {@code insertAfter} entry when the target group has it, else appends; a group
+     * made for them removes violations after {@code removeViolationsAfter} seconds.
+     */
+    private static void addPunishmentChecks(
+            MigrationContext ctx,
+            String defaultGroup,
+            List<String> selectors,
+            List<String> additions,
+            List<String> defaultCommands,
+            @Nullable String insertAfter,
+            int removeViolationsAfter) {
         Map<String, Object> groups = ctx.output().getMap("Punishments");
         if (groups == null) return;
         String target = groups.containsKey(defaultGroup) ? defaultGroup : null;
@@ -242,7 +276,7 @@ public final class CultConfigSpecs {
         if (!changed) return;
         if (target == null) {
             Map<String, Object> group = new LinkedHashMap<>();
-            group.put("remove-violations-after", 300);
+            group.put("remove-violations-after", removeViolationsAfter);
             group.put("checks", checks);
             group.put("commands", defaultCommands);
             ctx.output().put("Punishments." + defaultGroup, group);
