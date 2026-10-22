@@ -612,7 +612,7 @@ public class SimulationContext {
             return entities.getPlayerMovementSpeed();
         }
         if (vehicle instanceof PacketEntityCamel camel) {
-            final double sprintBonus = riderSprinting && camel.dashCooldown == 0 && !camel.dashing ? 0.1 : 0;
+            final double sprintBonus = riderSprinting && camel.dashCooldown == 0 ? 0.1 : 0;
             return camel.movementSpeedAttribute + sprintBonus;
         }
 

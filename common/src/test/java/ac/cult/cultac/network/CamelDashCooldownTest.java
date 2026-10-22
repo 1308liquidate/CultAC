@@ -114,6 +114,25 @@ class CamelDashCooldownTest {
     }
 
     /**
+     * Camel#getRiddenSpeed reads only the dash cooldown: a camel still dashing, spawned mid-dash and not yet landed,
+     * gives a sprinting rider the bonus once the cooldown is zero.
+     */
+    @Test
+    void aDashingCamelWithASpentCooldownGivesTheBonus() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            spawn(f);
+            PacketEntityCamel camel = (PacketEntityCamel) f.player.compensatedEntities.getEntity(CAMEL);
+            camel.onGround = false;
+            metadata(f, true);
+            assertExact(f.tick(ON_FOOT, true));
+
+            mount(f);
+            assertTrue(camel.dashing && camel.dashCooldown == 0, "the camel is not dashing with a spent cooldown");
+            assertExact(ride(f, new Vec3(START.x, START.y, START.z + GROUND_INPUT)));
+        }
+    }
+
+    /**
      * The rider's own dash arms the cooldown, the rider dismounts before it runs out and the camel's client ticks run
      * it out while nobody rides it: the first ridden tick after the remount carries the sprint bonus.
      */

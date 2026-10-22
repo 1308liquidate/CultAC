@@ -21,6 +21,7 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityNautilus;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
+import java.util.List;
 import java.util.Set;
 
 public class VehiclePredictionRunner extends CultProcessor implements VehicleListener, ClientTickEndListener {
@@ -38,8 +39,9 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
             nautilus.tickClientState();
         }
         // ClientLevel#tickEntities runs Camel#tick for every camel, ridden or not.
-        for (PacketEntityCamel camel : player.compensatedEntities.camels()) {
-            camel.tickDashCooldown();
+        List<PacketEntityCamel> camels = player.compensatedEntities.camels();
+        for (int i = 0, size = camels.size(); i < size; i++) {
+            camels.get(i).tickDashCooldown();
         }
         PacketEntityHorse horse = player.compensatedEntities.vehicles.getClientVisibleHorseRoot();
         if (horse != null) {
