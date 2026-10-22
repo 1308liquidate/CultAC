@@ -56,9 +56,9 @@ public class VelocityTransformer {
             // LivingEntity#aiStep thresholds deltaMovement before travelRidden runs
             // AbstractHorse#tickRidden's rider jump and travel adds the ridden input.
             input = applyMovementThreshold(input, simulationContext.getVersion(), false);
-            input = applyCamelRefusal(player, input);
             input = applyRideableInput(player, input);
-            return applyJumps(player, input);
+            // Camel#travel clears the refusing camel's motion after tickRidden's dash.
+            return applyCamelRefusal(player, applyJumps(player, input));
         }
 
         input = applyRideableInput(player, input);

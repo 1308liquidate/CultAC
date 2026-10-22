@@ -3,6 +3,7 @@ package ac.cult.cultac.network;
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
@@ -47,6 +48,11 @@ class CamelStandUpTest {
     /** LivingEntity#moveRelative for the ridden input's 0.98F on 0.6-friction ground. */
     private static final double GROUND_INPUT = (double) 0.98F * (SPEED * (0.21600002F / (0.6F * 0.6F * 0.6F)));
 
+    /** Camel#executeRidersJump at full charge from rest: 1.4285F times the 0.42 jump strength, less the grounded fall. */
+    private static final double DASH_CLIMB = 0.52157000337422;
+    /** Camel#executeRidersJump at full charge: 22.2222F times the 0.09 movement speed along the look direction. */
+    private static final double DASH_PUSH = 22.2222F * (double) 0.09F;
+
     private static final ServerboundPlayerInput IDLE =
             new ServerboundPlayerInput(false, false, false, false, false, false, false);
     private static final ServerboundPlayerInput FORWARD_SPRINT =
@@ -87,6 +93,53 @@ class CamelStandUpTest {
         }
     }
 
+    /**
+     * Camel#canJump is false while the camel refuses to move, so LocalPlayer#jumpableVehicle sends no riding jump: a
+     * seated camel takes neither the dash's climb nor its push along the look direction.
+     */
+    @Test
+    void aSeatedCamelTakesNoRidingJump() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            mount(f, -(GAME_TIME - 1000L), Vec3.ZERO);
+            command(f, PlayerCommandAction.START_JUMPING_WITH_HORSE, 90);
+            // LocalPlayer#aiStep sends the riding jump after the camel's tick, so it arms the next one.
+            assertExact(ride(f, START));
+
+            assertNotExact(ride(f, new Vec3(START.x, START.y + DASH_CLIMB, START.z + DASH_PUSH), false));
+        }
+    }
+
+    @Test
+    void aSeatedCamelDoesNotClimbOnARidingJump() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            mount(f, -(GAME_TIME - 1000L), Vec3.ZERO);
+            command(f, PlayerCommandAction.START_JUMPING_WITH_HORSE, 90);
+            // LocalPlayer#aiStep sends the riding jump after the camel's tick, so it arms the next one.
+            assertExact(ride(f, START));
+
+            assertNotExact(ride(f, new Vec3(START.x, START.y + DASH_CLIMB, START.z), false));
+        }
+    }
+
+    /**
+     * AbstractHorse#tickRidden runs the armed dash before Camel#travel clears a refusing grounded camel's horizontal
+     * velocity: a camel seated between the riding jump and its next tick keeps only the dash's climb.
+     */
+    @Test
+    void aCamelSeatedAfterARidingJumpKeepsOnlyTheClimb() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            mount(f, GAME_TIME - 1000L, Vec3.ZERO);
+            command(f, PlayerCommandAction.START_JUMPING_WITH_HORSE, 90);
+            // LocalPlayer#aiStep sends the riding jump after the camel's tick, so it arms the next one.
+            assertExact(ride(f, START));
+            f.player.compensatedEntities.updateEntityMetadata(
+                    CAMEL,
+                    List.of(new EntityMetadata.Entry(LAST_POSE_CHANGE_TICK, -GAME_TIME, ByteBuffer.allocate(0))));
+
+            assertExact(ride(f, new Vec3(START.x, START.y + DASH_CLIMB, START.z), false));
+        }
+    }
+
     /** The saddled camel at {@code START}, its pose changed at {@code lastPoseChangeTick}, carrying {@code carried}. */
     private static void mount(JavaTickFixture f, long lastPoseChangeTick, Vec3 carried) {
         f.player.compensatedWorld.applyClientTime(new TimeUpdate(GAME_TIME, Map.of()));
@@ -112,17 +165,25 @@ class CamelStandUpTest {
     }
 
     private static void startSprinting(JavaTickFixture f) {
-        var command = new ServerboundPlayerCommand(f.player.entityID, PlayerCommandAction.START_SPRINTING, 0);
+        command(f, PlayerCommandAction.START_SPRINTING, 0);
+    }
+
+    private static void command(JavaTickFixture f, PlayerCommandAction action, int data) {
+        var command = new ServerboundPlayerCommand(f.player.entityID, action, data);
         new PacketEntityAction()
                 .onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, command), f.player, command);
     }
 
     /** One client tick facing +z: the rider's Rot, the camel's grounded move and the tick end. */
     private static PredictionResult ride(JavaTickFixture f, Vec3 to) {
+        return ride(f, to, true);
+    }
+
+    private static PredictionResult ride(JavaTickFixture f, Vec3 to, boolean onGround) {
         PredictionResult before = f.player.checkManager.getSimulationProcessor().getLastPrediction();
         var rot = new ServerboundMovePlayer(0, 0, 0, 0F, 0F, false, false, false, true);
         f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
-        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), 0F, 0F, true, true);
+        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), 0F, 0F, onGround, true);
         f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, move), f.player, move);
         f.tickEnd();
         PredictionResult result = f.player.checkManager.getSimulationProcessor().getLastPrediction();
@@ -136,5 +197,9 @@ class CamelStandUpTest {
             report.append(' ').append(flag.getVerbose().getString());
         }
         assertTrue(exact(result), report.toString());
+    }
+
+    private static void assertNotExact(PredictionResult result) {
+        assertFalse(exact(result), describe(result));
     }
 }

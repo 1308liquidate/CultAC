@@ -63,8 +63,12 @@ public class PacketEntityAction {
                     break;
                 }
                 PacketEntityHorse horse = player.compensatedEntities.vehicles.getClientVisibleHorseRoot();
+                // LocalPlayer#jumpableVehicle sends no riding jump while Camel#canJump is false.
                 if (horse instanceof PacketEntityCamel camel
-                        && (!camel.hasSaddle || camel.dashCooldown > 0 || !camel.onGround)) {
+                        && (!camel.hasSaddle
+                                || camel.dashCooldown > 0
+                                || !camel.onGround
+                                || camel.refuseToMove(player.compensatedWorld.clientGameTime()))) {
                     break;
                 }
                 if (horse != null && horse.hasSaddle) {
