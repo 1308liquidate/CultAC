@@ -50,6 +50,9 @@ class CamelDashCooldownTest {
     private static final double GROUND_FRICTION = 0.6F * 0.91F;
     /** LivingEntity#moveRelative for the ridden input's 0.98F on 0.6-friction ground. */
     private static final double GROUND_INPUT = (double) 0.98F * (SPEED * (0.21600002F / (0.6F * 0.6F * 0.6F)));
+    /** The ridden input with Camel#getRiddenSpeed's movement_speed alone. */
+    private static final double WALK_INPUT = (double) 0.98F * (0.09F * (0.21600002F / (0.6F * 0.6F * 0.6F)));
+
     private static final ServerboundPlayerInput IDLE =
             new ServerboundPlayerInput(false, false, false, false, false, false, false);
     private static final ServerboundPlayerInput FORWARD_SPRINT =
@@ -77,6 +80,36 @@ class CamelDashCooldownTest {
             velocity = velocity * GROUND_FRICTION + GROUND_INPUT;
             z += velocity;
             assertExact(ride(f, new Vec3(START.x, START.y, z)));
+        }
+    }
+
+    /**
+     * SynchedEntityData#assignValues calls Camel#onSyncedDataUpdated for every entry it receives, changed or not: a
+     * DASH entry repeating the camel's state still sets the spent cooldown to 55, and the ridden tick takes no bonus.
+     */
+    @Test
+    void aRepeatedDashEntrySetsTheSpentCooldown() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            spawn(f);
+            metadata(f, false);
+            assertExact(f.tick(ON_FOOT, true));
+
+            mount(f);
+            metadata(f, false);
+            assertExact(ride(f, new Vec3(START.x, START.y, START.z + WALK_INPUT)));
+        }
+    }
+
+    /** Camel#onSyncedDataUpdated skips DASH on the camel's first tick: the spawn's entries set no cooldown. */
+    @Test
+    void aDashEntryBeforeTheFirstTickSetsNoCooldown() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            spawn(f);
+            metadata(f, true);
+            assertExact(f.tick(ON_FOOT, true));
+
+            mount(f);
+            assertExact(ride(f, new Vec3(START.x, START.y, START.z + GROUND_INPUT)));
         }
     }
 
@@ -142,6 +175,16 @@ class CamelDashCooldownTest {
             vy = (vy - 0.08) * 0.98F;
         }
         return new Vec3(from.x, y, z);
+    }
+
+    /** The saddled, grounded camel at {@code START} beside the rider on foot. */
+    private static void spawn(JavaTickFixture f) {
+        f.player.compensatedWorld.applyClientTime(new TimeUpdate(GAME_TIME, Map.of()));
+        f.place(ON_FOOT, Vec3.ZERO);
+        f.player.compensatedEntities.addEntity(CAMEL, EntityTypeIds.CAMEL, START, 0, 0, 0);
+        PacketEntityCamel camel = (PacketEntityCamel) f.player.compensatedEntities.getEntity(CAMEL);
+        camel.hasSaddle = true;
+        camel.onGround = true;
     }
 
     /** The server's camel DASH and a standing LAST_POSE_CHANGE_TICK, delivered. */

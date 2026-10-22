@@ -10,6 +10,8 @@ public class PacketEntityCamel extends PacketEntityHorse {
     public boolean lastPredictedInLiquid;
     // Camel LAST_POSE_CHANGE_TICK: negative while sitting; its magnitude is the game time of the last pose change.
     public long lastPoseChangeTick;
+    // Entity#firstTick: true until the camel's first client tick.
+    private boolean firstTick = true;
 
     public PacketEntityCamel(CultPlayer player, int entityId, int type, double x, double y, double z, float xRot) {
         super(player, entityId, type, x, y, z, xRot);
@@ -36,6 +38,7 @@ public class PacketEntityCamel extends PacketEntityHorse {
         if (dashCooldown > 0) {
             dashCooldown--;
         }
+        firstTick = false;
     }
 
     public boolean isCamelSitting() {
@@ -65,8 +68,9 @@ public class PacketEntityCamel extends PacketEntityHorse {
         }
     }
 
+    /** Camel#onSyncedDataUpdated: every DASH entry after the first tick sets a spent dash cooldown to 55. */
     public void setDashingFromMetadata(boolean dashing) {
-        if (this.dashing != dashing && dashCooldown == 0) {
+        if (!firstTick && dashCooldown == 0) {
             dashCooldown = 55;
         }
         this.dashing = dashing;
