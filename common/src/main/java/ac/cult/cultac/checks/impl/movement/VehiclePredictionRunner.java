@@ -65,6 +65,33 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
         promoteInputAfterClientTickEnd();
     }
 
+    /**
+     * The pose changes the client makes to the camel it rides, after the camel's tick; the server's pose data replaces
+     * them when it arrives. This tick's prediction already used the pose the tick started with.
+     */
+    private void tickClientCamelPose(PacketEntityCamel camel, PredictionResult result) {
+        long gameTime = player.compensatedWorld.clientGameTime();
+        // Camel#tickRidden, inside LivingEntity#travelRidden for the saddled camel's controller, stands it up when
+        // the controller's zza (the input staged from the last passenger tick) is positive.
+        if (camel.actionAlive
+                && camel.hasSaddle
+                && result.getSimulationContext().getHorseInputs() != null
+                && result.getSimulationContext().getHorseInputs().z > 0.0D
+                && camel.isCamelSitting()
+                && !camel.isInPoseTransition(gameTime)) {
+            camel.standUp(gameTime);
+        }
+        // Camel#tick then stands a sitting camel up at once in water; Entity#baseTick set isInWater at the start.
+        if (camel.isCamelSitting()
+                && !result.getSimulationContext()
+                        .getWorldData()
+                        .getInWater()
+                        .getStates()
+                        .contains(false)) {
+            camel.standUpInstantly(gameTime);
+        }
+    }
+
     @Override
     public void process(final VehiclePositionUpdate vehicleUpdate) {
         // We previously didn't do vehicle setbacks because vehicle netcode sucks
@@ -91,6 +118,9 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
 
         if (vehicleMovementFromClientTick) {
             evaluateItemControlledVehicle(riding);
+            if (riding instanceof PacketEntityCamel camel) {
+                tickClientCamelPose(camel, result);
+            }
         }
 
         boolean isStriderInLava = riding != null

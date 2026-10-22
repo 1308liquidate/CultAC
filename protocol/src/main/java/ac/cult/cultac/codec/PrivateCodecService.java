@@ -322,7 +322,8 @@ public final class PrivateCodecService implements WireValueDecoder {
                 factory);
     }
 
-    record MetadataTypes(int floatingPoint, int pose, int optionalInt, int painting, int particle, int particles) {}
+    record MetadataTypes(
+            int floatingPoint, int longValue, int pose, int optionalInt, int painting, int particle, int particles) {}
 
     private static final Map<ProtocolVersion, MetadataTypes> METADATA_TYPES = new ConcurrentHashMap<>();
 
@@ -335,6 +336,7 @@ public final class PrivateCodecService implements WireValueDecoder {
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes1_21_2 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
+                        values.longType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
                         values.paintingVariantType.typeId(),
@@ -343,6 +345,7 @@ public final class PrivateCodecService implements WireValueDecoder {
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes1_21_5 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
+                        values.longType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
                         values.paintingVariantType.typeId(),
@@ -351,6 +354,7 @@ public final class PrivateCodecService implements WireValueDecoder {
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes1_21_9 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
+                        values.longType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
                         values.paintingVariantType.typeId(),
@@ -359,6 +363,7 @@ public final class PrivateCodecService implements WireValueDecoder {
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes1_21_11 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
+                        values.longType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
                         values.paintingVariantType.typeId(),
@@ -367,6 +372,7 @@ public final class PrivateCodecService implements WireValueDecoder {
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes26_1 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
+                        values.longType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
                         values.paintingVariantType.typeId(),
@@ -375,6 +381,7 @@ public final class PrivateCodecService implements WireValueDecoder {
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes26_3 values ->
                 new MetadataTypes(
                         values.floatType.typeId(),
+                        values.longType.typeId(),
                         values.poseType.typeId(),
                         values.optionalVarIntType.typeId(),
                         values.paintingVariantType.typeId(),
@@ -400,7 +407,7 @@ public final class PrivateCodecService implements WireValueDecoder {
         checkOpen();
         var types = types(version);
         var serializers = metadataTypes(version);
-        int pose = serializers.pose(), optional = serializers.optionalInt();
+        int pose = serializers.pose(), optional = serializers.optionalInt(), longValue = serializers.longValue();
         int painting = serializers.painting();
         int particle = serializers.particle(), particles = serializers.particles();
         MetadataValue first = null, second = null;
@@ -411,7 +418,8 @@ public final class PrivateCodecService implements WireValueDecoder {
             var values = types.entityDataTypes().values();
             if (id < 0 || id >= values.length) throw new MalformedPacketException("Unknown metadata serializer " + id);
             String kind = "unused";
-            if (id == 0 || id == 1 || id == 3 || id == 8) kind = "value";
+            // Long carries Camel's LAST_POSE_CHANGE_TICK.
+            if (id == 0 || id == 1 || id == 3 || id == 8 || id == longValue) kind = "value";
             else if (id == pose) kind = "pose";
             else if (id == optional) kind = "optional_int";
             else if (id == 7) kind = "item";

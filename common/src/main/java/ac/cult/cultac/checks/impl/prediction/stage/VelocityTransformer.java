@@ -57,7 +57,7 @@ public class VelocityTransformer {
             // AbstractHorse#tickRidden's rider jump and travel adds the ridden input.
             input = applyMovementThreshold(input, simulationContext.getVersion(), false);
             input = applyRideableInput(player, input);
-            return applyJumps(player, input);
+            return applyCamelRefuseToMove(player, applyJumps(player, input));
         }
 
         input = applyRideableInput(player, input);
@@ -238,6 +238,33 @@ public class VelocityTransformer {
         return transformed;
     }
 
+    /**
+     * Camel#refuseToMove for this tick. The client ticks the root camel before ClientTickEnd advances its game time,
+     * and before this tick's Camel#tickRidden can stand it up; a stand-up only moves a sitting camel into its
+     * transition, which still refuses.
+     */
+    private boolean camelRefusesToMove(CultPlayer player) {
+        return simulationContext.getVehicle() instanceof PacketEntityCamel camel
+                && camel.refuseToMove(player.compensatedWorld.clientGameTime());
+    }
+
+    /** Camel#travel drops the horizontal deltaMovement of a camel that refuses to move while on the ground. */
+    private List<PredVector> applyCamelRefuseToMove(CultPlayer player, List<PredVector> velocities) {
+        if (!camelRefusesToMove(player)) {
+            return velocities;
+        }
+        List<Boolean> onGroundStates = simulationContext.getLastOnGround().getStates();
+        List<PredVector> transformed = new ArrayList<>(velocities.size() * onGroundStates.size());
+        for (PredVector velocity : velocities) {
+            for (boolean onGround : onGroundStates) {
+                addDistinctPredVector(
+                        transformed,
+                        onGround ? velocity.withXYZ(0.0D, velocity.y, 0.0D, "Camel refuses to move") : velocity);
+            }
+        }
+        return transformed;
+    }
+
     private boolean canUseItemControlledMovement(CultPlayer player, PacketEntity vehicle) {
         return player.compensatedEntities.vehicles.canCurrentPlayerControlServerVehicleForClientTickMovement()
                 || isVehicleControlSwitchTimingUnproven(player, vehicle);
@@ -267,6 +294,10 @@ public class VelocityTransformer {
         }
 
         if (vehicle instanceof PacketEntityHorse) {
+            // Camel#getRiddenInput ignores the controller while the camel refuses to move.
+            if (camelRefusesToMove(player)) {
+                return Vec3.ZERO;
+            }
             return getExactHorseFamilyRiddenInput(simulationContext.getHorseInputs());
         }
 

@@ -63,8 +63,13 @@ public class PacketEntityAction {
                     break;
                 }
                 PacketEntityHorse horse = player.compensatedEntities.vehicles.getClientVisibleHorseRoot();
+                // LocalPlayer#jumpableVehicle requires Camel#canJump, false while the camel refuses to move. The
+                // passenger tick sending this follows the root camel's tick at the same client game time.
                 if (horse instanceof PacketEntityCamel camel
-                        && (!camel.hasSaddle || camel.dashCooldown > 0 || !camel.onGround)) {
+                        && (!camel.hasSaddle
+                                || camel.dashCooldown > 0
+                                || !camel.onGround
+                                || camel.refuseToMove(player.compensatedWorld.clientGameTime()))) {
                     break;
                 }
                 if (horse != null && horse.hasSaddle) {
