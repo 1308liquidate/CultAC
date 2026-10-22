@@ -32,8 +32,15 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
     @Override
     public void onPlayerTickEnd(final PacketReceiveEvent event) {
         // LocalPlayer#sendChanges ends a controlling rider's tick with its sprint flag equal to the last command sent.
-        player.vehicleData.camelSprintingState =
-                player.isClientSprinting() ? SprintingState.STARTED : SprintingState.STOPPED;
+        // LocalPlayer#aiStep ends a passenger's tick with the flag cleared unless the input it sent holds forward
+        // impulse (LocalPlayer#canStartSprinting, LocalPlayer#shouldStopRunSprinting).
+        boolean riderSprinting = player.isClientSprinting();
+        if (player.compensatedEntities.getSelf().inVehicle()
+                && player.packetStateData.clientMovementInputKnown
+                && !player.isBedrockMovement()) {
+            riderSprinting &= player.boatData.nextVehicleKeys.forwardImpulse() > 0;
+        }
+        player.vehicleData.camelSprintingState = riderSprinting ? SprintingState.STARTED : SprintingState.STOPPED;
         PacketEntity root = player.compensatedEntities.vehicles.getVelocityMovementVehicle();
         if (root instanceof PacketEntityNautilus nautilus) {
             nautilus.tickClientState();

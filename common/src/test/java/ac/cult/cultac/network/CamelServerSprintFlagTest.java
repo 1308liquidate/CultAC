@@ -112,6 +112,24 @@ class CamelServerSprintFlagTest {
     }
 
     /**
+     * LocalPlayer#aiStep sets a rider's sprint flag only with forward impulse and clears it without one, so a rider
+     * strafing without forward ends every tick not sprinting, whatever it sent.
+     */
+    @Test
+    void aStrafingRidersSprintStartGivesNoBonus() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            mountAtRest(f, LEFT, true);
+
+            double velocity = strafeInput(WALK);
+            double x = REST.x + velocity;
+            assertExact(ride(f, 0F, 0F, 0F, new Vec3(x, REST.y, REST.z)));
+            velocity = velocity * GROUND_FRICTION + strafeInput(WALK);
+            x += velocity;
+            assertExact(ride(f, 0F, 0F, 0F, new Vec3(x, REST.y, REST.z)));
+        }
+    }
+
+    /**
      * A rider of a camel it does not control has its flag cleared by LocalPlayer#aiStep and sends no STOP_SPRINTING.
      * Moved onto a saddled camel with forward and sprint held, its first travel reads the cleared flag; aiStep sprints
      * again that tick and LocalPlayer#sendIsSprintingIfNeeded sends nothing, so the next travel has the bonus.
