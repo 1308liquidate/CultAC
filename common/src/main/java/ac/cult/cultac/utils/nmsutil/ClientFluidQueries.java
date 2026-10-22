@@ -68,9 +68,11 @@ public final class ClientFluidQueries {
 
     public static boolean is(CultPlayer player, SimFluidState state, FluidTags tag) {
         if (usesTagBasedFluidRules(player)) {
-            return clientTags(player)
-                    .fluids()
-                    .getOrDefault(tag.key(), List.of())
+            // clientTags(player).fluids().getOrDefault(tag.key(), List.of()), memoised per tag for per-cell queries.
+            if (player.registryState == null) player.registryState = new ClientComponentRegistries();
+            var model = player.user.getCultConnection().dispatcher().runtime().data().version();
+            return player.registryState
+                    .clientFluidMembers(model, player.getClientVersion().getProtocolVersion(), tag)
                     .contains(state.type());
         }
         // Older clients retain the model's default fluid-tag membership.

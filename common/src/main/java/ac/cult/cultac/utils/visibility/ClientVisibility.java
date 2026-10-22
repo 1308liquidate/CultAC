@@ -637,7 +637,8 @@ public final class ClientVisibility {
         int maxChunkZ = (int) Math.floor(Math.max(eye.z, Math.min(target.maxZ, eye.z + range))) >> 4;
         // Iterate received chunks, so plugin-authored large velocities or entity
         // boxes cannot turn this into a scan through millions of unloaded cells.
-        for (long key : player.compensatedWorld.chunkPositions()) {
+        for (var keys = player.compensatedWorld.chunkPositions().iterator(); keys.hasNext(); ) {
+            long key = keys.nextLong();
             int chunkX = (int) (key >> 32), chunkZ = (int) key;
             if (chunkX < minChunkX || chunkX > maxChunkX || chunkZ < minChunkZ || chunkZ > maxChunkZ) continue;
             SimpleCollisionBox query =

@@ -238,11 +238,12 @@ public final class PalettedSection {
 
     private void setCode(int index, int code) {
         if (bits == 0) return;
-        int perWord = 64 / bits, shift = (index % perWord) * bits;
+        // Every caller passes an index codeAt has just read at this width, or one in [0, size).
+        int word = wordIndex(index, bits), shift = (index - word * VALUES_PER_WORD[bits]) * bits;
         long mask = (1L << bits) - 1;
         if (code < 0 || code > mask)
             throw new IllegalArgumentException("Section palette index does not fit " + bits + " bits");
-        words[index / perWord] = words[index / perWord] & ~(mask << shift) | ((long) code & mask) << shift;
+        words[word] = words[word] & ~(mask << shift) | ((long) code & mask) << shift;
     }
 
     public int get(int index) {

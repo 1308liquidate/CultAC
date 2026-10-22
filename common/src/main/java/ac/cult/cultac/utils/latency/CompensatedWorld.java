@@ -1050,7 +1050,9 @@ public class CompensatedWorld {
             if (prediction == null) {
                 boolean isPlayerTryingToDisableCult =
                         player.getSetbackTeleportUtil().shouldBlockMovement();
-                int serverState = getBlockStateIdAt(asVector);
+                // Nothing since the first read writes chunk data or the selection snapshot
+                // (putIfAbsent stores this same value), so it is still the current state.
+                int serverState = original;
                 originalServerBlocks.put(
                         asVector.asLong(),
                         new BlockPrediction(
@@ -1084,7 +1086,8 @@ public class CompensatedWorld {
         ghostBlockMitigator.handleNewBlock(asVector);
 
         // This works because of how we optimized wrappedblockstate (avoid messing with inner tick predictions)
-        if (getBlockStateIdAt(asVector) == newState) return original;
+        // No world write has happened since the first read.
+        if (original == newState) return original;
 
         player.checkManager.getSimulationProcessor().handleBlockChange(asVector, original);
         player.checkManager.getSimulationProcessor().handleBlockChange(asVector, newState);
@@ -1925,10 +1928,11 @@ public class CompensatedWorld {
     }
 
     public void clearChunksForDimension(String dimension) {
-        Iterator<Map.Entry<Long, CachedChunk>> iterator = chunks.entrySet().iterator();
+        Iterator<Long2ObjectMap.Entry<CachedChunk>> iterator =
+                chunks.long2ObjectEntrySet().iterator();
         while (iterator.hasNext()) {
-            Map.Entry<Long, CachedChunk> entry = iterator.next();
-            long chunkPosition = entry.getKey();
+            Long2ObjectMap.Entry<CachedChunk> entry = iterator.next();
+            long chunkPosition = entry.getLongKey();
             String chunkDimension = chunkDimensions.get(chunkPosition);
             if (!dimension.equals(chunkDimension)) {
                 continue;
@@ -1957,8 +1961,8 @@ public class CompensatedWorld {
         TerrainListener listener = terrainListener;
         long[] cleared = listener == null ? null : new long[chunks.size()];
         int count = 0;
-        for (Map.Entry<Long, CachedChunk> entry : chunks.entrySet()) {
-            long chunkPosition = entry.getKey();
+        for (Long2ObjectMap.Entry<CachedChunk> entry : chunks.long2ObjectEntrySet()) {
+            long chunkPosition = entry.getLongKey();
             if (cleared != null) cleared[count++] = chunkPosition;
             String dimension = chunkDimensions.getOrDefault(chunkPosition, visibleDimension);
             releaseChunkSections(

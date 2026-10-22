@@ -1299,13 +1299,30 @@ public class CompensatedEntities {
         return position != null && entity.isInLoadedChunk(player.compensatedWorld, position);
     }
 
+    private static final Comparator<PacketEntity> CLIENT_TICK_ORDER =
+            Comparator.comparingLong(PacketEntity::getClientTickOrder);
+    // Reused between client ticks; taken while in use so a reentrant tick snapshots into its own list.
+    private ArrayList<PacketEntity> clientTickRootsScratch = new ArrayList<>();
+
     public void tickClientEntities(Consumer<PacketEntity> tick) {
-        List<PacketEntity> roots = rootsInAddOrder();
-        if (roots == null) {
-            roots = new ArrayList<>(entityMap.values());
+        ArrayList<PacketEntity> roots = clientTickRootsScratch;
+        clientTickRootsScratch = null;
+        if (roots == null) roots = new ArrayList<>(entityMap.size() + 1);
+        try {
+            tickClientEntities(tick, roots);
+        } finally {
+            roots.clear();
+            clientTickRootsScratch = roots;
+        }
+    }
+
+    private void tickClientEntities(Consumer<PacketEntity> tick, ArrayList<PacketEntity> roots) {
+        if (!rootsInAddOrder(roots)) {
+            roots.clear();
+            roots.addAll(entityMap.values());
             roots.add(getSelf());
             roots.removeIf(entity -> entity.getRiding() != null || !isTicking(entity));
-            roots.sort(Comparator.comparingLong(PacketEntity::getClientTickOrder));
+            roots.sort(CLIENT_TICK_ORDER);
         }
         boolean frozen =
                 player.packetStateData.serverTicksFrozen && player.packetStateData.serverFrozenTickStepsRemaining == 0;
@@ -1330,25 +1347,24 @@ public class CompensatedEntities {
     }
 
     /**
-     * The ticking roots, self included, in the stable client tick order sort of entityMap values then self; null
-     * unless the add order holds exactly the entityMap values with strictly increasing tick orders.
+     * Appends the ticking roots, self included, to the empty {@code roots} in the stable client tick order sort of
+     * entityMap values then self; false, with {@code roots} partly filled, unless the add order holds exactly the
+     * entityMap values with strictly increasing tick orders.
      */
-    private List<PacketEntity> rootsInAddOrder() {
+    private boolean rootsInAddOrder(List<PacketEntity> roots) {
         int size = addOrder.size();
-        if (size != entityMap.size()) return null;
+        if (size != entityMap.size()) return false;
         boolean mapped = addOrderMapped && addOrderMappedAt == entityMap.mutations;
         PacketEntity self = getSelf();
         long selfOrder = self.getClientTickOrder();
         boolean selfPending = self.getRiding() == null && isTicking(self);
-        // Tracked passengers ride, so they are never roots.
-        List<PacketEntity> roots = new ArrayList<>(Math.max(1, size + 1 - trackedPassengers));
         long previous = 0L;
         for (int i = 0; i < size; i++) {
             PacketEntity entity = addOrder.get(i);
             long order = entity.getClientTickOrder();
-            if (i > 0 && order <= previous) return null;
+            if (i > 0 && order <= previous) return false;
             // Distinct orders make the entries distinct, so with equal sizes this proves the sets equal.
-            if (!mapped && entityMap.get(entity.getEntityId()) != entity) return null;
+            if (!mapped && entityMap.get(entity.getEntityId()) != entity) return false;
             previous = order;
             // Self ticks after an entity sharing its order.
             if (selfPending && selfOrder < order) {
@@ -1360,7 +1376,7 @@ public class CompensatedEntities {
         if (selfPending) roots.add(self);
         addOrderMapped = true;
         addOrderMappedAt = entityMap.mutations;
-        return roots;
+        return true;
     }
 
     private static boolean containsPlayer(PacketEntity entity) {

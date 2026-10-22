@@ -3,6 +3,7 @@ package ac.cult.cultac.utils.latency;
 import ac.cult.blocksim.BlockSimulator;
 import ac.cult.blocksim.behavior.ConsumableBehavior;
 import ac.cult.blocksim.data.DataTables;
+import ac.cult.blocksim.data.FluidTags;
 import ac.cult.blocksim.data.HolderSets;
 import ac.cult.blocksim.data.InteractionRegistries;
 import ac.cult.blocksim.data.ItemRegistry;
@@ -17,6 +18,7 @@ import ac.cult.cultac.protocol.data.ModelBlockStates;
 import ac.cult.cultac.utils.blockplace.BlockSimulatorWorldView;
 import ac.cult.cultac.utils.inventory.ItemUtil;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -41,6 +43,14 @@ public final class ClientComponentRegistries {
 
     private ProtocolVersion lastClientTagsSource;
     private ProtocolVersion lastClientTagsClient;
+    /**
+     * Per-{@link FluidTags} members of {@code clientTags(clientFluidSource, ProtocolVersion.of(clientFluidProtocol))},
+     * which per-cell fluid queries repeat; cleared with {@link #lastClientTags}, whose fluids they are.
+     */
+    private final List<String>[] clientFluidMembers = newFluidMemberCache();
+
+    private ProtocolVersion clientFluidSource;
+    private int clientFluidProtocol;
     private final Map<ActionPath, HolderSets.Overlay> simulatorTags = new HashMap<>();
     private Map<String, RegistryTags.Payload> configurationTags;
     private Map<String, List<WireValueDecoder.RegistryEntry>> configurationRegistries;
@@ -259,6 +269,7 @@ public final class ClientComponentRegistries {
         geometryTags = null;
         actionTags.clear();
         lastClientTags = null;
+        Arrays.fill(clientFluidMembers, null);
         simulatorTags.clear();
         configurationTags = null;
         configurationRegistries = null;
@@ -303,6 +314,7 @@ public final class ClientComponentRegistries {
         geometryTags = null;
         actionTags.clear();
         lastClientTags = null;
+        Arrays.fill(clientFluidMembers, null);
         simulatorTags.clear();
     }
 
@@ -370,6 +382,31 @@ public final class ClientComponentRegistries {
             lastClientTagsClient = client;
         }
         return lastClientTags;
+    }
+
+    /**
+     * {@code clientTags(source, ProtocolVersion.of(clientProtocol)).fluids().getOrDefault(tag.key(), List.of())},
+     * memoised until the tags change or the source/client pair differs.
+     */
+    public List<String> clientFluidMembers(ProtocolVersion source, int clientProtocol, FluidTags tag) {
+        if (source != clientFluidSource || clientProtocol != clientFluidProtocol) {
+            Arrays.fill(clientFluidMembers, null);
+            clientFluidSource = source;
+            clientFluidProtocol = clientProtocol;
+        }
+        List<String> members = clientFluidMembers[tag.ordinal()];
+        if (members == null) {
+            members = clientTags(source, ProtocolVersion.of(clientProtocol))
+                    .fluids()
+                    .getOrDefault(tag.key(), List.of());
+            clientFluidMembers[tag.ordinal()] = members;
+        }
+        return members;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String>[] newFluidMemberCache() {
+        return (List<String>[]) new List<?>[FluidTags.values().length];
     }
 
     private static Map<String, List<String>> exportTags(String registry, RegistryTags.Payload payload) {

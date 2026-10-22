@@ -683,9 +683,10 @@ class EntityTrackingParityTest {
 
     @SuppressWarnings("unchecked")
     private static List<PacketEntity> rootsInAddOrder(CompensatedEntities entities) throws Exception {
-        Method method = CompensatedEntities.class.getDeclaredMethod("rootsInAddOrder");
+        Method method = CompensatedEntities.class.getDeclaredMethod("rootsInAddOrder", List.class);
         method.setAccessible(true);
-        return (List<PacketEntity>) method.invoke(entities);
+        List<PacketEntity> roots = new java.util.ArrayList<>();
+        return (boolean) method.invoke(entities, roots) ? roots : null;
     }
 
     @SuppressWarnings("unchecked")
