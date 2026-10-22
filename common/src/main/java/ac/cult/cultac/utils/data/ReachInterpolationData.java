@@ -908,6 +908,9 @@ public class ReachInterpolationData {
             return physicalPitch;
         }
 
+        // LinearInterpolationHandler#doInterpolate lerps the pitch in double.
+        if (followsInterpolationHandler())
+            return (float) CultMath.lerp(1.0 / remainingSteps, physicalPitch, targetPitch);
         return lerp(physicalPitch, targetPitch, 1.0F / remainingSteps);
     }
 

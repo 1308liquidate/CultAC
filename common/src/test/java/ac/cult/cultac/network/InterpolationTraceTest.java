@@ -45,7 +45,7 @@ class InterpolationTraceTest {
 
     @Test
     void steppedTrace() throws Exception {
-        assertEquals(3796141699976637738L, trace(ClientVersion.V_26_3, 13L));
+        assertEquals(8926915609959338323L, trace(ClientVersion.V_26_3, 13L));
     }
 
     private static long trace(ClientVersion version, long seed) throws Exception {

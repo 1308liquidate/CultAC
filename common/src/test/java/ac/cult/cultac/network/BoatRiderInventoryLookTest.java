@@ -90,6 +90,31 @@ class BoatRiderInventoryLookTest {
      */
     @Test
     void aRiderTheInterpolatingTeleportedBoatTurnsInItsInventoryIsNotRotating() throws Exception {
+        assertEquals(0, teleportInAnInventory(DRIFT, false));
+    }
+
+    /**
+     * The third LinearInterpolationHandler step puts a boat that does not move itself exactly on the teleport target,
+     * and LocalPlayer#sendChanges sends that tick's ServerboundMoveVehiclePacket after the rider's Rot.
+     */
+    @Test
+    void aRiderTheStillTeleportedBoatTurnsInItsInventoryIsNotRotating() throws Exception {
+        assertEquals(0, teleportInAnInventory(Vec3.ZERO, false));
+    }
+
+    /** The ping after a teleport bundle can reach the client after its next tick. */
+    @Test
+    void aRiderTheStillTeleportedBoatTurnsInItsInventoryBeforeTheNextPingIsNotRotating() throws Exception {
+        assertEquals(0, teleportInAnInventory(Vec3.ZERO, true));
+    }
+
+    /**
+     * Steers left until {@link #RELEASE_TICK}, opens the inventory at {@link #OPEN_TICK} and has the server teleport the
+     * boat 5 blocks and 150 degrees round at {@link #TELEPORT_TICK}; the boat moves {@code drift} a tick from then on.
+     * The ping the server sends after the teleport is answered after the next tick when {@code trailingPong}. Returns
+     * MultiActionsO's violations.
+     */
+    private static double teleportInAnInventory(Vec3 drift, boolean trailingPong) throws Exception {
         float[] turns = deltaRotations();
         try (var f = board(true)) {
             MultiActionsO check = f.player.checkManager.getCheck(MultiActionsO.class);
@@ -106,13 +131,16 @@ class BoatRiderInventoryLookTest {
             float lastStepYaw = 0;
             int steps = 0;
             int turnedLooks = 0;
-            for (int tick = 0; tick <= TELEPORT_TICK + 4; tick++) {
+            int nextPing = -1;
+            for (int tick = 0; tick <= TELEPORT_TICK + 20; tick++) {
                 if (tick == OPEN_TICK) f.player.openWindow.onClientOpenOrCloseWindow(true);
                 if (tick == TELEPORT_TICK) {
                     target = new Vec3(SEAT.x, SEAT.y, SEAT.z + 5.0);
                     targetYaw = boatYaw + 150.0F;
                     teleportBoat(f, target, targetYaw);
-                    f.pongThrough(f.player.lastTransactionSent.get());
+                    int bundlePing = f.player.lastTransactionSent.get();
+                    nextPing = f.player.sendTransactionAndGetId();
+                    f.pongThrough(trailingPong ? bundlePing : nextPing);
                     lastStep = boat;
                     lastStepYaw = boatYaw;
                     steps = 3;
@@ -134,14 +162,16 @@ class BoatRiderInventoryLookTest {
                 yaw = clampRotation(yaw + turns[tick], boatYaw);
                 if (tick >= TELEPORT_TICK) {
                     if (yaw != previousYaw) turnedLooks++;
-                    boat = boat.add(DRIFT);
+                    boat = boat.add(drift);
                 }
                 rot(f, yaw, LOOK_PITCH);
                 moveBoat(f, boat, boatYaw);
                 f.tickEnd();
+                if (tick == TELEPORT_TICK) f.pongThrough(nextPing);
             }
             assertTrue(turnedLooks > 0, "the boat turned no judged look");
-            assertEquals(0, check.violations);
+            assertEquals(boatYaw, f.player.compensatedEntities.getSelf().getRiding().clientPhysicalYaw);
+            return check.violations;
         }
     }
 

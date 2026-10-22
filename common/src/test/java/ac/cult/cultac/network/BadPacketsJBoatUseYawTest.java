@@ -295,6 +295,86 @@ class BadPacketsJBoatUseYawTest {
     }
 
     /**
+     * The third LinearInterpolationHandler step puts a boat that does not move itself exactly on the teleport target.
+     * LocalPlayer#sendChanges sends that tick's ServerboundMoveVehiclePacket after the rider's Rot.
+     */
+    @Test
+    void aDriverUsesItemsAfterItsStillBoatInterpolatesOntoTheTarget() throws Exception {
+        assertEquals(0, useItemsAfterAStillBoatIsTeleported(false));
+    }
+
+    /** The ping after a teleport bundle can reach the client after its next tick. */
+    @Test
+    void aDriverUsesItemsAfterItsStillBoatInterpolatesOntoTheTargetBeforeTheNextPing() throws Exception {
+        assertEquals(0, useItemsAfterAStillBoatIsTeleported(true));
+    }
+
+    /**
+     * Steers left on stone, releases the keys and has the server teleport the turning boat 5 blocks and 150 degrees
+     * round; the boat does not move itself, and the rider uses an item every tick for a second. The ping the server
+     * sends after the teleport is answered after the first tick when {@code trailingPong}. Returns BadPacketsJ's
+     * violations.
+     */
+    private static double useItemsAfterAStillBoatIsTeleported(boolean trailingPong) throws Exception {
+        try (var f = new JavaTickFixture()) {
+            ride(f, 0.0F, false);
+            BadPacketsJ check = f.player.checkManager.getListener(BadPacketsJ.class);
+            float friction = stoneFriction();
+            float deltaRotation = 0.0F;
+            float boatYaw = 0.0F;
+            float yaw = 0.0F;
+            for (int tick = 0; tick < 6; tick++) {
+                if (tick == 0) f.input(new ServerboundPlayerInput(false, false, true, false, false, false, false));
+                if (tick == 4) f.input(new ServerboundPlayerInput(false, false, false, false, false, false, false));
+                deltaRotation *= friction;
+                if (tick > 0 && tick <= 4) deltaRotation--;
+                boatYaw += deltaRotation;
+                yaw = clampRotation(yaw + deltaRotation, boatYaw);
+                rot(f, yaw);
+                moveBoat(f, boatYaw);
+                f.tickEnd();
+            }
+            Vec3 target = new Vec3(SEAT.x, SEAT.y, SEAT.z + 5.0);
+            float targetYaw = boatYaw + 150.0F;
+            teleportBoat(f, target, targetYaw);
+            int bundlePing = f.player.lastTransactionSent.get();
+            int nextPing = f.player.sendTransactionAndGetId();
+            f.pongThrough(trailingPong ? bundlePing : nextPing);
+            Vec3 boat = SEAT;
+            Vec3 lastStep = boat;
+            float lastStepYaw = boatYaw;
+            int steps = 3;
+            int clamped = 0;
+            for (int tick = 0; tick < 20; tick++) {
+                if (steps > 0) {
+                    // AbstractInterpolationHandler#interpolate carries the boat's own turn into the target.
+                    targetYaw += boatYaw - lastStepYaw;
+                    boat = boat.lerp(target, 1.0 / steps);
+                    boatYaw = rotLerp(1.0 / steps, boatYaw, targetYaw);
+                    lastStep = boat;
+                    lastStepYaw = boatYaw;
+                    steps--;
+                }
+                use(f, yaw);
+                deltaRotation *= friction;
+                boatYaw += deltaRotation;
+                float turned = yaw + deltaRotation;
+                yaw = clampRotation(turned, boatYaw);
+                if (yaw != turned) clamped++;
+                rot(f, yaw);
+                moveBoat(f, new Vec3d(boat.x, boat.y, boat.z), boatYaw);
+                f.tickEnd();
+                if (tick == 0) f.pongThrough(nextPing);
+            }
+            assertEquals(target, lastStep);
+            assertEquals(deltaRotation, f.player.boatData.deltaRotation);
+            assertEquals(boatYaw, riding(f).clientPhysicalYaw);
+            assertTrue(clamped > 0);
+            return check.getViolations();
+        }
+    }
+
+    /**
      * Steers left on stone, has the server teleport the boat 150 degrees round, past 64 blocks when {@code far}, and
      * uses an item every tick after, the rider's yaw held 105 degrees from the boat by clampRotation. The boat drifts
      * {@link #DRIFT} a tick from the teleport on. Returns BadPacketsJ's violations.

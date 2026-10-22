@@ -783,7 +783,11 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                                 && player.compensatedEntities.vehicles.isVehicleSwitchBufferActiveFor(packetRoot));
         TeleportAcceptData teleportData = player.getSetbackTeleportUtil()
                 .checkVehicleTeleportQueue(
-                        packetRoot == null ? null : packetRoot.getEntityId(), newPos.x, newPos.y, newPos.z);
+                        packetRoot == null ? null : packetRoot.getEntityId(),
+                        newPos.x,
+                        newPos.y,
+                        newPos.z,
+                        pairedRiddenTick);
         boolean checkableClientTick =
                 fromClientTick && packetRoot != null && canAuthoritativelyMove && !teleportData.isTeleport();
 
