@@ -51,16 +51,14 @@ class EntityScanParityTest {
     }
 
     @Test
-    void pusherTypeTestMatchesForEveryModelType() throws Exception {
-        Method mayPushOrCollide = WorldStageBuilder.class.getDeclaredMethod("mayPushOrCollide", PacketEntity.class);
-        mayPushOrCollide.setAccessible(true);
+    void pusherTypeTestMatchesForEveryModelType() {
         int accepted = 0;
         for (int id : modelTypes()) {
             PacketEntity entity = new PacketEntity(id, 1);
             boolean expected = oldPusherType(entity);
             assertEquals(
                     expected,
-                    mayPushOrCollide.invoke(null, entity),
+                    entity.mayPushOrCollide(),
                     EntityTypeUtil.getKey(id).toString());
             if (expected) accepted++;
         }
@@ -108,7 +106,11 @@ class EntityScanParityTest {
     void recountMatchesTheTickOrderFirstScan() throws Exception {
         Method pusherBox = WorldStageBuilder.class.getDeclaredMethod(
                 "collidingPusherBox",
+                CultPlayer.class,
                 CompensatedEntities.class,
+                PacketEntity.class,
+                PacketEntity.class,
+                PacketEntity.class,
                 PacketEntity.class,
                 SimpleCollisionBox.class,
                 SimpleCollisionBox.class,
@@ -140,14 +142,27 @@ class EntityScanParityTest {
             int colliding = 0;
             for (PacketEntity entity : entities.entityMap.values()) {
                 boolean collides = pusherBox.invoke(
-                                null, entities, entity, playerBox, new SimpleCollisionBox(), new SimpleCollisionBox())
+                                null,
+                                f.player,
+                                entities,
+                                entity,
+                                entities.rootOfSelf(),
+                                entities.selfRidingRoot(),
+                                entities.serverVehicleRoot(),
+                                playerBox,
+                                new SimpleCollisionBox(),
+                                new SimpleCollisionBox())
                         != null;
                 if (collides) colliding++;
                 if (entities.clientTickOrder(entity) < playerTickOrder) continue;
+                // The recount keeps the movement's own count of riders outside the player's riding trees.
+                if (entities.isUntrackedRider(entity)) continue;
                 if (collides) expected++;
             }
-            WorldStageBuilder.recountCollidingTickingAfterPlayer(prediction);
-            assertEquals(expected, context.getWorldData().getNumCollidingTickingAfterPlayer());
+            WorldStageBuilder.recountCollidingTickingAfterPlayer(f.player, prediction);
+            assertEquals(
+                    expected + context.getWorldData().getNumRidersTickingAfterPlayer(),
+                    context.getWorldData().getNumCollidingTickingAfterPlayer());
             assertTrue(expected > 0 && expected < colliding, "expected=" + expected + " colliding=" + colliding);
         }
     }

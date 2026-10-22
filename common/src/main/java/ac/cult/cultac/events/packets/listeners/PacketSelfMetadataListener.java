@@ -85,7 +85,8 @@ public class PacketSelfMetadataListener {
                     boolean isSprinting = (field & 0x8) == 0x8;
 
                     final Runnable applySharedFlags = () -> {
-                        player.isSwimming = isSwimming;
+                        player.swimState.onServerFlag(isSwimming);
+                        player.packetStateData.swimmingPossible = isSwimming;
                         player.sprintState.onServerFlag(isSprinting);
                         if (!isSprinting) {
                             // The local client can retain its Camel sprint input for
@@ -156,8 +157,8 @@ public class PacketSelfMetadataListener {
                     if (proof != null) {
                         if (!event.isInsideBundle()) event.bundle();
                         player.latencyUtils.addRealTimeTask(proof.transaction(), () -> {
+                            // LivingEntity#onSyncedDataUpdated leaves the pose to Player#updatePlayerPose after aiStep.
                             player.isRiptidePose = isRiptiding;
-                            player.refreshPlayerPose();
                             ac.cult.cultac.utils.data.ItemUseInventory.metadata(player, (byte) handValue);
                         });
                     }

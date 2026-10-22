@@ -46,6 +46,11 @@ public final class CloudService {
 
     private CloudService() {}
 
+    /** Sends what every team socket hears to team sync. */
+    static void listenForTeam() {
+        CONNECTIONS.onTeam(CultAPI.INSTANCE.getPortalSync().teamListener());
+    }
+
     /** Applies the config: sockets open, close or move, and every player's capture follows. Any thread. */
     static void configReloaded() {
         configure(CultAPI.INSTANCE.getConfigManager().getConfig(), CultAPI.INSTANCE.getPlatform() == Platform.VELOCITY);

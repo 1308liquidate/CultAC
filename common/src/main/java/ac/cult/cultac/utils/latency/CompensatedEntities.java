@@ -8,6 +8,7 @@ import ac.cult.cultac.network.packet.InventoryPackets.EquipmentEntry;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.AttributeModifier;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.protocol.value.EntityPose;
@@ -33,13 +34,16 @@ import org.jetbrains.annotations.Nullable;
 public class CompensatedEntities {
     public final ClientPlayerModes clientPlayerModes = new ClientPlayerModes();
     private static final String SPRINTING_MODIFIER_ID = "minecraft:sprinting";
+    /** LivingEntity#SPEED_MODIFIER_SPRINTING, which LivingEntity#setSprinting adds to movement_speed. */
+    public static final AttributeModifier SPRINTING_SPEED_MODIFIER =
+            new AttributeModifier(SPRINTING_MODIFIER_ID, 0.3F, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
     public static final String SNOW_MODIFIER_ID = "minecraft:powder_snow";
     public static final Set<String> EXCLUDED_MODIFIER_IDS = Set.of(SPRINTING_MODIFIER_ID, SNOW_MODIFIER_ID);
     private static final String ATTRIBUTE_NAMESPACE = "minecraft:";
     private static final long LOCAL_PLAYER_CLIENT_TICK_ORDER = 0L;
     private static final int HELD_UPDATES = 4;
     private static final int HELD_ENTITIES = 256;
-    public final Int2ObjectOpenHashMap<PacketEntity> entityMap = new Int2ObjectOpenHashMap<>(40, 0.7f);
+    public final EntityMap entityMap = new EntityMap();
     public final Int2ObjectOpenHashMap<TrackerData> serverPositionsMap = new Int2ObjectOpenHashMap<>(40, 0.7f);
     private final Int2ObjectOpenHashMap<List<HeldAttributes>> pendingAttributes = new Int2ObjectOpenHashMap<>(10, 0.7f);
     private final Int2ObjectOpenHashMap<List<EquipmentEntry>> pendingEquipment = new Int2ObjectOpenHashMap<>(10, 0.7f);
@@ -48,14 +52,28 @@ public class CompensatedEntities {
     private long nextClientEntityTickOrder = 1L;
     // The entityMap values in the order addEntity put them.
     private final ArrayList<PacketEntity> addOrder = new ArrayList<>();
+    // While addOrderMapped is set and entityMap.mutations equals addOrderMappedAt, every addOrder entry is the
+    // entityMap value at its id; every addOrder write unsets addOrderMapped.
+    private boolean addOrderMapped;
+    private int addOrderMappedAt;
     // The sum of passengers.size() over entityMap values.
     private int trackedPassengers;
+    // Type-filtered entityMap values in entityMap iteration order, current while typeViewsAt matches the map.
+    private int typeViewsAt = -1;
+    private List<PacketEntity> pushOrCollideCandidates = List.of();
+    private List<PacketEntity> boats = List.of();
+    private List<PacketEntity> poseCollisionCandidates = List.of();
+    private List<PacketEntity> unknownCollisionCandidates = List.of();
 
     CultPlayer player;
 
     public TrackerData selfTrackedEntity;
     public PacketEntitySelf playerEntity;
     private Vec3 rideTickSeat;
+    // The client holds every sent change to the local player's passengers once it answers this transaction.
+    private int selfPassengersSettleTransaction = Integer.MIN_VALUE;
+    // The passengers the last set_passengers for the local player named.
+    private List<Integer> sentSelfPassengers = List.of();
 
     public CompensatedEntities(CultPlayer player) {
         this.player = player;
@@ -94,7 +112,58 @@ public class CompensatedEntities {
         for (PacketEntity entity : entityMap.values()) untrack(entity);
         entityMap.clear();
         addOrder.clear();
+        addOrderMapped = false;
         player.compensatedFireworks.clearLevel();
+    }
+
+    /** The entities passing {@link PacketEntity#mayPushOrCollide()}, in entityMap iteration order. Read only. */
+    public List<PacketEntity> pushOrCollideCandidates() {
+        refreshTypeViews();
+        return pushOrCollideCandidates;
+    }
+
+    /** The boats, in entityMap iteration order. Read only. */
+    public List<PacketEntity> boats() {
+        refreshTypeViews();
+        return boats;
+    }
+
+    /** The boats, minecarts, shulkers and happy ghasts, in entityMap iteration order. Read only. */
+    public List<PacketEntity> poseCollisionCandidates() {
+        refreshTypeViews();
+        return poseCollisionCandidates;
+    }
+
+    /** The boats, shulkers and {@link PacketEntityHappyGhast}s, in entityMap iteration order. Read only. */
+    public List<PacketEntity> unknownCollisionCandidates() {
+        refreshTypeViews();
+        return unknownCollisionCandidates;
+    }
+
+    private void refreshTypeViews() {
+        if (typeViewsAt == entityMap.mutations) return;
+        List<PacketEntity> pushOrCollide = presized(pushOrCollideCandidates);
+        List<PacketEntity> boatList = presized(boats);
+        List<PacketEntity> pose = presized(poseCollisionCandidates);
+        List<PacketEntity> unknown = presized(unknownCollisionCandidates);
+        for (PacketEntity entity : entityMap.values()) {
+            if (entity.mayPushOrCollide()) pushOrCollide.add(entity);
+            boolean boat = entity.isBoat();
+            boolean shulker = entity.type == EntityTypeIds.SHULKER;
+            if (boat) boatList.add(entity);
+            if (boat || entity.isMinecart() || shulker || entity.isHappyGhast()) pose.add(entity);
+            if (boat || shulker || entity instanceof PacketEntityHappyGhast) unknown.add(entity);
+        }
+        pushOrCollideCandidates = pushOrCollide;
+        boats = boatList;
+        poseCollisionCandidates = pose;
+        unknownCollisionCandidates = unknown;
+        typeViewsAt = entityMap.mutations;
+    }
+
+    private List<PacketEntity> presized(List<PacketEntity> previous) {
+        if (previous.isEmpty() || entityMap.isEmpty()) return new ArrayList<>();
+        return new ArrayList<>(Math.max(10, previous.size() + 1));
     }
 
     private void track(PacketEntity entity) {
@@ -151,7 +220,7 @@ public class CompensatedEntities {
      * yet; its riders are simulated too, so a vehicle switch reads a positioned vehicle.
      */
     @Nullable
-    private PacketEntity serverVehicleRoot() {
+    public PacketEntity serverVehicleRoot() {
         Integer vehicleId = vehicles.serverPlayerVehicle;
         if (vehicleId == null) return null;
         PacketEntity vehicle = entityMap.get(vehicleId.intValue());
@@ -170,8 +239,20 @@ public class CompensatedEntities {
      */
     public boolean isUntrackedRider(PacketEntity entity) {
         if (entity.getRiding() == null) return false;
+        return isUntrackedRider(entity, selfRidingRoot(), serverVehicleRoot());
+    }
+
+    /**
+     * {@link #isUntrackedRider(PacketEntity)} given {@link #selfRidingRoot()} and {@link #serverVehicleRoot()} read
+     * since the last riding, server vehicle or entityMap change.
+     */
+    public boolean isUntrackedRider(
+            PacketEntity entity, @Nullable PacketEntity selfRidingRoot, @Nullable PacketEntity serverVehicleRoot) {
+        if (entity.getRiding() == null) return false;
+        // Every root, and a cycle's null, differs from two null roots.
+        if (selfRidingRoot == null && serverVehicleRoot == null) return true;
         PacketEntity root = rootOf(entity);
-        return root == null || root != selfRidingRoot() && root != serverVehicleRoot();
+        return root == null || root != selfRidingRoot && root != serverVehicleRoot;
     }
 
     /**
@@ -184,6 +265,7 @@ public class CompensatedEntities {
         if (!isUntrackedRider(rider)) return;
         SimpleCollisionBox seat = untrackedRiderSeat(rider, 0);
         if (seat != null) rider.settleAtSeat(player, seat);
+        else rider.markPositionInexact();
     }
 
     /**
@@ -196,6 +278,73 @@ public class CompensatedEntities {
             if (seat != null) return seat;
         }
         return entity.getPossibleMovementCollisionBoxes();
+    }
+
+    /**
+     * Whether the seat of untracked {@code rider} can lie horizontally within {@code near}, without computing it.
+     * Passenger and vehicle attachment points lie within their entity's width, so each hop seats a rider within its
+     * vehicle's width plus its own width of the vehicle's centre, and the seat stays inside the root's box widened by
+     * those widths. Allocates nothing; {@code rootBox} and {@code scratch} are working space.
+     */
+    public boolean untrackedRiderMayReach(
+            PacketEntity rider, SimpleCollisionBox near, SimpleCollisionBox rootBox, SimpleCollisionBox scratch) {
+        double margin = 0.0D;
+        PacketEntity entity = rider;
+        for (int hops = 0; entity.getRiding() != null; hops++) {
+            if (hops > entityMap.size()) return true;
+            PacketEntity vehicle = entity.getRiding();
+            margin += BoundingBoxSize.getWidth(player, vehicle) + BoundingBoxSize.getWidth(player, entity);
+            entity = vehicle;
+        }
+        entity.getPossibleMovementCollisionBoxes(rootBox, scratch);
+        return rootBox.minX - margin < near.maxX
+                && rootBox.maxX + margin > near.minX
+                && rootBox.minZ - margin < near.maxZ
+                && rootBox.maxZ + margin > near.minZ;
+    }
+
+    /**
+     * The position box untracked {@code rider} may push from: its seat, widened by every position the root of its
+     * vehicle chain may hold. Null inside a riding cycle. Allocates; rule far riders out with
+     * {@link #untrackedRiderMayReach} first.
+     */
+    @Nullable
+    public SimpleCollisionBox untrackedRiderPushBox(PacketEntity rider) {
+        PacketEntity root = rootOf(rider);
+        SimpleCollisionBox seat = root == null ? null : untrackedRiderSeat(rider, 0);
+        if (seat == null) return null;
+        SimpleCollisionBox rootBox = root.getPossibleMovementCollisionBoxes();
+        // The seat follows the root's centre and feet, which range over the root's box less one root size.
+        double width = BoundingBoxSize.getWidth(player, root);
+        double spreadX = Math.max(0.0D, (rootBox.maxX - rootBox.minX - width) / 2.0D);
+        double spreadZ = Math.max(0.0D, (rootBox.maxZ - rootBox.minZ - width) / 2.0D);
+        double spreadY =
+                Math.max(0.0D, rootBox.maxY - rootBox.minY - Math.abs(BoundingBoxSize.getHeight(player, root)));
+        seat.minX -= spreadX;
+        seat.maxX += spreadX;
+        seat.minZ -= spreadZ;
+        seat.maxZ += spreadZ;
+        seat.maxY += spreadY;
+        seat.minY -= posedSeatDrop(rider);
+        return seat;
+    }
+
+    // Avatar#POSES lowers a posed avatar's passenger point, which falls back to its current height.
+    private double posedSeatDrop(PacketEntity rider) {
+        double drop = 0.0D;
+        PacketEntity entity = rider;
+        for (int hops = 0; hops <= entityMap.size(); hops++) {
+            PacketEntity vehicle = entity.getRiding();
+            if (vehicle == null) break;
+            if (vehicle.isAvatar()) {
+                drop += Math.max(
+                        0.0F,
+                        PacketEntity.avatarHeight(EntityPose.STANDING, vehicle.scale) - vehicle.leastPoseHeight());
+            }
+            if (!isUntrackedRider(vehicle)) break;
+            entity = vehicle;
+        }
+        return drop;
     }
 
     // The seat box positionPassenger would give rider, with every untracked vehicle above it seated the same way.
@@ -214,6 +363,37 @@ public class CompensatedEntities {
         return GetBoundingBox.getPacketEntityBoundingBox(player, seat.x, seat.y, seat.z, rider);
     }
 
+    /**
+     * Whether a set_passengers or remove_entities naming {@code entityIds} may change the local player's passengers:
+     * one of them rides it, or the last set_passengers for it named one.
+     */
+    public boolean mayChangeSelfPassengers(List<Integer> entityIds) {
+        for (int id : entityIds) {
+            if (sentSelfPassengers.contains(id)) return true;
+            for (PacketEntity passenger : playerEntity.passengers) {
+                if (passenger.getEntityId() == id) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Records a set_passengers for the local player, which the client applies on answering {@code transaction}. */
+    public void sentSelfPassengers(List<Integer> passengers, int transaction) {
+        sentSelfPassengers = List.copyOf(passengers);
+        markSelfPassengersChange(transaction);
+    }
+
+    /** Records a sent change to the local player's passengers, which the client holds on answering {@code transaction}. */
+    public void markSelfPassengersChange(int transaction) {
+        selfPassengersSettleTransaction = Math.max(selfPassengersSettleTransaction, transaction);
+    }
+
+    /** Entity#isVehicle for the local player, true only while no sent change to its passengers is unanswered. */
+    public boolean selfCertainlyCarriesPassenger() {
+        return !playerEntity.passengers.isEmpty()
+                && player.lastTransactionReceived.get() >= selfPassengersSettleTransaction;
+    }
+
     public void removeEntity(int entityID) {
         PacketEntity previousRoot = playerEntity.getRiding();
         PacketEntity removing = entityMap.get(entityID);
@@ -226,6 +406,7 @@ public class CompensatedEntities {
         if (entity == null) return;
         untrack(entity);
         addOrder.remove(entity);
+        addOrderMapped = false;
 
         boolean removedSelfVehicle = vehicles.serverPlayerVehicle != null && vehicles.serverPlayerVehicle == entityID;
         if (removedSelfVehicle) {
@@ -236,6 +417,8 @@ public class CompensatedEntities {
             passenger.eject();
         }
         if (dismountSeat != null) commitDismountSeat(dismountSeat);
+        // Entity#setRemoved stops a discarded entity riding.
+        entity.eject();
         if (player.isBedrockMovement()) {
             vehicles.seedStartingVelocityIfRootChanged(previousRoot);
             if (previousRoot == null) player.getSetbackTeleportUtil().transferBedrockVehicleSetback(entityID);
@@ -284,10 +467,19 @@ public class CompensatedEntities {
         return root == null ? entity.getClientTickOrder() : root.getClientTickOrder();
     }
 
-    /** Entity#isPassengerOfSameVehicle against the local player, which makes Entity#push skip the pair. */
-    public boolean sharesRootVehicleWithSelf(PacketEntity entity) {
+    /** The root of the local player's riding chain, the player itself while it rides nothing; null in a cycle. */
+    @Nullable
+    public PacketEntity rootOfSelf() {
+        return rootOf(playerEntity);
+    }
+
+    /**
+     * Entity#isPassengerOfSameVehicle against the local player, which makes Entity#push skip the pair, given
+     * {@link #rootOfSelf()} read since the last riding change.
+     */
+    public boolean sharesRootVehicleWithSelf(PacketEntity entity, @Nullable PacketEntity rootOfSelf) {
         PacketEntity root = rootOf(entity);
-        return root != null && root == rootOf(playerEntity);
+        return root != null && root == rootOfSelf;
     }
 
     // Null inside a riding cycle (a server mounting a vehicle on its own passenger), which has no root.
@@ -301,9 +493,53 @@ public class CompensatedEntities {
         return root;
     }
 
+    /** Whether {@code entity} rides {@code vehicle} directly or through other vehicles; a riding cycle ends the walk. */
+    public boolean ridesIndirectly(PacketEntity entity, PacketEntity vehicle) {
+        PacketEntity riding = entity.getRiding();
+        for (int hops = 0; riding != null && hops <= entityMap.size(); hops++, riding = riding.getRiding()) {
+            if (riding == vehicle) return true;
+        }
+        return false;
+    }
+
     // TODO: This doesn't belong here at all
     public double getPlayerMovementSpeed() {
         double speed = player.compensatedEntities.getSelf().playerSpeed;
+        return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
+    }
+
+    /**
+     * LivingEntity#getSpeed for each minecraft:sprinting modifier the client may hold in {@code outcome}: the held one
+     * or none, and vanilla's after a possible attack reset or, with {@code canonical}, for a sprint the client may
+     * start.
+     */
+    public double[] getPossiblePlayerMovementSpeeds(boolean canonical, ClientSprintState.Outcome outcome) {
+        ClientSprintState state = player.sprintState;
+        double canonicalSpeed = sprintingSpeed(SPRINTING_SPEED_MODIFIER);
+        if (outcome == ClientSprintState.Outcome.CANONICAL) return new double[] {canonicalSpeed};
+        AttributeModifier held = state.heldModifier();
+        double current = held == null ? getPlayerMovementSpeed() : sprintingSpeed(held);
+        boolean withCanonical = canonical
+                || switch (outcome) {
+                    case ANY -> state.outcomeOpen();
+                    case PRIOR -> state.canonicalPossible();
+                    default -> false;
+                };
+        if (!withCanonical || SPRINTING_SPEED_MODIFIER.equals(held)) {
+            return new double[] {current};
+        }
+        return new double[] {current, canonicalSpeed};
+    }
+
+    /** The largest of {@link #getPossiblePlayerMovementSpeeds}. */
+    public double getMaxPlayerMovementSpeed(boolean canonical, ClientSprintState.Outcome outcome) {
+        double max = 0.0D;
+        for (double speed : getPossiblePlayerMovementSpeeds(canonical, outcome)) max = Math.max(max, speed);
+        return max;
+    }
+
+    private double sprintingSpeed(AttributeModifier sprinting) {
+        double speed = player.compensatedEntities.getSelf().playerSpeedWith(sprinting);
         return CultMath.clampFloat((float) speed, 0.0F, 1024.0F);
     }
 
@@ -325,10 +561,10 @@ public class CompensatedEntities {
                 if (!player.isBedrockMovement()) player.combatAttributes.onServerSnapshot(snapshot);
                 if (matchesAttribute(snapshot, "movement_speed")) {
 
-                    boolean foundSprintingModifier = false;
+                    AttributeModifier foundSprintingModifier = null;
                     for (AttributeModifier modifier : snapshot.modifiers()) {
                         if (modifier.id().equals(SPRINTING_MODIFIER_ID)) {
-                            foundSprintingModifier = true;
+                            foundSprintingModifier = modifier;
                         }
                     }
 
@@ -537,6 +773,11 @@ public class CompensatedEntities {
         rideTickSeat = riding == null ? null : BoundingBoxSize.getRidingOffsetFromVehicle(riding, playerEntity, player);
     }
 
+    /** The seat the last client tick's Entity#rideTick ended on, or null when it ended off a vehicle. */
+    public Vec3 lastRideTickSeat() {
+        return rideTickSeat;
+    }
+
     /** Whether the local player was a passenger at the end of the last client tick. */
     public boolean rodeLastClientTick() {
         return rideTickSeat != null;
@@ -577,6 +818,7 @@ public class CompensatedEntities {
 
     public void positionPassenger(PacketEntity riding, PacketEntity passenger) {
         Vec3 passengerPosition = BoundingBoxSize.getRidingOffsetFromVehicle(riding, passenger, player);
+        passenger.inheritPositionCertainty(riding);
         passenger.setPassengerPosition(
                 player,
                 GetBoundingBox.getPacketEntityBoundingBox(
@@ -610,6 +852,7 @@ public class CompensatedEntities {
             addOrder.remove(replaced);
         }
         addOrder.add(packetEntity);
+        addOrderMapped = false;
         track(packetEntity);
         int replayedProof = Integer.MIN_VALUE;
         List<HeldAttributes> held = pendingAttributes.remove(entityID);
@@ -678,6 +921,9 @@ public class CompensatedEntities {
         if ((entityType == EntityTypeIds.FISHING_BOBBER)) {
             return new PacketEntityHook(player, entityID, entityType, position.x, position.y, position.z, data);
         }
+        if (PacketEntityHurtingProjectile.isHurtingProjectile(entityType)) {
+            return new PacketEntityHurtingProjectile(player, entityID, entityType, position, data);
+        }
         return new PacketEntity(player, entityID, entityType, position.x, position.y, position.z);
     }
 
@@ -727,10 +973,12 @@ public class CompensatedEntities {
             return;
         }
 
+        boolean controlled = vehicles.canClientAuthoritativelyMoveVisibleRoot(entity);
         for (EquipmentEntry slot : slots) {
             updateSelfEquipment(entityID, slot.slot(), slot.item());
 
             if (slot.slot() == EquipmentSlot.SADDLE) {
+                entity.saddleItem = slot.item();
                 boolean hasSaddle = !slot.item().isEmpty();
                 if (entity instanceof PacketEntityRideable rideable) {
                     rideable.hasSaddle = hasSaddle;
@@ -745,6 +993,7 @@ public class CompensatedEntities {
                 happyGhast.hasBodyArmor = !slot.item().isEmpty();
             }
         }
+        vehicles.markSaddleControlSwitch(entity, controlled);
     }
 
     private void updateSelfEquipment(int entityID, EquipmentSlot slot, ac.cult.blocksim.engine.SimItemStack stack) {
@@ -820,6 +1069,8 @@ public class CompensatedEntities {
             var height = WatchableIndexUtil.getIndex(watchableObjects, 9);
             if (width != null && width.value() instanceof Float value) interaction.actionWidth = value;
             if (height != null && height.value() instanceof Float value) interaction.actionHeight = value;
+            // Interaction#onSyncedDataUpdated refreshes its dimensions on either field.
+            if (width != null || height != null) interaction.refreshDimensions(player);
         }
         var modelType = EntityTypeUtil.modelType(entity.type);
         if (modelType != null && modelType.has(ac.cult.blocksim.entity.EntityTypes.ARROW)) {
@@ -847,6 +1098,13 @@ public class CompensatedEntities {
             if (dashData != null && dashData.value() instanceof Boolean dashing) {
                 nautilus.setDashingFromMetadata(dashing);
             }
+            EntityMetadata.Entry tameData = WatchableIndexUtil.getIndex(
+                    watchableObjects,
+                    WatchableIndexUtil.tameableFlags(
+                            player.user.getCultConnection().getObservedProtocol()));
+            if (tameData != null && tameData.value() instanceof Byte tameFlags) {
+                nautilus.isTame = (tameFlags & 0x04) != 0;
+            }
         }
         applyGravityMetadata(entity, watchableObjects);
 
@@ -860,8 +1118,8 @@ public class CompensatedEntities {
         if (entity instanceof PacketEntityHook) {
             EntityMetadata.Entry hookedData =
                     WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.FISHING_HOOKED_ENTITY);
-            if (hookedData == null) return;
-            ((PacketEntityHook) entity).attached = (Integer) hookedData.value() - 1; // the server adds 1 to the ID
+            if (!(hookedData != null && hookedData.value() instanceof Integer hooked)) return;
+            ((PacketEntityHook) entity).attached = hooked - 1; // the server adds 1 to the ID
         }
 
         if (entity instanceof PacketEntityRideable) {
@@ -894,10 +1152,12 @@ public class CompensatedEntities {
 
         Object value = sizeData.value();
         if (value instanceof Integer) {
-            ((PacketEntitySizeable) entity).size = Math.max((int) value, 1);
+            ((PacketEntitySizeable) entity).size = (int) value;
         } else if (value instanceof Byte) {
-            ((PacketEntitySizeable) entity).size = Math.max((byte) value, 1);
+            ((PacketEntitySizeable) entity).size = (byte) value;
         }
+        // AbstractCubeMob#onSyncedDataUpdated and Phantom#onSyncedDataUpdated refresh dimensions on ID_SIZE.
+        entity.refreshDimensions(player);
     }
 
     private void applyShulkerMetadata(PacketEntity entity, List<EntityMetadata.Entry> watchableObjects) {
@@ -937,16 +1197,16 @@ public class CompensatedEntities {
         }
         if (entity.type == EntityTypeIds.PIG) {
             EntityMetadata.Entry boostData = WatchableIndexUtil.getIndex(watchableObjects, layout.pigBoostTime());
-            if (boostData != null) {
-                ((PacketEntityRideable) entity).boost.onSynced((int) boostData.value());
+            if (boostData != null && boostData.value() instanceof Integer boost) {
+                ((PacketEntityRideable) entity).boost.onSynced(boost);
             }
             return;
         }
 
         if (entity instanceof PacketEntityStrider) {
             EntityMetadata.Entry boostData = WatchableIndexUtil.getIndex(watchableObjects, layout.striderBoostTime());
-            if (boostData != null) {
-                ((PacketEntityRideable) entity).boost.onSynced((int) boostData.value());
+            if (boostData != null && boostData.value() instanceof Integer boost) {
+                ((PacketEntityRideable) entity).boost.onSynced(boost);
             }
         }
     }
@@ -954,22 +1214,23 @@ public class CompensatedEntities {
     private void applyHorseMetadata(
             PacketEntity entity, List<EntityMetadata.Entry> watchableObjects, WatchableIndexUtil.Layout layout) {
         EntityMetadata.Entry flagsData = WatchableIndexUtil.getIndex(watchableObjects, layout.horseFlags());
-        if (flagsData != null) {
-            byte flags = (byte) flagsData.value();
+        if (flagsData != null && flagsData.value() instanceof Byte flags) {
             PacketEntityHorse horse = (PacketEntityHorse) entity;
             horse.isTame = (flags & 0x02) != 0;
             // Through 1.21.4, AbstractHorse#isSaddled reads flag 0x04 from
             // DATA_ID_FLAGS. Newer clients read EquipmentSlot.SADDLE instead.
             if (!layout.saddleEquipment()) {
+                boolean controlled = vehicles.canClientAuthoritativelyMoveVisibleRoot(horse);
                 horse.hasSaddle = (flags & 0x04) != 0;
+                vehicles.markSaddleControlSwitch(horse, controlled);
             }
             horse.setRearingFromMetadata((flags & 0x20) != 0);
         }
 
         if (entity instanceof PacketEntityCamel camel) {
             EntityMetadata.Entry dashData = WatchableIndexUtil.getIndex(watchableObjects, layout.camelDash());
-            if (dashData != null) {
-                camel.setDashingFromMetadata((boolean) dashData.value());
+            if (dashData != null && dashData.value() instanceof Boolean dashing) {
+                camel.setDashingFromMetadata(dashing);
             }
         }
     }
@@ -1020,9 +1281,7 @@ public class CompensatedEntities {
     public boolean isTicking(PacketEntity entity) {
         if (entity.type == EntityTypeIds.PLAYER) return true;
         Vec3 position = entity.clientPhysicalPosition;
-        return position != null
-                && player.compensatedWorld.isChunkLoaded(
-                        CultMath.floor(position.x) >> 4, CultMath.floor(position.z) >> 4);
+        return position != null && entity.isInLoadedChunk(player.compensatedWorld, position);
     }
 
     public void tickClientEntities(Consumer<PacketEntity> tick) {
@@ -1062,6 +1321,7 @@ public class CompensatedEntities {
     private List<PacketEntity> rootsInAddOrder() {
         int size = addOrder.size();
         if (size != entityMap.size()) return null;
+        boolean mapped = addOrderMapped && addOrderMappedAt == entityMap.mutations;
         PacketEntity self = getSelf();
         long selfOrder = self.getClientTickOrder();
         boolean selfPending = self.getRiding() == null && isTicking(self);
@@ -1073,7 +1333,7 @@ public class CompensatedEntities {
             long order = entity.getClientTickOrder();
             if (i > 0 && order <= previous) return null;
             // Distinct orders make the entries distinct, so with equal sizes this proves the sets equal.
-            if (entityMap.get(entity.getEntityId()) != entity) return null;
+            if (!mapped && entityMap.get(entity.getEntityId()) != entity) return null;
             previous = order;
             // Self ticks after an entity sharing its order.
             if (selfPending && selfOrder < order) {
@@ -1083,6 +1343,8 @@ public class CompensatedEntities {
             if (entity.getRiding() == null && isTicking(entity)) roots.add(entity);
         }
         if (selfPending) roots.add(self);
+        addOrderMapped = true;
+        addOrderMappedAt = entityMap.mutations;
         return roots;
     }
 
@@ -1153,4 +1415,36 @@ public class CompensatedEntities {
      * a smaller scale merged earlier updates set, or NaN.
      */
     private record HeldAttributes(List<AttributeSnapshot> values, int provenAt, float leastScale) {}
+
+    /**
+     * The tracked entities by id; {@code mutations} advances on every put and clear, and on every remove of a present
+     * key: removing an absent key leaves the arrays untouched.
+     */
+    public static final class EntityMap extends Int2ObjectOpenHashMap<PacketEntity> {
+        private int mutations;
+
+        public EntityMap() {
+            super(40, 0.7f);
+        }
+
+        @Override
+        public PacketEntity put(int key, PacketEntity value) {
+            mutations++;
+            return super.put(key, value);
+        }
+
+        @Override
+        public PacketEntity remove(int key) {
+            int before = size();
+            PacketEntity removed = super.remove(key);
+            if (size() != before) mutations++;
+            return removed;
+        }
+
+        @Override
+        public void clear() {
+            mutations++;
+            super.clear();
+        }
+    }
 }

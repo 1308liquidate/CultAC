@@ -105,14 +105,15 @@ public class EntityPush implements UncertaintyHandler {
         SimpleCollisionBox playerBox = GetBoundingBox.getBoundingBoxFromPosAndSize(
                 state.getStart().x, state.getStart().y, state.getStart().z, 0.6f, 1.8f);
         long localPlayerTickOrder = player.compensatedEntities.getSelf().getClientTickOrder();
-        boolean previousTickPlayerBodyMovement =
-                lastResult.getSimulationContext().getVehicle() == null;
+        boolean pushableLastTick = lastResult.getSimulationContext().getVehicle() == null
+                && lastResult.getSimulationContext().getWorldData().isPushable();
+        boolean pushableThisTick = state.getWorldData().isPushable();
 
         // ClientLevel#tickEntities iterates client tick-list order. A remote boat that
         // ticks before LocalPlayer can push the player before LocalPlayer#sendPosition
         // in the same tick; a later-ticking remote boat pushes after sendPosition and
         // is carried into the following player-body tick.
-        for (PacketEntity entity : state.getEntities().entityMap.values()) {
+        for (PacketEntity entity : state.getEntities().boats()) {
             if (!entity.isBoat()
                     || entity.isDead
                     || entity.hasPassenger(player.compensatedEntities.getSelf())
@@ -120,9 +121,10 @@ public class EntityPush implements UncertaintyHandler {
                 continue;
             }
 
-            boolean pushesBeforeCurrentPlayerTick = entity.getClientTickOrder() < localPlayerTickOrder;
+            boolean pushesBeforeCurrentPlayerTick =
+                    pushableThisTick && entity.getClientTickOrder() < localPlayerTickOrder;
             boolean pushedAfterPreviousPlayerTick =
-                    previousTickPlayerBodyMovement && entity.getClientTickOrder() > localPlayerTickOrder;
+                    pushableLastTick && entity.getClientTickOrder() > localPlayerTickOrder;
             if (!pushesBeforeCurrentPlayerTick && !pushedAfterPreviousPlayerTick) {
                 continue;
             }

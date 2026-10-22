@@ -769,6 +769,7 @@ public final class GeyserBedrockBridgeRuntime {
                     player.packetStateData.acceptedClientTick++;
                     player.packetStateData.lastClientTickEndTransaction = player.lastTransactionReceived.get();
                     player.packetStateData.carriedItemChangedThisClientTick = false;
+                    player.packetStateData.carriedItemClaimedThisClientTick = false;
                     player.serverOpenedInventoryThisTick = false;
                 }
             });

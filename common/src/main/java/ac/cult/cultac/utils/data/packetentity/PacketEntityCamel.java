@@ -20,6 +20,12 @@ public class PacketEntityCamel extends PacketEntityHorse {
         this.stepHeightAttribute = 1.5D;
     }
 
+    /** Camel#isTamed, which CamelHusk inherits: a camel never carries FLAG_TAME and is always tamed. */
+    @Override
+    public boolean isTamed() {
+        return true;
+    }
+
     public void tickDashCooldown() {
         if (dashing && dashCooldown < 50 && (onGround || lastPredictedInLiquid || getRiding() != null)) {
             dashing = false;

@@ -13,6 +13,8 @@ public class CompensatedCameraEntity extends Check {
     private final ArrayDeque<PacketEntity> entities = new ArrayDeque<>(1);
     // The camera the server last sent; NO_SERVER_CAMERA means the player itself.
     private int serverCamera = NO_SERVER_CAMERA;
+    // The one possibility while entities holds exactly one, else null; every write to entities ends in refreshOnly.
+    private PacketEntity only;
 
     public CompensatedCameraEntity(CultPlayer player) {
         super(player);
@@ -27,6 +29,7 @@ public class CompensatedCameraEntity extends Check {
             PacketEntity entity = player.compensatedEntities.getEntity(camera);
             if (entity != null) {
                 entities.add(entity);
+                refreshOnly();
             }
         });
 
@@ -38,11 +41,13 @@ public class CompensatedCameraEntity extends Check {
             if (entities.isEmpty()) {
                 entities.add(player.compensatedEntities.getSelf());
             }
+            refreshOnly();
         });
     }
 
     public boolean isSelf() {
         PacketEntity self = player.compensatedEntities.getSelf();
+        if (only != null) return only == self;
         for (PacketEntity entity : entities) {
             if (entity != self) {
                 return false;
@@ -69,5 +74,10 @@ public class CompensatedCameraEntity extends Check {
     public void reset() {
         entities.clear();
         entities.add(player.compensatedEntities.getSelf());
+        refreshOnly();
+    }
+
+    private void refreshOnly() {
+        only = entities.size() == 1 ? entities.peekFirst() : null;
     }
 }

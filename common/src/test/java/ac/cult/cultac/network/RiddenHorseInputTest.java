@@ -213,9 +213,7 @@ class RiddenHorseInputTest {
         int chunkZ = (int) Math.floor(start.z) >> 4;
         for (int cx = chunkX - 1; cx <= chunkX + 1; cx++) {
             for (int cz = chunkZ - 1; cz <= chunkZ + 1; cz++) {
-                world.chunks.put(
-                        CompensatedWorld.chunkPositionToLong(cx, cz),
-                        new CompensatedWorld.CachedChunk(new CompensatedWorld.CachedSection[16], 0));
+                world.putChunk(cx, cz, new CompensatedWorld.CachedChunk(new CompensatedWorld.CachedSection[16], 0));
             }
         }
         int floor = (int) Math.floor(start.y) - 1;

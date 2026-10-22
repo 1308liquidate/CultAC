@@ -168,7 +168,7 @@ class EntityTrackingParityTest {
     }
 
     private static void checkKeptBounds(ReachInterpolationData data, String where) {
-        ReachInterpolationData fresh = data.copy();
+        ReachInterpolationData fresh = fresh(data);
         String kept = bits(data.getPossibleMovementLocationCombined(new SimpleCollisionBox()));
         assertEquals(bits(fresh.getPossibleMovementLocationCombined(new SimpleCollisionBox())), kept, where);
         assertEquals(kept, bits(data.getPossibleMovementLocationCombined(new SimpleCollisionBox())), where);
@@ -218,6 +218,34 @@ class EntityTrackingParityTest {
             assertEquals(expected, ticked);
             assertTrue(ticked.contains(pig));
             assertFalse(ticked.contains(replaced));
+        }
+    }
+
+    @Test
+    void theAddOrderIsRecheckedAfterEveryMapWrite() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            CompensatedEntities entities = f.player.compensatedEntities;
+            for (int id = 10; id < 14; id++)
+                entities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(id - 10, 64, 2), 0, 0, 0);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            PacketEntity kept = entities.getEntity(11);
+            entities.entityMap.put(11, new PacketEntity(EntityTypeIds.PIG, 40));
+            assertNull(rootsInAddOrder(entities));
+            assertNull(rootsInAddOrder(entities));
+            entities.entityMap.put(11, kept);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.removeEntity(12);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.addEntity(12, EntityTypeIds.PIG, new Vec3(3, 64, 5), 0, 0, 0);
+            entities.addEntity(13, EntityTypeIds.PIG, new Vec3(4, 64, 5), 0, 0, 0);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.removeEntity(99);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.clearEntityMap();
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
+            entities.addEntity(20, EntityTypeIds.PIG, new Vec3(1, 64, 4), 0, 0, 0);
+            assertEquals(sortedRoots(entities), rootsInAddOrder(entities));
         }
     }
 
@@ -306,14 +334,8 @@ class EntityTrackingParityTest {
                 long op = random.nextLong();
                 forceSort(reference.player.compensatedEntities);
                 String before = current.digest();
-                keepBounds(false);
-                String expected;
-                try {
-                    old.apply(op);
-                    expected = old.digest();
-                } finally {
-                    keepBounds(true);
-                }
+                old.apply(op);
+                String expected = old.digest();
                 current.apply(op);
                 String actual = current.digest();
                 assertEquals(expected, actual, "seed=" + seed + " step=" + step);
@@ -359,8 +381,7 @@ class EntityTrackingParityTest {
                     new ReachInterpolationData[] {entity.newPacketLocation, entity.oldPacketLocation}) {
                 if (data == null) continue;
                 if (data.usesSteppedInterpolation() && data.hasActiveInterpolationTarget()) activeStepped++;
-                // A copy starts without kept bounds, so it computes them from the same inputs.
-                ReachInterpolationData copy = data.copy();
+                ReachInterpolationData copy = fresh(data);
                 String kept = bits(data.getPossibleMovementLocationCombined(new SimpleCollisionBox()));
                 assertEquals(bits(copy.getPossibleMovementLocationCombined(new SimpleCollisionBox())), kept, where);
                 assertEquals(kept, bits(data.getPossibleMovementLocationCombined()), where);
@@ -674,11 +695,17 @@ class EntityTrackingParityTest {
         return (List<PacketEntity>) field.get(entities);
     }
 
-    /** Off, every ReachInterpolationData computes its movement bounds at each read, as before the cache. */
-    private static void keepBounds(boolean keep) throws Exception {
-        Field field = ReachInterpolationData.class.getDeclaredField("keepsBounds");
-        field.setAccessible(true);
-        field.setBoolean(null, keep);
+    /** A copy of data that computes its movement bounds from the same inputs at its first read. */
+    private static ReachInterpolationData fresh(ReachInterpolationData data) {
+        ReachInterpolationData copy = data.copy();
+        try {
+            Field field = ReachInterpolationData.class.getDeclaredField("boundsValid");
+            field.setAccessible(true);
+            field.setBoolean(copy, false);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
+        return copy;
     }
 
     private static ArrayDeque<?> queue(ReachInterpolationData data) throws Exception {

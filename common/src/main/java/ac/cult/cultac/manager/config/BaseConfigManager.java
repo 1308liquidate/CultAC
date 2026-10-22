@@ -19,6 +19,9 @@ import org.jetbrains.annotations.Nullable;
  */
 public class BaseConfigManager {
 
+    public static final String OBSERVE_ONLY_ENV = "CULTAC_OBSERVE_ONLY";
+    public static final String OBSERVE_ONLY_KEY = "observe-only";
+
     private final List<Pattern> ignoredClientPatterns = new ArrayList<>();
 
     @Getter
@@ -186,19 +189,19 @@ public class BaseConfigManager {
 
     /** {@code CULTAC_OBSERVE_ONLY} when it reads true/1/yes or false/0/no, else {@code observe-only}. */
     static boolean resolveObserveOnly(ConfigManager config, Function<String, String> env) {
-        String value = env.apply("CULTAC_OBSERVE_ONLY");
-        if (value != null) {
-            switch (value.strip().toLowerCase(Locale.ROOT)) {
-                case "true", "1", "yes" -> {
-                    return true;
-                }
-                case "false", "0", "no" -> {
-                    return false;
-                }
-                default -> {}
-            }
-        }
-        return config.getBooleanElse("observe-only", false);
+        Boolean pinned = observeOnlyPin(env);
+        return pinned != null ? pinned : config.getBooleanElse(OBSERVE_ONLY_KEY, false);
+    }
+
+    /** The mode {@code CULTAC_OBSERVE_ONLY} pins, or null when the config key decides. */
+    public static @Nullable Boolean observeOnlyPin(Function<String, String> env) {
+        String value = env.apply(OBSERVE_ONLY_ENV);
+        if (value == null) return null;
+        return switch (value.strip().toLowerCase(Locale.ROOT)) {
+            case "true", "1", "yes" -> true;
+            case "false", "0", "no" -> false;
+            default -> null;
+        };
     }
 
     public static List<String> resolveCommandRoots(@Nullable ConfigManager config, Consumer<String> warn) {

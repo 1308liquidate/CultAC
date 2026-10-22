@@ -14,6 +14,7 @@ import ac.cult.cultac.utils.floodgate.GeyserUtil;
 import ac.grim.grimac.api.event.events.GrimJoinEvent;
 import ac.grim.grimac.api.event.events.GrimQuitEvent;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,6 +31,7 @@ public class PlayerDataManager {
 
     // Enumeration only; each session owns its sole player attachment.
     private final Set<CultPlayer> activePlayers = ConcurrentHashMap.newKeySet();
+    private final Set<CultPlayer> entries = Collections.unmodifiableSet(activePlayers);
     // Exemption belongs to one connection, not to an identity. Two simultaneous
     // connections may legitimately present the same UUID; carrying an exemption
     // across them would let the replacement connection evade the anticheat.
@@ -217,7 +219,7 @@ public class PlayerDataManager {
     }
 
     public Collection<CultPlayer> getEntries() {
-        return java.util.Collections.unmodifiableSet(activePlayers);
+        return entries;
     }
 
     public int size() {

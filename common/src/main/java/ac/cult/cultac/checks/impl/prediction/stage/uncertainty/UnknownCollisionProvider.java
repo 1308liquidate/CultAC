@@ -41,8 +41,13 @@ public final class UnknownCollisionProvider {
                 && player.compensatedEntities.getSelf().getRiding().isBoat();
         boolean inVehicle = player.compensatedEntities.getSelf().inVehicle();
 
-        for (PacketEntity entity : player.compensatedEntities.entityMap.values()) {
-            if (player.compensatedEntities.isUntrackedRider(entity)) continue;
+        Iterable<PacketEntity> candidates = inBoat
+                ? player.compensatedEntities.entityMap.values()
+                : player.compensatedEntities.unknownCollisionCandidates();
+        PacketEntity selfRidingRoot = player.compensatedEntities.selfRidingRoot();
+        PacketEntity serverVehicleRoot = player.compensatedEntities.serverVehicleRoot();
+        for (PacketEntity entity : candidates) {
+            if (player.compensatedEntities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot)) continue;
             if (entity.isBoat()) {
                 // Expand by 2 since boats suck.
                 addIntersecting(
@@ -67,7 +72,8 @@ public final class UnknownCollisionProvider {
                 if (canPush) {
                     addIntersecting(
                             boxes,
-                            entity.getPossibleCollisionBoxes(entityBox, scratch).expand(1),
+                            entity.toBoundingBox(player, entity.getPossibleCollisionBoxes(entityBox, scratch))
+                                    .expand(1),
                             queryBox);
                 }
             }

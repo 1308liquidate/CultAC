@@ -6,6 +6,8 @@ import ac.cult.blocksim.data.BlockProps;
 import ac.cult.blocksim.data.BlockTags;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.StateFacts;
+import ac.cult.blocksim.engine.shapes.Shapes;
+import ac.cult.blocksim.engine.shapes.VoxelShape;
 import ac.cult.cultac.events.packets.PacketWorldBorder;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
@@ -13,7 +15,9 @@ import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.utils.collisions.ClientBlockShapes;
 import ac.cult.cultac.utils.collisions.datatypes.CollisionBox;
+import ac.cult.cultac.utils.collisions.datatypes.CollisionBoxPool;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox;
 import ac.cult.cultac.utils.latency.CompensatedWorld.CachedChunk;
 import ac.cult.cultac.utils.latency.CompensatedWorld.CachedSection;
 import ac.cult.cultac.utils.math.CultMath;
@@ -23,6 +27,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.IntPredicate;
 
 public class Collisions {
@@ -33,6 +38,9 @@ public class Collisions {
     private static final Vec3 WEAVING_COBWEB_STUCK_SPEED = new Vec3(0.5, 0.25, 0.5);
     private static final Vec3 SWEET_BERRY_BUSH_STUCK_SPEED = new Vec3(0.800000011920929, 0.75, 0.800000011920929);
     private static final Vec3 POWDER_SNOW_STUCK_SPEED = new Vec3(0.8999999761581421, 1.5, 0.8999999761581421);
+    /** Every Entity#stuckSpeedMultiplier a block's entityInside gives the local player. */
+    public static final List<Vec3> PLAYER_STUCK_SPEEDS = List.of(
+            COBWEB_STUCK_SPEED, WEAVING_COBWEB_STUCK_SPEED, SWEET_BERRY_BUSH_STUCK_SPEED, POWDER_SNOW_STUCK_SPEED);
 
     private static final boolean IS_FOURTEEN = true; // Current runtime is newer than 1.14.
 
@@ -43,6 +51,28 @@ public class Collisions {
     public static Vec3 collide(
             CultPlayer player, SimpleCollisionBox box, double desiredX, double desiredY, double desiredZ) {
         return collide(player, box, desiredX, desiredY, desiredZ, getAxisStepOrder(desiredX, desiredZ), true);
+    }
+
+    /** {@code onGroundForStep} is Entity#onGround at the move's start, which lets Entity#collide step upwards. */
+    public static Vec3 collide(
+            CultPlayer player,
+            SimpleCollisionBox box,
+            double desiredX,
+            double desiredY,
+            double desiredZ,
+            boolean onGroundForStep) {
+        return collide(
+                player,
+                box,
+                desiredX,
+                desiredY,
+                desiredZ,
+                getAxisStepOrder(desiredX, desiredZ),
+                true,
+                box.minY,
+                null,
+                onGroundForStep,
+                null);
     }
 
     public static Vec3 collideWithAdditionalCollisionBoxes(
@@ -181,6 +211,41 @@ public class Collisions {
             return Vec3.ZERO;
         }
 
+        CollisionBoxPool pool = CollisionBoxPool.current();
+        int mark = pool.mark();
+        try {
+            return collide(
+                    player,
+                    box,
+                    desiredX,
+                    desiredY,
+                    desiredZ,
+                    order,
+                    allowStepping,
+                    entityBottom,
+                    additionalCollisionBoxes,
+                    onGroundForStep,
+                    withoutStep,
+                    pool);
+        } finally {
+            pool.release(mark);
+        }
+    }
+
+    /** Native colliders come from {@code pool}; none of them outlives this call. */
+    private static Vec3 collide(
+            CultPlayer player,
+            SimpleCollisionBox box,
+            double desiredX,
+            double desiredY,
+            double desiredZ,
+            List<Axis> order,
+            boolean allowStepping,
+            double entityBottom,
+            List<SimpleCollisionBox> additionalCollisionBoxes,
+            boolean onGroundForStep,
+            Vec3[] withoutStep,
+            CollisionBoxPool pool) {
         SimpleCollisionBox grabBoxesBB = box.copy();
         double stepUpHeight = player.getMaxUpStep();
         boolean separateStepQuery = !player.isBedrockMovement();
@@ -206,7 +271,7 @@ public class Collisions {
         }
 
         List<SimpleCollisionBox> desiredMovementCollisionBoxes = new ArrayList<>();
-        getCollisionBoxes(player, grabBoxesBB, desiredMovementCollisionBoxes, false, entityBottom);
+        getCollisionBoxes(player, grabBoxesBB, desiredMovementCollisionBoxes, false, entityBottom, CURRENT_ACTOR, pool);
         addAdditionalCollisionBoxes(grabBoxesBB, desiredMovementCollisionBoxes, additionalCollisionBoxes);
 
         SimpleCollisionBox moved = new SimpleCollisionBox();
@@ -246,7 +311,7 @@ public class Collisions {
             }
 
             List<SimpleCollisionBox> stepCollisionBoxes = new ArrayList<>();
-            getCollisionBoxes(player, stepSearchBox, stepCollisionBoxes, false, entityBottom);
+            getCollisionBoxes(player, stepSearchBox, stepCollisionBoxes, false, entityBottom, CURRENT_ACTOR, pool);
             addAdditionalCollisionBoxes(stepSearchBox, stepCollisionBoxes, additionalCollisionBoxes);
             for (double candidateHeight :
                     collectCandidateStepUpHeights(stepStartBox, stepCollisionBoxes, stepUpHeight, collisionResult.y)) {
@@ -441,11 +506,25 @@ public class Collisions {
             boolean onlyCheckCollide,
             double entityBottom,
             JavaCollisionState actor) {
+        return getCollisionBoxes(player, wantedBB, listOfBlocks, onlyCheckCollide, entityBottom, actor, null);
+    }
+
+    /**
+     * With a {@code pool}, native colliders come from it: the caller holds a mark on it and reads no collider added to
+     * {@code listOfBlocks} after releasing that mark.
+     */
+    public static boolean getCollisionBoxes(
+            CultPlayer player,
+            SimpleCollisionBox wantedBB,
+            List<SimpleCollisionBox> listOfBlocks,
+            boolean onlyCheckCollide,
+            double entityBottom,
+            JavaCollisionState actor,
+            CollisionBoxPool pool) {
         boolean modernJava = !player.isBedrockMovement();
         if (modernJava)
             ac.cult.blocksim.data.Box.validateBounds(
                     wantedBB.minX, wantedBB.minY, wantedBB.minZ, wantedBB.maxX, wantedBB.maxY, wantedBB.maxZ);
-        ac.cult.blocksim.engine.shapes.VoxelShape queryShape = null;
         boolean resolvedDirect = false;
         boolean direct = false;
         var registry = DataTables.defaults().registry();
@@ -540,23 +619,50 @@ public class Collisions {
                                 }
                                 if (actor == CURRENT_ACTOR && BlockIds.is(data, BlockIds.POWDER_SNOW))
                                     actor = JavaCollisionState.current(player);
-                                CollisionBox collisionBox =
-                                        ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor, direct);
-                                if (collisionBox.isNull()) continue;
-                                if (modernJava
-                                        && queryShape == null
-                                        && collisionBox
-                                                instanceof
-                                                ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox voxel
-                                        && !voxel.usesStrictFullBlockIntersection()) {
-                                    queryShape = ac.cult.blocksim.engine.shapes.Shapes.create(
-                                            wantedBB.minX,
-                                            wantedBB.minY,
-                                            wantedBB.minZ,
-                                            wantedBB.maxX,
-                                            wantedBB.maxY,
-                                            wantedBB.maxZ);
+                                VoxelShape shape = null;
+                                Optional<CollisionBox> alternative = null;
+                                if (modernJava) {
+                                    shape = NativeBlockCollisionHelper.getCollisionShape(
+                                            player, data, x, y, z, entityBottom, actor);
+                                    if (!direct)
+                                        alternative = ClientBlockShapes.movementAlternative(
+                                                player, data, x, y, z, entityBottom);
                                 }
+                                if (modernJava && (direct || alternative.isEmpty())) {
+                                    // Must match NativeBlockCollisionHelper.getCollisionBox bit for bit.
+                                    if (shape.isEmpty()) continue;
+                                    boolean fullBlock = shape == Shapes.block();
+                                    if (fullBlock
+                                            ? !(wantedBB.minX < 1.0 + x
+                                                    && wantedBB.maxX > 0.0 + x
+                                                    && wantedBB.minY < 1.0 + y
+                                                    && wantedBB.maxY > 0.0 + y
+                                                    && wantedBB.minZ < 1.0 + z
+                                                    && wantedBB.maxZ > 0.0 + z)
+                                            : !shape.intersectsAabb(
+                                                    wantedBB.minX,
+                                                    wantedBB.minY,
+                                                    wantedBB.minZ,
+                                                    wantedBB.maxX,
+                                                    wantedBB.maxY,
+                                                    wantedBB.maxZ,
+                                                    x,
+                                                    y,
+                                                    z,
+                                                    true)) continue;
+                                    if (onlyCheckCollide) return true;
+                                    VoxelShapeCollisionBox collider = pool == null
+                                            ? new VoxelShapeCollisionBox(shape, fullBlock)
+                                            : pool.voxel(shape, fullBlock);
+                                    listOfBlocks.add(collider.offset(x, y, z));
+                                    continue;
+                                }
+                                CollisionBox collisionBox = alternative == null
+                                        ? ClientBlockShapes.movement(player, data, x, y, z, entityBottom, actor, direct)
+                                        : ClientBlockShapes.selectIfDifferent(
+                                                NativeBlockCollisionHelper.collider(player, shape, x, y, z),
+                                                alternative);
+                                if (collisionBox.isNull()) continue;
                                 // Vanilla BlockCollisions filters the swept query before axis clipping
                                 // or collecting step heights. The full-block path deliberately uses
                                 // strict AABB intersection; other voxel shapes use Shapes AND.
@@ -565,7 +671,7 @@ public class Collisions {
                                                         instanceof
                                                         ac.cult.cultac.utils.collisions.datatypes.VoxelShapeCollisionBox
                                                                 voxel
-                                                ? voxel.intersectsQuery(wantedBB, queryShape)
+                                                ? voxel.intersectsQuery(wantedBB)
                                                 : collisionBox.isIntersected(wantedBB))) continue;
                                 // Don't add to a list if we only care if the player intersects with the block
                                 if (!onlyCheckCollide) {

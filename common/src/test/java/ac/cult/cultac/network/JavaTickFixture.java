@@ -76,6 +76,11 @@ final class JavaTickFixture implements AutoCloseable {
         // Let the block-change timing uncertainty expire at client tick boundaries.
         for (int tick = 0; tick < 3; tick++) player.compensatedWorld.removeInvalidPistonLikeStuff(0);
         player.getSetbackTeleportUtil().hasFullyLoaded = true;
+        resetTimerBalances();
+    }
+
+    /** Gives the timer checks ten seconds of client ticks ahead of the wall clock. */
+    void resetTimerBalances() throws Exception {
         // These synchronous fixtures exercise packet ordering, not wall-clock pacing.
         setField(
                 AbstractTimerCheck.class,
@@ -141,6 +146,14 @@ final class JavaTickFixture implements AutoCloseable {
     void rideTick() {
         var rot = new ServerboundMovePlayer(0, 0, 0, player.xRot, player.yRot, player.onGround, false, false, true);
         listener.onMovePlayer(event(ServerboundPackets.MOVE_PLAYER, rot), player, rot);
+        tickEnd();
+    }
+
+    /** A client tick that sends StatusOnly: LocalPlayer#sendPosition withheld the position and rotation. */
+    void statusTick(boolean onGround, boolean horizontalCollision) {
+        var status = new ServerboundMovePlayer(
+                0, 0, 0, player.xRot, player.yRot, onGround, horizontalCollision, false, false);
+        listener.onMovePlayer(event(ServerboundPackets.MOVE_PLAYER, status), player, status);
         tickEnd();
     }
 

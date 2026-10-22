@@ -105,7 +105,7 @@ class CloudSettingsTest {
     @Test
     void theKeyIsNotInToString() {
         CloudSettings settings = new CloudSettings(
-                "https://intake.example", "issued-token-0123456789", "{server}", "lobby", List.of(5), false);
+                "https://intake.example", "issued-token-0123456789", "{server}", "lobby", List.of(5), false, false);
         String text = settings.toString();
         assertFalse(text.contains("issued-token-0123456789"), text);
         assertTrue(text.contains("https://intake.example"), text);
@@ -144,6 +144,34 @@ class CloudSettingsTest {
         }
         assertTrue(CloudSettings.perf(on, Map.of("CULTAC_CLOUD_PERF", "")::get));
         assertTrue(CloudSettings.perf(on, Map.of("CULTAC_CLOUD_PERF", "maybe")::get));
+    }
+
+    @Test
+    void teamSyncIsOffByDefault() {
+        ConfigManager config = config(Map.of());
+        Mockito.when(config.getBooleanElse(Mockito.eq("cloud.team-sync"), Mockito.anyBoolean()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        assertFalse(CloudSettings.team(config, name -> null));
+        assertFalse(CloudSettings.team(config, Map.of(CloudSettings.TEAM_ENV, "maybe")::get));
+        assertFalse(CloudSettings.OFF.team());
+    }
+
+    @Test
+    void theEnvironmentWinsOverTheConfigForTeamSync() {
+        ConfigManager off = config(Map.of());
+        Mockito.when(off.getBooleanElse(Mockito.eq("cloud.team-sync"), Mockito.anyBoolean()))
+                .thenReturn(false);
+        ConfigManager on = config(Map.of());
+        Mockito.when(on.getBooleanElse(Mockito.eq("cloud.team-sync"), Mockito.anyBoolean()))
+                .thenReturn(true);
+        assertTrue(CloudSettings.team(on, name -> null));
+        for (String yes : List.of("true", "1", "yes", " YES ")) {
+            assertTrue(CloudSettings.team(off, Map.of(CloudSettings.TEAM_ENV, yes)::get), yes);
+        }
+        for (String no : List.of("false", "0", "no", "False")) {
+            assertFalse(CloudSettings.team(on, Map.of(CloudSettings.TEAM_ENV, no)::get), no);
+        }
+        assertTrue(CloudSettings.team(on, Map.of(CloudSettings.TEAM_ENV, "")::get));
     }
 
     private static CloudSettings read(String url) {

@@ -48,8 +48,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             SimpleCollisionBox targetBox,
             Vec3 targetSize,
             int type,
-            boolean livingEntity,
-            boolean exempt,
+            boolean enforced,
             AttackReach reach) {}
 
     /**
@@ -141,15 +140,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                 return;
             }
 
-            // Dead entities cause false flags (https://github.com/GrimAnticheat/Grim/issues/546)
-            if (entity.isDead) return;
-
-            if (entity.type == EntityTypeIds.ARMOR_STAND) return;
-
-            // Riders outside the local player's own riding tree have no simulated position.
-            if (player.compensatedEntities.isUntrackedRider(entity)) return;
-
-            if (player.gamemode == GameMode.SPECTATOR) return;
+            if (!measured(entity)) return;
 
             AttackReach reach = AttackReach.capture(player, visibility);
             boolean tooManyAttacks = playerAttackQueue.size() > 10;
@@ -164,8 +155,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                         getReachBox(entity),
                         getReachSize(entity),
                         entity.type,
-                        entity.isLivingEntity(),
-                        isReachExempt(entity),
+                        isEnforced(entity),
                         reach));
             }
 
@@ -220,9 +210,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     //
     // Meaning that the other check should be the only one that flags.
     private boolean isKnownInvalid(PacketEntity reachEntity, AttackReach reach) {
-        // If the entity doesn't exist, or if it is exempt, or if it is dead
-        if ((isReachExempt(reachEntity) || !reachEntity.isLivingEntity())
-                && reachEntity.type != EntityTypeIds.END_CRYSTAL) return false; // exempt
+        if (!isEnforced(reachEntity)) return false;
 
         // Filter out what we assume to be cheats
         if (cancelBuffer != 0) {
@@ -239,8 +227,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                     attack.targetBox(),
                     attack.targetSize(),
                     attack.type(),
-                    attack.livingEntity(),
-                    attack.exempt(),
+                    attack.enforced(),
                     attack.fromCandidates(),
                     attack.reach(),
                     false);
@@ -295,8 +282,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                 getReachBox(reachEntity),
                 getReachSize(reachEntity),
                 reachEntity.type,
-                reachEntity.isLivingEntity(),
-                isReachExempt(reachEntity),
+                isEnforced(reachEntity),
                 fromCandidates,
                 reach,
                 isPrediction);
@@ -309,7 +295,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                     reachEntity.desyncClientPos.subtract(1, 0, 1), reachEntity.desyncClientPos.add(1, 2, 1));
         }
 
-        SimpleCollisionBox movementBox = reachEntity.getPossibleCollisionBoxes();
+        SimpleCollisionBox movementBox = reachEntity.toBoundingBox(player, reachEntity.getPossibleCollisionBoxes());
         float movementWidth = BoundingBoxSize.getWidth(player, reachEntity);
         float movementHeight = BoundingBoxSize.getHeight(player, reachEntity);
         float reachWidth = BoundingBoxSize.getReachWidth(player, reachEntity);
@@ -347,19 +333,15 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
             SimpleCollisionBox targetBox,
             Vec3 targetSize,
             int type,
-            boolean livingEntity,
-            boolean exempt,
+            boolean enforced,
             List<Vec3> fromCandidates,
             AttackReach reach,
             boolean isPrediction) {
-        targetBox = targetBox.copy();
-        targetBox.expand(threshold);
-        targetBox.expand(player.getMovementThreshold());
+        targetBox = measuredBox(targetBox);
 
         measureBest(targetBox, targetSize, fromCandidates, reach, isPrediction);
 
-        // if the entity is not exempt and the entity is alive
-        if ((!exempt && livingEntity) || type == EntityTypeIds.END_CRYSTAL) {
+        if (enforced) {
             if (bestDistance == Double.POSITIVE_INFINITY) {
                 cancelBuffer = 1;
                 return "Missed hitbox";
@@ -848,8 +830,69 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    private boolean isReachExempt(PacketEntity reachEntity) {
-        return reachEntity.type == EntityTypeIds.SHULKER || EntityTypeUtil.isBoat(reachEntity.type);
+    /**
+     * Whether this check measures this player's attack on the target sent now and flags it when beyond reach, on
+     * itself or, for a missed hitbox, on its hitboxes check; it also cancels it as Reach.block-impossible-hits and
+     * packet modification allow.
+     */
+    public boolean enforcesReach(PacketEntity target) {
+        return isEnabled()
+                && !isExemptPermission()
+                && !player.checkManager.getCheck(hitboxes()).isExemptPermission()
+                && !player.isDisabled()
+                && targets(target.type)
+                && playerAttackQueue.size() <= 10
+                && measured(target)
+                && isEnforced(target);
+    }
+
+    /**
+     * Whether the attack on the target sent now lies beyond reach from every attack origin and eye: the box the tick
+     * end measures is farther from each than any range the client's picks allow, so that measurement flags it as
+     * beyond reach or as a missed hitbox.
+     */
+    public boolean measuresBeyondReach(PacketEntity target) {
+        SimpleCollisionBox box = measuredBox(target);
+        double max = AttackReach.capture(player, visibility).maxClosestDistance();
+        double scale = player.getScale();
+        for (Vec3 from : getAttackOrigins()) {
+            for (double height : EYE_HEIGHTS) {
+                if (nearest(box, from.x, from.y + height * scale, from.z) <= max) return false;
+            }
+        }
+        return true;
+    }
+
+    /** The target's reach box grown by the threshold, as this check measures attacks on it. */
+    public SimpleCollisionBox measuredBox(PacketEntity target) {
+        return measuredBox(getReachBox(target));
+    }
+
+    private SimpleCollisionBox measuredBox(SimpleCollisionBox reachBox) {
+        SimpleCollisionBox box = reachBox.copy();
+        box.expand(threshold);
+        box.expand(player.getMovementThreshold());
+        return box;
+    }
+
+    private boolean measured(PacketEntity entity) {
+        // Dead entities cause false flags (https://github.com/GrimAnticheat/Grim/issues/546)
+        if (entity.isDead) return false;
+
+        if (entity.type == EntityTypeIds.ARMOR_STAND) return false;
+
+        // Riders outside the local player's own riding tree have no simulated position.
+        if (player.compensatedEntities.isUntrackedRider(entity)) return false;
+
+        return player.gamemode != GameMode.SPECTATOR;
+    }
+
+    // The targets whose picked box Cult models: living entities but shulkers, end crystals, and a Java client's boats,
+    // which AbstractBoat moves only by LinearInterpolationHandler's 3 steps to the position the server sent.
+    private boolean isEnforced(PacketEntity reachEntity) {
+        if (reachEntity.type == EntityTypeIds.END_CRYSTAL) return true;
+        if (reachEntity.isBoat()) return !player.isBedrockMovement();
+        return reachEntity.isLivingEntity() && reachEntity.type != EntityTypeIds.SHULKER;
     }
 
     @Override

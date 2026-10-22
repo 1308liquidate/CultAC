@@ -11,8 +11,11 @@ import ac.cult.cultac.cloud.intake.v3.Join;
 import ac.cult.cultac.cloud.intake.v3.Leave;
 import ac.cult.cultac.cloud.intake.v3.Meta;
 import ac.cult.cultac.cloud.intake.v3.PerfLimits;
+import ac.cult.cultac.cloud.intake.v3.PortalRole;
 import ac.cult.cultac.cloud.intake.v3.Registry;
 import ac.cult.cultac.cloud.intake.v3.Replies;
+import ac.cult.cultac.cloud.intake.v3.TeamRole;
+import ac.cult.cultac.cloud.intake.v3.TeamRoles;
 import ac.cult.cultac.cloud.intake.v3.Unstreamed;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.anticheat.LogThrottle;
@@ -170,7 +173,7 @@ public final class IntakeWire {
     // Field numbers of intake.proto: Replies.replies; Reply's kinds, capture first; Capture's three id lists.
     private static final int REPLIES_REPLY = 1;
     private static final int REPLY_CAPTURE = 1;
-    private static final int REPLY_LAST_KIND = 8;
+    private static final int REPLY_LAST_KIND = 10;
     private static final int CAPTURE_FIRST_IDS = 2;
 
     private IntakeWire() {}
@@ -257,9 +260,43 @@ public final class IntakeWire {
                 .build());
     }
 
+    /** Team sync: one {@code TeamRoles} message of {@code roles}, at most 100. */
+    public static byte[] team(List<TeamRole> roles) {
+        return entry(IntakeMessage.newBuilder()
+                .setTeam(TeamRoles.newBuilder().addAllPlayers(roles))
+                .build());
+    }
+
+    /** Team sync: one player's entry; {@code name} null leaves it out. */
+    public static TeamRole teamRole(UUID player, String name, PortalRole role, boolean offline) {
+        TeamRole.Builder entry = TeamRole.newBuilder()
+                .setPlayer(ByteString.copyFrom(uuid(player)))
+                .setRole(role)
+                .setOffline(offline);
+        if (name != null) entry.setName(name);
+        return entry.build();
+    }
+
     /** An {@code Intake} holding one message: a queued record, which concatenates with others into one. */
     private static byte[] entry(IntakeMessage message) {
         return Intake.newBuilder().addMessages(message).build().toByteArray();
+    }
+
+    /**
+     * Whether a queued record is a JOIN, a LEAVE or team sync: the service answers a JOIN with the capture policy the
+     * stream waits on, orders a player's sessions across sockets by JOIN and LEAVE, and shows portal roles to staff, so
+     * none of them may wait for a message to fill.
+     */
+    public static boolean endsMessage(byte[] record) {
+        if (record.length < 3 || record[0] != (MESSAGES << 3 | WireFormat.WIRETYPE_LENGTH_DELIMITED))
+            return false;
+        int at = 1;
+        while (at < record.length && record[at] < 0) at++;
+        if (++at >= record.length) return false;
+        int kind = WireFormat.getTagFieldNumber(record[at] & 0xFF);
+        return kind == IntakeMessage.JOIN_FIELD_NUMBER
+                || kind == IntakeMessage.LEAVE_FIELD_NUMBER
+                || kind == IntakeMessage.TEAM_FIELD_NUMBER;
     }
 
     /** A {@code META} record's body: the player's own combat settings. */
@@ -672,12 +709,17 @@ public final class IntakeWire {
     }
 
     /**
-     * The id of a probe whose body is a 4-byte id alone, {@code id} being its packet id; null for any other packet. Only
-     * such a probe goes out as a marker.
+     * The id of a probe whose body is a 4-byte id alone, {@code id} being its packet id; {@code absent} for any other
+     * packet. Only such a probe goes out as a marker.
      */
-    public static Integer bareId(byte[] packet, int id) {
-        if (id < 0 || packet.length != varLongBytes(id) + 4) return null;
-        return pingId(packet, id);
+    public static long bareId(byte[] packet, int id, long absent) {
+        if (!bare(packet, id)) return absent;
+        return pingId(packet, id, absent);
+    }
+
+    /** Whether a probe's packet is as long as its id and a 4-byte body, {@code id} being its packet id. */
+    public static boolean bare(byte[] packet, int id) {
+        return id >= 0 && packet.length == varLongBytes(id) + 4;
     }
 
     /** A clientbound ping's wire id from its packet bytes, {@code id} being the ping's packet id; null if not one. */
@@ -703,14 +745,9 @@ public final class IntakeWire {
     }
 
     /**
-     * The bytes a record of {@code length} body bytes takes in a frame, its own field in the frame included: a
+     * The bytes a record of {@code length} body bytes takes in a frame, short of its own field's tag and length: a
      * clientbound one with its server tick delta and ping kind, a whole pong with its {@code skipped} pings.
      */
-    public static long captureBytes(int kind, long sinceLast, int length, int tickDelta, int pingKind, int skipped) {
-        int record = recordSize(kind, sinceLast, length, tickDelta, pingKind, skipped);
-        return 1 + CodedOutputStream.computeUInt32SizeNoTag(record) + record;
-    }
-
     private static int recordSize(int kind, long sinceLast, int length, int tickDelta, int pingKind, int skipped) {
         int size = kind == PING_MARKER
                 ? CodedOutputStream.computeEnumSize(PING_MARKER, pingKind)
@@ -729,7 +766,7 @@ public final class IntakeWire {
     public static final class FrameBuilder {
         /** Record slots a builder starts again with once a frame past {@link #MAX_KEPT_RECORDS} is cleared. */
         static final int RESTING_RECORDS = 256;
-        /** The most record slots kept between frames, 128 KiB. */
+        /** The most record slots kept between frames, about 160 KiB of arrays. */
         static final int MAX_KEPT_RECORDS = 4096;
 
         private int count;
@@ -740,6 +777,7 @@ public final class IntakeWire {
         private int[] tickDeltas = new int[32];
         private int[] pingKinds = new int[32];
         private int[] skips = new int[32];
+        private int[] sizes = new int[32];
         private long serverTick = -1;
         private long bytes;
 
@@ -760,6 +798,7 @@ public final class IntakeWire {
                 tickDeltas = Arrays.copyOf(tickDeltas, count * 2);
                 pingKinds = Arrays.copyOf(pingKinds, count * 2);
                 skips = Arrays.copyOf(skips, count * 2);
+                sizes = Arrays.copyOf(sizes, count * 2);
             }
             kinds[count] = kind;
             this.sinceLast[count] = sinceLast;
@@ -768,8 +807,10 @@ public final class IntakeWire {
             tickDeltas[count] = tickDelta;
             pingKinds[count] = pingKind;
             skips[count] = skipped;
+            int size = recordSize(kind, sinceLast, length, tickDelta, pingKind, skipped);
+            sizes[count] = size;
             count++;
-            bytes += captureBytes(kind, sinceLast, length, tickDelta, pingKind, skipped);
+            bytes += 1 + CodedOutputStream.computeUInt32SizeNoTag(size) + size;
         }
 
         /** The server tick of the frame's first clientbound record. */
@@ -807,8 +848,7 @@ public final class IntakeWire {
                 if (seq != 0) stream.writeUInt64(FRAME_SEQ, seq);
                 for (int i = 0; i < count; i++) {
                     stream.writeTag(FRAME_RECORDS, 2);
-                    stream.writeUInt32NoTag(
-                            recordSize(kinds[i], sinceLast[i], lengths[i], tickDeltas[i], pingKinds[i], skips[i]));
+                    stream.writeUInt32NoTag(sizes[i]);
                     if (kinds[i] == PING_MARKER) {
                         stream.writeEnum(PING_MARKER, pingKinds[i]);
                     } else {
@@ -838,6 +878,7 @@ public final class IntakeWire {
                 tickDeltas = new int[RESTING_RECORDS];
                 pingKinds = new int[RESTING_RECORDS];
                 skips = new int[RESTING_RECORDS];
+                sizes = new int[RESTING_RECORDS];
             } else {
                 Arrays.fill(payloads, 0, count, null);
             }
@@ -859,7 +900,7 @@ public final class IntakeWire {
      * {@link #zstdUnavailable} to be null.
      */
     public static final class StreamWriter implements AutoCloseable {
-        public static final int LEVEL = 3;
+        public static final int LEVEL = 1;
         /** The receiver's window limit (2 MiB); the frame header declares it. */
         public static final int WINDOW_LOG = 21;
 
@@ -869,8 +910,8 @@ public final class IntakeWire {
                 .setChecksum(false)
                 .setContentSize(false);
         /**
-         * The buffers' resting size, the size past which they drop back to it, and the run of messages no larger than
-         * it that drops them, so a burst followed by small messages does not reallocate them each time.
+         * The buffers' resting size, the size past which they drop back to what recent messages needed, and how many
+         * messages that need is taken over.
          */
         private static final int RESTING_BYTES = 64 * 1024;
 
@@ -881,38 +922,70 @@ public final class IntakeWire {
 
         private ByteBuffer output = ByteBuffer.allocateDirect(RESTING_BYTES);
         private byte[] buffer = new byte[RESTING_BYTES];
-        /** Messages in a row no larger than {@link #RESTING_BYTES}. */
-        private int small;
+        /** Messages ended since the buffers were last fitted to need, and the largest part and message among them. */
+        private int messages;
 
-        /** {@code bytes} is the records' total length. */
-        public ByteBuffer write(List<byte[]> records, int bytes) {
-            small = bytes <= RESTING_BYTES ? small + 1 : 0;
-            if (small >= SHRINK_AFTER_MESSAGES
-                    && (input.capacity() > SHRINK_PAST_BYTES
-                            || output.capacity() > SHRINK_PAST_BYTES
-                            || buffer.length > SHRINK_PAST_BYTES)) {
-                input = ByteBuffer.allocateDirect(RESTING_BYTES);
-                output = ByteBuffer.allocateDirect(RESTING_BYTES);
-                buffer = new byte[RESTING_BYTES];
-                small = 0;
-            }
+        private int largestPart;
+        private int largestMessage;
+        /** Record bytes written since the last message ended. */
+        private long open;
+
+        /**
+         * Writes {@code records}, {@code bytes} long in all, into the open message. With {@code end} the message ends
+         * at a flush and is returned; without, it stays open, its output held off-heap, and null is returned.
+         */
+        public ByteBuffer write(List<byte[]> records, int bytes, boolean end) {
+            if (open == 0) shrink();
+            open += bytes;
+            largestPart = Math.max(largestPart, bytes);
             if (input.capacity() < bytes) input = ByteBuffer.allocateDirect(bytes);
             input.clear();
             for (byte[] record : records) input.put(record);
             input.flip();
             int bound = (int) Zstd.compressBound(bytes);
-            if (output.capacity() < bound) output = ByteBuffer.allocateDirect(bound);
-            output.clear();
-            while (!stream.compressDirectByteBufferStream(output, input, EndDirective.FLUSH)) {
+            if (output.remaining() < bound) {
+                int held = output.position();
+                output = ByteBuffer.allocateDirect(held == 0 ? bound : Math.max(held + bound, output.capacity() * 2))
+                        .put(output.flip());
+            }
+            EndDirective directive = end ? EndDirective.FLUSH : EndDirective.CONTINUE;
+            while (!stream.compressDirectByteBufferStream(output, input, directive)) {
                 if (!output.hasRemaining())
                     output = ByteBuffer.allocateDirect(output.capacity() * 2).put(output.flip());
             }
+            if (!end) return null;
+            open = 0;
             output.flip();
             int length = 1 + output.remaining();
+            messages++;
+            largestMessage = Math.max(largestMessage, length);
             if (buffer.length < length) buffer = new byte[Math.max(length, buffer.length * 2)];
             buffer[0] = COMPRESSED;
             output.get(buffer, 1, length - 1);
+            output.clear();
             return ByteBuffer.wrap(buffer, 0, length);
+        }
+
+        /** The compressed bytes the open message holds so far, short of what zstd buffers until a block fills. */
+        public int held() {
+            return output.position();
+        }
+
+        /**
+         * Before a message, once every {@link #SHRINK_AFTER_MESSAGES}: a buffer past {@link #SHRINK_PAST_BYTES} and
+         * past what those messages needed drops to that need.
+         */
+        private void shrink() {
+            if (messages < SHRINK_AFTER_MESSAGES) return;
+            int part = Math.max(RESTING_BYTES, largestPart);
+            int message = Math.max(RESTING_BYTES, largestMessage);
+            int written = (int) Math.min(Integer.MAX_VALUE - 8, message + Zstd.compressBound(part));
+            if (input.capacity() > Math.max(SHRINK_PAST_BYTES, part)) input = ByteBuffer.allocateDirect(part);
+            if (output.capacity() > Math.max(SHRINK_PAST_BYTES, written)) output = ByteBuffer.allocateDirect(written);
+            if (buffer.length > Math.max(SHRINK_PAST_BYTES, message)) buffer = new byte[message];
+            messages = 0;
+            largestPart = 0;
+            largestMessage = 0;
         }
 
         /** Frees the native context; the frame is left unended. */
@@ -948,7 +1021,9 @@ public final class IntakeWire {
                     DiagWatchReply,
                     DiagCutReply,
                     PerfLimitsReply,
-                    PerfStartReply {
+                    PerfStartReply,
+                    TeamStateReply,
+                    TeamSweepReply {
         /** The player it is for; null for a reply to the whole socket. */
         UUID player();
     }
@@ -984,6 +1059,22 @@ public final class IntakeWire {
 
     /** Perf: record a profile of {@code seconds} under {@code profile}. */
     public record PerfStartReply(UUID profile, int seconds) implements Reply {
+        @Override
+        public UUID player() {
+            return null;
+        }
+    }
+
+    /** Team sync: whether the organization takes portal roles now; replaces the last state. */
+    public record TeamStateReply(boolean enabled) implements Reply {
+        @Override
+        public UUID player() {
+            return null;
+        }
+    }
+
+    /** Team sync: the accounts to look up while they are offline; a player not 16 bytes long is left out. */
+    public record TeamSweepReply(List<UUID> players) implements Reply {
         @Override
         public UUID player() {
             return null;
@@ -1059,6 +1150,14 @@ public final class IntakeWire {
                         replies.add(new PerfStartReply(uuid(start.getProfile()), (int)
                                 Math.min(Integer.MAX_VALUE, Integer.toUnsignedLong(start.getSeconds()))));
                     }
+                }
+                case TEAM_STATE -> replies.add(new TeamStateReply(reply.getTeamState().getEnabled()));
+                case TEAM_SWEEP -> {
+                    List<UUID> players = new ArrayList<>(reply.getTeamSweep().getPlayersCount());
+                    for (ByteString player : reply.getTeamSweep().getPlayersList()) {
+                        if (player.size() == 16) players.add(uuid(player));
+                    }
+                    replies.add(new TeamSweepReply(List.copyOf(players)));
                 }
                 default -> {}
             }

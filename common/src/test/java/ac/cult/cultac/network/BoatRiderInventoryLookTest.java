@@ -1,0 +1,175 @@
+package ac.cult.cultac.network;
+
+import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.checks.impl.multiactions.MultiActionsO;
+import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundMoveVehicle;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
+import ac.cult.cultac.protocol.value.Vec3d;
+import ac.cult.cultac.utils.math.Vec3;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Minecraft#tick runs ClientLevel#tickEntities before LocalPlayer#sendChanges: AbstractBoat#tick decays and steers the
+ * driven boat's deltaRotation and turns the boat by it, the rider's AbstractBoat#positionRider turns its yaw by the
+ * same deltaRotation and clampRotation holds the yaw within 105 degrees of the boat, and only then does the client send
+ * the rider's Rot and the boat's move. A boat keeps turning its rider while deltaRotation decays after the keys are
+ * released, with an inventory open or not.
+ */
+class BoatRiderInventoryLookTest {
+    private static final int BOAT = 100;
+    private static final int OTHER_RIDER = 101;
+    private static final Vec3 SEAT = new Vec3(0.5, FLOOR_Y, 0.5);
+    private static final ServerboundPlayerInput LEFT =
+            new ServerboundPlayerInput(false, false, true, false, false, false, false);
+    private static final ServerboundPlayerInput RELEASED =
+            new ServerboundPlayerInput(false, false, false, false, false, false, false);
+    private static final int RELEASE_TICK = 8;
+    // The client opens the inventory in Minecraft#handleKeybinds, before the tick's entities.
+    private static final int OPEN_TICK = RELEASE_TICK + 1;
+    private static final int TICKS = 40;
+    private static final float LOOK_YAW = 30;
+    private static final float LOOK_PITCH = 10;
+
+    @Test
+    void aRiderTheReleasedBoatKeepsTurningInItsInventoryIsNotRotating() throws Exception {
+        Run run = drive(true, -1, 0, 0, 0);
+
+        assertTrue(run.turnedLooks > 0, "the boat turned no judged look");
+        assertEquals(0, run.violations);
+    }
+
+    @Test
+    void aMouseLookOnTopOfTheBoatsTurnInAnInventoryIsStillFlagged() throws Exception {
+        Run run = drive(true, OPEN_TICK + 2, 20, 0, 0);
+
+        assertEquals(1, run.violations);
+    }
+
+    @Test
+    void aPitchChangeWhileTheBoatTurnsInAnInventoryIsStillFlagged() throws Exception {
+        Run run = drive(true, OPEN_TICK + 2, 0, 5, 0);
+
+        assertEquals(1, run.violations);
+    }
+
+    @Test
+    void aRiderBehindTheBoatsControllerIsNotTurnedByItsDeltaRotation() throws Exception {
+        Run run = drive(false, -1, 0, 0, 0);
+
+        assertTrue(run.turnedLooks > 0, "the rider turned no judged look");
+        assertEquals(run.turnedLooks, run.violations);
+    }
+
+    @Test
+    void aBoatYawThatIsNotTheBoatsTurnCannotExplainTheRidersLook() throws Exception {
+        // The boat reports a yaw that clampRotation turns into a look the keys gave no boat to make.
+        Run run = drive(true, OPEN_TICK + 2, 0, 0, -120);
+
+        assertEquals(1, run.violations);
+    }
+
+    private record Run(double violations, int turnedLooks) {}
+
+    /**
+     * Steers left until {@link #RELEASE_TICK}, opens the inventory at {@link #OPEN_TICK} and sends the rider's look the
+     * way vanilla turns it with a boat it drives, plus {@code extraYaw} and {@code extraPitch} at tick {@code at}, with
+     * the boat reporting a yaw {@code boatShift} off its turn then. A rider behind the controller sends the same look
+     * while the boat, which it cannot move, stands still.
+     */
+    private static Run drive(boolean controls, int at, float extraYaw, float extraPitch, float boatShift)
+            throws Exception {
+        float[] turns = deltaRotations();
+        try (var f = board(controls)) {
+            MultiActionsO check = f.player.checkManager.getCheck(MultiActionsO.class);
+            f.player.setExperimentalChecks(true);
+            check.setEnabled(true);
+            check.reload();
+            check.violations = 0;
+            float boatYaw = 0;
+            // Entity#turn, then AbstractBoat#onPassengerTurned, before the first tick.
+            float yaw = clampRotation(LOOK_YAW, boatYaw);
+            float pitch = LOOK_PITCH;
+            int turnedLooks = 0;
+            for (int tick = 0; tick < TICKS; tick++) {
+                if (tick == OPEN_TICK) f.player.openWindow.onClientOpenOrCloseWindow(true);
+                steer(f, tick);
+                if (controls) boatYaw += turns[tick];
+                if (tick == at) boatYaw += boatShift;
+                float previousYaw = yaw;
+                yaw = clampRotation(yaw + turns[tick], boatYaw);
+                if (tick == at) {
+                    yaw += extraYaw;
+                    pitch += extraPitch;
+                }
+                if (tick > OPEN_TICK && yaw != previousYaw) turnedLooks++;
+                rot(f, yaw, pitch);
+                if (controls) moveBoat(f, boatYaw);
+                f.tickEnd();
+            }
+            return new Run(check.violations, turnedLooks);
+        }
+    }
+
+    /** The boat's deltaRotation at each tick of {@link #drive}, which neither the rider's nor the boat's yaw changes. */
+    private static float[] deltaRotations() throws Exception {
+        float[] turns = new float[TICKS];
+        try (var f = board(true)) {
+            for (int tick = 0; tick < TICKS; tick++) {
+                steer(f, tick);
+                rot(f, f.player.xRot, f.player.yRot);
+                moveBoat(f, 0);
+                f.tickEnd();
+                turns[tick] = f.player.boatData.deltaRotation;
+            }
+        }
+        return turns;
+    }
+
+    /** A 26.3 client on a boat at yaw 0 on stone, its first passenger when it {@code controls} the boat. */
+    private static JavaTickFixture board(boolean controls) throws Exception {
+        var f = new JavaTickFixture();
+        f.place(SEAT, Vec3.ZERO);
+        f.player.compensatedEntities.addEntity(BOAT, EntityTypeIds.OAK_BOAT, SEAT, 0, 0, 0);
+        if (controls) {
+            f.setPassengers(BOAT, List.of(f.player.entityID));
+        } else {
+            f.player.compensatedEntities.addEntity(OTHER_RIDER, EntityTypeIds.ZOMBIE, SEAT, 0, 0, 0);
+            f.setPassengers(BOAT, List.of(OTHER_RIDER, f.player.entityID));
+        }
+        f.pongThrough(f.player.lastTransactionSent.get());
+        assertTrue(f.player.compensatedEntities.getSelf().inVehicle());
+        return f;
+    }
+
+    // LocalPlayer#sendChanges sends the keys that changed before the Rot.
+    private static void steer(JavaTickFixture f, int tick) {
+        if (tick == 0) f.input(LEFT);
+        if (tick == RELEASE_TICK) f.input(RELEASED);
+    }
+
+    private static void rot(JavaTickFixture f, float yaw, float pitch) {
+        var packet = new ServerboundMovePlayer(0, 0, 0, yaw, pitch, f.player.onGround, false, false, true);
+        f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, packet), f.player, packet);
+    }
+
+    private static void moveBoat(JavaTickFixture f, float boatYaw) {
+        var packet = new ServerboundMoveVehicle(new Vec3d(SEAT.x, SEAT.y, SEAT.z), boatYaw, 0, true, true);
+        f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, packet), f.player, packet);
+    }
+
+    // AbstractBoat#clampRotation's yaw for a player passenger, in Mth's float operations.
+    private static float clampRotation(float yaw, float boatYaw) {
+        float delta = (yaw - boatYaw) % 360.0F;
+        if (delta >= 180.0F) delta -= 360.0F;
+        if (delta < -180.0F) delta += 360.0F;
+        float target = delta < -105.0F ? -105.0F : Math.min(delta, 105.0F);
+        return yaw + target - delta;
+    }
+}

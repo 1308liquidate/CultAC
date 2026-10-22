@@ -214,7 +214,7 @@ class ObserveOnlyCallSiteTest {
             events/packets/worldreader/BasePacketWorldReader.java#handleBlockEvent(CultPlayer,PacketSendEvent,ClientboundBlockEvent) replace
             network/PacketDispatcher.java#clear() replace
             utils/data/packetentity/PacketEntity.java#mount(PacketEntity) eject
-            utils/latency/CompensatedEntities.java#removeEntity(int) eject
+            utils/latency/CompensatedEntities.java#removeEntity(int) eject x2
             utils/latency/CompensatedVehicleState.java#applyClientVisibleDismount() eject
             utils/latency/CompensatedVehicleState.java#applyVehiclePassengers(int,int[]) eject
             [] session cleanup and shutdown

@@ -33,13 +33,15 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * The cloud's label API at {@code cloud.url}, called with {@code cloud.api-key}. The service takes the key there only
- * while it may label, and otherwise answers 403 {@value #NO_LABEL}, which staff see as {@link #NOT_ALLOWED}. Every call
- * runs once, off the calling thread, with timeouts. The key goes only into the {@code Authorization} header; it is
- * never logged, shown or put in an error.
+ * while its organization is trusted, and otherwise answers 403 {@value #NO_LABEL}, which staff see as
+ * {@link #NOT_ALLOWED}. Every call runs once, off the calling thread, with timeouts. The key goes only into the
+ * {@code Authorization} header; it is never logged, shown or put in an error.
  */
 public final class LabelClient {
-    /** The service's problem detail for a key that may not label. */
-    static final String NO_LABEL = "this key may not label";
+    /** The service's problem detail for a key whose organization is not trusted. */
+    static final String NO_LABEL = "labels are for trusted organizations";
+    /** {@link #NO_LABEL} as older service builds word it. */
+    static final String NO_LABEL_KEY = "this key may not label";
     /** The service's problem detail for a labelling player who is not one of the organization's moderators. */
     static final String NOT_A_LABELLER =
             "this player is not a moderator of the organization with this Minecraft account on their profile";
@@ -49,7 +51,7 @@ public final class LabelClient {
     public static final String ONLY_ADMINS = "Only admins can mark a player clean.";
     public static final String NOT_A_MODERATOR =
             "Your Minecraft account isn't a moderator of this server's cloud organization.";
-    public static final String NOT_ALLOWED = "This server's key isn't allowed to label.";
+    public static final String NOT_ALLOWED = "This organization can't label yet: labels are for trusted organizations.";
 
     static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
     private static final int MAX_ERROR = 160;
@@ -179,9 +181,9 @@ public final class LabelClient {
     }
 
     /**
-     * What went wrong, for the staff member: {@link #NOT_ALLOWED} when the key may not label, {@link #NOT_A_MODERATOR}
-     * when the player may not, {@link #ONLY_ADMINS} for a moderator's clean label, else the status and the service's
-     * own message when it gave one, the key masked.
+     * What went wrong, for the staff member: {@link #NOT_ALLOWED} when the organization is not trusted,
+     * {@link #NOT_A_MODERATOR} when the player may not, {@link #ONLY_ADMINS} for a moderator's clean label, else the
+     * status and the service's own message when it gave one, the key masked.
      */
     public static String failure(Reply reply) {
         String said = said(reply.body());
@@ -190,7 +192,7 @@ public final class LabelClient {
             case 401 -> "The cloud refused this server's key (HTTP 401).";
             case 403 ->
                 switch (said) {
-                    case NO_LABEL -> NOT_ALLOWED;
+                    case NO_LABEL, NO_LABEL_KEY -> NOT_ALLOWED;
                     case NOT_A_LABELLER -> NOT_A_MODERATOR;
                     case CLEAN_ADMINS -> ONLY_ADMINS;
                     default ->

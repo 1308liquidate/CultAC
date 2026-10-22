@@ -324,6 +324,12 @@ public final class PrivateCodecService implements WireValueDecoder {
 
     record MetadataTypes(int floatingPoint, int pose, int optionalInt, int painting, int particle, int particles) {}
 
+    private static final Map<ProtocolVersion, MetadataTypes> METADATA_TYPES = new ConcurrentHashMap<>();
+
+    private static MetadataTypes metadataTypes(ProtocolVersion version) {
+        return METADATA_TYPES.computeIfAbsent(version, value -> metadataTypes(types(value)));
+    }
+
     static MetadataTypes metadataTypes(VersionedTypesHolder types) {
         return switch (types.entityDataTypes()) {
             case ac.cult.shaded.vialib.api.minecraft.entitydata.types.EntityDataTypes1_21_2 values ->
@@ -380,7 +386,7 @@ public final class PrivateCodecService implements WireValueDecoder {
 
     @Override
     public int floatSerializer(ProtocolVersion version) {
-        return metadataTypes(types(version)).floatingPoint();
+        return metadataTypes(version).floatingPoint();
     }
 
     @Override
@@ -393,11 +399,12 @@ public final class PrivateCodecService implements WireValueDecoder {
             ProtocolVersion version, ByteBuf input, Registries registries, NbtFactory<T> factory) {
         checkOpen();
         var types = types(version);
-        var serializers = metadataTypes(types);
+        var serializers = metadataTypes(version);
         int pose = serializers.pose(), optional = serializers.optionalInt();
         int painting = serializers.painting();
         int particle = serializers.particle(), particles = serializers.particles();
-        var result = new ArrayList<MetadataValue>();
+        MetadataValue first = null, second = null;
+        ArrayList<MetadataValue> result = null;
         for (int index; (index = input.readUnsignedByte()) != 255; ) {
             int start = input.readerIndex() - 1;
             int id = Types.VAR_INT.readPrimitive(input);
@@ -442,10 +449,21 @@ public final class PrivateCodecService implements WireValueDecoder {
                     value = new int[] {position.x(), position.y(), position.z()};
                 }
             }
-            result.add(new MetadataValue(
-                    index, kind, value, ByteBufUtil.getBytes(input, start, input.readerIndex() - start)));
+            var decoded = new MetadataValue(index, kind, value, start, input.readerIndex() - start);
+            if (first == null) first = decoded;
+            else if (second == null) second = decoded;
+            else {
+                if (result == null) {
+                    result = new ArrayList<>();
+                    result.add(first);
+                    result.add(second);
+                }
+                result.add(decoded);
+            }
         }
-        return List.copyOf(result);
+        if (result != null) return List.copyOf(result);
+        if (second != null) return List.of(first, second);
+        return first != null ? List.of(first) : List.of();
     }
 
     /** Metadata batches may hold this many particles; vanilla sends a handful. */

@@ -40,6 +40,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.Iterator;
@@ -72,7 +73,9 @@ import org.yaml.snakeyaml.Yaml;
  * <p>Streams queue records from any thread; one virtual sender thread cuts them into messages of up to the size connect
  * allows once the service resolves their probe markers, and at most {@link #MAX_WRITE_BYTES} record bytes, which a
  * {@link CompressionPipeline} compresses on the pool every socket shares, and the sender writes out in the order cut,
- * so they reach the service in order. A new socket starts a new generation:
+ * so they reach the service in order. A message gathers what is queued for up to {@link Timing#batchNanos}, compressed
+ * as it comes; a record that {@linkplain IntakeWire#endsMessage ends a message} goes out at the next flush. A new
+ * socket starts a new generation:
  * records queued for the old one are dropped and every stream is told to join again, since the service knows nothing
  * of players joined on the old one.
  *
@@ -105,6 +108,11 @@ public final class CloudConnection {
 
         /** The service sent a finding. Called on the socket's listener thread. */
         void finding(IntakeWire.Event event);
+
+        /** Hears the team sockets: on the sender thread when one opens, else on whichever thread closed or read it. */
+        default TeamSocket.Listener team() {
+            return TeamSocket.Listener.NONE;
+        }
     }
 
     private static final Gson GSON = new Gson();
@@ -130,8 +138,12 @@ public final class CloudConnection {
     static final int MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
 
     private static final long FLUSH_NANOS = TimeUnit.MILLISECONDS.toNanos(50);
+    /** How long a message stays open taking parts, each flush's records, before it ends and goes out. */
+    private static final long BATCH_NANOS = TimeUnit.SECONDS.toNanos(1);
     /** How long one message's write may take before the socket is given up. */
     private static final long WRITE_NANOS = TimeUnit.SECONDS.toNanos(15);
+    /** How long the sender may take to send its open message before it drops its own socket. */
+    private static final long END_NANOS = TimeUnit.SECONDS.toNanos(1);
     /** How long a retiring socket may take to send what is queued before it closes regardless. */
     private static final long RETIRE_NANOS = TimeUnit.SECONDS.toNanos(5);
     /** How long a socket another connection took its server id from waits before connecting again. */
@@ -179,7 +191,7 @@ public final class CloudConnection {
     private final Map<UUID, Long> departed = new LinkedHashMap<>();
 
     /**
-     * Any thread adds; only the sender thread takes while it runs, since {@link #nextMessage} peeks before it polls.
+     * Any thread adds; only the sender thread takes while it runs, since {@link #nextPart} peeks before it polls.
      * Once the sender has {@link #stopped}, whoever adds drops what is left.
      */
     private final ConcurrentLinkedQueue<Queued> queue = new ConcurrentLinkedQueue<>();
@@ -199,6 +211,23 @@ public final class CloudConnection {
 
     private final DiagUpload perfUpload = new DiagUpload();
     private final Perf perf;
+    /** Whether connect offers team sync ({@code cloud.team-sync}). */
+    private final boolean offerTeam;
+    /** The open socket, while its connect answered {@code team}. */
+    private volatile Team teamSocket;
+
+    /** The socket of {@code generation} as a team socket. */
+    private record Team(CloudConnection connection, long generation) implements TeamSocket {
+        @Override
+        public boolean send(byte[] record) {
+            return connection.send(generation, record, 0);
+        }
+
+        @Override
+        public String serverId() {
+            return connection.serverId();
+        }
+    }
 
     private volatile WebSocket socket;
     private volatile long generation;
@@ -214,6 +243,16 @@ public final class CloudConnection {
     private volatile long usedNanos;
 
     private final long idleAfterNanos;
+    private final long batchNanos;
+    private final Batch batch = new Batch();
+    /** On the sender thread: whether it is ending the open message before dropping its socket. */
+    private boolean ending;
+    /** On the sender thread, while {@link #ending}: when it gives up and drops what is not yet sent. */
+    private long endByNanos;
+    /** The socket the sender closed after ending its open message, until the service answers or the sender gives up. */
+    private volatile WebSocket closing;
+    /** The socket the sender is ending its open message on, from end()'s snapshot until it is lost: sends refuse it. */
+    private volatile WebSocket refusing;
 
     private volatile boolean closed;
     /** The sender thread no longer takes from {@link #queue}: set before its last drop. */
@@ -249,6 +288,11 @@ public final class CloudConnection {
         long resolvedLength() {
             return length() + resolvedExtra;
         }
+
+        /** Whether the message that takes this entry ends with it. */
+        boolean ends() {
+            return IntakeWire.endsMessage(record);
+        }
     }
 
     /**
@@ -278,12 +322,37 @@ public final class CloudConnection {
 
     private record Agreed(long generation, Terms terms, boolean textStripped) {}
 
-    /** The quiet and idle periods, the clock liveness, idleness and retirement read, and the wait after a takeover. */
-    record Timing(long quietNanos, long idleNanos, LongSupplier clock, long takeoverNanos) {
+    /**
+     * The quiet and idle periods, the clock liveness, idleness, retirement, a message's age and the end of the open
+     * message read, the wait after a takeover, and how long a message stays open.
+     */
+    record Timing(long quietNanos, long idleNanos, LongSupplier clock, long takeoverNanos, long batchNanos) {
         static final Timing DEFAULT = new Timing(QUIET_NANOS, IDLE_NANOS, System::nanoTime);
 
         Timing(long quietNanos, long idleNanos, LongSupplier clock) {
             this(quietNanos, idleNanos, clock, TAKEOVER_NANOS);
+        }
+
+        Timing(long quietNanos, long idleNanos, LongSupplier clock, long takeoverNanos) {
+            this(quietNanos, idleNanos, clock, takeoverNanos, BATCH_NANOS);
+        }
+    }
+
+    /**
+     * The open message on the sender thread: its record bytes, its bytes once the service resolves its probe markers,
+     * when its first part was cut, and whether it takes no more entries: the next would take it past a limit, or the
+     * last one taken ends it.
+     */
+    static final class Batch {
+        int bytes;
+        long resolved;
+        long startedNanos;
+        boolean full;
+
+        void clear() {
+            bytes = 0;
+            resolved = 0;
+            full = false;
         }
     }
 
@@ -327,6 +396,7 @@ public final class CloudConnection {
             String serverId,
             List<Integer> protocols,
             boolean offerPerf,
+            boolean offerTeam,
             SharedTransport shared,
             Owner owner,
             Timing timing) {
@@ -335,12 +405,14 @@ public final class CloudConnection {
         this.serverId = serverId;
         this.protocols = List.copyOf(protocols);
         this.offerPerf = offerPerf;
+        this.offerTeam = offerTeam;
         this.shared = shared;
         this.owner = owner;
         liveness = new SocketLiveness(timing.quietNanos());
         clock = timing.clock();
         idleAfterNanos = timing.idleNanos();
         takeoverNanos = timing.takeoverNanos();
+        batchNanos = timing.batchNanos();
         usedNanos = clock.getAsLong();
         http = shared.http;
         queuedBytes = new QueuedBytes(SharedTransport.PROCESS_QUEUED);
@@ -426,6 +498,11 @@ public final class CloudConnection {
     /** Whether a retiring socket's time to send what is queued is up. */
     private boolean overdue() {
         return retiring && clock.getAsLong() - retireByNanos > 0;
+    }
+
+    /** Whether the sender, ending its open message before dropping its socket, is past {@link #END_NANOS}. */
+    private boolean late() {
+        return ending && clock.getAsLong() - endByNanos > 0;
     }
 
     /** One diagnostics line: counts only, never whom. */
@@ -541,7 +618,8 @@ public final class CloudConnection {
      * resolves it. False when that socket is gone or too much is queued, and the record was dropped.
      */
     public boolean send(long generation, byte[] record, long resolvedExtra) {
-        if (closed || generation != this.generation || socket == null) return false;
+        WebSocket open = socket;
+        if (closed || generation != this.generation || open == null || open == refusing) return false;
         if (!queuedBytes.tryAdd(record.length, MAX_QUEUED_BYTES, SharedTransport.MAX_PROCESS_QUEUED_BYTES)) {
             refused.incrementAndGet();
             return false;
@@ -562,6 +640,8 @@ public final class CloudConnection {
                     if (socket == null) {
                         // A lost socket's records are never sent: let go of them now, not at the next connect.
                         dropQueued();
+                        pipeline.drop();
+                        batch.clear();
                         if (retiring || frozen) {
                             closed = true;
                             break;
@@ -581,9 +661,9 @@ public final class CloudConnection {
                         checkText();
                         pump(diagUpload);
                         pump(perfUpload);
-                        flush();
+                        flush(queue);
                         logRefused();
-                        if (retiring && (queue.isEmpty() || overdue())) {
+                        if (retiring && (queue.isEmpty() && !pipeline.open() || overdue())) {
                             closeNormally();
                             break;
                         }
@@ -633,20 +713,87 @@ public final class CloudConnection {
     }
 
     /** After a reload: drops the socket so the next connect announces the agent, when it differs from the one sent. */
-    private void checkAgent() {
+    private void checkAgent() throws InterruptedException {
         if (!reloaded) return;
         reloaded = false;
         WebSocket open = socket;
         JsonObject sent = announced;
-        if (open != null && sent != null && !agent().equals(sent)) lost(open, "agent changed on reload");
+        if (open != null && sent != null && !agent().equals(sent)) {
+            String why = "agent changed on reload";
+            try {
+                end(open, why);
+            } finally {
+                lost(open, why);
+                if (refusing == open) refusing = null;
+            }
+        }
     }
 
     /** A codec that failed after connect said {@code textStripped} true: reconnect once to say false. */
-    private void checkText() {
+    private void checkText() throws InterruptedException {
         WebSocket open = socket;
         if (open != null && agreed.textStripped() && !PlayerText.strips()) {
-            lost(open, "a player text codec did not load; reconnecting with textStripped false");
+            String why = "a player text codec did not load; reconnecting with textStripped false";
+            try {
+                end(open, why);
+            } finally {
+                lost(open, why);
+                if (refusing == open) refusing = null;
+            }
         }
+    }
+
+    /**
+     * Before the sender drops {@code open}, its own socket, because {@code why}: the open message ends and goes out with
+     * what was queued before, then the socket closes normally and the sender waits for the service to answer the close,
+     * which proves every message before it was read, all within {@link #END_NANOS}. Past that, or on a failed write,
+     * what is unsent is dropped as a lost socket drops it, and the socket is lost saying so; from the snapshot on,
+     * {@link #send} refuses records for the socket.
+     */
+    private void end(WebSocket open, String why) throws InterruptedException {
+        refusing = open;
+        Queue<Queued> before = new ArrayDeque<>();
+        for (int left = queue.size(); left > 0; left--) {
+            Queued queued = queue.poll();
+            if (queued == null) break;
+            before.add(queued);
+        }
+        ending = true;
+        endByNanos = clock.getAsLong() + END_NANOS;
+        boolean sent = false;
+        boolean answered = false;
+        Exception failed = null;
+        try {
+            flush(before);
+            sent = socket == open && pipeline.idle();
+            if (sent) {
+                closing = open;
+                open.sendClose(WebSocket.NORMAL_CLOSURE, "reconnecting");
+                long left;
+                while (closing == open && socket == open && (left = endByNanos - clock.getAsLong()) > 0) {
+                    LockSupport.parkNanos(left);
+                    if (Thread.interrupted()) throw new InterruptedException();
+                }
+                answered = closing != open;
+            }
+        } catch (InterruptedException interrupted) {
+            throw interrupted;
+        } catch (Exception unsent) {
+            failed = unsent;
+        } finally {
+            ending = false;
+            closing = null;
+            dropQueued(before);
+        }
+        if (answered || failed == null && socket != open) return;
+        String dropped = failed != null
+                ? sent
+                        ? "its close failed after its last message was written; that message may be lost: " + failed
+                        : "its last message was not sent: " + failed
+                : sent
+                        ? "the service did not answer its close within the end bound; its last message may be lost"
+                        : "its open message was not sent within the end bound and is dropped";
+        lost(open, why + "; " + dropped);
     }
 
     private void open() {
@@ -668,6 +815,7 @@ public final class CloudConnection {
             body.addProperty("textStripped", textStripped);
             body.addProperty("diag", DiagWire.VERSION);
             if (offerPerf) body.addProperty("perf", PerfWire.VERSION);
+            if (offerTeam) body.addProperty("team", TeamSocket.VERSION);
             JsonObject agent = agent();
             body.add("agent", agent);
             HttpResponse<String> response = http.send(
@@ -720,12 +868,24 @@ public final class CloudConnection {
             diagnostics.connected(opened, connected.diagLimits());
             perf.connected(opened, offerPerf ? connected.perfLimits() : null);
             pipeline.stream();
+            batch.clear();
             agreed = new Agreed(opened, terms, textStripped);
             generation = opened;
             announced = agent;
             reloaded = false;
             openedNanos = System.nanoTime();
             liveness.opened(clock.getAsLong());
+            if (offerTeam) {
+                // Before the socket is published, so the close of this socket always follows its open.
+                Team team = new Team(this, opened);
+                Boolean answered = connected.team == null ? null : connected.team.enabled;
+                if (answered != null) teamSocket = team;
+                try {
+                    owner.team().opened(team, answered);
+                } catch (RuntimeException failure) {
+                    LogUtil.warn("Team sync could not take an opened socket", failure);
+                }
+            }
             socket = webSocket;
             webSocket.request(1);
             failing = false;
@@ -879,6 +1039,8 @@ public final class CloudConnection {
         DiagLimitsJson diag;
         /** Present when the service takes the perf offered: its limits. */
         PerfLimitsJson perf;
+        /** Present when the service takes the team sync offered: the organization's state. */
+        TeamStateJson team;
 
         /** The perf limits answered; null when the service took none. */
         PerfLimits perfLimits() {
@@ -963,6 +1125,11 @@ public final class CloudConnection {
         long uploadBytesPerSecond;
         boolean wholeJvm;
         long skipMsptMicros;
+    }
+
+    /** {@code ConnectResponse.team} in connect's JSON; {@code {}} is disabled. */
+    static final class TeamStateJson {
+        boolean enabled;
     }
 
     /** Which anticheat connects, from which build, with which config, and whether it acts on what it finds. */
@@ -1094,70 +1261,90 @@ public final class CloudConnection {
     }
 
     /**
-     * Sends everything queued for the current socket, in messages {@link #nextMessage} cuts, compressed on the pipeline
-     * while earlier ones are sent. What is dropped is dropped before it is compressed; on protocol 5 a compressed message
-     * that cannot be sent closes the socket.
+     * Compresses everything on {@code from} for the current socket into the open message, in parts {@link #nextPart}
+     * cuts, and sends each message once it is full or has been open {@link Timing#batchNanos}, compressing later parts
+     * on the pipeline while earlier messages are sent. A retiring socket, or one the sender is about to drop, ends its
+     * open message at once. What is dropped is dropped before it is compressed; on protocol 5 a compressed message that
+     * cannot be sent closes the socket.
      */
-    private void flush() throws Exception {
+    private void flush(Queue<Queued> from) throws Exception {
         WebSocket open = socket;
         if (open == null) return;
         long current = generation;
         int resolvedLimit = messageLimit();
         int limit = Math.min(resolvedLimit, MAX_WRITE_BYTES);
-        List<byte[]> message = new ArrayList<>();
+        List<byte[]> part = new ArrayList<>();
         int bytes = 0;
         try {
             while (true) {
-                while (pipeline.hasRoom()
-                        && !overdue()
-                        && (bytes = nextMessage(queue, queuedBytes, current, limit, resolvedLimit, message)) > 0) {
-                    pipeline.submit(message, bytes);
-                    message.clear();
+                while (pipeline.hasRoom() && !overdue() && !late()) {
+                    bytes = nextPart(from, queuedBytes, current, limit, resolvedLimit, batch, part);
+                    if (bytes == 0 && !pipeline.open()) break;
+                    if (!pipeline.open()) batch.startedNanos = clock.getAsLong();
+                    boolean end =
+                            batch.full || retiring || ending || clock.getAsLong() - batch.startedNanos >= batchNanos;
+                    if (bytes == 0 && !end) break;
+                    pipeline.submit(part, bytes, end);
+                    part.clear();
                     bytes = 0;
+                    if (!end) break;
+                    batch.clear();
                 }
-                if (overdue()) return;
-                byte[] next = pipeline.take();
+                if (overdue() || late()) return;
+                byte[] next = ending ? pipeline.take(endByNanos - clock.getAsLong()) : pipeline.take();
                 if (next == null) return;
                 write(open, next);
                 logRefused();
             }
         } catch (Exception failure) {
             queuedBytes.addAndGet(-bytes);
-            pipeline.drop();
-            // The service cannot decompress a stream past a message it never got.
-            lost(open, "a message was not sent: " + failure);
+            batch.clear();
+            // While ending, end() loses the socket; the sender drops the rest once it is gone, outside the end bound.
+            if (!ending) {
+                pipeline.drop();
+                // The service cannot decompress a stream past a message it never got.
+                lost(open, "a message was not sent: " + failure);
+            }
             throw failure;
         }
     }
 
     /**
-     * Takes the next message for the socket of {@code generation} off {@code queue} into {@code message}: whole entries
-     * in order, at most {@code limit} record bytes and {@code resolvedLimit} bytes once the service resolves their probe
-     * markers, or a single entry past either. Entries of other sockets are dropped. Returns the
-     * message's record bytes, 0 when nothing is queued for the socket.
+     * Takes the next part of {@code batch}, the open message for the socket of {@code generation}, off {@code queue}
+     * into {@code part}: whole entries in order, the message at most {@code limit} record bytes and {@code resolvedLimit}
+     * bytes once the service resolves their probe markers, or a single entry past either. An entry that would take it
+     * past either stays queued and marks the batch full, as does one that {@linkplain Queued#ends ends} the message once
+     * taken. Entries of other sockets are dropped. Returns the part's record
+     * bytes, 0 when nothing is queued for the socket or the batch is full.
      */
-    static int nextMessage(
+    static int nextPart(
             Queue<Queued> queue,
             QueuedBytes queuedBytes,
             long generation,
             int limit,
             long resolvedLimit,
-            List<byte[]> message) {
+            Batch batch,
+            List<byte[]> part) {
         int bytes = 0;
-        long resolved = 0;
         Queued queued;
-        while ((queued = queue.peek()) != null) {
+        while (!batch.full && (queued = queue.peek()) != null) {
             int length = queued.length();
             if (queued.generation() != generation) {
                 queue.poll();
                 queuedBytes.addAndGet(-length);
                 continue;
             }
-            if (bytes > 0 && (bytes + length > limit || resolved + queued.resolvedLength() > resolvedLimit)) break;
+            if (batch.bytes > 0
+                    && (batch.bytes + length > limit || batch.resolved + queued.resolvedLength() > resolvedLimit)) {
+                batch.full = true;
+                break;
+            }
             queue.poll();
-            message.add(queued.record());
+            part.add(queued.record());
             bytes += length;
-            resolved += queued.resolvedLength();
+            batch.bytes += length;
+            batch.resolved += queued.resolvedLength();
+            if (queued.ends()) batch.full = true;
         }
         return bytes;
     }
@@ -1201,7 +1388,8 @@ public final class CloudConnection {
 
     /**
      * {@link WebSocket} takes one message at a time, so only the sender thread writes, each after the last. A write
-     * fails after 15 s, or once a retiring socket's time is up.
+     * fails after 15 s, once a retiring socket's time is up, or, while the sender ends its open message, at
+     * {@link #endByNanos}.
      */
     private void write(WebSocket open, byte[] message) throws Exception {
         try {
@@ -1212,11 +1400,11 @@ public final class CloudConnection {
                     sending.get(FLUSH_NANOS, TimeUnit.NANOSECONDS);
                     break;
                 } catch (TimeoutException slow) {
-                    if (overdue() || System.nanoTime() - giveUp > 0) throw slow;
+                    if (overdue() || late() || System.nanoTime() - giveUp > 0) throw slow;
                 }
             }
         } catch (Exception failure) {
-            lost(open, "send failed: " + failure);
+            if (!ending) lost(open, "send failed: " + failure);
             throw failure;
         } finally {
             pipeline.sent(message);
@@ -1241,8 +1429,12 @@ public final class CloudConnection {
     }
 
     private void dropQueued() {
+        dropQueued(queue);
+    }
+
+    private void dropQueued(Queue<Queued> from) {
         Queued queued;
-        while ((queued = queue.poll()) != null) queuedBytes.addAndGet(-queued.length());
+        while ((queued = from.poll()) != null) queuedBytes.addAndGet(-queued.length());
     }
 
     /**
@@ -1253,12 +1445,22 @@ public final class CloudConnection {
         if (socket != gone) return;
         lastLifeNanos = System.nanoTime() - openedNanos;
         socket = null;
+        refusing = null;
         long ended = generation;
         if (why == null) LogUtil.info("Cloud socket closed (server id " + serverId + ")");
         else LogUtil.warn("Cloud socket closed: " + redacted(why) + " (server id " + serverId + ")");
         gone.abort();
         diagnostics.socketClosed(ended);
         perf.socketClosed(ended);
+        Team team = teamSocket;
+        teamSocket = null;
+        if (team != null) {
+            try {
+                owner.team().closed(team);
+            } catch (RuntimeException failure) {
+                LogUtil.warn("Team sync could not take a closed socket", failure);
+            }
+        }
         for (Stream stream : streams.values()) {
             try {
                 stream.disconnected(ended);
@@ -1353,6 +1555,20 @@ public final class CloudConnection {
                             perf.start(generation, start.profile(), start.seconds());
                             continue;
                         }
+                        if (reply instanceof IntakeWire.TeamStateReply state) {
+                            Team team = teamSocket;
+                            if (team != null && team.generation() == generation) {
+                                owner.team().state(team, state.enabled());
+                            }
+                            continue;
+                        }
+                        if (reply instanceof IntakeWire.TeamSweepReply sweep) {
+                            Team team = teamSocket;
+                            if (team != null && team.generation() == generation) {
+                                owner.team().sweep(team, sweep.players());
+                            }
+                            continue;
+                        }
                         Stream stream = streams.get(reply.player());
                         if (stream != null) stream.reply(generation, reply);
                         else if (reply instanceof IntakeWire.DiagCutReply cut)
@@ -1368,6 +1584,11 @@ public final class CloudConnection {
 
         @Override
         public CompletionStage<?> onClose(WebSocket webSocket, int status, String reason) {
+            if (webSocket == closing && status == WebSocket.NORMAL_CLOSURE) {
+                closing = null;
+                LockSupport.unpark(sender);
+                return null;
+            }
             if (status == TAKEN_OVER && socket == webSocket) {
                 if (retiring) {
                     lost(webSocket, null);

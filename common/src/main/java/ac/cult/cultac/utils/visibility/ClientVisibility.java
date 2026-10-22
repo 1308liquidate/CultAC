@@ -296,23 +296,51 @@ public final class ClientVisibility {
         return envelope;
     }
 
+    /**
+     * How LocalPlayer#pick may see an entity: some eye selects it, some eye within a pick range sees only blocks before
+     * it, or every eye is beyond every pick range, where filterHitResult alone drops the hit.
+     */
+    public enum Sight {
+        VISIBLE,
+        BLOCKED,
+        OUT_OF_RANGE
+    }
+
     public boolean entityHidden(PacketEntity entity, double positionError) {
-        double pickRadius = EntityTypeUtil.modelType(entity.type).has(EntityTypes.PROJECTILE) ? 1.0F : 0;
+        return entitySight(entity, positionError) != Sight.VISIBLE;
+    }
+
+    /** The entity's sight under every selection this tick: any selection that selects it makes it visible. */
+    public Sight entitySight(PacketEntity entity, double positionError) {
         // ProjectileUtil#getEntityHitResult clips the physical bounding box,
         // inflated only by the native pick radius/item margin. Reach's separate
         // 0.03125 expansion can invent an exposed point across a solid corner.
-        return hiddenForEverySelection(
-                () -> entityHidden(entity.getPossibleMovementCollisionBoxes(), positionError, pickRadius));
+        boolean[] inRange = {false};
+        if (!hiddenForEverySelection(() -> entityHidden(
+                entity.toBoundingBox(player, entity.getPossibleMovementCollisionBoxes()),
+                positionError,
+                pickRadius(entity),
+                inRange))) return Sight.VISIBLE;
+        return inRange[0] ? Sight.BLOCKED : Sight.OUT_OF_RANGE;
+    }
+
+    /** Whether no selection selects any part of {@code box}, a box the entity's picked box may lie in. */
+    public boolean entityHidden(PacketEntity entity, SimpleCollisionBox box, double positionError) {
+        return hiddenForEverySelection(() -> entityHidden(box, positionError, pickRadius(entity), null));
+    }
+
+    private static double pickRadius(PacketEntity entity) {
+        return EntityTypeUtil.modelType(entity.type).has(EntityTypes.PROJECTILE) ? 1.0F : 0;
     }
 
     public boolean entityHidden(SimpleCollisionBox target, double positionError) {
-        return hiddenForEverySelection(() -> entityHidden(target, positionError, 0));
+        return hiddenForEverySelection(() -> entityHidden(target, positionError, 0, null));
     }
 
     public boolean entityInteractionHidden(PacketEntity entity, double positionError) {
         double pickRadius = EntityTypeUtil.modelType(entity.type).has(EntityTypes.PROJECTILE) ? 1.0F : 0;
         return hiddenForEverySelection(() -> {
-            var target = entity.getPossibleMovementCollisionBoxes();
+            var target = entity.toBoundingBox(player, entity.getPossibleMovementCollisionBoxes());
             var self = player.compensatedEntities.getSelf();
             double range = self.getEntityInteractionRange();
             if (!(range > 0)) return true;
@@ -323,13 +351,15 @@ public final class ClientVisibility {
                 if (!withinRange(eye, target, range)) continue;
                 // LocalPlayer#raycastHitResult supplies the same item-dependent
                 // selection for attacks and uses, including native pick margins.
-                return entityHidden(target, positionError, pickRadius);
+                return entityHidden(target, positionError, pickRadius, null);
             }
             return true;
         });
     }
 
-    private boolean entityHidden(SimpleCollisionBox target, double positionError, double pickRadius) {
+    /** Whether no eye selects the target under the active selection; sets {@code inRange[0]} for an eye within range. */
+    private boolean entityHidden(
+            SimpleCollisionBox target, double positionError, double pickRadius, boolean[] inRange) {
         double defaultRange = player.compensatedEntities.getSelf().getEntityInteractionRange();
         ItemComponents.AttackRange attack = selectionAttackRange();
         double itemRange = attack == null ? 0 : Math.sqrt(3) * nativeItemRayScale(attack);
@@ -338,8 +368,16 @@ public final class ClientVisibility {
                 eyes(positionError, List.of(target.copy().expand(margin)), null, Math.max(defaultRange, itemRange))) {
             if (selectable(eye, target, pickRadius, defaultRange)) return false;
             if (attack != null && selectable(eye, target, attack.hitboxMargin(), itemRange)) return false;
+            if (inRange != null
+                    && (inRange(eye, target, pickRadius, defaultRange)
+                            || attack != null && inRange(eye, target, attack.hitboxMargin(), itemRange)))
+                inRange[0] = true;
         }
         return true;
+    }
+
+    private static boolean inRange(Vec3 eye, SimpleCollisionBox target, double margin, double range) {
+        return range > 0 && withinRange(eye, target.copy().expand(margin), range);
     }
 
     private boolean selectable(Vec3 eye, SimpleCollisionBox target, double margin, double range) {
@@ -599,7 +637,7 @@ public final class ClientVisibility {
         int maxChunkZ = (int) Math.floor(Math.max(eye.z, Math.min(target.maxZ, eye.z + range))) >> 4;
         // Iterate received chunks, so plugin-authored large velocities or entity
         // boxes cannot turn this into a scan through millions of unloaded cells.
-        for (long key : player.compensatedWorld.chunks.keySet()) {
+        for (long key : player.compensatedWorld.chunkPositions()) {
             int chunkX = (int) (key >> 32), chunkZ = (int) key;
             if (chunkX < minChunkX || chunkX > maxChunkX || chunkZ < minChunkZ || chunkZ > maxChunkZ) continue;
             SimpleCollisionBox query =

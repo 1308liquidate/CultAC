@@ -271,15 +271,12 @@ public class BasePacketWorldReader {
         if (nearPlayer) {
             int transaction = player.appendFlushProofTransaction(event);
             if (transaction > 0) {
-                multiBlockChange.runUpdates((x, y, z, state) ->
-                        player.compensatedWorld.queueServerBlockUpdate(x, y, z, state, transaction));
+                player.compensatedWorld.queueServerBlockUpdates(multiBlockChange, transaction);
                 return;
             }
         }
 
-        int transaction = player.lastTransactionSent.get();
-        multiBlockChange.runUpdates(
-                (x, y, z, state) -> player.compensatedWorld.queueServerBlockUpdate(x, y, z, state, transaction));
+        player.compensatedWorld.queueServerBlockUpdates(multiBlockChange, player.lastTransactionSent.get());
     }
 
     private boolean isNearPlayer(CultPlayer player, BlockPos pos, int range) {

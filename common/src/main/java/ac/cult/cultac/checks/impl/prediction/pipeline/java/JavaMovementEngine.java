@@ -17,10 +17,13 @@ import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
+import ac.cult.cultac.utils.data.MainSupportingBlockData;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.GeyserVelocity;
 import ac.cult.cultac.utils.nmsutil.NextTickVelocityDeriver;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -101,7 +104,8 @@ public final class JavaMovementEngine implements MovementEngine {
                                 context.getMaxHeight(),
                                 SimpleCollisionBox.AxisEpsilon.JAVA),
                 JavaFallDistance.beforeMove(player, context, initialStartingVelocity),
-                !canStep);
+                !canStep,
+                context.getHorizontalInputRadius(player, initialStartingVelocity));
     }
 
     @Override
@@ -126,6 +130,8 @@ public final class JavaMovementEngine implements MovementEngine {
             PredictionResult lastPrediction,
             Vec3 acceptedDiff,
             NextTickVelocityDeriver.Scratch scratch) {
+        if (result.getSimulationContext().getVehicle() != null)
+            settleRiddenSupport(player, result, JavaFallDistance.movement(result, acceptedDiff));
         if (contextUsesExactEffects(result.getSimulationContext())) {
             var moved = JavaFallDistance.afterCollision(player, result, acceptedDiff);
             result.setJavaCommittedMove(moved);
@@ -134,17 +140,18 @@ public final class JavaMovementEngine implements MovementEngine {
             JavaInsideBlockEffects.Scan scan = JavaInsideBlockEffects.scan(player, result, moved.movement());
             Vec3 end = result.getSimulationContext().getStart().add(moved.movement());
             var states = new ArrayList<JavaPredictionCarry.State>(velocities.size());
-            var nextVelocities = new ArrayList<Vec3>(velocities.size());
+            var nextVelocities = new LinkedHashSet<Vec3>(velocities.size() * 2);
             for (Vec3 velocity : velocities) {
+                Vec3 stepped = JavaInsideBlockEffects.stepOn(player, result, moved, velocity);
                 var effects = JavaInsideBlockEffects.resolve(
-                        player, result, scan, moved.fallDistance(), velocity, moved.landed());
+                        player, result, scan, moved.fallDistance(), stepped, moved.landed());
                 effects = afterActorTick(player, result.getSimulationContext(), moved.movement(), effects);
                 effects = GeyserVelocity.applyToState(player, result, end, effects);
                 var state =
                         new JavaPredictionCarry.State(effects.velocity(), effects.fallDistance(), effects.stuckSpeed());
                 if (!states.contains(state)) {
                     states.add(state);
-                    if (!nextVelocities.contains(state.velocity())) nextVelocities.add(state.velocity());
+                    nextVelocities.add(state.velocity());
                 }
             }
             var stateList = List.copyOf(states);
@@ -167,12 +174,31 @@ public final class JavaMovementEngine implements MovementEngine {
                             ? moved.fallDistance()
                             : stateList.getFirst().fallDistance(),
                     stateList);
-            return new PredictionCommit(carry, Set.of(nextVelocities.toArray(Vec3[]::new)));
+            return new PredictionCommit(carry, nextVelocities);
         }
         return new PredictionCommit(
                 JavaFallDistance.commit(player, result, acceptedDiff),
                 NextTickVelocityDeriver.findVelocitiesForNextTick(
                         player, result, lastPrediction, acceptedDiff, scratch));
+    }
+
+    /**
+     * Entity#move's setOnGroundWithMovement on the root vehicle: checkSupportingBlock runs on the move's own
+     * verticalCollisionBelow, set when collision changes a downward move's y (a landing or a step up), and
+     * getBlockSpeedFactor, the effect block and the next travel's friction read the supporting block it stores. The
+     * world data's support, built before the move, holds the vehicle's starting ground.
+     */
+    private static void settleRiddenSupport(CultPlayer player, PredictionResult result, Vec3 movement) {
+        SimulationContext context = result.getSimulationContext();
+        double requestedY = result.getInitialStartingVel().y * context.getLastStuckSpeed().y;
+        boolean collidedBelow = requestedY < 0.0 && !JavaFallDistance.sameMoveY(movement.y, requestedY);
+        MainSupportingBlockData support = player.checkManager
+                .getSimulationProcessor()
+                .mainSupportingBlockAfter(
+                        context.getToMaxPose(), context.getEnd().subtract(context.getStart()), collidedBelow);
+        WorldData world = context.getWorldData();
+        world.setMainSupportingBlockPos(support);
+        world.setOnBlock(BlockProperties.getOnPos(player, support, context.getEnd()));
     }
 
     /**

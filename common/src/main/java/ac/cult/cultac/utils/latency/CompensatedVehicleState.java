@@ -240,6 +240,20 @@ public final class CompensatedVehicleState implements Debuggable {
         vehicle.onGround = onGround;
     }
 
+    /** {@link #applyVehiclePacketPosition} for a LocalPlayer#tick move of a root the client controls. */
+    public void applyControlledVehicleMove(
+            PacketEntity vehicle, Vec3 to, boolean onGround, float physicalYaw, float physicalPitch) {
+        if (vehicle == null) {
+            return;
+        }
+
+        vehicle.moveLocallyControlledRoot(
+                GetBoundingBox.getPacketEntityBoundingBox(player, to.x, to.y, to.z, vehicle),
+                physicalYaw,
+                physicalPitch);
+        vehicle.onGround = onGround;
+    }
+
     public void setServerVehicle(int vehicleId, int[] passengers, int transaction) {
         PacketEntity vehicle = entities.getEntity(vehicleId);
         if (serverPlayerVehicle == null || serverPlayerVehicle != vehicleId) {
@@ -287,6 +301,17 @@ public final class CompensatedVehicleState implements Debuggable {
     public void markItemControlledVehicleControlSwitch() {
         PacketEntity vehicle = possibleItemControlledVehicle();
         if (vehicle != null && hasSaddle(vehicle)) {
+            markVehicleSwitchBufferWindow(vehicle);
+        }
+    }
+
+    /**
+     * Call after the saddle or harness of {@code vehicle} changes, with whether the local player controlled it before.
+     * The vehicle's getControllingPassenger reads that equipment, so the change moves control at the client's next
+     * tick, as a mount does.
+     */
+    public void markSaddleControlSwitch(PacketEntity vehicle, boolean controlledBefore) {
+        if (canClientAuthoritativelyMoveVisibleRoot(vehicle) != controlledBefore) {
             markVehicleSwitchBufferWindow(vehicle);
         }
     }
@@ -438,6 +463,19 @@ public final class CompensatedVehicleState implements Debuggable {
                                 .getPath());
     }
 
+    /**
+     * Whether the client must send ServerboundMoveVehiclePacket each tick. LocalPlayer#sendChanges sends it when the
+     * root vehicle is Entity#isLocalInstanceAuthoritative, which needs a controlling passenger that is the local
+     * player; otherwise the passenger only sends its Rot. A pig or strider is controlled only while its rider holds the
+     * stick, which the client chooses, so neither is ever required to.
+     */
+    public boolean mustEchoMoveVehicle(@Nullable PacketEntity root) {
+        return root != null
+                && passengerIndex(root) == 0
+                && !isItemControlledVehicleType(root)
+                && canLocalClientAuthoritativelyMove(root);
+    }
+
     private boolean canPossiblySwitchToItemControlThisClientTick(@Nullable PacketEntity vehicle) {
         if (vehicle == null || passengerIndex(vehicle) != 0 || !hasSaddle(vehicle)) {
             return false;
@@ -559,7 +597,12 @@ public final class CompensatedVehicleState implements Debuggable {
         for (PacketEntity passenger : List.copyOf(vehicle.passengers)) passenger.eject();
         for (int passengerId : passengerIds) {
             PacketEntity passenger = entities.getEntity(passengerId);
-            if (passenger != null && passenger != vehicle) passenger.mount(vehicle);
+            if (passenger == null || passenger == vehicle) continue;
+            // Entity#startRiding refuses a vehicle the passenger already rides or one that rides the passenger.
+            if (passenger.getRiding() == vehicle || entities.ridesIndirectly(vehicle, passenger)) continue;
+            passenger.mount(vehicle);
+            // The seat is placed before the client's next ride tick confirms it.
+            passenger.markPositionInexact();
         }
         entities.updatePassengerPositions();
         seedStartingVelocityIfRootChanged(previousRoot);

@@ -3,6 +3,7 @@ package ac.cult.cultac.network;
 import static org.junit.jupiter.api.Assertions.*;
 
 import ac.cult.blocksim.data.Components;
+import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.blocksim.entity.EntityTypes;
@@ -13,6 +14,8 @@ import ac.cult.cultac.checks.impl.combat.EntityReach;
 import ac.cult.cultac.checks.impl.combat.PlayerHitboxes;
 import ac.cult.cultac.checks.impl.combat.PlayerReach;
 import ac.cult.cultac.checks.impl.combat.ReachCheck;
+import ac.cult.cultac.checks.impl.visibility.AttackMobVisibility;
+import ac.cult.cultac.checks.impl.visibility.AttackPlayerVisibility;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
 import ac.cult.cultac.network.codec.ModelRegistryNamesState;
@@ -20,6 +23,7 @@ import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.network.packet.EntityMetadata;
+import ac.cult.cultac.network.packet.EntityPositionPath;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.player.PlayerObserver;
@@ -30,7 +34,10 @@ import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityPositionSync;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundExplode;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveEntity;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveMinecart;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRespawn;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundTeleportEntity;
@@ -40,11 +47,13 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSetCarriedItem;
 import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
+import ac.cult.cultac.protocol.value.EntityDelta;
 import ac.cult.cultac.protocol.value.EntityPose;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.protocol.value.PlayerSpawnInfo;
+import ac.cult.cultac.protocol.value.PositionPath;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityPlayer;
@@ -56,6 +65,7 @@ import ac.cult.cultac.utils.nmsutil.WatchableIndexUtil;
 import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -63,7 +73,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.function.Consumer;
+import java.util.function.ObjIntConsumer;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -130,6 +142,149 @@ class ReachInteractionRangeTest {
             setup.hold("{\"max_reach\":4.5,\"hitbox_margin\":0.125}");
             assertEquals(List.of(), setup.attack(EntityTypeIds.PLAYER, .9, 4.0));
             assertEquals(List.of("PlayerHitboxes"), setup.attack(EntityTypeIds.PLAYER, 1.0, 4.0));
+        }
+    }
+
+    @Test
+    void anAttackBeyondReachInPlainSightIsPlayerReachsToFlag() throws Exception {
+        try (var setup = new Setup()) {
+            Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+            visibility.setEnabled(true);
+            var plain = setup.routedAttack(3.7);
+            assertEquals(List.of("PlayerReach"), plain.flagged());
+            assertTrue(plain.cancelled(), "PlayerReach cancels it");
+            assertEquals(0, visibility.violations);
+            setup.wall();
+            var walled = setup.routedAttack(3.7);
+            assertEquals(List.of("PlayerReach"), walled.flagged(), "Beyond every pick range reach owns it");
+            assertTrue(walled.cancelled(), "PlayerReach cancels it");
+            assertEquals(0, visibility.violations);
+            var near = setup.routedAttack(2.5);
+            assertEquals(List.of(), near.flagged(), "Visibility cancels an attack through blocks");
+            assertTrue(near.cancelled());
+            assertEquals(1, visibility.violations);
+        }
+    }
+
+    @Test
+    void anotherSelectionsItemRangeKeepsAnAttackThroughBlocksWithVisibility() throws Exception {
+        try (var setup = new Setup()) {
+            Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+            visibility.setEnabled(true);
+            setup.hold(0, "{\"min_reach\":2,\"max_reach\":4.5,\"hitbox_margin\":0.125}");
+            setup.hold(1, null);
+            setup.tickEnd();
+            setup.wall();
+            // Within the held weapon's range, beyond the hand's: the hotbar switch keeps both selections this tick.
+            setup.selectSlot(1);
+            var routed = setup.routedAttack(3.5);
+            assertTrue(routed.cancelled(), "The weapon's selection reaches it and every ray is blocked");
+            assertEquals(List.of(), routed.flagged());
+            assertEquals(1, visibility.violations);
+        }
+    }
+
+    @Test
+    void aJavaClientsBoatBeyondReachInPlainSightIsEntityReachsToFlag() throws Exception {
+        try (var setup = new Setup()) {
+            Check visibility = setup.player.checkManager.getCheck(AttackMobVisibility.class);
+            visibility.setEnabled(true);
+            // The boat's near face 3.7 blocks ahead at the eye's height.
+            var ahead = new Vec3(setup.player.x, setup.player.y + 1.62 - .3, setup.player.z + 3.7 + 1.375 / 2);
+            var java = setup.routedAttack(EntityTypeIds.OAK_BOAT, ahead);
+            assertEquals(List.of("EntityReach"), java.flagged());
+            assertTrue(java.cancelled(), "EntityReach cancels it");
+            assertEquals(0, visibility.violations);
+        }
+    }
+
+    @Test
+    void aDisabledReachLeavesTheDistanceToVisibility() throws Exception {
+        try (var setup = new Setup()) {
+            Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+            visibility.setEnabled(true);
+            setup.player.checkManager.getCheck(PlayerReach.class).setEnabled(false);
+            var routed = setup.routedAttack(3.7);
+            assertTrue(routed.cancelled());
+            assertEquals(1, visibility.violations);
+        }
+    }
+
+    @Test
+    void aLowTargetOnlyTheEyeInsideGrassReachesStaysWithVisibility() throws Exception {
+        for (String mode : new String[] {"plain", "grass", "grass+wall"}) {
+            try (var setup = new Setup()) {
+                Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+                visibility.setEnabled(true);
+                // LocalPlayer#pick's block clip from the crawling eye inside the grass outline hits the grass.
+                if (!mode.equals("plain")) setup.block(0, 64, -2, "short_grass");
+                if (mode.endsWith("wall")) for (int y = 58; y <= 68; y++) setup.block(0, y, 0, "stone");
+                setup.look(0, 0, 22, 0, 22);
+                // The near face 2.65 ahead and its top 0.5 below the feet: only the crawling eye is within range.
+                var routed = setup.routedAttack(EntityTypeIds.PLAYER, new Vec3(.5, 61.7, 1.45));
+                assertEquals(List.of(), routed.flagged(), mode);
+                if (mode.equals("plain")) {
+                    assertFalse(routed.cancelled(), "The crawling eye sees it");
+                    assertEquals(0, visibility.violations);
+                } else {
+                    assertTrue(routed.cancelled(), mode);
+                    assertEquals(1, visibility.violations, mode);
+                }
+            }
+        }
+    }
+
+    @Test
+    void anInexactTargetBehindAWallJustBeyondItsPhysicalBoxStaysCancelled() throws Exception {
+        for (boolean walled : new boolean[] {false, true}) {
+            for (double face : new double[] {3.01, 3.025, 3.04}) {
+                try (var setup = new Setup()) {
+                    Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+                    visibility.setEnabled(true);
+                    if (walled) for (int y = 60; y <= 68; y++) setup.block(0, y, 0, "stone");
+                    int id = setup.addTarget(EntityTypeIds.PLAYER, new Vec3(.5, 64, -1.5 + face + .3));
+                    setup.player.compensatedEntities.getEntity(id).markPositionInexact();
+                    var routed = setup.routedAttack(id);
+                    String at = "face=" + face + " wall=" + walled;
+                    if (face > 3.03) {
+                        // The reach box, 0.03125 larger, is beyond range from every eye.
+                        assertEquals(List.of("PlayerReach"), routed.flagged(), at);
+                        assertTrue(routed.cancelled(), at);
+                        assertEquals(0, visibility.violations, at);
+                    } else if (walled) {
+                        assertEquals(List.of(), routed.flagged(), at);
+                        assertTrue(routed.cancelled(), at);
+                        assertEquals(1, visibility.violations, at);
+                    } else {
+                        assertEquals(List.of(), routed.flagged(), at);
+                        assertFalse(routed.cancelled(), "In sight and within reach of the reach box: " + at);
+                        assertEquals(0, visibility.violations, at);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void anExemptPlayersAttackThroughAWallBeyondRangeStaysWithVisibility() throws Exception {
+        for (String permission : new String[] {
+            "cult.exempt.playerreach", "cult.nomodifypacket.playerreach", "cult.exempt.playerhitboxes"
+        }) {
+            try (var setup = new Setup()) {
+                Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
+                visibility.setEnabled(true);
+                PlatformPlayer platform = Mockito.mock(PlatformPlayer.class);
+                Mockito.when(platform.hasPermission(permission)).thenReturn(true);
+                setup.player.platformPlayer = platform;
+                setup.player.checkManager.getCheck(PlayerReach.class).updatePermissions();
+                setup.player.checkManager.getCheck(PlayerHitboxes.class).updatePermissions();
+                setup.wall();
+                // At 7 blocks the tick end reports a missed hitbox, which PlayerHitboxes flags.
+                var routed = setup.routedAttack(permission.endsWith("hitboxes") ? 7 : 3.7);
+                assertTrue(routed.cancelled(), permission);
+                assertEquals(List.of(), routed.flagged(), permission);
+                assertEquals(1, visibility.violations, permission);
+            }
         }
     }
 
@@ -728,6 +883,444 @@ class ReachInteractionRangeTest {
         }
     }
 
+    // A Java client holds a target moved only by proven movements exactly where the server tracks it.
+    @Test
+    void aTargetMovedOnlyByBundledMovementsIsJudgedWithoutAMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertFalse(setup.attack(2.99));
+            assertTrue(setup.attack(3.01));
+            assertEquals(List.of(), setup.attackAfter(2.99, entity -> setup.moveAwayAndBack(entity, 4, true)));
+            assertEquals(
+                    List.of("EntityReach"), setup.attackAfter(3.01, entity -> setup.moveAwayAndBack(entity, 4, true)));
+        }
+    }
+
+    // The client may have received an unbundled movement before any tick between its proofs.
+    @Test
+    void aTargetMovedByAnUnbundledMovementKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackAfter(3.01, entity -> setup.moveAwayAndBack(entity, 2, false)));
+            assertEquals(
+                    List.of("EntityReach"), setup.attackAfter(3.10, entity -> setup.moveAwayAndBack(entity, 2, false)));
+        }
+    }
+
+    // A folded queue samples the client's interpolation only approximately.
+    @Test
+    void aTargetWhoseQueueFoldedKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackAfter(3.01, entity -> setup.moveAwayAndBack(entity, 200, true)));
+            assertEquals(
+                    List.of("EntityReach"),
+                    setup.attackAfter(3.10, entity -> setup.moveAwayAndBack(entity, 200, true)));
+        }
+    }
+
+    // A snap assigns a position without proving that every feasible client took it.
+    @Test
+    void aSnapOntoAFarPositionSyncKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackAfter(3.01, entity -> snapAwayAndBack(setup, entity)));
+            assertEquals(List.of("EntityReach"), setup.attackAfter(3.10, entity -> snapAwayAndBack(setup, entity)));
+        }
+    }
+
+    private static void snapAwayAndBack(Setup setup, PacketEntity entity) {
+        setup.moveAwayAndBack(entity, 2, false);
+        Vec3 at = entity.newPacketLocation.targetPosition();
+        setup.positionSync(entity.getEntityId(), at.add(100, 0, 0));
+        setup.positionSync(entity.getEntityId(), at);
+        setup.moveAwayAndBack(entity, 2, true);
+    }
+
+    // The client sets a far teleport's position at once, where the model interpolates toward it.
+    @Test
+    void aTargetTeleportedAwayAndBackKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.bind();
+            int id = 101;
+            double z = 3.01 - 1.2;
+            setup.player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, z), 0, 0, 0);
+            setup.teleport(id, new Vec3(.5, 64, z + 100));
+            setup.teleport(id, new Vec3(.5, 64, z - .02));
+            assertEquals(List.of(), setup.attackEntity(id, EntityTypeIds.ZOMBIE, () -> {}));
+        }
+    }
+
+    private static final List<ProtocolVersion> CODEC_BASE_VERSIONS =
+            List.of(ProtocolVersion.V26_3, ProtocolVersion.V1_21_4);
+
+    // ClientPacketListener#handleTeleportEntity places the entity and keeps the base relative moves decode from.
+    @Test
+    void aRelativeMoveAfterATeleportDecodesFromTheBaseTheTeleportKept() throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (ProtocolVersion version : CODEC_BASE_VERSIONS) {
+            for (boolean bundled : new boolean[] {true, false}) {
+                try (var setup = new Setup(version)) {
+                    int id = setup.spawn(new Vec3(.5, 64, 1));
+                    setup.inBundles(bundled, () -> {
+                        setup.teleport(id, new Vec3(10.5, 64, 1));
+                        setup.moveRelative(id, 0, 0, 1024);
+                    });
+                    PacketEntity entity = setup.player.compensatedEntities.getEntity(id);
+                    Vec3 target = entity.newPacketLocation.targetPosition();
+                    if (!target.equals(new Vec3(.5, 64, 1.25)))
+                        failures.add(version + " bundled=" + bundled + ": " + target);
+                }
+            }
+        }
+        assertEquals(List.of(), failures);
+    }
+
+    // The move lands a quarter block past the spawn the teleport left as the base, inside reach.
+    @Test
+    void aTargetMovedFromTheBaseATeleportKeptIsReachedWhereTheClientPutsIt() throws Exception {
+        assertEquals(
+                List.of(),
+                teleportThenMoveFlags(new Vec3(.5, 64, 1.3), (setup, id) -> {}, new Vec3(.5, 64, 11.3), List.of()));
+    }
+
+    // The move lands a quarter block past the spawn, half a block beyond reach, though the teleport placed it in reach.
+    @Test
+    void aTargetMovedFromTheBaseATeleportKeptFlagsWhereTheTeleportPlacedIt() throws Exception {
+        assertEquals(
+                List.of(),
+                teleportThenMoveFlags(
+                        new Vec3(.5, 64, 2.05), (setup, id) -> {}, new Vec3(.5, 64, .8), List.of("EntityReach")));
+    }
+
+    // ClientPacketListener#handleEntityPositionSync sets the base that later teleports keep.
+    @Test
+    void aPositionSyncAfterATeleportResetsTheBase() throws Exception {
+        assertEquals(
+                List.of(),
+                teleportThenMoveFlags(
+                        new Vec3(.5, 64, 21.3),
+                        (setup, id) -> {
+                            setup.teleport(id, new Vec3(.5, 64, 31.3));
+                            setup.sendPositionSync(id, new Vec3(.5, 64, 1.3));
+                            setup.pongThrough(setup.player.lastTransactionSent.get() + 1);
+                        },
+                        new Vec3(.5, 64, 11.3),
+                        List.of()));
+    }
+
+    // ClientPacketListener#handleMoveEntity leaves the position and the base of a rotation-only move.
+    @Test
+    void aRotationAfterATeleportKeepsThePositionAndTheBase() throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (ProtocolVersion version : CODEC_BASE_VERSIONS) {
+            for (boolean bundled : new boolean[] {true, false}) {
+                try (var setup = new Setup(version)) {
+                    int id = setup.spawn(new Vec3(.5, 64, 1));
+                    setup.inBundles(bundled, () -> {
+                        setup.teleport(id, new Vec3(.5, 64, 10.5));
+                        setup.turnEntity(id, 90);
+                    });
+                    var tracked = setup.player.compensatedEntities.getTrackedEntity(id);
+                    List<Double> state = List.of(
+                            tracked.getX(),
+                            tracked.getY(),
+                            tracked.getZ(),
+                            tracked.getCodecBaseX(),
+                            tracked.getCodecBaseY(),
+                            tracked.getCodecBaseZ());
+                    if (!state.equals(List.of(.5, 64.0, 10.5, .5, 64.0, 1.0)))
+                        failures.add(version + " bundled=" + bundled + ": " + state);
+                }
+            }
+        }
+        assertEquals(List.of(), failures);
+    }
+
+    // ViaBackwards 26.3->26.2 sums a stepped move into the one delta handleMoveEntity decodes from the kept base.
+    @Test
+    void aViaBackwardsSteppedMoveAfterATeleportDecodesFromTheBaseTheTeleportKept() throws Exception {
+        var steps = new EntityDelta.Stepped(List.of(
+                new EntityDelta.Step((short) 0, (short) 0, (short) 512, 1),
+                new EntityDelta.Step((short) 0, (short) 0, (short) 512, 1)));
+        assertEquals(
+                List.of(),
+                trackedAfterAMove(
+                        () -> new Setup(ProtocolVersion.V26_3, ProtocolVersion.V26_2),
+                        "minecraft:zombie",
+                        (setup, id) -> setup.teleport(id, new Vec3(.5, 64, 10)),
+                        steps,
+                        new Vec3(.5, 64, 1.25)));
+    }
+
+    // ItemFrame#recalculateBoundingBox syncs the base on the Entity#setPos a hanging entity's teleport reaches.
+    @Test
+    void aRelativeMoveAfterAnItemFrameTeleportDecodesFromTheTeleport() throws Exception {
+        assertEquals(
+                List.of(),
+                trackedAfterAMove(
+                        () -> new Setup(ProtocolVersion.V26_3),
+                        "minecraft:item_frame",
+                        (setup, id) -> setup.teleport(id, new Vec3(.5, 64, 10)),
+                        new EntityDelta.Linear((short) 0, (short) 0, (short) 1024),
+                        new Vec3(.5, 64, 10.25)));
+    }
+
+    // ClientPacketListener#handleMinecartAlongTrack only queues lerp steps.
+    @Test
+    void aRelativeMoveAfterAMinecartStepDecodesFromTheBaseTheStepKept() throws Exception {
+        assertEquals(
+                List.of(),
+                trackedAfterAMove(
+                        () -> new Setup(ProtocolVersion.V26_3),
+                        "minecraft:minecart",
+                        (setup, id) -> setup.moveMinecart(id, new Vec3(.5, 64, 10)),
+                        new EntityDelta.Linear((short) 0, (short) 0, (short) 1024),
+                        new Vec3(.5, 64, 1.25)));
+    }
+
+    /**
+     * Spawns this type at (.5, 64, 1), places it, then moves it by this delta; returns each bundling whose tracked
+     * position differs from expected.
+     */
+    private static List<String> trackedAfterAMove(
+            Callable<Setup> setups, String type, ObjIntConsumer<Setup> place, EntityDelta move, Vec3 expected)
+            throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (boolean bundled : new boolean[] {true, false}) {
+            try (var setup = setups.call()) {
+                int id = setup.spawn(type, new Vec3(.5, 64, 1));
+                setup.inBundles(bundled, () -> {
+                    place.accept(setup, id);
+                    setup.moveRelative(id, move);
+                });
+                var tracked = setup.player.compensatedEntities.getTrackedEntity(id);
+                Vec3 position = new Vec3(tracked.getX(), tracked.getY(), tracked.getZ());
+                if (!position.equals(expected)) failures.add("bundled=" + bundled + ": " + position);
+            }
+        }
+        return failures;
+    }
+
+    /**
+     * Spawns a zombie, runs before, teleports it and moves it a quarter block along the look, then attacks it once its
+     * interpolation finished; returns each version and bundling whose flags differ from expected.
+     */
+    private static List<String> teleportThenMoveFlags(
+            Vec3 spawn, ObjIntConsumer<Setup> before, Vec3 teleport, List<String> expected) throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (ProtocolVersion version : CODEC_BASE_VERSIONS) {
+            for (boolean bundled : new boolean[] {true, false}) {
+                try (var setup = new Setup(version)) {
+                    int id = setup.spawn(spawn);
+                    setup.inBundles(bundled, () -> {
+                        before.accept(setup, id);
+                        setup.teleport(id, teleport);
+                        setup.moveRelative(id, 0, 0, 1024);
+                    });
+                    PacketEntity entity = setup.player.compensatedEntities.getEntity(id);
+                    for (int tick = 0; tick < 100 && entity.newPacketLocation.hasActiveInterpolationTarget(); tick++)
+                        setup.tickEnd();
+                    List<String> flags = setup.attackEntity(id, EntityTypeIds.ZOMBIE, () -> {});
+                    if (!flags.equals(expected)) failures.add(version + " bundled=" + bundled + ": " + flags);
+                }
+            }
+        }
+        return failures;
+    }
+
+    // A legacy client snaps onto a far position sync, where the model interpolates toward it.
+    @Test
+    void aLegacyTargetSyncedAwayAndBackKeepsTheMargin() throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (ProtocolVersion version : ProtocolVersion.values()) {
+            if (version == ProtocolVersion.V26_3) continue;
+            try (var setup = new Setup(version)) {
+                setup.bind();
+                int id = 101;
+                double z = 3.01 - 1.2;
+                setup.player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, z), 0, 0, 0);
+                setup.bundledPositionSync(id, new Vec3(.5, 64, z + 100));
+                setup.bundledPositionSync(id, new Vec3(.5, 64, z - .02));
+                List<String> flags = setup.attackEntity(id, EntityTypeIds.ZOMBIE, () -> {});
+                if (!flags.isEmpty()) failures.add(version + ":" + flags);
+            }
+        }
+        assertEquals(List.of(), failures);
+    }
+
+    // A client that received an earlier movement late can be within 64 blocks of a sync the model snaps to.
+    @Test
+    void aFarSyncDoesNotProveASnap() throws Exception {
+        try (var setup = new Setup()) {
+            int id = 101;
+            setup.player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity entity = setup.player.compensatedEntities.getEntity(id);
+            entity.onPositionPath(
+                    EntityPositionPath.linear(new Vec3(1.5, 64, 1)), true, null, null, setup.player, false);
+            entity.onMovement(setup.player, true);
+            setup.positionSync(id, new Vec3(-63.3, 64, 1));
+            assertFalse(entity.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // Answering the ping before an unbundled sync does not prove the client handled it.
+    @Test
+    void anUnbundledFarSyncAtItsFirstBoundaryKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            int id = 101;
+            setup.player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity entity = setup.player.compensatedEntities.getEntity(id);
+            setup.pongThrough(setup.sendUnbundledPositionSync(id, new Vec3(100.5, 64, 1)));
+            assertFalse(entity.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // A seat derived from a vehicle whose position is uncertain is uncertain too.
+    @Test
+    void aRiderSettledAtAnUncertainSeatKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.player.compensatedEntities.addEntity(101, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1), 0, 0, 0);
+            setup.player.compensatedEntities.addEntity(102, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity boat = setup.player.compensatedEntities.getEntity(101);
+            PacketEntity rider = setup.player.compensatedEntities.getEntity(102);
+            rider.mount(boat);
+            boat.onFirstTransaction(false, true, .56, 64, 1, setup.player);
+            assertFalse(boat.newPacketLocation.hasExactPosition());
+            setup.player.compensatedEntities.settleIfUntrackedRider(rider);
+            rider.eject();
+            assertFalse(rider.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // A passenger attached to a vehicle whose position is uncertain is uncertain too.
+    @Test
+    void aPassengerOfAnUncertainVehicleKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.player.compensatedEntities.addEntity(101, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1), 0, 0, 0);
+            setup.player.compensatedEntities.addEntity(102, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity boat = setup.player.compensatedEntities.getEntity(101);
+            PacketEntity passenger = setup.player.compensatedEntities.getEntity(102);
+            passenger.mount(boat);
+            setup.player.compensatedEntities.positionPassenger(boat, passenger);
+            assertTrue(passenger.newPacketLocation.hasExactPosition());
+            boat.onFirstTransaction(false, true, .56, 64, 1, setup.player);
+            setup.player.compensatedEntities.positionPassenger(boat, passenger);
+            passenger.eject();
+            assertFalse(passenger.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // A late receipt of the root's move leaves the client's rider 2.98 away at any chain depth.
+    @Test
+    void aSeatAtTheEndOfAVehicleChainKeepsTheMargin() throws Exception {
+        for (int depth : new int[] {1, 65, 66, 80}) {
+            try (var setup = new Setup()) {
+                var entities = setup.player.compensatedEntities;
+                entities.addEntity(200, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1.78), 0, 0, 0);
+                PacketEntity root = entities.getEntity(200);
+                PacketEntity rider = root;
+                for (int i = 1; i <= depth; i++) {
+                    entities.addEntity(200 + i, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1.78), 0, 0, 0);
+                    PacketEntity child = entities.getEntity(200 + i);
+                    child.mount(rider);
+                    rider = child;
+                }
+                setup.tickEnd();
+                root.onFirstTransaction(false, true, .5, 64, 1.84, setup.player);
+                entities.settleIfUntrackedRider(rider);
+                rider.eject();
+                Vec3 seat = rider.clientPhysicalPosition;
+                rider.onPositionPath(EntityPositionPath.linear(seat), true, 1F, 0F, setup.player, true);
+                setup.player.y = seat.y;
+                setup.player.lastY = seat.y;
+                assertEquals(
+                        List.of(),
+                        setup.attackEntity(rider.getEntityId(), EntityTypeIds.ZOMBIE, () -> {}),
+                        "depth " + depth);
+            }
+        }
+    }
+
+    // A rider whose vehicle chain has no root gets no seat and no proof.
+    @Test
+    void aRiderOfAVehicleCycleKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            var entities = setup.player.compensatedEntities;
+            entities.addEntity(101, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            entities.addEntity(102, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1), 0, 0, 0);
+            PacketEntity rider = entities.getEntity(101);
+            PacketEntity vehicle = entities.getEntity(102);
+            rider.mount(vehicle);
+            vehicle.mount(rider);
+            assertTrue(rider.newPacketLocation.hasExactPosition());
+            entities.settleIfUntrackedRider(rider);
+            assertFalse(rider.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // Mounting and dismounting before any ride tick leaves the client's rider at its spawn, 2.99 away.
+    @Test
+    void aRiderMountedAndDismountedBeforeItsRideTickKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.bind();
+            var entities = setup.player.compensatedEntities;
+            entities.addEntity(301, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1.81), 0, 0, 0);
+            entities.addEntity(302, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1.79), 0, 0, 0);
+            PacketEntity rider = entities.getEntity(302);
+            setup.setPassengers(301, List.of(302));
+            setup.setPassengers(301, List.of());
+            Vec3 seat = rider.clientPhysicalPosition;
+            setup.bundledPositionSync(302, seat);
+            setup.player.y = seat.y;
+            setup.player.lastY = seat.y;
+            assertEquals(List.of(), setup.attackEntity(302, EntityTypeIds.ZOMBIE, () -> {}));
+        }
+    }
+
+    // A rider seated before its ride tick is still at its spawn on the client, 2.99 away.
+    @Test
+    void aRiderMountedBeforeItsRideTickKeepsTheMargin() throws Exception {
+        try (var setup = new Setup()) {
+            setup.bind();
+            var entities = setup.player.compensatedEntities;
+            entities.addEntity(301, EntityTypeIds.OAK_BOAT, new Vec3(.5, 64, 1.81), 0, 0, 0);
+            entities.addEntity(302, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, 1.79), 0, 0, 0);
+            PacketEntity rider = entities.getEntity(302);
+            setup.setPassengers(301, List.of(302));
+            assertFalse(rider.newPacketLocation.hasExactPosition());
+        }
+    }
+
+    // ServerGamePacketListenerImpl#handleAttack accepts attacks up to 3 past entity_interaction_range.
+    @Test
+    void boatsAreBoundedByTheEntityInteractionRange() throws Exception {
+        try (var setup = new Setup()) {
+            for (String key : List.of("oak_boat", "oak_chest_boat", "bamboo_raft", "bamboo_chest_raft")) {
+                int type = EntityTypes.defaults().byKey(key).id();
+                assertEquals(List.of(), setup.attackBoat(type, 2.9, 0), key);
+                assertEquals(List.of("EntityReach"), setup.attackBoat(type, 3.1, 0), key);
+                assertEquals(List.of("EntityReach"), setup.attackBoat(type, 5.5, 0), key);
+            }
+        }
+    }
+
+    // AbstractBoat interpolates linearly to the last position the client may have received.
+    @Test
+    void aMovingBoatIsJudgedWhereverItsInterpolationMayHaveIt() throws Exception {
+        try (var setup = new Setup()) {
+            assertEquals(List.of(), setup.attackBoat(EntityTypeIds.OAK_BOAT, 3.5, -1));
+            assertEquals(List.of(), setup.attackBoat(EntityTypeIds.OAK_BOAT, 2.9, 1));
+            assertEquals(List.of("EntityReach"), setup.attackBoat(EntityTypeIds.OAK_BOAT, 3.1, 1));
+        }
+    }
+
+    @Test
+    void aRiderAttackingItsOwnBoatIsInRange() throws Exception {
+        try (var setup = new Setup()) {
+            setup.board(0);
+            setup.rotate(0, 90);
+            setup.tickEnd();
+            assertEquals(List.of(), setup.attackEntity(Setup.BOAT, EntityTypeIds.OAK_BOAT, () -> setup.rotate(0, 90)));
+        }
+    }
+
     private static final class Setup implements AutoCloseable {
         final RecordConsumerServices services = new RecordConsumerServices();
         final RecordReceiveFixture fixture;
@@ -738,7 +1331,24 @@ class ReachInteractionRangeTest {
         int nextEntity = 100;
 
         Setup() throws Exception {
-            fixture = new RecordReceiveFixture(ProtocolVersion.V26_3, false);
+            this(ProtocolVersion.V26_3, false);
+        }
+
+        // A client that joined with this version, not one Via translates from 26.3.
+        Setup(ProtocolVersion version) throws Exception {
+            this(version, true);
+        }
+
+        // A client of this version that Via translates the server's packets for.
+        Setup(ProtocolVersion server, ProtocolVersion client) throws Exception {
+            this(server, false);
+            Mockito.when(fixture.connection.platform().getClientProtocol()).thenReturn(client);
+        }
+
+        private Setup(ProtocolVersion version, boolean originalClient) throws Exception {
+            fixture = new RecordReceiveFixture(version, false);
+            if (originalClient)
+                Mockito.when(fixture.connection.platform().getClientProtocol()).thenReturn(version);
             services.useNetwork(fixture.manager);
             CultAPI.INSTANCE.getPlayerDataManager().addUser(fixture.user);
             player = fixture.user.getCultPlayer();
@@ -811,6 +1421,18 @@ class ReachInteractionRangeTest {
                             fixture.user, ConnectionPhase.PLAY, ServerboundPackets.MOVE_PLAYER, packet),
                     player,
                     packet);
+        }
+
+        // Stone from the feet to above the eye, 1.5 blocks down the look.
+        void wall() {
+            block(0, 64, 0, "stone");
+            block(0, 65, 0, "stone");
+        }
+
+        void block(int x, int y, int z, String block) {
+            int state =
+                    DataTables.defaults().registry().block("minecraft:" + block).defaultState();
+            player.compensatedWorld.applyBlockChangeRawDANGER(x, y, z, state);
         }
 
         void tickEnd() {
@@ -1415,6 +2037,13 @@ class ReachInteractionRangeTest {
                     .orElseThrow();
         }
 
+        // One client tick attacking a boat of this type straight ahead at the eye's height whose near face is this far
+        // from the eye, its relative move this much further ahead sent but not yet proven.
+        List<String> attackBoat(int type, double distance, double moved) {
+            Vec3 position = new Vec3(player.x, player.y + 1.62 - .3, player.z + distance + 1.375 / 2);
+            return attackAt(type, position, new Vec3(0, 0, moved), () -> {}, () -> rotate(0, 0));
+        }
+
         // One client tick attacking a player whose hitbox face is this far along a look of this yaw from the seat.
         List<String> attackAlong(float lookYaw, double distance, float yaw) {
             return attackAlong(lookYaw, distance, () -> rotate(yaw));
@@ -1518,6 +2147,43 @@ class ReachInteractionRangeTest {
             return !attack(EntityTypeIds.PLAYER, .5, distance).isEmpty();
         }
 
+        record Routed(boolean cancelled, List<String> flagged) {}
+
+        // Attacks a player head-on through the early handlers first, as PacketDispatcher routes it; a cancel ends it.
+        Routed routedAttack(double distance) {
+            return routedAttack(EntityTypeIds.PLAYER, new Vec3(.5, 64, distance - 1.2));
+        }
+
+        Routed routedAttack(int type, Vec3 position) {
+            return routedAttack(addTarget(type, position));
+        }
+
+        int addTarget(int type, Vec3 position) {
+            int id = nextEntity++;
+            player.compensatedEntities.addEntity(id, type, position, 0, 0, 0);
+            return id;
+        }
+
+        Routed routedAttack(int id) {
+            var packet = new ServerboundInteract(id, InteractAction.ATTACK, Hand.MAIN_HAND, Optional.empty(), false);
+            var event =
+                    new PacketReceiveEvent<>(fixture.user, ConnectionPhase.PLAY, ServerboundPackets.INTERACT, packet);
+            double[] before =
+                    checks.stream().mapToDouble(check -> check.violations).toArray();
+            player.checkManager.dispatchEarlyReceive(event);
+            if (!event.isCancelled()) player.checkManager.dispatchReceiveHandlers(event);
+            for (Check check : checks) {
+                if (check instanceof ReachCheck reach) reach.onPlayerTickEnd(null);
+            }
+            player.checkManager.getListener(ClientVisibilityProcessor.class).onPlayerTickEnd(null);
+            List<String> flagged = new ArrayList<>();
+            for (int i = 0; i < checks.size(); i++) {
+                if (checks.get(i).violations > before[i])
+                    flagged.add(checks.get(i).getCheckName());
+            }
+            return new Routed(event.isCancelled(), flagged);
+        }
+
         // Attacks an entity at this x whose hitbox face is this far down the look; returns the checks that flagged.
         List<String> attack(int type, double x, double distance) {
             int id = nextEntity++;
@@ -1539,6 +2205,156 @@ class ReachInteractionRangeTest {
                     flagged.add(checks.get(i).getCheckName());
             }
             return flagged;
+        }
+
+        // Attacks a zombie whose hitbox face is this far down the look once this history of tracked movements, ending
+        // where it spawned, has finished interpolating; returns the checks that flagged.
+        List<String> attackAfter(double distance, Consumer<PacketEntity> history) {
+            int id = nextEntity++;
+            player.compensatedEntities.addEntity(id, EntityTypeIds.ZOMBIE, new Vec3(.5, 64, distance - 1.2), 0, 0, 0);
+            PacketEntity entity = player.compensatedEntities.getEntity(id);
+            history.accept(entity);
+            for (int tick = 0; tick < 1_000 && entity.newPacketLocation.hasActiveInterpolationTarget(); tick++)
+                tickEnd();
+            assertFalse(entity.newPacketLocation.hasActiveInterpolationTarget());
+            assertTrue(entity.newPacketLocation.usesSteppedInterpolation());
+            return attackEntity(id, EntityTypeIds.ZOMBIE, () -> {});
+        }
+
+        // This many movements half a block along +z and back, each proven by its bundle or by its second transaction.
+        void moveAwayAndBack(PacketEntity entity, int moves, boolean bundled) {
+            Vec3 at = entity.desyncClientPos;
+            for (int move = 1; move <= moves; move++) {
+                Vec3 to = move % 2 == 0 ? at : at.add(0, 0, .5);
+                entity.onPositionPath(EntityPositionPath.linear(to), true, null, null, player, bundled);
+                if (!bundled) entity.onSecondTransaction();
+            }
+        }
+
+        // A position sync outside any bundle, its first and second transactions answered.
+        void positionSync(int id, Vec3 to) {
+            pongThrough(sendUnbundledPositionSync(id, to) + 1);
+        }
+
+        // Sends a position sync outside any bundle; returns its first transaction, unanswered.
+        int sendUnbundledPositionSync(int id, Vec3 to) {
+            bind();
+            useBundleDelimiter(false);
+            try {
+                sendPositionSync(id, to);
+                return player.lastTransactionSent.get();
+            } finally {
+                useBundleDelimiter(true);
+            }
+        }
+
+        void setPassengers(int vehicle, List<Integer> passengers) {
+            var packet = new ClientboundSetPassengers(vehicle, passengers);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.SET_PASSENGERS, packet, false);
+            player.packetEntityReplication.onSetPassengers(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // A position sync in its own bundle, its proof answered.
+        void bundledPositionSync(int id, Vec3 to) {
+            sendPositionSync(id, to);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        private void sendPositionSync(int id, Vec3 to) {
+            var packet = new ClientboundEntityPositionSync(
+                    id, new PositionPath.Linear(new Vec3d(to.x, to.y, to.z)), 0, 0, false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_POSITION_SYNC, packet, false);
+            player.packetEntityReplication.onEntityPositionSync(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+        }
+
+        // An absolute entity teleport in its own bundle, its proof answered.
+        void teleport(int id, Vec3 to) {
+            var packet =
+                    new ClientboundTeleportEntity(id, new Vec3d(to.x, to.y, to.z), Vec3d.ZERO, 0, 0, Set.of(), false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.TELEPORT_ENTITY, packet, false);
+            player.packetEntityReplication.onTeleportEntity(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // A zombie spawned by add_entity, which gives the tracker its codec base, its proof answered.
+        int spawn(Vec3 at) {
+            return spawn("minecraft:zombie", at);
+        }
+
+        int spawn(String type, Vec3 at) {
+            bind();
+            int id = nextEntity++;
+            var packet = new ClientboundAddEntity(id, type, new Vec3d(at.x, at.y, at.z), 0, 0, 0);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ADD_ENTITY, packet, false);
+            player.packetEntityReplication.onAddEntity(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get());
+            assertNotNull(player.compensatedEntities.getEntity(id));
+            return id;
+        }
+
+        // A move_entity of these 1/4096 block deltas, its proof answered.
+        void moveRelative(int id, int xa, int ya, int za) {
+            moveRelative(id, new EntityDelta.Linear((short) xa, (short) ya, (short) za));
+        }
+
+        void moveRelative(int id, EntityDelta delta) {
+            var packet = new ClientboundMoveEntity(id, delta, 0, 0, false, true, false);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.MOVE_ENTITY, packet, false);
+            player.packetEntityReplication.onMoveEntity(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // A move_minecart_along_track ending at this position, its proof answered.
+        void moveMinecart(int id, Vec3 to) {
+            var step = new ClientboundMoveMinecart.Step(new Vec3d(to.x, to.y, to.z), new Vec3d(0, 0, 0), 0, 0, 1);
+            var packet = new ClientboundMoveMinecart(id, List.of(step));
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.MOVE_MINECART, packet, false);
+            player.packetEntityReplication.onMoveMinecart(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // A rotation-only move_entity, its proof answered.
+        void turnEntity(int id, float yaw) {
+            var packet = new ClientboundMoveEntity(
+                    id, new EntityDelta.Linear((short) 0, (short) 0, (short) 0), yaw, 0, false, false, true);
+            var event = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.MOVE_ENTITY, packet, false);
+            player.packetEntityReplication.onMoveEntity(event, player, packet);
+            event.tasksAfter().forEach(Runnable::run);
+            pongThrough(player.lastTransactionSent.get() + 1);
+        }
+
+        // Sends entity movements in their own bundles, or each between its two pings.
+        void inBundles(boolean bundled, Runnable sends) {
+            useBundleDelimiter(bundled);
+            try {
+                sends.run();
+            } finally {
+                useBundleDelimiter(true);
+            }
+        }
+
+        private void useBundleDelimiter(boolean use) {
+            try {
+                Field field = player.packetEntityReplication.getClass().getDeclaredField("useReachBundleDelimiter");
+                field.setAccessible(true);
+                field.setBoolean(player.packetEntityReplication, use);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException(e);
+            }
         }
 
         // The attack reached ReachCheck's measurement, so no exemption in ReachCheck#handleInteract dropped it.

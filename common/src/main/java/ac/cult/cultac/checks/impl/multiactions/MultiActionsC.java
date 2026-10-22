@@ -27,7 +27,7 @@ public class MultiActionsC extends Check implements CheckListener {
 
     @Contract(pure = true)
     public static boolean isVerboseSprinting(@NotNull CultPlayer player) {
-        if (!player.isSprinting) return false;
+        if (!player.isClientSprinting()) return false;
 
         PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
         if (last == null || last.getSimulationContext() == null) return true;

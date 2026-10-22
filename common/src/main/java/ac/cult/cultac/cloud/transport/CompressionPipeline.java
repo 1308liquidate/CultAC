@@ -9,6 +9,8 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -24,6 +26,9 @@ import java.util.function.Supplier;
  * <p>A socket's messages ({@link #stream}) are one zstd frame: each is written after the one submitted before it, one at
  * a time, by the socket's {@link IntakeWire.StreamWriter}, and one whose predecessor failed is not written at all. The
  * socket's writer is closed when the next socket opens and when the pipeline closes.
+ *
+ * <p>A message may be submitted in parts, all but the last leaving it open: each part is compressed as it comes, its
+ * records let go, and only its compressed bytes are held, off-heap, until the last part ends the message.
  */
 final class CompressionPipeline implements AutoCloseable {
     private final ExecutorService pool;
@@ -36,10 +41,13 @@ final class CompressionPipeline implements AutoCloseable {
     private final Supplier<IntakeWire.StreamWriter> streams;
     /** The socket's zstd frame; null before the first socket and once closed. */
     private IntakeWire.StreamWriter stream;
-    /** The message last submitted to the stream, which the next one is written after. */
+    /** The part last submitted to the stream, which the next one is written after. */
     private CompletableFuture<byte[]> streamTail;
+    /** What the open message holds in the queued count; null while no message is open. */
+    private AtomicLong open;
 
-    private record Pending(int bytes, CompletableFuture<byte[]> message) {}
+    /** A message ended; {@code counted} is what it holds in the queued count until it is written. */
+    private record Pending(AtomicLong counted, CompletableFuture<byte[]> message) {}
 
     /**
      * Writes on {@code pool}, which has {@code threads} threads and outlives the pipeline. {@code queuedBytes} is the
@@ -102,6 +110,7 @@ final class CompressionPipeline implements AutoCloseable {
         if (stream != null) stream.close();
         stream = null;
         streamTail = null;
+        open = null;
     }
 
     /** Whether the socket's messages are one zstd frame, so none may go missing. */
@@ -109,37 +118,60 @@ final class CompressionPipeline implements AutoCloseable {
         return stream != null;
     }
 
-    /** Starts writing {@code records}, {@code bytes} long in all, as one message. The list may be reused after. */
-    void submit(List<byte[]> records, int bytes) {
+    /**
+     * Starts writing {@code records}, {@code bytes} long in all, as the next part of the open message, which {@code end}
+     * ends. The list may be reused after. A part the pool refuses fails its message as a write that throws does.
+     */
+    void submit(List<byte[]> records, int bytes, boolean end) {
         List<byte[]> own = List.copyOf(records);
+        IntakeWire.StreamWriter writer = stream;
+        AtomicLong counted = open == null ? new AtomicLong() : open;
+        CompletableFuture<byte[]> after = streamTail == null ? CompletableFuture.completedFuture(null) : streamTail;
         writing.incrementAndGet();
         writingBytes.addAndGet(bytes);
-        IntakeWire.StreamWriter writer = stream;
-        CompletableFuture<byte[]> after = streamTail == null ? CompletableFuture.completedFuture(null) : streamTail;
-        CompletableFuture<byte[]> message = after.handleAsync(
-                (previous, failed) -> {
-                    if (failed == null) return written(() -> writer.write(own, bytes), bytes);
+        CompletableFuture<byte[]> part = after.<byte[]>handleAsync(
+                        (previous, failed) -> {
+                            if (failed != null) throw new CompletionException(failed);
+                            return written(writer, own, bytes, end, counted);
+                        },
+                        pool)
+                .whenComplete((message, failed) -> {
                     writing.decrementAndGet();
                     writingBytes.addAndGet(-bytes);
-                    throw new CompletionException(failed);
-                },
-                pool);
-        streamTail = message;
-        pending.add(new Pending(bytes, message));
+                });
+        counted.addAndGet(bytes);
+        open = counted;
+        streamTail = part;
+        if (!end) return;
+        pending.add(new Pending(counted, part));
+        open = null;
     }
 
-    /** A message written, as its own array: its bytes replace its records' in the queued count. */
-    private byte[] written(Supplier<ByteBuffer> write, int bytes) {
-        try {
-            ByteBuffer written = write.get();
-            byte[] out = new byte[written.remaining()];
-            written.get(out);
-            queuedBytes.addAndGet(out.length - bytes);
-            return out;
-        } finally {
-            writing.decrementAndGet();
-            writingBytes.addAndGet(-bytes);
+    /**
+     * A part written: the compressed bytes it adds to the message replace its records' in the queued count. The part
+     * that ends the message returns it as its own array; any other returns null.
+     */
+    private byte[] written(
+            IntakeWire.StreamWriter writer, List<byte[]> records, int bytes, boolean end, AtomicLong counted) {
+        int held = writer.held();
+        ByteBuffer written = writer.write(records, bytes, end);
+        if (written == null) {
+            long delta = writer.held() - held - bytes;
+            counted.addAndGet(delta);
+            queuedBytes.addAndGet(delta);
+            return null;
         }
+        byte[] out = new byte[written.remaining()];
+        written.get(out);
+        long delta = out.length - held - bytes;
+        counted.addAndGet(delta);
+        queuedBytes.addAndGet(delta);
+        return out;
+    }
+
+    /** Whether a message is open: parts of it were submitted and none ended it. */
+    boolean open() {
+        return open != null;
     }
 
     /**
@@ -147,19 +179,33 @@ final class CompressionPipeline implements AutoCloseable {
      * Interrupted, the message is given up and its bytes leave the count once its write ends.
      */
     byte[] take() throws InterruptedException, ExecutionException {
+        try {
+            return take(Long.MAX_VALUE);
+        } catch (TimeoutException unbounded) {
+            throw new AssertionError(unbounded);
+        }
+    }
+
+    /** As {@link #take}, the message given up as on an interrupt once {@code timeoutNanos} pass before it is written. */
+    byte[] take(long timeoutNanos) throws InterruptedException, ExecutionException, TimeoutException {
         Pending head = pending.poll();
         if (head == null) return null;
         try {
-            return head.message().get();
+            return head.message().get(timeoutNanos, TimeUnit.NANOSECONDS);
         } catch (ExecutionException failed) {
-            queuedBytes.addAndGet(-head.bytes());
+            queuedBytes.addAndGet(-head.counted().get());
             throw failed;
-        } catch (InterruptedException interrupted) {
+        } catch (InterruptedException | TimeoutException given) {
             head.message()
                     .whenComplete((message, failed) ->
-                            queuedBytes.addAndGet(failed == null ? -message.length : -head.bytes()));
-            throw interrupted;
+                            queuedBytes.addAndGet(failed == null ? -message.length : -head.counted().get()));
+            throw given;
         }
+    }
+
+    /** Whether nothing submitted is left: no message open and none pending. */
+    boolean idle() {
+        return open == null && pending.isEmpty();
     }
 
     /** A message from {@link #take} left on the socket or was given up. */
@@ -167,16 +213,24 @@ final class CompressionPipeline implements AutoCloseable {
         queuedBytes.addAndGet(-message.length);
     }
 
-    /** Drops every pending message, waiting out the writes already started so their bytes leave the count. */
+    /**
+     * Drops every pending message and the open one, waiting out the writes already started so their bytes leave the
+     * count. The stream cannot go on past a dropped message: the socket's writer must not write again.
+     */
     void drop() {
         Pending head;
         while ((head = pending.poll()) != null) {
             try {
                 queuedBytes.addAndGet(-head.message().join().length);
             } catch (RuntimeException failed) {
-                queuedBytes.addAndGet(-head.bytes());
+                queuedBytes.addAndGet(-head.counted().get());
             }
         }
+        AtomicLong counted = open;
+        if (counted == null) return;
+        open = null;
+        streamTail.handle((part, failed) -> null).join();
+        queuedBytes.addAndGet(-counted.get());
     }
 
     /** Drops what is pending and frees the socket's zstd context; the shared pool keeps running. */

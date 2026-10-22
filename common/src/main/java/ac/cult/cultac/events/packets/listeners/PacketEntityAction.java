@@ -29,6 +29,7 @@ public class PacketEntityAction {
         switch (packet.action()) {
             case START_SPRINTING:
                 player.isSprinting = true;
+                player.sprintClearedAsPassenger = false;
                 player.vehicleData.camelSprintingState = SprintingState.STARTED;
                 break;
             case STOP_SPRINTING:

@@ -25,10 +25,11 @@ public final class ClientItemUseState {
             int proof,
             float legalMultiplier,
             float requiredMultiplier,
+            float slowestMultiplier,
             boolean canSprint,
             boolean required,
             boolean definitelyUsing) {
-        public static final Snapshot NONE = new Snapshot(0, -1, -1, 1, 1, true, false, false);
+        public static final Snapshot NONE = new Snapshot(0, -1, -1, 1, 1, 1, true, false, false);
     }
 
     public record ActiveUse(Hand hand, String itemKey) {}
@@ -139,10 +140,13 @@ public final class ClientItemUseState {
                 obligation = new Use(obligation.hand(), held.copy(), nextRemaining(obligation.remaining()), held);
         }
         float legal = inactive ? 1 : 0;
+        // LocalPlayer#modifyInput slows by any use the client may hold, including one it may have refused.
+        float slowest = 1;
         boolean canSprint = inactive;
         for (Use use : candidates) {
             var effects = effects(use.stack(), version);
             legal = Math.max(legal, effects.speedMultiplier());
+            slowest = Math.min(slowest, effects.speedMultiplier());
             canSprint |= effects.canSprint();
         }
         float required =
@@ -153,6 +157,7 @@ public final class ClientItemUseState {
                 proof,
                 legal,
                 required,
+                Math.min(slowest, required),
                 canSprint,
                 obligation != null && required < 1,
                 !inactive && !candidates.isEmpty());

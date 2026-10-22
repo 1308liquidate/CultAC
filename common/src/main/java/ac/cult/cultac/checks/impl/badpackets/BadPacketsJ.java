@@ -3,6 +3,7 @@ package ac.cult.cultac.checks.impl.badpackets;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
 import ac.cult.cultac.checks.type.DecodedPacketReceiveListener;
+import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
@@ -60,11 +61,11 @@ public class BadPacketsJ extends Check implements DecodedPacketReceiveListener {
         }
 
         if (this.rotations > 0 && !player.packetStateData.lastPacketWasTeleport) {
-            onTickPacket(player);
+            onTickPacket(player.xRot, player.yRot);
         }
     }
 
-    // isTickPacket: tick end counts for 1.21.2+ clients when no movement arrived this client tick
+    // isTickPacket: tick end closes the client tick, also for a movement packet cancelled before this check saw it
     @CultPacketHandler("serverbound.client_tick_end")
     public void onClientTickEnd(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {
         if (!player.cameraEntity.isSelf()) {
@@ -72,13 +73,25 @@ public class BadPacketsJ extends Check implements DecodedPacketReceiveListener {
             return;
         }
 
-        if (this.rotations > 0 && !player.packetStateData.receivedMovementThisClientTick) {
-            onTickPacket(player);
+        if (this.rotations > 0) {
+            // The client sends no tick movement, so no rotation, until ClientPacketListener#hasClientLoaded
+            if (CheckManagerListener.localPlayerTicked(player)) {
+                // LocalPlayer#sendChanges sends Rot every riding tick, so a tick without movement ran sendPosition,
+                // which sends no rotation while the player's equals the last one it sent
+                if (player.packetStateData.receivedMovementThisClientTick) {
+                    onTickPacket(player.packetStateData.lastSentTickYaw, player.packetStateData.lastSentTickPitch);
+                } else {
+                    onTickPacket(
+                            player.packetStateData.lastSendPositionYaw, player.packetStateData.lastSendPositionPitch);
+                }
+            } else {
+                this.rotations = 0;
+            }
         }
     }
 
-    private void onTickPacket(CultPlayer player) {
-        if (this.yaw != player.xRot || this.pitch != player.yRot) {
+    private void onTickPacket(float tickYaw, float tickPitch) {
+        if (!Float.isNaN(tickYaw) && (this.yaw != tickYaw || this.pitch != tickPitch)) {
             while (this.rotations-- > 0) flag();
         }
         this.rotations = 0;

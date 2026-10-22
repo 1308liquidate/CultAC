@@ -4,6 +4,7 @@ import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.collisions.datatypes.CollisionBoxPool;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.math.CultMath;
@@ -30,6 +31,7 @@ public class CollisionModifier implements UncertaintyHandler {
     private final List<SimpleCollisionBox> probeUnknown = new ArrayList<>();
     private final SimpleCollisionBox probeBox = new SimpleCollisionBox();
     private final SimpleCollisionBox probeEntityBox = new SimpleCollisionBox();
+    private final SimpleCollisionBox probeBlockQuery = new SimpleCollisionBox();
     private final SimpleCollisionBox probeEntityScratch = new SimpleCollisionBox();
     private final AxisResult positiveResult = new AxisResult(0, false);
     private final AxisResult negativeResult = new AxisResult(0, false);
@@ -244,9 +246,13 @@ public class CollisionModifier implements UncertaintyHandler {
             ProbeDimensions dimensions,
             JavaCollisionState actor) {
         return probeCollisions(
-                player, context, minY, target, playerPos, attemptedMovementExtents, dimensions, actor, false);
+                player, context, minY, target, playerPos, attemptedMovementExtents, dimensions, actor, false, 0.0D);
     }
 
+    /**
+     * Probes the collisions around the attempted movement. {@code horizontalInputReach} is how far input the
+     * attempted extents leave out can carry the movement on X and Z.
+     */
     public CollideAxisData probeCollisions(
             CultPlayer player,
             SimulationContext context,
@@ -256,7 +262,42 @@ public class CollisionModifier implements UncertaintyHandler {
             SimpleCollisionBox attemptedMovementExtents,
             ProbeDimensions dimensions,
             JavaCollisionState actor,
-            boolean followCandidateVerticalMovement) {
+            boolean followCandidateVerticalMovement,
+            double horizontalInputReach) {
+        CollisionBoxPool pool = CollisionBoxPool.current();
+        int mark = pool.mark();
+        try {
+            return probeCollisions(
+                    player,
+                    context,
+                    minY,
+                    target,
+                    playerPos,
+                    attemptedMovementExtents,
+                    dimensions,
+                    actor,
+                    followCandidateVerticalMovement,
+                    horizontalInputReach,
+                    pool);
+        } finally {
+            probeCollisions.clear();
+            pool.release(mark);
+        }
+    }
+
+    /** Native colliders come from {@code pool}; none of them outlives this call. */
+    private CollideAxisData probeCollisions(
+            CultPlayer player,
+            SimulationContext context,
+            double minY,
+            Vec3 target,
+            Vec3 playerPos,
+            SimpleCollisionBox attemptedMovementExtents,
+            ProbeDimensions dimensions,
+            JavaCollisionState actor,
+            boolean followCandidateVerticalMovement,
+            double horizontalInputReach,
+            CollisionBoxPool pool) {
         // Start with player bounding box
         SimpleCollisionBox grabBoxesBB = context.getFromMaximumExtent();
 
@@ -275,10 +316,16 @@ public class CollisionModifier implements UncertaintyHandler {
             if (target.y > 0) grabBoxesBB.maxY += target.y;
         }
         grabBoxesBB.expand(maxEpsilon(dimensions.epsilon()));
+        // Entity#collide gathers block shapes through expandTowards(movement), and that movement carries the input.
+        SimpleCollisionBox blockQuery = horizontalInputReach > 0.0D
+                ? probeBlockQuery
+                        .set(grabBoxesBB)
+                        .expand(horizontalInputReach * stuckSpeed.x, 0.0D, horizontalInputReach * stuckSpeed.z)
+                : grabBoxesBB;
 
         List<SimpleCollisionBox> collisions = probeCollisions;
         collisions.clear();
-        Collisions.getCollisionBoxes(player, grabBoxesBB, collisions, false, playerPos.y, actor);
+        Collisions.getCollisionBoxes(player, blockQuery, collisions, false, playerPos.y, actor, pool);
 
         List<SimpleCollisionBox> found = probeUnknown;
         found.clear();
@@ -647,18 +694,18 @@ public class CollisionModifier implements UncertaintyHandler {
 
         // WHY CAN MOJANG NOT HANDLE THE SIMPLEST OF THINGS CORRECTLY
         // START HANDLING OF POTENTIALLY UNKNOWN CLIENT SIDED BLOCKS
-        float maximumWidth = context.getVehicle() == null ? dimensions.width() : context.getMaxWidth();
-        float maximumHeight = context.getVehicle() == null ? dimensions.maxHeight() : context.getMaxHeight();
-        SimpleCollisionBox biggestBoxPossible =
-                GetBoundingBox.getBoundingBoxFromPosAndSize(posX, posY, posZ, maximumWidth, maximumHeight);
-        biggestBoxPossible.expand(0.1); // For good measure.
-        for (SimpleCollisionBox box : unknown) {
-            if (box.isCollided(biggestBoxPossible)) {
-                return new AxisResult(0, true);
-            }
-        }
-        // We only care about finding the first collision
         if (!unknown.isEmpty()) {
+            float maximumWidth = context.getVehicle() == null ? dimensions.width() : context.getMaxWidth();
+            float maximumHeight = context.getVehicle() == null ? dimensions.maxHeight() : context.getMaxHeight();
+            SimpleCollisionBox biggestBoxPossible =
+                    GetBoundingBox.getBoundingBoxFromPosAndSize(posX, posY, posZ, maximumWidth, maximumHeight);
+            biggestBoxPossible.expand(0.1); // For good measure.
+            for (SimpleCollisionBox box : unknown) {
+                if (box.isCollided(biggestBoxPossible)) {
+                    return new AxisResult(0, true);
+                }
+            }
+            // We only care about finding the first collision
             collisions = new ArrayList<>(collisions);
             collisions.addAll(unknown);
         }

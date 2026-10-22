@@ -76,13 +76,12 @@ public final class TravelVelocityTransformer {
             }
         }
 
-        if (result.getSimulationContext().getVehicle() == null && player.isFlying) {
-            // Player#travel replaces the travelled Y with the Y deltaMovement had before LivingEntity#travel, times 0.6.
-            double carriedY = preTravelVelocityY(result, playerVelocity) * 0.6;
-            for (int i = 0; i < frictions.size(); i++) {
-                Vec3 friction = frictions.get(i);
-                frictions.set(i, new Vec3(friction.x, carriedY, friction.z));
-            }
+        // Player#travel replaces the travelled Y with 0.6 of the Y it travelled with, without gravity.
+        if (result.getSimulationContext().getVehicle() == null
+                && player.isFlying
+                && result.getInitialStartingVel() != null) {
+            double flightY = result.getInitialStartingVel().y * 0.6;
+            frictions.replaceAll(velocity -> new Vec3(velocity.x, flightY, velocity.z));
         }
 
         // MCP-Reborn Strider#floatStrider only rewrites deltaMovement from the
@@ -108,12 +107,5 @@ public final class TravelVelocityTransformer {
         }
 
         return frictions;
-    }
-
-    private static double preTravelVelocityY(PredictionResult result, Vec3 fallback) {
-        if (result.getValidMovements() == null || result.getValidMovements().getClosestTrace() == null) {
-            return fallback.y;
-        }
-        return result.getValidMovements().getClosestTrace().preCollisionVelocity().y;
     }
 }

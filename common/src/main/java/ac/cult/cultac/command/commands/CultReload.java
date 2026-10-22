@@ -7,6 +7,7 @@ import ac.cult.cultac.platform.api.sender.Sender;
 import ac.cult.cultac.runtime.RuntimeEnvironment;
 import ac.cult.cultac.utils.anticheat.MessageUtil;
 import ac.grim.grimac.api.GrimAbstractAPI;
+import java.util.concurrent.CompletableFuture;
 import net.kyori.adventure.text.Component;
 import org.incendo.cloud.CommandManager;
 import org.incendo.cloud.context.CommandContext;
@@ -26,16 +27,17 @@ public class CultReload implements BuildableCommand {
 
         sender.sendMessage(MessageUtil.getParsedComponent(sender, "reloading", "%prefix% &7Reloading config..."));
 
+        reloadAsync().exceptionally(throwable -> false).thenAccept(bool -> {
+            Component message = bool
+                    ? MessageUtil.getParsedComponent(sender, "reloaded", "%prefix% &fConfig has been reloaded.")
+                    : MessageUtil.getParsedComponent(sender, "reload-failed", "%prefix% &cFailed to reload config.");
+            sender.sendMessage(message);
+        });
+    }
+
+    /** Re-reads the on-disk config into every live generation. */
+    static CompletableFuture<Boolean> reloadAsync() {
         var host = RuntimeEnvironment.host();
-        (host == null ? CultAPI.INSTANCE.getExternalAPI() : (GrimAbstractAPI) host.publicApi())
-                .reloadAsync()
-                .exceptionally(throwable -> false)
-                .thenAccept(bool -> {
-                    Component message = bool
-                            ? MessageUtil.getParsedComponent(sender, "reloaded", "%prefix% &fConfig has been reloaded.")
-                            : MessageUtil.getParsedComponent(
-                                    sender, "reload-failed", "%prefix% &cFailed to reload config.");
-                    sender.sendMessage(message);
-                });
+        return (host == null ? CultAPI.INSTANCE.getExternalAPI() : (GrimAbstractAPI) host.publicApi()).reloadAsync();
     }
 }

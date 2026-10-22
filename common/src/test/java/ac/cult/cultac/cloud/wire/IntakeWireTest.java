@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.cultac.cloud.intake.v3.Capture;
 import ac.cult.cultac.cloud.intake.v3.Condition;
+import ac.cult.cultac.cloud.intake.v3.DiagPart;
 import ac.cult.cultac.cloud.intake.v3.Edition;
 import ac.cult.cultac.cloud.intake.v3.Event;
 import ac.cult.cultac.cloud.intake.v3.Frame;
@@ -20,10 +21,15 @@ import ac.cult.cultac.cloud.intake.v3.IntakeMessage;
 import ac.cult.cultac.cloud.intake.v3.Join;
 import ac.cult.cultac.cloud.intake.v3.Meta;
 import ac.cult.cultac.cloud.intake.v3.Outcome;
+import ac.cult.cultac.cloud.intake.v3.PerfPart;
+import ac.cult.cultac.cloud.intake.v3.PortalRole;
 import ac.cult.cultac.cloud.intake.v3.Record;
 import ac.cult.cultac.cloud.intake.v3.Refused;
 import ac.cult.cultac.cloud.intake.v3.Replies;
 import ac.cult.cultac.cloud.intake.v3.Reply;
+import ac.cult.cultac.cloud.intake.v3.TeamRole;
+import ac.cult.cultac.cloud.intake.v3.TeamState;
+import ac.cult.cultac.cloud.intake.v3.TeamSweep;
 import ac.cult.cultac.cloud.intake.v3.Unstreamed;
 import ac.cult.cultac.cloud.intake.v3.Verdict;
 import ac.cult.cultac.cloud.intake.v3.World;
@@ -334,7 +340,7 @@ class IntakeWireTest {
         try (IntakeWire.StreamWriter writer = new IntakeWire.StreamWriter();
                 ZstdDecompressCtx reader = new ZstdDecompressCtx()) {
             for (int round = 0; round < 2; round++) {
-                byte[] compressed = bytes(writer.write(List.of(join, leave), records.length));
+                byte[] compressed = bytes(writer.write(List.of(join, leave), records.length, true));
                 assertEquals(IntakeWire.COMPRESSED, compressed[0]);
                 byte[] decompressed = decompress(reader, compressed);
                 assertArrayEquals(records, decompressed);
@@ -351,7 +357,7 @@ class IntakeWireTest {
         new Random(1).nextBytes(big);
         try (IntakeWire.StreamWriter writer = new IntakeWire.StreamWriter();
                 ZstdDecompressCtx reader = new ZstdDecompressCtx()) {
-            assertArrayEquals(big, decompress(reader, bytes(writer.write(List.of(big), big.length))));
+            assertArrayEquals(big, decompress(reader, bytes(writer.write(List.of(big), big.length, true))));
         }
     }
 
@@ -378,6 +384,75 @@ class IntakeWireTest {
         }
     }
 
+    private static final UUID TEAM_PLAYER = UUID.fromString("7445efd5-b580-47d0-b669-bf621fe82396");
+    private static final String TEAM_PLAYER_HEX = "74 45 ef d5 b5 80 47 d0 b6 69 bf 62 1f e8 23 96";
+
+    @Test
+    void teamRolesMatchTheGoldenBytes() throws InvalidProtocolBufferException {
+        byte[] golden = hex("0a 24 3a 22 0a 20 0a 10 " + TEAM_PLAYER_HEX + " 12 0a 44 69 73 72 65 67 61 72 64 31 18 03");
+
+        byte[] written = IntakeWire.team(
+                List.of(IntakeWire.teamRole(TEAM_PLAYER, "Disregard1", PortalRole.PORTAL_ROLE_MODERATOR, false)));
+
+        assertArrayEquals(golden, written);
+        TeamRole read = Intake.parseFrom(golden).getMessages(0).getTeam().getPlayers(0);
+        assertEquals(TEAM_PLAYER, IntakeWire.uuid(read.getPlayer()));
+        assertEquals("Disregard1", read.getName());
+        assertEquals(PortalRole.PORTAL_ROLE_MODERATOR, read.getRole());
+        assertFalse(read.getOffline());
+    }
+
+    @Test
+    void teamRepliesMatchTheGoldenBytes() {
+        byte[] enabled = hex("0a 04 4a 02 08 01");
+        byte[] disabled = hex("0a 02 4a 00");
+        byte[] sweep = hex("0a 14 52 12 0a 10 " + TEAM_PLAYER_HEX);
+
+        assertEquals(List.of(new IntakeWire.TeamStateReply(true)), IntakeWire.replies(enabled));
+        assertEquals(List.of(new IntakeWire.TeamStateReply(false)), IntakeWire.replies(disabled));
+        assertEquals(List.of(new IntakeWire.TeamSweepReply(List.of(TEAM_PLAYER))), IntakeWire.replies(sweep));
+        assertArrayEquals(
+                enabled,
+                Replies.newBuilder()
+                        .addReplies(Reply.newBuilder().setTeamState(TeamState.newBuilder().setEnabled(true)))
+                        .build()
+                        .toByteArray());
+        assertArrayEquals(
+                disabled,
+                Replies.newBuilder()
+                        .addReplies(Reply.newBuilder().setTeamState(TeamState.getDefaultInstance()))
+                        .build()
+                        .toByteArray());
+        assertArrayEquals(
+                sweep,
+                Replies.newBuilder()
+                        .addReplies(Reply.newBuilder()
+                                .setTeamSweep(TeamSweep.newBuilder()
+                                        .addPlayers(ByteString.copyFrom(IntakeWire.uuid(TEAM_PLAYER)))))
+                        .build()
+                        .toByteArray());
+    }
+
+    @Test
+    void teamSweepLeavesOutAPlayerOfTheWrongLength() {
+        byte[] sweep = Replies.newBuilder()
+                .addReplies(Reply.newBuilder()
+                        .setTeamSweep(TeamSweep.newBuilder()
+                                .addPlayers(ByteString.copyFrom(new byte[3]))
+                                .addPlayers(ByteString.copyFrom(IntakeWire.uuid(TEAM_PLAYER)))))
+                .build()
+                .toByteArray();
+
+        assertEquals(List.of(new IntakeWire.TeamSweepReply(List.of(TEAM_PLAYER))), IntakeWire.replies(sweep));
+    }
+
+    private static byte[] hex(String spaced) {
+        String[] parts = spaced.split(" ");
+        byte[] out = new byte[parts.length];
+        for (int i = 0; i < parts.length; i++) out[i] = (byte) Integer.parseInt(parts[i], 16);
+        return out;
+    }
+
     @Test
     void readsTheServicesReplies() {
         Replies replies = Replies.newBuilder()
@@ -399,8 +474,8 @@ class IntakeWireTest {
                 .build();
         ByteArrayOutputStream message = new ByteArrayOutputStream();
         message.writeBytes(replies.toByteArray());
-        // A reply of a kind this client does not know: Reply field 9, a string.
-        message.writeBytes(new byte[] {0x0A, 0x03, 0x4A, 0x01, 0x78});
+        // A reply of a kind this client does not know: Reply field 11, a string.
+        message.writeBytes(new byte[] {0x0A, 0x03, 0x5A, 0x01, 0x78});
 
         List<IntakeWire.Reply> read = IntakeWire.replies(message.toByteArray());
 
@@ -892,12 +967,37 @@ class IntakeWireTest {
     }
 
     @Test
-    void captureBytesCountsARecordsWholeField() {
+    void aFrameBuilderCountsARecordsWholeField() {
         IntakeWire.FrameBuilder builder = new IntakeWire.FrameBuilder();
         add(builder, IntakeWire.SERVERBOUND, 300, new byte[200]);
         int body = CodedOutputStream.computeTagSize(IntakeWire.SERVERBOUND) + 2 + 200 + 1 + 2;
         assertEquals(1 + 2 + body, builder.bytes());
-        assertEquals(builder.bytes(), IntakeWire.captureBytes(IntakeWire.SERVERBOUND, 300, 200, 0, 0, 0));
+    }
+
+    @Test
+    void joinLeaveAndTeamRecordsEndTheirMessage() {
+        List<TeamRole> roles = new ArrayList<>();
+        for (int i = 0; i < 100; i++)
+            roles.add(IntakeWire.teamRole(PLAYER, "staff" + i, PortalRole.PORTAL_ROLE_ADMIN, false));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.join(PLAYER, 773, "vanilla", -64, 384, null, "name", 0)));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.unstreamed(PLAYER, 819, "geyser", -64, 384, null, null)));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.leave(PLAYER)));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.team(roles)));
+        assertTrue(IntakeWire.endsMessage(IntakeWire.team(List.of())));
+
+        IntakeWire.FrameBuilder builder = new IntakeWire.FrameBuilder();
+        add(builder, IntakeWire.SERVERBOUND, 300, new byte[2000]);
+        assertFalse(IntakeWire.endsMessage(builder.build(PLAYER, 1)));
+        assertFalse(IntakeWire.endsMessage(Intake.newBuilder()
+                .addMessages(IntakeMessage.newBuilder().setDiag(DiagPart.getDefaultInstance()))
+                .build()
+                .toByteArray()));
+        assertFalse(IntakeWire.endsMessage(Intake.newBuilder()
+                .addMessages(IntakeMessage.newBuilder().setPerf(PerfPart.getDefaultInstance()))
+                .build()
+                .toByteArray()));
+        assertFalse(IntakeWire.endsMessage(new byte[0]));
+        assertFalse(IntakeWire.endsMessage(new byte[] {0x0A, (byte) 0x80}));
     }
 
     @Test

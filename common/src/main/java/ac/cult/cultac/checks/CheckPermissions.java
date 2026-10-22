@@ -88,6 +88,7 @@ public final class CheckPermissions {
             "fastbreak",
             "groundspoof",
             "happyghastoffset",
+            "inputkeys",
             "interactentityvisibility",
             "invalidbreak",
             "invalidplacea",

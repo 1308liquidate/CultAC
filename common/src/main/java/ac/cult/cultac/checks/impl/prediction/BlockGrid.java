@@ -168,9 +168,7 @@ public final class BlockGrid {
     }
 
     private static void pad(StringBuilder sb, int length, int width) {
-        for (int i = length; i < width; i++) {
-            sb.append(' ');
-        }
+        if (width > length) sb.repeat(' ', width - length);
     }
 
     private static int index(int x, int y, int z, int minX, int minY, int minZ, int xSize, int zSize) {

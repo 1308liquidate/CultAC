@@ -46,6 +46,7 @@ import ac.cult.cultac.utils.data.ClientAttackStrength;
 import ac.cult.cultac.utils.data.ClientCombatAttributes;
 import ac.cult.cultac.utils.data.ClientItemUseState;
 import ac.cult.cultac.utils.data.ClientSprintState;
+import ac.cult.cultac.utils.data.ClientSwimState;
 import ac.cult.cultac.utils.data.PacketStateData;
 import ac.cult.cultac.utils.data.VehicleData;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
@@ -58,7 +59,6 @@ import ac.cult.cultac.utils.latency.CompensatedInventory;
 import ac.cult.cultac.utils.latency.CompensatedWorld;
 import ac.cult.cultac.utils.latency.KeepAliveProcessor;
 import ac.cult.cultac.utils.latency.LatencyUtils;
-import ac.cult.cultac.utils.lists.EvictingQueue;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.TrigHandler;
 import ac.cult.cultac.utils.math.Vec3;
@@ -75,15 +75,15 @@ import ac.grim.grimac.api.handler.ResyncHandler;
 import com.viaversion.viaversion.api.Via;
 import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.protocol.packet.PacketTracker;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.UUID;
@@ -151,8 +151,11 @@ public class CultPlayer implements GrimUser {
     // Determining player ping
     // The difference between keepalive and transactions is that keepalive is async while transactions are sync
     private Queue<SentTransaction> transactionsSent = new ArrayDeque<>();
-    private final @NotNull Map<@NotNull Integer, @NotNull TrackedTransaction> transactionsPendingSend =
-            new HashMap<>(4);
+    /** The ids in {@link #transactionsSent}, which never holds one id twice. */
+    private final IntOpenHashSet transactionIdsSent = new IntOpenHashSet();
+
+    private final Int2ObjectOpenHashMap<@NotNull TrackedTransaction> transactionsPendingSend =
+            new Int2ObjectOpenHashMap<>(4);
     /** Ping ids a client cannot predict from the ones it has answered. */
     private final SecureRandom wireIds = wireIdSource();
 
@@ -244,7 +247,10 @@ public class CultPlayer implements GrimUser {
     public boolean isSneaking;
     // The client's last START/STOP_SPRINTING (LocalPlayer#wasSprinting)
     public boolean isSprinting;
+    // LocalPlayer#aiStep cleared the sprint flag of a passenger without a STOP_SPRINTING; the next START_SPRINTING ends it.
+    public boolean sprintClearedAsPassenger;
     public final ClientSprintState sprintState = new ClientSprintState();
+    public final ClientSwimState swimState = new ClientSwimState();
     public final ClientAttackStrength attackStrength = new ClientAttackStrength();
     public final ClientCombatAttributes combatAttributes = new ClientCombatAttributes();
     public final VisibilityDebug visibilityDebug = new VisibilityDebug(this);
@@ -252,7 +258,6 @@ public class CultPlayer implements GrimUser {
     public boolean canFly;
     public boolean canInstabuild;
     public boolean isInvulnerable;
-    public boolean isSwimming;
     public boolean isGliding;
     public boolean isRiptidePose = false;
     public @NotNull SimpleCollisionBox boundingBox;
@@ -300,7 +305,6 @@ public class CultPlayer implements GrimUser {
 
     public long lastRotated;
     public final @NotNull VehicleData vehicleData = new VehicleData();
-    public boolean wasEyeInWater;
     public boolean serverOpenedInventoryThisTick;
     // Whether this tick's movement intersected a nether portal block (see MultiActionsD)
     public boolean intersectedWithNetherPortal;
@@ -342,6 +346,10 @@ public class CultPlayer implements GrimUser {
     /** A login or respawn replaced the LocalPlayer, which has not ticked yet. */
     public void onLocalPlayerCreated() {
         packetStateData.localPlayerTickedSinceSpawn = false;
+        packetStateData.lastSentTickYaw = 0;
+        packetStateData.lastSentTickPitch = 0;
+        packetStateData.lastSendPositionYaw = 0;
+        packetStateData.lastSendPositionPitch = 0;
         headArcFrom = Float.NaN;
         unclampedHeadYaw = Float.NaN;
         boatYawBeforeTurn = Float.NaN;
@@ -367,12 +375,11 @@ public class CultPlayer implements GrimUser {
         if (boat == null || !boat.isBoat()) return;
         float boatYaw = boat.clientPhysicalYaw;
         boatYawBeforeTurn = boatYaw;
-        // AbstractBoat#deltaRotation only turns a boat its controlling passenger drives.
-        float turn = !boat.passengers.isEmpty() && boat.passengers.get(0) == self ? boatData.deltaRotation : 0;
+        float turn = boatTurn(boat);
         float yaw = before + turn;
-        float delta = CultMath.wrapDegrees(yaw - boatYaw);
-        float target = CultMath.clamp(delta, -105.0F, 105.0F);
-        if (target != delta && yaw + target - delta == xRot) unclampedHeadYaw = yaw;
+        if (Math.abs(CultMath.wrapDegrees(yaw - boatYaw)) > 105.0F && clampToBoat(yaw, boatYaw) == xRot) {
+            unclampedHeadYaw = yaw;
+        }
         if (Float.isNaN(boatYawBefore)) return;
         // The head lies more than 105 degrees to the sent yaw's side of the boat, and within 105 of the turned
         // reference, the boat yaw the mouse turn clamped against advanced by deltaRotation.
@@ -391,10 +398,47 @@ public class CultPlayer implements GrimUser {
         }
         if (far <= near) return;
         float edge = xRot + side * (far - 105.0F);
-        float edgeDelta = CultMath.wrapDegrees(edge - boatYaw);
-        if (edge + CultMath.clamp(edgeDelta, -105.0F, 105.0F) - edgeDelta != xRot) return;
+        if (clampToBoat(edge, boatYaw) != xRot) return;
         headArcFrom = xRot + (side > 0 ? near - 105.0F : 105.0F - far);
         headArcLength = far - near;
+    }
+
+    /**
+     * The yaw a client tick that began at {@code before} sends without a mouse turn: AbstractBoat#positionRider turns a
+     * rider by the deltaRotation of the boat it drives, and clampRotation holds the yaw within 105 degrees of the boat.
+     * Only valid once the tick's vehicle move is processed, which the client sends after the rider's Rot.
+     */
+    public float yawWithoutLook(float before) {
+        PacketEntity boat = compensatedEntities.getSelf().getRiding();
+        if (boat == null || !boat.isBoat()) return before;
+        return clampToBoat(before + boatTurn(boat), boat.clientPhysicalYaw);
+    }
+
+    /**
+     * Whether a boat the player drives reports the yaw AbstractBoat#controlBoat gives it: the last tick's yaw turned by
+     * deltaRotation. The client states that yaw in its vehicle move, so a yaw that differs says nothing about the turn
+     * it gave the rider.
+     */
+    public boolean boatYawFollowsTurn() {
+        PacketEntity boat = compensatedEntities.getSelf().getRiding();
+        if (boat == null || !boat.isBoat() || !drivesBoat(boat)) return true;
+        return boat.clientPhysicalYaw == boatYawBeforeTurn + boatData.deltaRotation;
+    }
+
+    // AbstractBoat#deltaRotation only turns a boat its controlling passenger drives.
+    private float boatTurn(PacketEntity boat) {
+        return drivesBoat(boat) ? boatData.deltaRotation : 0;
+    }
+
+    private boolean drivesBoat(PacketEntity boat) {
+        return !boat.passengers.isEmpty() && boat.passengers.get(0) == compensatedEntities.getSelf();
+    }
+
+    // AbstractBoat#clampRotation's yaw for a player passenger, in its float operations, which need not return an
+    // unclamped yaw unchanged.
+    private static float clampToBoat(float yaw, float boatYaw) {
+        float delta = CultMath.wrapDegrees(yaw - boatYaw);
+        return yaw + CultMath.clamp(delta, -105.0F, 105.0F) - delta;
     }
 
     public void onPacketCancel() {
@@ -565,6 +609,9 @@ public class CultPlayer implements GrimUser {
         }
 
         SentTransaction acknowledged = acknowledgeThrough(id);
+        if (!isBedrockMovement() && getSetbackTeleportUtil().hasWithheldJavaTeleport()) {
+            withheld("answered a ping sent after a teleport it did not answer");
+        }
 
         // ViaVersion rate-limits inbound packets; our own transactions don't count
         if (packetTracker != null) {
@@ -585,9 +632,9 @@ public class CultPlayer implements GrimUser {
             if (current == null) {
                 return null;
             }
+            transactionIdsSent.remove(current.id());
             lastTransactionReceived.set(current.transaction());
             rawTransactionPing = System.nanoTime() - current.sentAt();
-            transPings.add(rawTransactionPing);
             playerClockAtLeast = current.sentAt();
             if (usesModernJavaItemUse()) itemUseBurst.acknowledge(current.transaction());
             if (current instanceof BedrockTransaction bedrock) {
@@ -611,9 +658,6 @@ public class CultPlayer implements GrimUser {
         lastCheckedFlying = now;
         compensatedWorld.removeInvalidPistonLikeStuff(lastTransactionReceived.get());
     }
-
-    @Getter
-    private final @NotNull EvictingQueue<@NotNull Long> transPings = new EvictingQueue<>(60);
 
     public float getMaxUpStep() {
         PacketEntity riding = compensatedEntities.getSelf().getRiding();
@@ -905,8 +949,11 @@ public class CultPlayer implements GrimUser {
         } else {
             transactionsSent.add(new SentTransaction(transaction.transaction(), transaction.id(), System.nanoTime()));
         }
-        TransactionChannels.SEND.fire(
-                ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(this), transaction.id(), timestamp);
+        transactionIdsSent.add(transaction.id());
+        if (!TransactionChannels.SEND.isEmpty()) {
+            TransactionChannels.SEND.fire(
+                    ac.cult.cultac.runtime.RuntimeEnvironment.outwardUser(this), transaction.id(), timestamp);
+        }
         return transaction.transaction();
     }
 
@@ -937,8 +984,7 @@ public class CultPlayer implements GrimUser {
         boolean used;
         do {
             id = nextWireId(random);
-            used = false;
-            for (SentTransaction sent : transactionsSent) used |= sent.id() == id;
+            used = transactionIdsSent.contains(id);
             used |= transactionsPendingSend.containsKey(id);
             used |= foreignPings.contains(id);
         } while (used);
@@ -988,6 +1034,7 @@ public class CultPlayer implements GrimUser {
             if (index < 0) throw new IllegalStateException("Last written transaction is missing");
             pending.add(index + 1, transaction);
         }
+        transactionIdsSent.add(transaction.id());
         return transaction;
     }
 
@@ -1068,7 +1115,8 @@ public class CultPlayer implements GrimUser {
         if (isInBed) {
             return Pose.SLEEPING;
         }
-        if (isSwimming) {
+        // Player#isSwimming
+        if (swimState.swimming() && !isFlying && gamemode != GameMode.SPECTATOR) {
             return Pose.SWIMMING;
         }
         if (isGliding) {
@@ -1081,6 +1129,11 @@ public class CultPlayer implements GrimUser {
     }
 
     private boolean canPlayerFitWithinBlocksAndEntitiesWhen(Pose newPose) {
+        return canPlayerFitWithinBlocksAndEntitiesWhen(newPose, x, y, z);
+    }
+
+    /** Player#canPlayerFitWithinBlocksAndEntitiesWhen with the player at {@code (x, y, z)}. */
+    public boolean canPlayerFitWithinBlocksAndEntitiesWhen(Pose newPose, double x, double y, double z) {
         SimpleCollisionBox box = GetBoundingBox.getBoundingBoxFromPosAndSize(
                         x, y, z, newPose.width * getScale(), newPose.height * getScale())
                 .expand(-1.0E-7D);
@@ -1091,7 +1144,7 @@ public class CultPlayer implements GrimUser {
         PacketEntity riding = compensatedEntities.getSelf().getRiding();
         SimpleCollisionBox entityBox = new SimpleCollisionBox();
         SimpleCollisionBox scratch = new SimpleCollisionBox();
-        for (PacketEntity entity : compensatedEntities.entityMap.values()) {
+        for (PacketEntity entity : compensatedEntities.poseCollisionCandidates()) {
             if (!canCollideWithForPoseCheck(riding, entity)) {
                 continue;
             }
@@ -1130,13 +1183,18 @@ public class CultPlayer implements GrimUser {
     }
 
     public void timedOut() {
+        withheld("no ping answered within " + maxTransactionTime + " s");
+    }
+
+    /** A client withholding a packet a vanilla client always sends is treated as one withholding its pongs. */
+    public void withheld(String what) {
         // Not failsOpen(): the client decides whether to answer a ping, so withholding them must not buy an exemption.
         if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
-            LogUtil.warn(
-                    "Not inspecting " + getName() + " any more; no ping answered within " + maxTransactionTime + " s");
+            LogUtil.warn("Not inspecting " + getName() + " any more; " + what);
             CultAPI.INSTANCE.getPlayerDataManager().exemptUser(user);
             return;
         }
+        LogUtil.warn(getName() + " " + what);
         disconnect(MessageUtil.miniMessage(MessageUtil.replacePlaceholders(
                 this, CultAPI.INSTANCE.getConfigManager().getDisconnectTimeout())));
     }
@@ -1544,6 +1602,22 @@ public class CultPlayer implements GrimUser {
 
     public boolean inVehicle() {
         return compensatedEntities.getSelf().inVehicle();
+    }
+
+    /**
+     * Whether the client's sprint flag is set. LocalPlayer#aiStep clears it for a passenger whose vehicle cannot
+     * sprint or that it does not control, and LocalPlayer#sendChanges sends no STOP_SPRINTING for a vehicle it does
+     * not control, so {@link #isSprinting} keeps the last START_SPRINTING until the client sprints or dismounts.
+     */
+    public boolean isClientSprinting() {
+        return isSprinting && !sprintClearedAsPassenger;
+    }
+
+    /** A client tick mounted on {@code vehicle}: only a camel the player controls (Camel#canSprint) keeps the flag. */
+    public void onMountedClientTick(PacketEntity vehicle) {
+        if (EntityTypeUtil.isCamelFamily(vehicle.type)
+                && compensatedEntities.vehicles.canClientAuthoritativelyMoveVisibleRoot(vehicle)) return;
+        sprintClearedAsPassenger = true;
     }
 
     @Override

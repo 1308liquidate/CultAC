@@ -56,6 +56,45 @@ class CloudConnectionRetireTest {
     }
 
     @Test
+    void aRetiredSocketSendsTheMessageItHoldsOpen() throws Exception {
+        CloudConnection.Timing timing = new CloudConnection.Timing(
+                CloudConnection.Timing.DEFAULT.quietNanos(),
+                CloudConnection.Timing.DEFAULT.idleNanos(),
+                System::nanoTime,
+                CloudConnection.Timing.DEFAULT.takeoverNanos(),
+                Long.MAX_VALUE / 4);
+        try (Globals globals = new Globals();
+                Receiver receiver = new Receiver(timing)) {
+            receiver.connections.configure(settings(receiver.url(), "test-key", List.of(5)));
+            CloudConnection connection = receiver.connections.forServer("proxy.a");
+            assertNotNull(connection);
+            AtomicLong generation = new AtomicLong(-1);
+            connection.register(PLAYER, new CloudConnection.Stream() {
+                public void connected(long connected) {
+                    generation.set(connected);
+                }
+
+                public void disconnected(long ended) {}
+
+                public void reply(long replied, IntakeWire.Reply reply) {}
+            });
+            receiver.allowConnect("\"protocol\":5");
+            await(() -> generation.get() > 0, "connected");
+
+            IntakeWire.FrameBuilder builder = new IntakeWire.FrameBuilder();
+            builder.add(IntakeWire.SERVERBOUND, 0, new byte[] {1, 2, 3}, 3, 0, 0, 0);
+            assertTrue(connection.send(generation.get(), builder.build(PLAYER, 1), 0));
+            assertNull(receiver.messages.poll(500, TimeUnit.MILLISECONDS), "the message stays open");
+            receiver.connections.retireAll();
+            IntakeMessage frame = receiver.messages.poll(5, TimeUnit.SECONDS);
+            assertNotNull(frame, "the open message goes out");
+            assertEquals(IntakeMessage.KindCase.FRAME, frame.getKindCase());
+            assertEquals(WebSocket.NORMAL_CLOSURE, receiver.closes.poll(5, TimeUnit.SECONDS));
+            await(connection::closed, "closed");
+        }
+    }
+
+    @Test
     void retiringTheOpenSocketsKeepsTheUploadOnForOthers() throws Exception {
         try (Globals globals = new Globals();
                 Receiver receiver = new Receiver()) {

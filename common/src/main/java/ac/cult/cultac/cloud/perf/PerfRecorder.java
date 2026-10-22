@@ -13,19 +13,19 @@ import java.lang.management.ThreadInfo;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import jdk.jfr.EventType;
 import jdk.jfr.FlightRecorder;
 import jdk.jfr.consumer.RecordedClass;
@@ -47,7 +47,8 @@ public final class PerfRecorder {
     /** Allocated classes tracked apart; past it new classes are counted as one. */
     static final int MAX_ALLOC_CLASSES = 4096;
 
-    private static final String OTHER_CLASSES = "(other)";
+    private static final String OTHER_CLASSES = Attribution.OTHER_NAME;
+    private static final Pattern KEPT_FLAG = Pattern.compile("-XX:(?:[+-]\\w+|\\w+=\\d+(?:\\.\\d+)?[kKmMgGtT]?)");
     private static final String UNKNOWN = "(unknown)";
     private static final long READ_EVERY_NANOS = TimeUnit.SECONDS.toNanos(5);
     private static final long POLL_MILLIS = 100;
@@ -131,7 +132,6 @@ public final class PerfRecorder {
     }
 
     private Result run(PerfSettings settings, BooleanSupplier cancelled) throws InterruptedException {
-        Window window = new Window(Thread.currentThread().threadId());
         Load load = new Load();
         long startMillis = clock.millis();
         long start = System.nanoTime();
@@ -139,6 +139,7 @@ public final class PerfRecorder {
         long ownCpu = ownCpuNanos();
         Map<Long, Long> ownAlloc = ownAllocatedBytes();
         Map<Long, ThreadBytes> threadAlloc = threadAllocatedBytes();
+        Window window = new Window(Thread.currentThread().threadId(), threadAlloc, PerfRecorder::threadAllocatedBytes);
         ProcCpu.Snapshot procStart = procCpu();
         load.players(platform, start);
         long dispatchCpu;
@@ -330,10 +331,17 @@ public final class PerfRecorder {
         return value == null ? "" : value;
     }
 
-    /** The JVM's -X sizing and -XX flags; system properties may carry secrets and are left out. */
     private static List<String> jvmFlags() {
-        return ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
-                .filter(flag -> flag.startsWith("-XX:") || flag.startsWith("-Xm") || flag.startsWith("-Xss"))
+        return jvmFlags(ManagementFactory.getRuntimeMXBean().getInputArguments());
+    }
+
+    /**
+     * The -X sizing, boolean -XX and numeric -XX flags of {@code arguments}; system properties and other -XX values
+     * may carry commands, paths or secrets and are left out.
+     */
+    static List<String> jvmFlags(List<String> arguments) {
+        return arguments.stream()
+                .filter(flag -> KEPT_FLAG.matcher(flag).matches() || flag.startsWith("-Xm") || flag.startsWith("-Xss"))
                 .toList();
     }
 
@@ -381,6 +389,14 @@ public final class PerfRecorder {
     }
 
     record ThreadBytes(String name, long bytes) {}
+
+    /**
+     * Whether a thread may carry virtual threads, by name: the default scheduler's workers match, and so do the workers
+     * of other default-factory pools (not the common pool's), which can only raise the carriers' bound.
+     */
+    static boolean carrier(String name) {
+        return name != null && name.startsWith("ForkJoinPool-");
+    }
 
     /** Name and allocated bytes so far of every live thread, by thread id; null when the JVM cannot tell or fails. */
     static Map<Long, ThreadBytes> threadAllocatedBytes() {
@@ -457,8 +473,13 @@ public final class PerfRecorder {
         static final int ALLOC = 2;
         static final int CPU_TIME = 3;
 
+        /** Room over a carrier's bytes since the start: a sample's weight also counts the TLAB it held at the start. */
+        static final long ALLOC_SLACK = 64L << 20;
+
         /** {@code groups}: one per thread group with sampled or exact bytes. */
         record Calibration(boolean calibrated, List<PerfAllocCalibration> groups) {}
+
+        private record HeldAlloc(CopiedStack stack, int group, String type, long bytes, long startNanos) {}
 
         final StackTrie trie = new StackTrie();
         /**
@@ -468,8 +489,14 @@ public final class PerfRecorder {
         private final Map<String, long[]> classes = new HashMap<>();
         /** Sampled allocated bytes by thread group. */
         private final long[] sampledAlloc = new long[Attribution.GROUPS.size()];
-        /** Threads whose first allocation sample, weighted since before the window, has been dropped. */
-        private final Set<Long> allocThreads = new HashSet<>();
+        /** The earliest allocation sample so far of each thread, held back from the trie. */
+        private final Map<Long, HeldAlloc> earliestAlloc = new HashMap<>();
+        /** The allocated bytes at the window start of each platform thread ThreadMXBean lists; null when unknown. */
+        private final Map<Long, ThreadBytes> allocStart;
+        /** Every live thread's allocated bytes now, as {@link #threadAllocatedBytes()} reads them. */
+        private final Supplier<Map<Long, ThreadBytes>> allocNow;
+        /** The most a carrier has been seen to allocate since the window start. */
+        private long carrierBytes;
 
         int gcCount;
         long gcPauseNanos;
@@ -484,7 +511,13 @@ public final class PerfRecorder {
         private Throwable failure;
 
         Window(long recordingThread) {
+            this(recordingThread, null, Map::of);
+        }
+
+        Window(long recordingThread, Map<Long, ThreadBytes> allocStart, Supplier<Map<Long, ThreadBytes>> allocNow) {
             this.recordingThread = recordingThread;
+            this.allocStart = allocStart;
+            this.allocNow = allocNow;
         }
 
         synchronized void sample(RecordedEvent event, int kind) {
@@ -508,19 +541,59 @@ public final class PerfRecorder {
                 case NATIVE -> trie.add(stack, group, 0, 1, 0);
                 default -> {
                     RecordedClass allocated = event.getClass("objectClass");
+                    Instant at = event.getStartTime();
                     alloc(
                             stack,
                             group,
                             thread == null ? -1 : thread.getJavaThreadId(),
+                            thread != null && thread.isVirtual(),
+                            at.getEpochSecond() * 1_000_000_000L + at.getNano(),
                             allocated == null ? null : allocated.getName(),
                             Math.max(0, event.getLong("weight")));
                 }
             }
         }
 
-        /** One allocation sample; the first of each thread, {@code threadId} >= 0, is dropped. */
-        synchronized void alloc(StackTrie.StackTraceView stack, int group, long threadId, String type, long bytes) {
-            if (threadId >= 0 && allocThreads.add(threadId)) return;
+        /**
+         * One allocation sample of {@code threadId}, -1 when unknown, taken at {@code startNanos}. JFR weighs a sample
+         * by the bytes its thread allocated since that thread's previous sample, which for the first sample of a window
+         * reaches back before it, and delivers samples out of order. Each thread's earliest sample is therefore held
+         * back and dropped, unless the thread started after the window's start snapshot: its first sample is weighed
+         * from zero. {@code onCarrier} samples, of a virtual thread, are weighed from its carrier's previous sample
+         * under any thread's name; they are dropped instead when heavier than any carrier's bytes since the window
+         * start allow, kept when the carriers' live bytes are unknown, and held like the others without a start
+         * snapshot.
+         */
+        synchronized void alloc(
+                StackTrie.StackTraceView stack,
+                int group,
+                long threadId,
+                boolean onCarrier,
+                long startNanos,
+                String type,
+                long bytes) {
+            if (threadId < 0) {
+                add(stack, group, type, bytes);
+                return;
+            }
+            if (onCarrier && allocStart != null) {
+                if (!carriedOverByCarrier(bytes)) add(stack, group, type, bytes);
+                return;
+            }
+            if (allocStart != null && !allocStart.containsKey(threadId)) {
+                add(stack, group, type, bytes);
+                return;
+            }
+            HeldAlloc held = earliestAlloc.get(threadId);
+            if (held != null && startNanos >= held.startNanos()) {
+                add(stack, group, type, bytes);
+                return;
+            }
+            earliestAlloc.put(threadId, new HeldAlloc(CopiedStack.of(stack), group, type, bytes, startNanos));
+            if (held != null) add(held.stack(), held.group(), held.type(), held.bytes());
+        }
+
+        private void add(StackTrie.StackTraceView stack, int group, String type, long bytes) {
             trie.add(stack, group, 0, 0, bytes);
             sampledAlloc[group] += bytes;
             if (type == null) type = OTHER_CLASSES;
@@ -528,6 +601,23 @@ public final class PerfRecorder {
             int side = group != Attribution.PERF && Attribution.hasOwnFrame(stack) ? 0 : 1;
             classes.computeIfAbsent(type, ignored -> new long[2 * Attribution.GROUPS.size()])[2 * group + side] +=
                     bytes;
+        }
+
+        /**
+         * Whether a carrier-weighed sample is heavier than any carrier allocated since the window start, plus
+         * {@link #ALLOC_SLACK}: then it carries bytes from before the window. Live threads are read again before
+         * saying so, which counts the carriers started since.
+         */
+        private boolean carriedOverByCarrier(long bytes) {
+            if (bytes <= carrierBytes + ALLOC_SLACK) return false;
+            Map<Long, ThreadBytes> now = allocNow.get();
+            if (now == null) return false;
+            for (Map.Entry<Long, ThreadBytes> thread : now.entrySet()) {
+                if (!carrier(thread.getValue().name())) continue;
+                ThreadBytes start = allocStart.get(thread.getKey());
+                carrierBytes = Math.max(carrierBytes, thread.getValue().bytes() - (start == null ? 0 : start.bytes()));
+            }
+            return bytes > carrierBytes + ALLOC_SLACK;
         }
 
         /**
@@ -597,9 +687,13 @@ public final class PerfRecorder {
             return dispatchThread;
         }
 
-        /** The classes that allocated most; without {@code wholeJvm} only bytes on stacks with a CultAC frame. */
+        /**
+         * The classes that allocated most; without {@code wholeJvm} only bytes on stacks with a CultAC frame, and
+         * classes outside {@link Attribution#named} merged as {@link #OTHER_CLASSES}.
+         */
         synchronized List<PerfClassAlloc> topClasses(boolean wholeJvm) {
             List<PerfClassAlloc> all = new ArrayList<>();
+            long unnamed = 0;
             for (Map.Entry<String, long[]> entry : classes.entrySet()) {
                 long own = 0;
                 long other = 0;
@@ -607,9 +701,14 @@ public final class PerfRecorder {
                     own += entry.getValue()[i];
                     other += entry.getValue()[i + 1];
                 }
+                if (!wholeJvm && (entry.getKey().equals(OTHER_CLASSES) || !Attribution.named(entry.getKey()))) {
+                    unnamed += own;
+                    continue;
+                }
                 if (own > 0) all.add(classAlloc(entry.getKey(), own, true));
                 if (other > 0 && wholeJvm) all.add(classAlloc(entry.getKey(), other, false));
             }
+            if (unnamed > 0) all.add(classAlloc(OTHER_CLASSES, unnamed, true));
             all.sort(Comparator.comparingLong(PerfClassAlloc::getBytes).reversed());
             return all.size() > TOP_ALLOC_CLASSES ? all.subList(0, TOP_ALLOC_CLASSES) : all;
         }
@@ -626,9 +725,13 @@ public final class PerfRecorder {
     /** One JFR stack trace's frames at a time, leaf first, read through JFR's own name strings. */
     private static final class Frames implements StackTrie.StackTraceView {
         private List<RecordedFrame> frames = List.of();
+        private int at = -1;
+        private RecordedMethod method;
 
         Frames reset(List<RecordedFrame> frames) {
             this.frames = frames;
+            at = -1;
+            method = null;
             return this;
         }
 
@@ -639,14 +742,51 @@ public final class PerfRecorder {
 
         @Override
         public String type(int fromLeaf) {
-            RecordedMethod method = frames.get(fromLeaf).getMethod();
+            RecordedMethod method = methodAt(fromLeaf);
             return method == null ? UNKNOWN : method.getType().getName();
         }
 
         @Override
         public String method(int fromLeaf) {
-            RecordedMethod method = frames.get(fromLeaf).getMethod();
+            RecordedMethod method = methodAt(fromLeaf);
             return method == null ? UNKNOWN : method.getName();
+        }
+
+        /** Each frame's method is looked up once for its type and name, which are read one after the other. */
+        private RecordedMethod methodAt(int fromLeaf) {
+            if (fromLeaf != at) {
+                method = frames.get(fromLeaf).getMethod();
+                at = fromLeaf;
+            }
+            return method;
+        }
+    }
+
+    /** A stack's frames copied out of a JFR event, which the stream reuses. */
+    private record CopiedStack(String[] types, String[] methods) implements StackTrie.StackTraceView {
+        static CopiedStack of(StackTrie.StackTraceView stack) {
+            String[] types = new String[stack.size()];
+            String[] methods = new String[types.length];
+            for (int i = 0; i < types.length; i++) {
+                types[i] = stack.type(i);
+                methods[i] = stack.method(i);
+            }
+            return new CopiedStack(types, methods);
+        }
+
+        @Override
+        public int size() {
+            return types.length;
+        }
+
+        @Override
+        public String type(int fromLeaf) {
+            return types[fromLeaf];
+        }
+
+        @Override
+        public String method(int fromLeaf) {
+            return methods[fromLeaf];
         }
     }
 }

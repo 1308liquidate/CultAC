@@ -41,6 +41,7 @@ public class PacketChangeGameState extends CultProcessor implements CheckListene
         player.latencyUtils.addRealTimeTaskNow(() -> {
             GameMode previous = player.gamemode;
             player.gamemode = next;
+            applyGameModeAbilities(player, next, false);
             player.compensatedEntities.getSelf().onGameModeChange(player.gamemode == GameMode.CREATIVE);
 
             if (previous == GameMode.SPECTATOR && player.gamemode != GameMode.SPECTATOR) {
@@ -51,5 +52,15 @@ public class PacketChangeGameState extends CultProcessor implements CheckListene
         if (!player.runAtTrailingProof(event, () -> player.abilitiesHandled(instabuild, invulnerable))) {
             player.latencyUtils.addRealTimeTask(preceding, () -> player.abilitiesSent(instabuild, invulnerable));
         }
+    }
+
+    /**
+     * GameType#updatePlayerAbilities, which MultiPlayerGameMode#setLocalMode runs on the local player. Creative keeps
+     * the flying state, which a new LocalPlayer starts without.
+     */
+    public static void applyGameModeAbilities(CultPlayer player, GameMode mode, boolean newLocalPlayer) {
+        if (mode == GameMode.SPECTATOR) player.isFlying = true;
+        else if (mode != GameMode.CREATIVE || newLocalPlayer) player.isFlying = false;
+        player.canFly = mode == GameMode.CREATIVE || mode == GameMode.SPECTATOR;
     }
 }

@@ -36,6 +36,11 @@ public final class ClientComponentRegistries {
     private record ActionPath(ProtocolVersion source, ProtocolVersion client, ProtocolVersion model) {}
 
     private final Map<ActionPath, Tags> actionTags = new HashMap<>();
+    /** The last {@link #clientTags} answer, which per-cell fluid queries repeat; cleared with {@link #actionTags}. */
+    private Tags lastClientTags;
+
+    private ProtocolVersion lastClientTagsSource;
+    private ProtocolVersion lastClientTagsClient;
     private final Map<ActionPath, HolderSets.Overlay> simulatorTags = new HashMap<>();
     private Map<String, RegistryTags.Payload> configurationTags;
     private Map<String, List<WireValueDecoder.RegistryEntry>> configurationRegistries;
@@ -253,6 +258,7 @@ public final class ClientComponentRegistries {
         tags.clear();
         geometryTags = null;
         actionTags.clear();
+        lastClientTags = null;
         simulatorTags.clear();
         configurationTags = null;
         configurationRegistries = null;
@@ -264,7 +270,14 @@ public final class ClientComponentRegistries {
         if (worldRegistries != null) worldRegistries.fallback(dimensions);
     }
 
-    private static boolean clientPayloadIsEmpty(
+    static boolean clientPayloadIsEmpty(
+            String registry, RegistryTags.Payload payload, ProtocolVersion source, ProtocolVersion client) {
+        // Untranslated tags project to a copy with one entry per payload entry.
+        if (source == client && payload != null) return payload.isEmpty();
+        return projectedPayloadIsEmpty(registry, payload, source, client);
+    }
+
+    static boolean projectedPayloadIsEmpty(
             String registry, RegistryTags.Payload payload, ProtocolVersion source, ProtocolVersion client) {
         Map<String, List<String>> named;
         if (registry.equals("minecraft:block")) named = exportTags("minecraft:block", payload);
@@ -289,6 +302,7 @@ public final class ClientComponentRegistries {
         tags.putAll(packet.tags());
         geometryTags = null;
         actionTags.clear();
+        lastClientTags = null;
         simulatorTags.clear();
     }
 
@@ -350,7 +364,12 @@ public final class ClientComponentRegistries {
 
     /** Movement membership stays in the original client's domain, without a return trip to the host. */
     public Tags clientTags(ProtocolVersion source, ProtocolVersion client) {
-        return actionTags(source, client, client);
+        if (lastClientTags == null || lastClientTagsSource != source || lastClientTagsClient != client) {
+            lastClientTags = actionTags(source, client, client);
+            lastClientTagsSource = source;
+            lastClientTagsClient = client;
+        }
+        return lastClientTags;
     }
 
     private static Map<String, List<String>> exportTags(String registry, RegistryTags.Payload payload) {

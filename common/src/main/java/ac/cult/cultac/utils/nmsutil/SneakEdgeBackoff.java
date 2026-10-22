@@ -4,13 +4,12 @@ import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
-import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaFallDistance;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
-import ac.cult.cultac.utils.data.KnownInput;
-import ac.cult.cultac.utils.enums.Pose;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
@@ -18,8 +17,8 @@ import java.util.List;
 /**
  * Entity#deltaMovement across a sneaking edge. Entity#move moves by the delta Player#maybeBackOffFromEdge shortens,
  * while deltaMovement keeps the delta LivingEntity#travel built, so the next tick starts from velocity the position
- * never showed. On a shortened axis that delta holds the input of the keys in the client's latest PLAYER_INPUT, which
- * LocalPlayer#sendChanges sends before the tick's position.
+ * never showed. On a shortened axis that delta holds the water current Entity#baseTick added and the input of the keys
+ * in the client's latest PLAYER_INPUT, which LocalPlayer#sendChanges sends before the tick's position.
  */
 final class SneakEdgeBackoff {
     private static final double STEP = 0.05D;
@@ -51,10 +50,80 @@ final class SneakEdgeBackoff {
         SimulationContext context = result.getSimulationContext();
         if (player == null || context == null || !appliesTo(player, result, context)) return null;
 
+        float sneakingSpeed =
+                (float) player.compensatedEntities.getSelf().sneakingSpeed.value();
+        if (context.getWorldData().getInWater() != DesyncStatus.TRUE) {
+            return deltaMovementFrom(
+                    player, result, context, accepted, context.isLastSneaking() ? sneakingSpeed : 1.0F);
+        }
+        if (!context.isLastSneaking()) return deltaMovementFrom(player, result, context, accepted, 1.0F);
+        // LocalPlayer#aiStep crouches a shift-holding player unless it swims. Entity#updateSwimming, in baseTick before
+        // aiStep, swims only a player whose sprint flag is set, and its eye state is local, so with the flag set a
+        // crouch-held water move is proven with either scale and kept when one alone reproduces it.
+        Vec3 crouching = deltaMovementFrom(player, result, context, accepted, sneakingSpeed);
+        if (!player.sprintState.flagBeforeAiStep()) return crouching;
+        Vec3 full = deltaMovementFrom(player, result, context, accepted, 1.0F);
+        if (full == null) return crouching;
+        return crouching == null || crouching.equals(full) ? full : null;
+    }
+
+    /**
+     * The carry for {@code movingSlowlyFactor} at the speed LivingEntity#getFrictionInfluencedSpeed gives in water, on
+     * the ground or in the air, kept when one speed the client's sprint state allows alone reproduces the move.
+     */
+    private static Vec3 deltaMovementFrom(
+            CultPlayer player,
+            PredictionResult result,
+            SimulationContext context,
+            Vec3 accepted,
+            float movingSlowlyFactor) {
+        boolean water = context.getWorldData().getInWater() == DesyncStatus.TRUE;
+        if (water) {
+            float speed = context.getMoveRelativeSpeed(player, true, true, false);
+            return deltaMovementFrom(player, result, context, accepted, movingSlowlyFactor, speed);
+        }
+        Vec3 found = null;
+        ClientSprintState.Outcome outcome = context.getSprintOutcome(player, result.getInitialStartingVel());
+        float[] speeds = context.getWorldData().getLastOnGround() == DesyncStatus.TRUE
+                ? context.getGroundMoveRelativeSpeeds(player, outcome)
+                : flyingSpeeds(context);
+        for (float speed : speeds) {
+            Vec3 carry = deltaMovementFrom(player, result, context, accepted, movingSlowlyFactor, speed);
+            if (carry == null) continue;
+            if (found != null && !found.equals(carry)) return null;
+            found = carry;
+        }
+        return found;
+    }
+
+    /** Player#getFlyingSpeed off the ground for each sprint flag the client may have held during travel. */
+    private static float[] flyingSpeeds(SimulationContext context) {
+        List<Boolean> sprinting = context.getIsSprinting().getStates();
+        float[] speeds = new float[sprinting.size()];
+        for (int i = 0; i < speeds.length; i++) speeds[i] = sprinting.get(i) ? 0.025999999F : 0.02F;
+        return speeds;
+    }
+
+    private static Vec3 deltaMovementFrom(
+            CultPlayer player,
+            PredictionResult result,
+            SimulationContext context,
+            Vec3 accepted,
+            float movingSlowlyFactor,
+            float speed) {
+        boolean water = context.getWorldData().getInWater() == DesyncStatus.TRUE;
         PredVector start = result.getInitialStartingVel();
-        Vec3 input = travelInput(player, context, player.packetStateData.knownInput);
+        Vec3 input = ClientKeyInput.travelInput(
+                player, context, player.packetStateData.knownInput, 1.0F, movingSlowlyFactor, speed);
         if (input == null) return null;
-        Vec3 delta = new Vec3(start.x + input.x, start.y, start.z + input.z);
+        // Entity#baseTick's updateInWaterStateAndDoFluidPushing adds the water current before LocalPlayer#aiStep.
+        Vec3 current = water ? WaterCurrent.calculateWaterCurrent(player, context, context.getStart(), start) : null;
+        double startX = current == null ? start.x : start.x + current.x;
+        double startY = current == null ? start.y : start.y + current.y;
+        double startZ = current == null ? start.z : start.z + current.z;
+        // LocalPlayer#aiStep's goDownInWater adds -0.04F while shift is held in water, before travel.
+        double deltaY = water ? startY + (double) -0.04F : startY;
+        Vec3 delta = new Vec3(startX + input.x, deltaY, startZ + input.z);
         if (!(Math.abs(delta.x) <= MAX_PROBED_AXIS) || !(Math.abs(delta.z) <= MAX_PROBED_AXIS)) return null;
 
         SimpleCollisionBox box = context.getFromActualPose();
@@ -67,6 +136,9 @@ final class SneakEdgeBackoff {
         boolean moved = movementLength > 1.0E-7 || backedOff.lengthSqr() - movementLength < 1.0E-7;
         Vec3 position = moved ? movement : Vec3.ZERO;
         if (position.distanceToSqr(accepted) > 1.0E-14) return null;
+        // Player#travel's swim pitch pull changes the vertical delta after goDownInWater; only a move the floor stops
+        // leaves a vertical delta that does not depend on it.
+        if (water && (movement.y != 0.0D || !(backedOff.y < 0.0D))) return null;
 
         // Entity#restituteMovementAfterCollisions zeroes each collided axis of a player suppressing bounce.
         return new Vec3(
@@ -93,56 +165,39 @@ final class SneakEdgeBackoff {
                 && !start.isJump()
                 && !start.isKnockback()
                 && !(start.y > 0.0D)
-                && world.getLastOnGround() == DesyncStatus.TRUE
-                && world.getInWater() == DesyncStatus.FALSE
+                && isAboveGround(player, result, context)
                 && world.getInLava() == DesyncStatus.FALSE
                 && world.getClimbingAtStart() == DesyncStatus.FALSE
                 && !world.isMightBeInBlock()
                 && context.getMaxAttackSlow() == 0
-                // A client hiding its sprint state carries less velocity, not more.
-                && !player.isSprinting
-                && player.sprintState.flagKnown()
-                && !player.sprintState.flag()
-                && !player.sprintState.modifier()
+                // LivingEntity#checkAutoSpinAttack can reset sprinting after travel.
+                && player.riptideSpinAttackTicks == 0
+                // LivingEntity#travelInWater moves by moveRelative(0.02F) when no water_movement_efficiency raises it.
+                && (world.getInWater() == DesyncStatus.FALSE
+                        || world.getInWater() == DesyncStatus.TRUE && context.getWaterMovementEfficiency() == 0.0F)
                 && !IsUsingItem.isUsingItem(player)
                 && result.getValidMovements() != null
                 && result.getValidMovements().getPositionOnlyDelta().lengthSqr() <= 1.0E-14;
     }
 
     /**
-     * LivingEntity#moveRelative's addition for {@code keys} on the ground: KeyboardInput#tick, LocalPlayer#modifyInput
-     * and Entity#getInputVector. LocalPlayer#aiStep computes crouching from the previous keys before Input#tick. Null
-     * when a pose the context does not determine could slow the input.
+     * Player#isAboveGround at the tick's start box, with the fallDistance Entity#move reads before its checkFallDamage
+     * adds this tick's fall.
      */
-    static Vec3 travelInput(CultPlayer player, SimulationContext context, KnownInput keys) {
-        Vec3 start = context.getStart();
-        SimpleCollisionBox standing = GetBoundingBox.getBoundingBoxFromPosAndSize(
-                        start.x,
-                        start.y,
-                        start.z,
-                        Pose.STANDING.width * context.getScale(),
-                        Pose.STANDING.height * context.getScale())
-                .expand(-SimpleCollisionBox.COLLISION_EPSILON);
-        // LocalPlayer#isMovingSlowly: with room to stand, the player crouches exactly when shift was held.
-        if (!Collisions.isEmpty(player, standing)) return null;
-
-        float movingSlowlyFactor = context.isLastSneaking()
-                ? (float) player.compensatedEntities.getSelf().sneakingSpeed.value()
-                : 1.0F;
-        Vec3 modified = VelocityTransformer.getExactControllerModifiedInputStatic(
-                new Vec3(keys.strafeImpulse(), 0.0D, keys.forwardImpulse()), movingSlowlyFactor);
-        return inputVector(context, modified, context.getMoveRelativeSpeed(player, true, false, false));
-    }
-
-    /** Entity#getInputVector. */
-    private static Vec3 inputVector(SimulationContext context, Vec3 input, float speed) {
-        double lengthSqr = input.lengthSqr();
-        if (lengthSqr < 1.0E-7D) return Vec3.ZERO;
-        Vec3 movement = (lengthSqr > 1.0D ? input.normalize() : input).scale(speed);
-        float yawRadians = context.getXRot() * ((float) Math.PI / 180F);
-        float sin = context.getTrig().sin(yawRadians);
-        float cos = context.getTrig().cos(yawRadians);
-        return new Vec3(movement.x * cos - movement.z * sin, movement.y, movement.z * cos + movement.x * sin);
+    private static boolean isAboveGround(CultPlayer player, PredictionResult result, SimulationContext context) {
+        DesyncStatus onGround = context.getWorldData().getLastOnGround();
+        if (onGround != DesyncStatus.FALSE) return onGround == DesyncStatus.TRUE;
+        float maxDownStep = player.getMaxUpStep();
+        double fallDistance = JavaFallDistance.beforeMove(player, context, result.getInitialStartingVel())
+                .fallDistance();
+        return fallDistance < maxDownStep
+                && !canFallAtLeast(
+                        player,
+                        context.getFromActualPose(),
+                        new SimpleCollisionBox(),
+                        0.0,
+                        0.0,
+                        maxDownStep - fallDistance);
     }
 
     /** Player#maybeBackOffFromEdge once its flying, mover, shift and Player#isAboveGround conditions hold. */

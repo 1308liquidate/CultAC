@@ -12,6 +12,7 @@ import ac.cult.cultac.network.packet.InventoryPackets;
 import ac.cult.cultac.network.packet.InventoryPackets.Content;
 import ac.cult.cultac.network.packet.InventoryPackets.CreativeSlot;
 import ac.cult.cultac.network.packet.InventoryPackets.MerchantOffer;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMountScreenOpen;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundOpenScreen;
@@ -38,6 +39,7 @@ import ac.cult.cultac.utils.inventory.inventory.AbstractContainerMenu;
 import ac.cult.cultac.utils.inventory.inventory.GenericContainerMenu;
 import ac.cult.cultac.utils.inventory.inventory.MenuType;
 import ac.cult.cultac.utils.inventory.inventory.WindowClickType;
+import ac.cult.cultac.utils.inventory.slot.MountSaddleSlot;
 import ac.cult.cultac.utils.inventory.slot.Slot;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import java.util.ArrayList;
@@ -406,6 +408,21 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
                 && click.changedSlots().containsKey(click.slot());
     }
 
+    /** AbstractContainerMenu#doClick puts an item into the mount's saddle slot only through ArmorSlot#mayPlace. */
+    private boolean fitsSaddleSlots(
+            InventoryClick click, List<SimItemStack> beforeSlots, List<SimItemStack> afterSlots) {
+        for (int index : click.changedSlots().keySet()) {
+            if (!(menu.getSlot(index) instanceof MountSaddleSlot saddle)) continue;
+            SimItemStack after = afterSlots.get(index);
+            if (after.isEmpty()) continue;
+            if (after.getCount() > saddle.getMaxStackSize()) return false;
+            SimItemStack before = beforeSlots.get(index);
+            boolean placed = !ItemUtil.isSameItemSameTags(before, after) || after.getCount() > before.getCount();
+            if (placed && !saddle.mayPlace(after)) return false;
+        }
+        return true;
+    }
+
     private static List<SimItemStack> copyMenuSlots(AbstractContainerMenu menu) {
         List<SimItemStack> slots = new ArrayList<>(menu.getSlots().size());
         for (Slot slot : menu.getSlots()) {
@@ -584,6 +601,9 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
                 selectedMerchantOffer,
                 sameResultComponents);
         if (!isClientClickClaimSane(click, beforeSlots, beforeCarried, afterSlots, afterCarried, allowance)) {
+            return false;
+        }
+        if (!fitsSaddleSlots(click, beforeSlots, afterSlots)) {
             return false;
         }
 
@@ -934,6 +954,10 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
     public void onSetCarriedItem(
             PacketReceiveEvent<ServerboundSetCarriedItem> event, CultPlayer player, ServerboundSetCarriedItem packet) {
         selectHotbarSlot(packet.slot());
+        // A claim after the tick's first cannot name a slot the previous Player#tick saw.
+        if (player.packetStateData.carriedItemClaimedThisClientTick) return;
+        player.packetStateData.carriedItemClaimedThisClientTick = true;
+        player.attackStrength.onClaimedMainHand(getHeldItem());
     }
 
     public void selectHotbarSlot(int slot) {
@@ -1118,6 +1142,22 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
         return new GenericContainerMenu(player, inventory, 2 + Math.max(0, inventoryColumns) * 3);
     }
 
+    /**
+     * ClientPacketListener#handleMountScreenOpen builds the menu over the client's mount. From 1.21.5 its slot 0 is the
+     * mount's EquipmentSlot.SADDLE; older clients read the saddle from the horse flags and Geyser from set_equipment.
+     */
+    private AbstractContainerMenu clientMenuFromMountScreen(PacketEntity mount, int inventoryColumns) {
+        if (player.isBedrockMovement() || player.getClientVersion().isOlderThan(ClientVersion.V_1_21_5)) {
+            return menuFromMountScreen(inventoryColumns);
+        }
+        AbstractContainerMenu mountMenu = new GenericContainerMenu(player, inventory, 0, false);
+        mountMenu.addSlot(new MountSaddleSlot(player, mount));
+        InventoryStorage mountStorage = new InventoryStorage(1 + Math.max(0, inventoryColumns) * 3);
+        for (int slot = 0; slot < mountStorage.getSize(); slot++) mountMenu.addSlot(new Slot(mountStorage, slot));
+        mountMenu.addFourRowPlayerInventory();
+        return mountMenu;
+    }
+
     @CultPacketHandler
     public void onOpenScreen(
             PacketSendEvent<ClientboundOpenScreen> event, CultPlayer player, ClientboundOpenScreen packet) {
@@ -1154,7 +1194,7 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
                 return;
             }
             serverContainerType = MenuType.UNKNOWN;
-            menu = menuFromMountScreen(packet.inventoryColumns());
+            menu = clientMenuFromMountScreen(mount, packet.inventoryColumns());
             openWindowID = packet.containerId();
             merchantOffers = List.of();
             selectedMerchantOffer = 0;

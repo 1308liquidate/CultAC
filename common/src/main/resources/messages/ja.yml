@@ -61,6 +61,7 @@ help:
     - "/%command% debug <player> &f- &7開発者用の予測出力を表示します"
     - "/%command% perf &f- &7開発者用のパフォーマンス (ms/予測)"
     - "/%command% reload &f- &7設定をリロードします"
+    - "/%command% observe [on|off] &f- &7observe-only モードを表示または切り替えます"
     - "/%command% spectate <player> &f- &7プレイヤーを観戦します"
     - "/%command% verbose &f- &7全てのフラグをバッファなしで表示します"
     - "/%command% log [0-255] &f- &7予測フラグのデバッグログをアップロードします"

@@ -3,8 +3,11 @@ package ac.cult.cultac.utils.latency;
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.data.FluidTags;
+import ac.cult.blocksim.data.StateFacts;
 import ac.cult.cultac.checks.impl.movement.GhostBlockMitigator;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.network.packet.WorldPackets.SectionBlocksUpdate;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
@@ -26,7 +29,10 @@ import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 
@@ -44,7 +50,10 @@ public class CompensatedWorld {
     private static final byte RECENT_FLUID_WATER = 1;
     private static final byte RECENT_FLUID_LAVA = 1 << 1;
     public final CultPlayer player;
-    public final Long2ObjectMap<CachedChunk> chunks;
+    private final Long2ObjectMap<CachedChunk> chunks;
+    private final LongSet chunkPositions;
+    // Changes whenever a chunk is added to or removed from chunks; every write to chunks bumps it.
+    private long chunkEpoch;
     private final Long2ObjectOpenHashMap<String> chunkDimensions = new Long2ObjectOpenHashMap<>();
     // Packet locations for blocks
     public Set<ShulkerData> openShulkerBoxes = new HashSet<>();
@@ -90,6 +99,9 @@ public class CompensatedWorld {
     private List<BlockPos> currentlyChangedBlocks = new LinkedList<>();
     private final Map<Integer, List<BlockPos>> serverIsCurrentlyProcessingThesePredictions = new LinkedHashMap<>();
     private int clientPredictionSequence;
+    /** BlockStatePredictionHandler#lastTeleportSequence: the prediction sequence when the client last took a teleport. */
+    private int lastTeleportPredictionSequence = -1;
+
     private int level;
     private boolean clientboundUnresolved;
     private boolean levelUnresolved;
@@ -122,6 +134,7 @@ public class CompensatedWorld {
         this.clientBlockEntities = new CompensatedBlockEntities(player);
         this.pistons = new CompensatedWorldPistons(player, this);
         chunks = new Long2ObjectOpenHashMap<>(81, 0.5f);
+        chunkPositions = LongSets.unmodifiable(chunks.keySet());
     }
 
     public void terrainListener(TerrainListener listener) {
@@ -141,6 +154,7 @@ public class CompensatedWorld {
         private final int transaction;
         private MotionHeightmap motionHeightmap;
         private final List<ac.cult.cultac.network.packet.WorldPackets.BlockEntityUpdate> blockEntities;
+        private static final AtomicReferenceArray<int[]> UNIFORM_BIOMES = new AtomicReferenceArray<>(1024);
         private int[][] biomes;
 
         public CachedChunk(CachedSection[] sections, int transaction) {
@@ -169,13 +183,32 @@ public class CompensatedWorld {
                 return;
             }
             if (biomes.length != sections.length) throw new IllegalArgumentException("Biome section count mismatch");
-            this.biomes = Arrays.stream(biomes)
-                    .map(values -> {
-                        if (values.length != 64)
-                            throw new IllegalArgumentException("Biome section must contain 64 values");
-                        return values.clone();
-                    })
-                    .toArray(int[][]::new);
+            int[][] retained = new int[biomes.length][];
+            for (int i = 0; i < biomes.length; i++) {
+                int[] values = biomes[i];
+                if (values.length != 64) throw new IllegalArgumentException("Biome section must contain 64 values");
+                retained[i] = isUniform(values) ? uniformBiomes(values[0]) : values.clone();
+            }
+            this.biomes = retained;
+        }
+
+        /** 64 copies of {@code biome}; arrays are shared between chunks, so no caller may write to them. */
+        public static int[] uniformBiomes(int biome) {
+            if (biome < 0 || biome >= UNIFORM_BIOMES.length()) {
+                int[] values = new int[64];
+                Arrays.fill(values, biome);
+                return values;
+            }
+            int[] shared = UNIFORM_BIOMES.get(biome);
+            if (shared != null) return shared;
+            int[] values = new int[64];
+            Arrays.fill(values, biome);
+            return UNIFORM_BIOMES.compareAndSet(biome, null, values) ? values : UNIFORM_BIOMES.get(biome);
+        }
+
+        private static boolean isUniform(int[] values) {
+            for (int i = 1; i < values.length; i++) if (values[i] != values[0]) return false;
+            return true;
         }
 
         public int sectionCount() {
@@ -248,6 +281,7 @@ public class CompensatedWorld {
     public static final class CachedSection {
         public static final java.util.concurrent.atomic.AtomicLong mutableCopyCounter =
                 new java.util.concurrent.atomic.AtomicLong(0);
+        private static final long[] COUNT_WEIGHTS = countWeights();
 
         private final PalettedSection states;
         private int nonEmptyBlockCount;
@@ -374,10 +408,27 @@ public class CompensatedWorld {
             return ac.cult.blocksim.data.DataTables.defaults().registry().facts(state);
         }
 
+        private static long[] countWeights() {
+            int states = DataTables.defaults().registry().stateCount();
+            long[] weights = new long[states];
+            for (int state = 0; state < states; state++) {
+                StateFacts facts = facts(state);
+                if (!facts.has(StateFacts.AIR))
+                    weights[state] = facts.fluid().equals("minecraft:empty") ? 1 : 1 | 1L << 32;
+            }
+            return weights;
+        }
+
         private void recalcCounts() {
+            long counts = states.weightSumWithin(COUNT_WEIGHTS);
+            if (counts >= 0) {
+                nonEmptyBlockCount = (int) counts;
+                fluidCount = (int) (counts >>> 32);
+                return;
+            }
             nonEmptyBlockCount = 0;
             fluidCount = 0;
-            states.forEachCount((state, count) -> {
+            states.forEachCountWithin(DataTables.defaults().registry().stateCount(), (state, count) -> {
                 var facts = facts(state);
                 if (!facts.has(ac.cult.blocksim.data.StateFacts.AIR)) {
                     nonEmptyBlockCount += count;
@@ -462,10 +513,22 @@ public class CompensatedWorld {
         clientPredictionSequence++;
     }
 
+    /** ClientPacketListener#handleMovePlayer -> BlockStatePredictionHandler#onTeleport. */
+    public void onClientTeleport() {
+        if (!tracksTeleportSequence()) return;
+        lastTeleportPredictionSequence = clientPredictionSequence;
+    }
+
+    /** BlockStatePredictionHandler#lastTeleportSequence exists from 26.1; older clients always snap back. */
+    private boolean tracksTeleportSequence() {
+        return !player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_1);
+    }
+
     public void resetClientPredictions() {
         player.blockActionReconciler.reset();
         endSelectionSnapshot();
         clientPredictionSequence = 0;
+        lastTeleportPredictionSequence = -1;
         isCurrentlyPredicting = false;
         currentlyChangedBlocks.clear();
         originalServerBlocks.clear();
@@ -483,7 +546,7 @@ public class CompensatedWorld {
                 it.hasNext(); ) {
             Map.Entry<Integer, List<BlockPos>> iter = it.next();
             if (iter.getKey() <= prediction) {
-                applyBlockChanges(iter.getValue(), transaction);
+                applyBlockChanges(iter.getValue(), transaction, prediction);
                 it.remove();
             }
         }
@@ -495,7 +558,7 @@ public class CompensatedWorld {
                 it.hasNext(); ) {
             Map.Entry<Integer, List<BlockPos>> iter = it.next();
             if (iter.getKey() <= prediction) {
-                applyBlockChanges(iter.getValue(), transaction);
+                applyBlockChanges(iter.getValue(), transaction, prediction);
                 it.remove();
             }
         }
@@ -514,6 +577,21 @@ public class CompensatedWorld {
         player.latencyUtils.addRealTimeTask(transaction, () -> {
             if (queuedLevel == level) handleServerBlockUpdate(x, y, z, state, transaction);
             serverBlockView.applied(position, id);
+        });
+    }
+
+    public void queueServerBlockUpdates(SectionBlocksUpdate update, int transaction) {
+        long[] ids = new long[update.size()];
+        int[] sent = {0};
+        update.runUpdates((x, y, z, state) -> ids[sent[0]++] = serverBlockView.sent(
+                BlockPos.asLong(x, y, z), ViaClientBlockShapeMappings.clientBlockStateId(player, stateIdOrAir(state))));
+        int queuedLevel = level;
+        player.latencyUtils.addRealTimeTask(transaction, () -> {
+            int[] applied = {0};
+            update.runUpdates((x, y, z, state) -> {
+                if (queuedLevel == level) handleServerBlockUpdate(x, y, z, state, transaction);
+                serverBlockView.applied(BlockPos.asLong(x, y, z), ids[applied[0]++]);
+            });
         });
     }
 
@@ -546,43 +624,36 @@ public class CompensatedWorld {
         updateBlock(x, y, z, state);
     }
 
-    private void applyBlockChanges(List<BlockPos> toApplyBlocks, int transaction) {
+    private void applyBlockChanges(List<BlockPos> toApplyBlocks, int transaction, int sequence) {
         // The transaction is sent after the block-ack packet in the same clientbound bundle.
         // Vanilla processes bundle sub-packets in order on the client thread, then replies to
         // the ping, so this marker means the ack and any bundled block updates are applied.
-        player.latencyUtils.addRealTimeTask(
-                transaction,
-                () -> toApplyBlocks.forEach(vector3i -> {
-                    BlockPrediction predictionData = originalServerBlocks.get(vector3i.asLong());
+        player.latencyUtils.addRealTimeTask(transaction, () -> {
+            // BlockStatePredictionHandler#endPredictionsUpTo: no snap back after a teleport since the prediction.
+            boolean snapsBack = !tracksTeleportSequence() || lastTeleportPredictionSequence < sequence;
+            toApplyBlocks.forEach(vector3i -> {
+                BlockPrediction predictionData = originalServerBlocks.get(vector3i.asLong());
 
-                    // We are the last to care about this prediction, remove it to stop memory leak
-                    // Block changes are allowed to execute out of order, because it actually doesn't matter
-                    if (predictionData != null && predictionData.getForBlockUpdate() == toApplyBlocks) {
-                        originalServerBlocks.remove(vector3i.asLong());
-                        handleAck(vector3i, predictionData.getOriginalBlockId(), predictionData.getPlayerPosition());
-                    }
-                }));
+                // We are the last to care about this prediction, remove it to stop memory leak
+                // Block changes are allowed to execute out of order, because it actually doesn't matter
+                if (predictionData != null && predictionData.getForBlockUpdate() == toApplyBlocks) {
+                    originalServerBlocks.remove(vector3i.asLong());
+                    handleAck(
+                            vector3i,
+                            predictionData.getOriginalBlockId(),
+                            predictionData.getPlayerPosition(),
+                            snapsBack);
+                }
+            });
+        });
     }
 
-    private void applyBlockChanges(List<BlockPos> toApplyBlocks, CultPlayer.TrackedTransaction transaction) {
-        // The transaction is sent after the block-ack packet in the same clientbound bundle.
-        // Vanilla processes bundle sub-packets in order on the client thread, then replies to
-        // the ping, so the tracked transaction is the marker for applying the ack here.
-        player.latencyUtils.addRealTimeTask(
-                transaction.transaction(),
-                () -> toApplyBlocks.forEach(vector3i -> {
-                    BlockPrediction predictionData = originalServerBlocks.get(vector3i.asLong());
-
-                    // We are the last to care about this prediction, remove it to stop memory leak
-                    // Block changes are allowed to execute out of order, because it actually doesn't matter
-                    if (predictionData != null && predictionData.getForBlockUpdate() == toApplyBlocks) {
-                        originalServerBlocks.remove(vector3i.asLong());
-                        handleAck(vector3i, predictionData.getOriginalBlockId(), predictionData.getPlayerPosition());
-                    }
-                }));
+    private void applyBlockChanges(
+            List<BlockPos> toApplyBlocks, CultPlayer.TrackedTransaction transaction, int sequence) {
+        applyBlockChanges(toApplyBlocks, transaction.transaction(), sequence);
     }
 
-    private void handleAck(BlockPos vector3i, int originalBlockId, Vec3 playerPosition) {
+    private void handleAck(BlockPos vector3i, int originalBlockId, Vec3 playerPosition, boolean snapsBack) {
         // make sure that this "delayed" block update is always known to the ghost block mitigator
         final GhostBlockMitigator mitigator = player.getGhostBlockMitigator();
         mitigator.handleNewBlock(vector3i);
@@ -597,8 +668,9 @@ public class CompensatedWorld {
                 // your illegal teleport.
                 final ac.cult.cultac.manager.player.SetbackTeleportUtil setbackUtil = player.getSetbackTeleportUtil();
                 setbackUtil.executeForceResync("block ack");
-            } else if (ClientBlockShapes.movement(player, state, vector3i.getX(), vector3i.getY(), vector3i.getZ())
-                    .isIntersected(player.boundingBox)) {
+            } else if (snapsBack
+                    && ClientBlockShapes.movement(player, state, vector3i.getX(), vector3i.getY(), vector3i.getZ())
+                            .isIntersected(player.boundingBox)) {
                 // The player will teleport themselves if they get stuck in the reverted block
                 player.lastX = player.x;
                 player.lastY = player.y;
@@ -622,9 +694,10 @@ public class CompensatedWorld {
 
         // Only a client whose wire sequence stops advancing reaches this; its oldest prediction reverts to the server.
         if (serverIsCurrentlyProcessingThesePredictions.size() >= MAX_PENDING_PREDICTIONS) {
-            Iterator<List<BlockPos>> oldest =
-                    serverIsCurrentlyProcessingThesePredictions.values().iterator();
-            applyBlockChanges(oldest.next(), player.lastTransactionSent.get() + 1);
+            Iterator<Map.Entry<Integer, List<BlockPos>>> oldest =
+                    serverIsCurrentlyProcessingThesePredictions.entrySet().iterator();
+            Map.Entry<Integer, List<BlockPos>> entry = oldest.next();
+            applyBlockChanges(entry.getValue(), player.lastTransactionSent.get() + 1, entry.getKey());
             oldest.remove();
         }
         // Vanilla stores predictions under its local monotonic counter, not the untrusted packet sequence.
@@ -656,6 +729,7 @@ public class CompensatedWorld {
         int sectionCount = lastClientboundDimension.sectionCount();
         sectionPoolLeases.retain(visibleDimension, chunkX, chunkZ, sectionCount);
         chunks.put(chunkPosition, new CachedChunk(new CachedSection[sectionCount], player.lastTransactionSent.get()));
+        chunkEpoch++;
         chunkDimensions.put(chunkPosition, visibleDimension);
     }
 
@@ -1330,6 +1404,20 @@ public class CompensatedWorld {
         return chunks.containsKey(chunkPosition);
     }
 
+    public void putChunk(int chunkX, int chunkZ, CachedChunk chunk) {
+        chunks.put(chunkPositionToLong(chunkX, chunkZ), chunk);
+        chunkEpoch++;
+    }
+
+    /** The positions of the received chunks, read-only, in the map's iteration order. */
+    public LongSet chunkPositions() {
+        return chunkPositions;
+    }
+
+    public long chunkEpoch() {
+        return chunkEpoch;
+    }
+
     public ac.cult.blocksim.engine.BlockEntityData getClientBlockEntityData(BlockPos pos) {
         return clientBlockEntities.snapshot(pos, getBlockStateIdAt(pos));
     }
@@ -1496,6 +1584,7 @@ public class CompensatedWorld {
             internChunkSections(chunk, dimension, chunkX, chunkZ);
             removePendingReinternSections(chunkX, chunkZ);
             previous = chunks.put(chunkPosition, chunk);
+            chunkEpoch++;
             previousDimension = chunkDimensions.put(chunkPosition, dimension);
             if (previous != null) {
                 String releaseDimension = previousDimension == null ? dimension : previousDimension;
@@ -1704,6 +1793,7 @@ public class CompensatedWorld {
             }
 
             CachedChunk removed = chunks.remove(chunkPosition);
+            chunkEpoch++;
             chunkDimensions.remove(chunkPosition);
             removePendingReinternSections(chunkX, chunkZ);
             if (removed != null) {
@@ -1839,6 +1929,7 @@ public class CompensatedWorld {
                 clientBlockEntities.forgetChunk(chunkX, chunkZ);
             }
             iterator.remove();
+            chunkEpoch++;
             if (terrainListener != null) terrainListener.columnUnloaded(chunkX, chunkZ);
         }
     }
@@ -1857,6 +1948,7 @@ public class CompensatedWorld {
         }
         sectionPoolLeases.clear();
         chunks.clear();
+        chunkEpoch++;
         chunkDimensions.clear();
         pendingReinternSections.clear();
         geysers.clear();

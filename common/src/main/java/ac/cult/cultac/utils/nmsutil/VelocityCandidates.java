@@ -2,8 +2,10 @@ package ac.cult.cultac.utils.nmsutil;
 
 import ac.cult.blocksim.data.BlockIds;
 import ac.cult.blocksim.entity.EntityTypeIds;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.Ladder;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
@@ -170,11 +172,15 @@ public final class VelocityCandidates {
                 || result.getAcceptedClosestToTarget() == null) {
             return fallback;
         }
-        Vec3 input = result.getLegacyLikePredictionVector().subtract(result.getAcceptedClosestToTarget());
         return result.getValidMovements()
                 .getClosestTrace()
                 .preCollisionVelocity()
-                .add(input);
+                .add(acceptedInput(result));
+    }
+
+    /** The accepted LivingEntity#moveRelative input: the circular allowance the closest movement used. */
+    private static Vec3 acceptedInput(PredictionResult result) {
+        return result.getLegacyLikePredictionVector().subtract(result.getAcceptedClosestToTarget());
     }
 
     private static Vec3 addFinite(Vec3 delta, Vec3 current) {
@@ -217,7 +223,8 @@ public final class VelocityCandidates {
                 // #suppresses_bounce) the 26.2 client does not bounce at all.
                 return OptionalDouble.empty();
             }
-            bounceY = restitutedBounceY(player, deltaY, clippedY, gravity, blockBounciness(result, onBlock));
+            bounceY = restitutedBounceY(
+                    player, deltaY, clippedY, gravity, blockBounciness(onBlock, livingMover(context)));
         } else {
             bounceY = -deltaY;
         }
@@ -242,13 +249,16 @@ public final class VelocityCandidates {
                 || (ClientBlockProperties.isBed(onBlock) && !BlockIds.is(onBlock, BlockIds.STRAW_BED));
     }
 
-    private static double blockBounciness(PredictionResult result, int onBlock) {
+    private static double blockBounciness(int onBlock, boolean living) {
         // MCP-Reborn 26.2 Entity#getBlockBounciness: non-living entities (such as
         // boats and minecarts) only receive 80% of the block's restitution.
         double restitution = BlockIds.is(onBlock, BlockIds.SLIME_BLOCK) ? 1.0D : isBouncyBlock(onBlock) ? 0.75D : 0.0D;
-        PacketEntity vehicle = result.getSimulationContext().getVehicle();
-        boolean living = vehicle == null || vehicle.isLivingEntity();
         return living ? restitution : restitution * 0.8D;
+    }
+
+    private static boolean livingMover(SimulationContext context) {
+        PacketEntity vehicle = context.getVehicle();
+        return vehicle == null || vehicle.isLivingEntity();
     }
 
     private static double restitutedBounceY(
@@ -362,7 +372,52 @@ public final class VelocityCandidates {
         // LivingEntity#travelFallFlying has already replaced deltaMovement
         // before Entity#move. Carry that velocity on uncollided axes as well;
         // carrying the initial vector would retain a stale pre-elytra candidate.
-        Vec3 postMoveDelta = preCollisionVelocity(result);
+        // In LivingEntity#handleRelativeFrictionAndCalculateMovement,
+        // LivingEntity#moveRelative adds the input to deltaMovement and
+        // LivingEntity#handleOnClimbable then clamps it on a climbable, both
+        // before Entity#move, so the carried velocity holds the accepted input,
+        // clamped while climbing. The travelFallFlying glide adds no input; its
+        // carried velocity is the accepted glide movement.
+        Vec3 carried = preCollisionVelocity(result);
+        Vec3 postMoveDelta = carried;
+        Vec3 input = null;
+        if (result.getValidMovements().getClosestTrace() != null && result.getAcceptedClosestToTarget() != null) {
+            input = acceptedInput(result);
+            postMoveDelta = postMoveDelta.add(input);
+        }
+        CultPlayer player = result.getPlayer();
+        SimulationContext context = result.getSimulationContext();
+        DesyncStatus climbing = player == null ? DesyncStatus.FALSE : Ladder.clampsDeltaMovement(context);
+        if (climbing != DesyncStatus.TRUE) {
+            addPostMoveDeltaMovementCandidates(
+                    candidates, result, postMoveDelta, canZeroX, canZeroY, canZeroZ, clippedY, stepped);
+        }
+        if (climbing != DesyncStatus.FALSE) {
+            // On a climbable the accepted input extends Ladder's clamp of the carried velocity.
+            Vec3 climbingDelta = Ladder.handleOnClimbable(player, context, carried);
+            if (input != null) climbingDelta = climbingDelta.add(input);
+            addPostMoveDeltaMovementCandidates(
+                    candidates,
+                    result,
+                    Ladder.handleOnClimbable(player, context, climbingDelta),
+                    canZeroX,
+                    canZeroY,
+                    canZeroZ,
+                    clippedY,
+                    stepped);
+        }
+    }
+
+    /** Adds what Entity#move leaves of the deltaMovement {@code postMoveDelta} it moved by. */
+    private static void addPostMoveDeltaMovementCandidates(
+            Set<Vec3> candidates,
+            PredictionResult result,
+            Vec3 postMoveDelta,
+            boolean canZeroX,
+            boolean canZeroY,
+            boolean canZeroZ,
+            double clippedY,
+            boolean stepped) {
         CultPlayer player = result.getPlayer();
         boolean use26Dot2 = player != null && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_2);
         if (use26Dot2) {
@@ -379,12 +434,7 @@ public final class VelocityCandidates {
                 postMoveDelta = new Vec3(postMoveDelta.x, postMoveDelta.y, -postMoveDelta.z * bounciness);
             }
         }
-        boolean verticalCollision = stepped
-                || (result.getCollideAxisData().getYPos() != null
-                        && result.getCollideAxisData().getYPos().isLikelyCollide())
-                || (result.getCollideAxisData().getYNeg() != null
-                        && result.getCollideAxisData().getYNeg().isLikelyCollide());
-        if (verticalCollision) {
+        if (stepped || collidedVertically(result)) {
             postMoveDelta = new Vec3(
                     postMoveDelta.x,
                     applyPostVerticalCollisionBlockVelocity(result, postMoveDelta.y, clippedY),
@@ -394,13 +444,37 @@ public final class VelocityCandidates {
         addVelocityCandidates(candidates, postMoveDelta, canZeroX, canZeroY, canZeroZ);
     }
 
+    /** Whether {@code result}'s move likely collided vertically. */
+    public static boolean collidedVertically(PredictionResult result) {
+        return result.getCollideAxisData().getYPos() != null
+                        && result.getCollideAxisData().getYPos().isLikelyCollide()
+                || result.getCollideAxisData().getYNeg() != null
+                        && result.getCollideAxisData().getYNeg().isLikelyCollide();
+    }
+
+    /** Entity#move's vertical deltaMovement once {@code result}'s vertical collision clipped it to {@code movedY}. */
+    public static double afterVerticalCollision(PredictionResult result, double movedY) {
+        return applyPostVerticalCollisionBlockVelocity(result, preCollisionVelocity(result).y, movedY);
+    }
+
     private static double applyPostVerticalCollisionBlockVelocity(
             PredictionResult result, double deltaY, double clippedY) {
-        int onBlock = result.getSimulationContext().getWorldData().getOnBlock();
-        boolean suppressingBounce = result.getSimulationContext().getVehicle() == null
-                && result.getSimulationContext().isSneaking();
-        CultPlayer player = result.getPlayer();
+        SimulationContext context = result.getSimulationContext();
+        return afterVerticalCollision(
+                result.getPlayer(),
+                context.getWorldData().getOnBlock(),
+                context.getVehicle() == null && context.isSneaking(),
+                livingMover(context),
+                deltaY,
+                clippedY);
+    }
 
+    /**
+     * Entity#move's vertical deltaMovement after a vertical collision clipped {@code deltaY} to {@code clippedY} with
+     * {@code onBlock} at Entity#getOnPosLegacy.
+     */
+    public static double afterVerticalCollision(
+            CultPlayer player, int onBlock, boolean suppressingBounce, boolean living, double deltaY, double clippedY) {
         if (player != null && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_2)) {
             // MCP-Reborn 26.2 Entity#restituteMovementAfterCollisions (Entity.java:803-844):
             // sneaking zeroes restitution; otherwise a downward collision bounces
@@ -420,7 +494,7 @@ public final class VelocityCandidates {
                         || BlockIds.is(onBlock, BlockIds.HONEY_BLOCK)) {
                     restitution = 0.0D;
                 } else {
-                    restitution = Math.max(restitution, blockBounciness(result, onBlock));
+                    restitution = Math.max(restitution, blockBounciness(onBlock, living));
                 }
             }
             if (restitution <= 0.0D) {

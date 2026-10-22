@@ -14,6 +14,7 @@ import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.data.ModelBlockStates;
 import ac.cult.cultac.protocol.value.BlockPos;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
@@ -35,6 +36,8 @@ public final class CompensatedBlockEntities {
 
     // Ordinary block writes need lookups but hold no block entity. Allocate storage on the first retained entry.
     private Long2ObjectOpenHashMap<Entry> entries;
+    // Every key whose entry the next tick may change; the rest are fixed points of tick.
+    private LongOpenHashSet ticking;
     private final Supplier<InteractionRegistries> registries;
     private final ModelBlockStates states;
 
@@ -121,16 +124,21 @@ public final class CompensatedBlockEntities {
     }
 
     public void tick() {
-        if (entries == null) return;
-        var iterator = entries.long2ObjectEntrySet().fastIterator();
-        while (iterator.hasNext()) {
-            var slot = iterator.next();
-            var entry = slot.getValue();
+        if (ticking == null) return;
+        var keys = ticking.iterator();
+        while (keys.hasNext()) {
+            long key = keys.nextLong();
+            var entry = entries.get(key);
+            if (entry == null) {
+                keys.remove();
+                continue;
+            }
             var next = ShulkerAnimation.tick(entry.data());
             if (next.type().equals("minecraft:jukebox")
                     && Rules.DATA.registry().value(entry.state(), "has_record").equals("true"))
                 next = JukeboxPlayback.tick(next);
-            if (next != entry.data()) slot.setValue(new Entry(next, entry.state()));
+            if (next != entry.data()) entries.put(key, new Entry(next, entry.state()));
+            else keys.remove();
         }
     }
 
@@ -170,12 +178,16 @@ public final class CompensatedBlockEntities {
         var iterator = entries.long2ObjectEntrySet().fastIterator();
         while (iterator.hasNext()) {
             long key = iterator.next().getLongKey();
-            if (((int) (key >> 38) >> 4) == x && ((int) (key << 26 >> 38) >> 4) == z) iterator.remove();
+            if (((int) (key >> 38) >> 4) == x && ((int) (key << 26 >> 38) >> 4) == z) {
+                iterator.remove();
+                ticking.remove(key);
+            }
         }
     }
 
     public void clear() {
         entries = null;
+        ticking = null;
     }
 
     private Entry get(long key) {
@@ -183,11 +195,18 @@ public final class CompensatedBlockEntities {
     }
 
     private void remove(long key) {
-        if (entries != null) entries.remove(key);
+        if (entries != null) {
+            entries.remove(key);
+            ticking.remove(key);
+        }
     }
 
     private void put(long key, Entry entry) {
-        if (entries == null) entries = new Long2ObjectOpenHashMap<>(2);
+        if (entries == null) {
+            entries = new Long2ObjectOpenHashMap<>(2);
+            ticking = new LongOpenHashSet(2);
+        }
         entries.put(key, entry);
+        ticking.add(key);
     }
 }

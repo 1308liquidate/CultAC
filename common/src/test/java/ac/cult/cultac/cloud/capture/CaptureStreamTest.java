@@ -20,6 +20,9 @@ import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.ProtocolCodecs;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.data.ProtocolData;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
+import io.netty.buffer.Unpooled;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -35,6 +38,133 @@ class CaptureStreamTest {
     private static final int SERVERBOUND_ID = 1;
     private static final int CLIENTBOUND_ID = 2;
     private static final int DIMENSION_ID = 3;
+
+    @Test
+    void borrowedWireCopiesMatchOwnedArraysAcrossDelayedVerdictsPolicyDropsAndReuse() {
+        for (boolean delayedPolicy : new boolean[] {false, true}) {
+            for (boolean direct : new boolean[] {false, true}) {
+                TestSink ownedSink = new TestSink();
+                TestSink copiedSink = new TestSink();
+                CaptureStream owned = joined(ownedSink);
+                CaptureStream copied = joined(copiedSink);
+                if (!delayedPolicy) {
+                    answer(owned);
+                    answer(copied);
+                }
+                ByteBuf wire = direct ? PooledByteBufAllocator.DEFAULT.directBuffer(300) : Unpooled.buffer(300);
+                try {
+                    for (int tick = 1; tick <= 40; tick++) {
+                        if (tick % 13 == 0) {
+                            ownedSink.refuse = 1;
+                            copiedSink.refuse = 1;
+                        }
+                        for (int packet = 0; packet < 32; packet++) {
+                            if (tick % 17 == 0 && packet == 20) {
+                                overfill(owned, tick * 1000L + packet);
+                                overfill(copied, tick * 1000L + packet);
+                            }
+                            boolean serverbound = packet % 3 == 0;
+                            int kind = serverbound ? IntakeWire.SERVERBOUND : IntakeWire.CLIENTBOUND;
+                            int id = serverbound ? SERVERBOUND_ID : CLIENTBOUND_ID;
+                            int length = packet % 4 == 0 ? 280 : 8 + packet % 8;
+                            byte[] bytes = new byte[length];
+                            Arrays.fill(bytes, (byte) (tick + packet));
+                            bytes[0] = (byte) id;
+                            long nanos = tick * 1000L + packet;
+                            int minY = serverbound ? 0 : -64;
+                            int height = serverbound ? 0 : 384;
+                            CaptureStream.Session session = serverbound ? null : SESSION;
+                            owned.tap(kind, id, bytes, nanos, minY, height, session);
+                            wire.clear().writeByte(77).writeBytes(bytes).readerIndex(1);
+                            copied.tap(kind, id, wire, nanos, minY, height, session, 0);
+                            assertEquals(1, wire.readerIndex());
+                            wire.setZero(0, wire.writerIndex());
+                        }
+                        owned.cut(tick * 1000L + 900);
+                        copied.cut(tick * 1000L + 900);
+                        if (tick > 3) {
+                            verdict(owned, tick - 3, tick - 3, 0);
+                            verdict(copied, tick - 3, tick - 3, 0);
+                        }
+                        if (delayedPolicy && tick == 10) {
+                            answer(owned);
+                            answer(copied);
+                        }
+                    }
+                    for (int tick = 38; tick <= 40; tick++) {
+                        verdict(owned, tick, tick, 0);
+                        verdict(copied, tick, tick, 0);
+                    }
+                    assertTrue(ownedSink.sent.size() > 30);
+                    assertEquals(ownedSink.sent.size(), copiedSink.sent.size());
+                    for (int i = 0; i < ownedSink.sent.size(); i++)
+                        assertArrayEquals(ownedSink.sent.get(i), copiedSink.sent.get(i));
+                } finally {
+                    wire.release();
+                }
+            }
+        }
+    }
+
+    @Test
+    void reusableCopyCapacityStaysBoundedAndIsGivenBackWhenTrafficQuietsStallsOrResets() {
+        long process = CapturePacketCopies.processBytes();
+        CaptureStream stream = answered(new TestSink());
+        ByteBuf wire = PooledByteBufAllocator.DEFAULT.directBuffer(300);
+        long second = 1_000_000_000L;
+        try {
+            long nanos = 0;
+            long peak = 0;
+            for (int tick = 1; tick <= 40; tick++) {
+                nanos = tick * 50_000_000L;
+                for (int packet = 0; packet < 160; packet++)
+                    serverbound(stream, wire, 1 + (tick * 7 + packet * 13) % 256, nanos);
+                stream.cut(nanos);
+                if (tick > 3) verdict(stream, tick - 3, tick - 3, 0);
+                peak = Math.max(peak, stream.pooledBytes());
+                assertTrue(stream.pooledBytes() <= CapturePacketCopies.PLAYER_BYTES, stream.pooledBytes() + "");
+            }
+            for (int tick = 38; tick <= 40; tick++) verdict(stream, tick, tick, 0);
+            assertTrue(peak > CapturePacketCopies.MAX_RETAINED_BYTES, peak + "");
+
+            for (int tick = 41; tick <= 100; tick++) {
+                nanos += second;
+                serverbound(stream, wire, 1, nanos);
+                stream.cut(nanos);
+                verdict(stream, tick, tick, 0);
+                assertTrue(stream.pooledBytes() <= CapturePacketCopies.PLAYER_BYTES, stream.pooledBytes() + "");
+            }
+            long quiet = stream.pooledBytes();
+            assertTrue(quiet <= 2 * CapturePacketCopies.POOL_BYTES + 128, quiet + " after a peak of " + peak);
+
+            for (int tick = 101; tick <= 200; tick++) {
+                nanos += 50_000_000L;
+                for (int packet = 0; packet < 160; packet++)
+                    serverbound(stream, wire, 1 + (tick * 11 + packet * 17) % 256, nanos);
+                stream.cut(nanos);
+                assertTrue(stream.pooledBytes() <= CapturePacketCopies.PLAYER_BYTES, stream.pooledBytes() + "");
+                assertTrue(
+                        CapturePacketCopies.processBytes() - process <= CapturePacketCopies.PLAYER_BYTES,
+                        CapturePacketCopies.processBytes() - process + "");
+            }
+
+            stream.reset();
+
+            assertEquals(0, stream.pooledBytes());
+            assertEquals(process, CapturePacketCopies.processBytes());
+        } finally {
+            wire.release();
+        }
+    }
+
+    private static void serverbound(CaptureStream stream, ByteBuf wire, int length, long nanos) {
+        wire.clear()
+                .writeByte(77)
+                .writeByte(SERVERBOUND_ID)
+                .writeZero(length - 1)
+                .readerIndex(1);
+        stream.tap(IntakeWire.SERVERBOUND, SERVERBOUND_ID, wire, nanos, 0, 0, null, 0);
+    }
 
     @Test
     void firstJoinWithAnOpenSocketIsByteIdenticalToAnImmediateJoin() {

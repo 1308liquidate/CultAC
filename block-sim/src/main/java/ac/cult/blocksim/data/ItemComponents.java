@@ -170,7 +170,7 @@ public final class ItemComponents {
         return List.copyOf(result);
     }
     private static JsonObject object(Components components, String key) {
-        var value = components.get(key);
+        var value = components.view(key);
         return value == null ? null : value.getAsJsonObject();
     }
     private static boolean flag(JsonObject value, String key, boolean fallback) {

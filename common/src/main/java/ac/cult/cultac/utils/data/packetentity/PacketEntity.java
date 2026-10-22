@@ -15,6 +15,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package ac.cult.cultac.utils.data.packetentity;
 
+import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.network.packet.EntityPositionPath;
 import ac.cult.cultac.network.packet.PacketCodecUtil;
@@ -27,7 +28,10 @@ import ac.cult.cultac.utils.data.BoatData;
 import ac.cult.cultac.utils.data.ReachInterpolationData;
 import ac.cult.cultac.utils.enums.BoatEntityStatus;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
+import ac.cult.cultac.utils.latency.CompensatedWorld;
+import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.BoundingBoxSize;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.ArrayList;
@@ -75,6 +79,8 @@ public class PacketEntity {
     public boolean noAI = false;
     public EntityPose actionPose = EntityPose.STANDING;
     public boolean actionAlive = true;
+    // The EquipmentSlot.SADDLE item, which a mount's inventory menu shows in its saddle slot.
+    public SimItemStack saddleItem = SimItemStack.EMPTY;
     public byte actionSharedFlags;
     public boolean actionArrowInGround;
     public float scale = 1.0f;
@@ -93,11 +99,21 @@ public class PacketEntity {
 
     public ReachInterpolationData oldPacketLocation;
     public ReachInterpolationData newPacketLocation;
+    // Set by an unproven receipt, fold, teleport, far sync, seat placement or uncertain vehicle; holds for life.
+    private boolean trackedPositionInexact;
     private long clientTickOrder = Long.MAX_VALUE;
     // Reused: valid only until the client tick that computed it applies it.
     private SimpleCollisionBox exactAfterClientTickBox;
     // Holds the current interpolation location only while carrying the target reads its position.
     private SimpleCollisionBox carryLocationBox;
+    private SimpleCollisionBox oldLocationBox;
+    private @Nullable ReachInterpolationData settledInterpolation;
+    private @Nullable Vec3 settledPhysicalPosition;
+    // Valid while the position, the world and its chunk epoch are the ones it was computed for.
+    private @Nullable Vec3 loadedChunkPosition;
+    private @Nullable CompensatedWorld loadedChunkWorld;
+    private long loadedChunkEpoch;
+    private boolean loadedChunk;
 
     public HashMap<MovementEffect, Integer> potionsMap = null;
     public BoatEntityStatus boatStatus = null;
@@ -121,8 +137,19 @@ public class PacketEntity {
         this.clientPhysicalPosition = spawnPosition;
         SimpleCollisionBox spawnBox = GetBoundingBox.getPacketEntityBoundingBox(cultPlayer, x, y, z, this);
         boolean ridingInVehicle = cultPlayer.compensatedEntities.getSelf().inVehicle();
-        this.newPacketLocation =
-                new ReachInterpolationData(cultPlayer, spawnBox, x, y, z, !ridingInVehicle, this, false);
+        this.newPacketLocation = ReachInterpolationData.takingStart(
+                cultPlayer,
+                spawnBox,
+                x,
+                y,
+                z,
+                clientPhysicalYaw,
+                clientPhysicalPitch,
+                clientPhysicalYaw,
+                clientPhysicalPitch,
+                !ridingInVehicle,
+                this,
+                false);
     }
 
     public int getType() {
@@ -151,6 +178,15 @@ public class PacketEntity {
 
     public boolean isHappyGhast() {
         return happyGhast;
+    }
+
+    /** The type test a push or collision with the player applies before any position or riding test. */
+    public boolean mayPushOrCollide() {
+        boolean hardCollidingEntity = boat || minecart || type == EntityTypeIds.STRIDER || happyGhast;
+        // Players can push living entities. Some entities also provide
+        // hard movement collision boxes that Bedrock consumes as geometry.
+        // The one exemption to a living entity is an armor stand (matters due to plugins sending them)
+        return !(!living && !hardCollidingEntity || type == EntityTypeIds.ARMOR_STAND);
     }
 
     public boolean isAnimal() {
@@ -229,22 +265,50 @@ public class PacketEntity {
             return;
         }
 
-        SimpleCollisionBox startingLocation = interpolationStartingLocation(player);
+        boolean placed = placedAtPacketPosition(player);
+        SimpleCollisionBox startingLocation =
+                placed ? packetPositionBox(player) : interpolationStartingLocation(player);
         boolean ridingInVehicle = player.compensatedEntities.getSelf().inVehicle();
         this.oldPacketLocation = newPacketLocation;
-        this.newPacketLocation = new ReachInterpolationData(
+        this.newPacketLocation = ReachInterpolationData.takingStart(
                 player,
                 startingLocation,
                 desyncClientPos.x,
                 desyncClientPos.y,
                 desyncClientPos.z,
-                clientPhysicalYaw,
-                clientPhysicalPitch,
+                placed ? targetYaw : clientPhysicalYaw,
+                placed ? targetPitch : clientPhysicalPitch,
                 targetYaw,
                 targetPitch,
                 !ridingInVehicle,
                 this,
                 uncertainInitialSteps);
+        trackedPositionInexact = true;
+        keepPositionCertainty();
+    }
+
+    /** Carries an inexact tracked position into the current snapshots, and a fold out of them. */
+    private void keepPositionCertainty() {
+        if (newPacketLocation == null) return;
+        if (!newPacketLocation.hasExactPosition()) trackedPositionInexact = true;
+        if (!trackedPositionInexact) return;
+        newPacketLocation.markPositionInexact();
+        if (oldPacketLocation != null) oldPacketLocation.markPositionInexact();
+    }
+
+    /** Keeps the packet-position margin for the rest of this entity's lifetime. */
+    public void markPositionInexact() {
+        trackedPositionInexact = true;
+        keepPositionCertainty();
+    }
+
+    /** Takes on the uncertainty of a position derived from {@code vehicle}, whose flag covers its own ancestry. */
+    public void inheritPositionCertainty(@Nullable PacketEntity vehicle) {
+        if (vehicle != null && vehicle.hasInexactPosition()) markPositionInexact();
+    }
+
+    private boolean hasInexactPosition() {
+        return trackedPositionInexact || (newPacketLocation != null && !newPacketLocation.hasExactPosition());
     }
 
     /** Packet processing appends to the client's queue; its codec base remains separate. */
@@ -267,7 +331,7 @@ public class PacketEntity {
         if (living && (newPacketLocation == null || !newPacketLocation.usesSteppedInterpolation())) {
             SimpleCollisionBox start = interpolationStartingLocation(player);
             Vec3 current = positionFromCollisionBox(start);
-            newPacketLocation = new ReachInterpolationData(
+            newPacketLocation = ReachInterpolationData.takingStart(
                     player,
                     start,
                     current.x,
@@ -290,13 +354,19 @@ public class PacketEntity {
                             newPacketLocation.hasActiveInterpolationTarget()
                                     ? newPacketLocation.targetPosition()
                                     : clientPhysicalPosition);
-            oldPacketLocation = bundled ? null : newPacketLocation;
-            newPacketLocation = newPacketLocation.copy();
+            if (bundled) {
+                oldPacketLocation = null;
+            } else {
+                oldPacketLocation = newPacketLocation;
+                newPacketLocation = newPacketLocation.copy();
+            }
             // Starting/appending an interpolation records the entity's physical transform,
             // including its current passenger attachment, as the next delta reference.
             newPacketLocation.setPhysicalBeforePathAppend(
                     actualPath, targetYaw, targetPitch, clientPhysicalPosition, clientPhysicalYaw, clientPhysicalPitch);
             newPacketLocation.appendPath(actualPath, targetYaw, targetPitch);
+            if (!bundled) trackedPositionInexact = true;
+            keepPositionCertainty();
             return;
         }
         if (bundled)
@@ -356,7 +426,9 @@ public class PacketEntity {
             return;
         }
 
-        SimpleCollisionBox startingLocation = interpolationStartingLocation(player);
+        boolean placed = placedAtPacketPosition(player);
+        SimpleCollisionBox startingLocation =
+                placed ? packetPositionBox(player) : interpolationStartingLocation(player);
         float targetYaw = interpolationTargetYaw(yaw);
         float targetPitch = interpolationTargetPitch(pitch);
         if (matchesActiveInterpolationTarget(
@@ -364,19 +436,20 @@ public class PacketEntity {
             return;
         }
         this.oldPacketLocation = null;
-        this.newPacketLocation = new ReachInterpolationData(
+        this.newPacketLocation = ReachInterpolationData.takingStart(
                 player,
                 startingLocation,
                 desyncClientPos.x,
                 desyncClientPos.y,
                 desyncClientPos.z,
-                clientPhysicalYaw,
-                clientPhysicalPitch,
+                placed ? targetYaw : clientPhysicalYaw,
+                placed ? targetPitch : clientPhysicalPitch,
                 targetYaw,
                 targetPitch,
                 !player.compensatedEntities.getSelf().inVehicle(),
                 this,
                 false);
+        keepPositionCertainty();
     }
 
     private float interpolationTargetYaw(@Nullable Float yaw) {
@@ -426,6 +499,32 @@ public class PacketEntity {
         return newPacketLocation != null
                 && newPacketLocation.hasActiveInterpolationTarget()
                 && newPacketLocation.getExactInterpolationStep() >= 0;
+    }
+
+    /**
+     * Whether a pre-26.3 Java client sets this entity straight onto a packet position: {@code Entity#lerpTo} (1.20.2,
+     * 1.21.1) and {@code Entity#moveOrInterpolateTo} without an {@code InterpolationHandler} (1.21.11) call
+     * {@code setPos}. Living entities other than shulkers, boats, minecarts, fishing hooks, experience orbs and
+     * displays interpolate in some of those versions.
+     */
+    private boolean placedAtPacketPosition(CultPlayer player) {
+        if (player.isBedrockMovement() || player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
+            return false;
+        }
+        if (type == EntityTypeIds.SHULKER) return true;
+        return !living
+                && !boat
+                && !minecart
+                && type != EntityTypeIds.FISHING_BOBBER
+                && type != EntityTypeIds.EXPERIENCE_ORB
+                && type != EntityTypeIds.BLOCK_DISPLAY
+                && type != EntityTypeIds.ITEM_DISPLAY
+                && type != EntityTypeIds.TEXT_DISPLAY;
+    }
+
+    private SimpleCollisionBox packetPositionBox(CultPlayer player) {
+        return GetBoundingBox.getPacketEntityBoundingBox(
+                player, desyncClientPos.x, desyncClientPos.y, desyncClientPos.z, this);
     }
 
     private SimpleCollisionBox interpolationStartingLocation(CultPlayer player) {
@@ -537,6 +636,43 @@ public class PacketEntity {
             }
             return;
         }
+        ReachInterpolationData interpolation = newPacketLocation;
+        Vec3 physicalBefore = clientPhysicalPosition;
+        boolean idleProbe = false;
+        if (oldPacketLocation == null
+                && interpolation != null
+                && clientPhysicalPositionExact
+                && !player.isBedrockMovement()) {
+            // A settled state with the inputs it settled on makes this tick a no-op.
+            if (interpolation == settledInterpolation
+                    && physicalBefore == settledPhysicalPosition
+                    && interpolation.isSettled()) return;
+            idleProbe = interpolation.beginIdleProbe();
+        }
+        stepInterpolation(player, tickingReliably);
+
+        if (player.isBedrockMovement() && isBoat() && bedrockPrediction != null) {
+            ac.cult.cultac.bedrock.prediction.integration.BedrockVehiclePredictionState.rebase(
+                    this, player.getSetbackTeleportUtil().getActiveBedrockCoordinateFrame());
+        }
+
+        // Handle uncertainty of second transaction spanning over multiple ticks
+        if (oldPacketLocation != null) {
+            oldPacketLocation.tickMovement(true, tickingReliably);
+            widenStartingLocationByOldLocation();
+        }
+        if (idleProbe
+                && newPacketLocation == interpolation
+                && oldPacketLocation == null
+                && clientPhysicalPosition == physicalBefore
+                && clientPhysicalPositionExact
+                && interpolation.settleIfIdleTickUnchanged()) {
+            settledInterpolation = interpolation;
+            settledPhysicalPosition = physicalBefore;
+        }
+    }
+
+    private void stepInterpolation(CultPlayer player, boolean tickingReliably) {
         carryInterpolationTargetByLocalPhysics(player);
         SimpleCollisionBox exactAfterClientTick = exactInterpolatedLocationAfterClientTick(player);
         float exactYawAfterClientTick = exactYawAfterClientTick();
@@ -555,17 +691,28 @@ public class PacketEntity {
         } else {
             clientPhysicalPositionExact = false;
         }
+    }
 
-        if (player.isBedrockMovement() && isBoat() && bedrockPrediction != null) {
-            ac.cult.cultac.bedrock.prediction.integration.BedrockVehiclePredictionState.rebase(
-                    this, player.getSetbackTeleportUtil().getActiveBedrockCoordinateFrame());
+    /**
+     * Entity#commonTick for the root of a client tick's ServerboundMoveVehiclePacket, whether or not the server accepts
+     * that packet: InterpolationHandler#interpolate advances the server path the root still follows before
+     * LivingEntity#aiStep reaches travelRidden. Covers the 26.3 stepped interpolation only.
+     */
+    public void interpolateBeforeLocalTravel(CultPlayer player) {
+        if (!hasActiveSteppedInterpolation()) {
+            return;
         }
-
-        // Handle uncertainty of second transaction spanning over multiple ticks
+        stepInterpolation(player, true);
         if (oldPacketLocation != null) {
-            oldPacketLocation.tickMovement(true, tickingReliably);
-            newPacketLocation.updatePossibleStartingLocation(oldPacketLocation.getPossibleMovementLocationCombined());
+            oldPacketLocation.tickMovement(true, true);
+            widenStartingLocationByOldLocation();
         }
+    }
+
+    private boolean hasActiveSteppedInterpolation() {
+        return newPacketLocation != null
+                && newPacketLocation.usesSteppedInterpolation()
+                && newPacketLocation.hasActiveInterpolationTarget();
     }
 
     public void tickPacketInterpolationPreservingPhysical(CultPlayer player, Vec3 physicalPosition) {
@@ -596,7 +743,7 @@ public class PacketEntity {
 
         if (oldPacketLocation != null) {
             oldPacketLocation.tickMovement(true, true);
-            newPacketLocation.updatePossibleStartingLocation(oldPacketLocation.getPossibleMovementLocationCombined());
+            widenStartingLocationByOldLocation();
         }
 
         this.clientPhysicalPosition = physicalPosition;
@@ -619,6 +766,7 @@ public class PacketEntity {
             float physicalPitch) {
         this.oldPacketLocation = null;
         this.newPacketLocation = interpolationData.copy();
+        keepPositionCertainty();
         tickPacketInterpolationPreservingPhysical(player, physicalPosition, physicalYaw, physicalPitch);
     }
 
@@ -627,9 +775,11 @@ public class PacketEntity {
     }
 
     protected void carryInterpolationTargetByLocalPhysics(CultPlayer player, ReachInterpolationData interpolationData) {
+        // Only an interpolating entity carries local movement into its target.
         if (interpolationData == null
                 || !interpolationData.hasActiveInterpolationTarget()
-                || !hasUsableMountedPhysicalPosition(player)) {
+                || !hasUsableMountedPhysicalPosition(player)
+                || placedAtPacketPosition(player)) {
             return;
         }
 
@@ -650,11 +800,21 @@ public class PacketEntity {
         syncDesyncClientPosToInterpolationTarget(interpolationData);
     }
 
+    private void widenStartingLocationByOldLocation() {
+        if (oldLocationBox == null) oldLocationBox = new SimpleCollisionBox();
+        newPacketLocation.updatePossibleStartingLocation(
+                oldPacketLocation.getPossibleMovementLocationCombined(oldLocationBox));
+    }
+
     private void syncDesyncClientPosToInterpolationTarget(ReachInterpolationData interpolationData) {
         if (!interpolationData.usesSteppedInterpolation()
                 && interpolationData == newPacketLocation
                 && interpolationData.hasActiveInterpolationTarget()) {
-            this.desyncClientPos = interpolationData.targetPosition();
+            this.desyncClientPos = position(
+                    interpolationData.targetCenterX(),
+                    interpolationData.targetMinY(),
+                    interpolationData.targetCenterZ(),
+                    desyncClientPos);
         }
     }
 
@@ -663,8 +823,14 @@ public class PacketEntity {
         if (oldPacketLocation == null
                 && newPacketLocation.interpolatesFromPhysicalAfterClientTick()
                 && hasUsableMountedPhysicalPosition(player)) {
-            SimpleCollisionBox physicalLocation = GetBoundingBox.getPacketEntityBoundingBox(
-                    player, clientPhysicalPosition.x, clientPhysicalPosition.y, clientPhysicalPosition.z, this);
+            if (exactAfterClientTickBox == null) exactAfterClientTickBox = new SimpleCollisionBox();
+            SimpleCollisionBox physicalLocation = GetBoundingBox.getBoundingBoxFromPosAndSize(
+                    exactAfterClientTickBox,
+                    clientPhysicalPosition.x,
+                    clientPhysicalPosition.y,
+                    clientPhysicalPosition.z,
+                    BoundingBoxSize.getWidth(player, this),
+                    BoundingBoxSize.getHeight(player, this));
             return newPacketLocation.getExactMovementLocationAfterClientTickFromPhysical(physicalLocation);
         }
         if (!newPacketLocation.hasExactMovementLocationAfterClientTick()) return null;
@@ -749,6 +915,7 @@ public class PacketEntity {
         this.clientPhysicalPositionExact = true;
         // Snapping to an exact position means interpolation is disabled
         this.newPacketLocation = new ReachInterpolationData(box);
+        keepPositionCertainty();
     }
 
     private SimpleCollisionBox passengerPhysicalBox;
@@ -776,6 +943,7 @@ public class PacketEntity {
         oldPacketLocation = null;
         bedrockInterpolation = null;
         setPositionRaw(seat, clientPhysicalYaw, clientPhysicalPitch);
+        markPositionInexact();
         if (!player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
             desyncClientPos = codecBase;
         }
@@ -785,6 +953,21 @@ public class PacketEntity {
         setPositionRaw(box);
         setClientPhysicalRotation(yaw, pitch);
         this.newPacketLocation.setCurrentAndTargetRotation(yaw, pitch);
+    }
+
+    /**
+     * Moves a root the client moves itself to {@code box}. A 26.3 stepped path it still follows keeps its steps and
+     * codec base, since ClientPacketListener#handleMoveVehicle alone cancels it; without one this is
+     * {@link #setPositionRaw(SimpleCollisionBox, float, float)}.
+     */
+    public void moveLocallyControlledRoot(SimpleCollisionBox box, float yaw, float pitch) {
+        if (!hasActiveSteppedInterpolation()) {
+            setPositionRaw(box, yaw, pitch);
+            return;
+        }
+        clientPhysicalPosition = positionFromCollisionBox(box);
+        clientPhysicalPositionExact = true;
+        setClientPhysicalRotation(yaw, pitch);
     }
 
     public void setClientPhysicalRotation(float yaw, float pitch) {
@@ -798,9 +981,11 @@ public class PacketEntity {
 
     /** {@link #positionFromCollisionBox(SimpleCollisionBox)}, returning {@code previous} when it holds those bits. */
     private static Vec3 positionFromCollisionBox(SimpleCollisionBox box, @Nullable Vec3 previous) {
-        double x = (box.maxX - box.minX) / 2 + box.minX;
-        double y = box.minY;
-        double z = (box.maxZ - box.minZ) / 2 + box.minZ;
+        return position((box.maxX - box.minX) / 2 + box.minX, box.minY, (box.maxZ - box.minZ) / 2 + box.minZ, previous);
+    }
+
+    /** A position with these coordinates: {@code previous} when it holds their bits. */
+    private static Vec3 position(double x, double y, double z, @Nullable Vec3 previous) {
         if (previous != null
                 && Double.doubleToRawLongBits(previous.x) == Double.doubleToRawLongBits(x)
                 && Double.doubleToRawLongBits(previous.y) == Double.doubleToRawLongBits(y)
@@ -810,12 +995,16 @@ public class PacketEntity {
         return new Vec3(x, y, z);
     }
 
+    /** {@code Entity#refreshDimensions}: the current, pending and seated positions take the entity's new dimensions. */
     public void refreshDimensions(CultPlayer player) {
-        if (desyncClientPos == null) {
-            return;
+        float width = BoundingBoxSize.getWidth(player, this);
+        float height = BoundingBoxSize.getHeight(player, this);
+        newPacketLocation.resize(width, height);
+        if (oldPacketLocation != null) oldPacketLocation.resize(width, height);
+        if (passengerPhysicalBox != null) {
+            Vec3 feet = positionFromCollisionBox(passengerPhysicalBox);
+            passengerPhysicalBox = GetBoundingBox.getBoundingBoxFromPosAndSize(feet.x, feet.y, feet.z, width, height);
         }
-        setPositionRaw(GetBoundingBox.getPacketEntityBoundingBox(
-                player, desyncClientPos.x, desyncClientPos.y, desyncClientPos.z, this));
     }
 
     public SimpleCollisionBox getPossibleCollisionBoxes() {
@@ -844,6 +1033,22 @@ public class PacketEntity {
                 oldPacketLocation.getPossibleMovementLocationCombined(scratch), out, out);
     }
 
+    /**
+     * Moves {@code box}, one of this entity's position boxes (minY at its position), onto its Java bounding box:
+     * {@code AbstractWindCharge#makeBoundingBox} starts the box 0.15F below the position, and {@code AABB} orders the
+     * corners, so a negative height spans below the position. Bedrock clients keep the position box. Readers of the
+     * position itself (riding offsets, eye positions) use the position box.
+     */
+    public SimpleCollisionBox toBoundingBox(CultPlayer player, SimpleCollisionBox box) {
+        if (player.isBedrockMovement()) return box;
+        if (type == EntityTypeIds.WIND_CHARGE || type == EntityTypeIds.BREEZE_WIND_CHARGE) {
+            box.offset(0, -0.15F, 0);
+        }
+        if (BoundingBoxSize.spansBelowPosition(player, this))
+            box.offset(0, -BoundingBoxSize.getHeight(player, this), 0);
+        return box;
+    }
+
     public List<SimpleCollisionBox> getPossibleMovementCollisionBoxCandidates() {
         if (passengerPhysicalBox != null && riding != null) return List.of(passengerPhysicalBox.copy());
         List<SimpleCollisionBox> candidates = new ArrayList<>();
@@ -866,6 +1071,18 @@ public class PacketEntity {
 
     public long getClientTickOrder() {
         return clientTickOrder;
+    }
+
+    /** Whether {@code world} holds the chunk column containing {@code position}. */
+    public boolean isInLoadedChunk(CompensatedWorld world, Vec3 position) {
+        long epoch = world.chunkEpoch();
+        if (position != loadedChunkPosition || world != loadedChunkWorld || epoch != loadedChunkEpoch) {
+            loadedChunk = world.isChunkLoaded(CultMath.floor(position.x) >> 4, CultMath.floor(position.z) >> 4);
+            loadedChunkPosition = position;
+            loadedChunkWorld = world;
+            loadedChunkEpoch = epoch;
+        }
+        return loadedChunk;
     }
 
     public void setClientTickOrder(long clientTickOrder) {
