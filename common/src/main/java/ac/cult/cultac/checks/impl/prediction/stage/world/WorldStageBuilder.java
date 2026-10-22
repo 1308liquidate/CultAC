@@ -283,10 +283,19 @@ public class WorldStageBuilder {
     // EntityFluidInteraction#update finds the eye only among the fluids inside Entity#getFluidInteractionBox.
     private static boolean eyeInWater(CultPlayer player, SimulationContext context, Pose pose) {
         Vec3 from = context.getStart();
-        SimpleCollisionBox body = context.getVehicle() != null
-                ? context.getFromMinimumExtent()
-                : GetBoundingBox.getBoundingBoxFromPosAndSize(
-                        from.x, from.y, from.z, pose.width * player.dimensionScale, pose.height * player.dimensionScale);
+        if (context.getVehicle() != null) {
+            if (player.isBedrockMovement()) {
+                return ClientFluidQueries.eyesInWater(
+                        player, context.getFromMinimumExtent(), from, from.y + pose.eyeHeight * player.dimensionScale);
+            }
+            // Entity#rideTick runs the passenger's Entity#baseTick where the previous Entity#positionRider seated it;
+            // on the first ride tick that is where Entity#startRiding found it, standing.
+            Vec3 seat = player.compensatedEntities.lastRideTickSeat();
+            from = seat != null ? seat : new Vec3(player.x, player.y, player.z);
+            if (seat == null) pose = Pose.STANDING;
+        }
+        SimpleCollisionBox body = GetBoundingBox.getBoundingBoxFromPosAndSize(
+                from.x, from.y, from.z, pose.width * player.dimensionScale, pose.height * player.dimensionScale);
         return ClientFluidQueries.eyesInWater(player, body, from, from.y + pose.eyeHeight * player.dimensionScale);
     }
 
