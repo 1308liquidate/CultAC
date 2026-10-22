@@ -36,12 +36,15 @@ public class NoFall implements EngineCheck {
         }
 
         SimpleCollisionBox valid = result.getValidMovements().getCollisionIgnoredMaxStartingVelExtents();
+        double stuckSpeedY = result.getSimulationContext().getLastStuckSpeed().y;
+        // Every Entity#move sets onGround from its own collision, so the travel lands by its own displacement:
+        // the reported movement minus the position-only shove.
+        double travelY = result.getTarget().y - result.getPositionOnlyDelta().y / stuckSpeedY;
         // The player is off the ground and can collide to the ground
         if (!result.getSimulationContext().isOnGround()
                 && canCollideDown
-                && valid.maxY + 0.001 < result.getTarget().y // And their valid Y is below their actual movement
-                && downCollide.inMovementSpace(result.getSimulationContext().getLastStuckSpeed().y) + 0.001
-                        >= result.getTarget().y) { // And they recovered by colliding
+                && valid.maxY + 0.001 < travelY // And their valid Y is below their actual movement
+                && downCollide.inMovementSpace(stuckSpeedY) + 0.001 >= travelY) { // And they recovered by colliding
             result.addFlag(noFallPseudo, () -> "false", 0.1);
             flaggedNoFall = true;
         }
