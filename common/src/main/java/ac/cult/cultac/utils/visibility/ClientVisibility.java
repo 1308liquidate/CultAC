@@ -116,10 +116,11 @@ public final class ClientVisibility {
         TransactionVel motion = knockback.secondBread;
         TransactionVel push = explosion.secondBread;
         List<Vec3> left = new ArrayList<>();
-        int replaced = tickEnd;
-        if (motion != null && motion.getTransaction() > tickEnd) {
+        // Tick ends are ordered by receipt ping; a motion and an explosion proven by one shared ping are ordered by
+        // their outbound sequence.
+        boolean motionSinceTickEnd = motion != null && motion.getTransaction() > tickEnd;
+        if (motionSinceTickEnd) {
             left.add(motion.getVel());
-            replaced = motion.getTransaction();
         } else {
             left.addAll(player.checkManager.getSimulationProcessor().getLastDerivedNextTickVelocities());
             if (left.isEmpty()) left.add(Vec3.ZERO);
@@ -131,7 +132,11 @@ public final class ClientVisibility {
             }
         }
         // An explosion's velocity sums the explosions since the tick end or the last motion.
-        Vec3 pushed = push != null && push.getTransaction() > replaced ? push.getVel() : Vec3.ZERO;
+        boolean pushSinceReplacement = push != null
+                && (motionSinceTickEnd
+                        ? push.getOutboundSequence() > motion.getOutboundSequence()
+                        : push.getTransaction() > tickEnd);
+        Vec3 pushed = pushSinceReplacement ? push.getVel() : Vec3.ZERO;
         TransactionVel pendingMotion = knockback.firstBread;
         TransactionVel pendingPush = explosion.firstBread;
         int count = left.size() * (pendingPush == null ? 1 : 2) + (pendingMotion == null ? 0 : 1);
@@ -143,7 +148,7 @@ public final class ClientVisibility {
         }
         if (pendingMotion != null) {
             Vec3 velocity = pendingMotion.getVel();
-            if (pendingPush != null && pendingPush.getTransaction() > pendingMotion.getTransaction())
+            if (pendingPush != null && pendingPush.getOutboundSequence() > pendingMotion.getOutboundSequence())
                 velocity = velocity.add(pendingPush.getVel());
             putMovement(movements, index, velocity);
         }

@@ -80,6 +80,36 @@ class FlushProofRegressionTest {
         }
     }
 
+    @Test
+    void aSetbackCarriesAnExplosionSentAfterAMotionInTheSameFlush() throws Exception {
+        // ClientPacketListener#handleExplosion pushes onto the motion before it, though one ping proves both.
+        assertEquals(
+                setbackVelocityAfter(new Vec3d(.7, 0, 0), null),
+                setbackVelocityAfter(new Vec3d(.5, 0, 0), new Vec3d(.2, 0, 0)));
+    }
+
+    private static Vec3 setbackVelocityAfter(Vec3d motion, Vec3d explosion) throws Exception {
+        try (var f = new JavaTickFixture()) {
+            prepare(f.fixture);
+            Vec3 start = new Vec3(.5, JavaTickFixture.FLOOR_Y + 6, .5);
+            f.place(start, Vec3.ZERO);
+            f.tick(start.add(0, -.0784, 0), false);
+            open(f.fixture);
+            send(f.fixture, new ClientboundEntityMotion(f.player.entityID, motion));
+            if (explosion != null) {
+                send(f.fixture, new ClientboundExplode(Vec3d.ZERO, explosion));
+                assertEquals(
+                        f.player.checkManager.getKnockbackHandler().getLastSent().getTransaction(),
+                        f.player.checkManager.getExplosionHandler().getLastSent().getTransaction());
+            }
+            // The client has the chunk it stands in once it answers a ping sent after it.
+            f.pongThrough(f.player.sendTrailingTransaction());
+            var teleports = f.player.getSetbackTeleportUtil();
+            assertTrue(teleports.executeViolationSetback());
+            return teleports.getRequiredSetBack().getVelocity();
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(
             value = ProtocolVersion.class,

@@ -446,9 +446,11 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
         if (sentKnockback != null) {
             clientVel = sentKnockback.getVel();
         }
-        // Don't apply explosions multiple times when spamming violations by looking at transaction order
+        // Don't apply explosions multiple times when spamming violations. Use wire order: one flush ping can prove
+        // both the motion and a later explosion.
         final boolean explosionIsNewer = sentExplosion != null
-                && (sentKnockback == null || sentExplosion.getTransaction() > sentKnockback.getTransaction());
+                && (sentKnockback == null
+                        || sentExplosion.getOutboundSequence() > sentKnockback.getOutboundSequence());
         if (explosionIsNewer) {
             clientVel = clientVel.add(sentExplosion.getVel());
         }
