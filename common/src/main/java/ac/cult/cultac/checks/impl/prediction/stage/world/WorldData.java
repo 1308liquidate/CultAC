@@ -91,6 +91,15 @@ public class WorldData {
     /** A vehicle's Entity#isInWater after this tick's Entity#baseTick, from the blocks the client holds this tick. */
     boolean vehicleInWater;
 
+    /** Whether LivingEntity#checkAutoSpinAttack may find a LivingEntity after this tick's travel. */
+    boolean spinAttackTarget;
+
+    /**
+     * Whether that LivingEntity may be a RemotePlayer: Player#attack reaches Player#causeExtraKnockback only through
+     * Entity#hurtOrSimulate, and RemotePlayer is the one LivingEntity whose hurtClient returns true.
+     */
+    boolean spinAttackPlayer;
+
     /** A shallow copy: carry contexts share its sub-objects and boxes, so none may be mutated in place. */
     public WorldData copy() {
         return new WorldData(
@@ -127,7 +136,9 @@ public class WorldData {
                 eyeInWater,
                 underwater,
                 swimming,
-                vehicleInWater);
+                vehicleInWater,
+                spinAttackTarget,
+                spinAttackPlayer);
     }
 
     public boolean mustBeInLiquid() {

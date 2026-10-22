@@ -29,6 +29,7 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult.Flag;
 import ac.cult.cultac.checks.impl.prediction.PredictionSetbackState;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext.HardCollidingEntityCollision;
+import ac.cult.cultac.checks.impl.prediction.SimulationContext.SpinRebound;
 import ac.cult.cultac.checks.impl.prediction.checks.PredCheckRunner;
 import ac.cult.cultac.checks.impl.prediction.checks.StepCollisionMemo;
 import ac.cult.cultac.checks.impl.prediction.checks.psuedo.InputKeys;
@@ -117,6 +118,9 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     boolean couldPotentiallyTickSkip = false;
     Set<Vec3> validPlayerStartingVels = new HashSet<>();
     PredictionResult lastPrediction = null;
+    /** The committed tick's LivingEntity#checkAutoSpinAttack certainly hit, so the next tick starts from the rebound. */
+    private boolean certainSpinHit;
+
     boolean lastWorldEyeInWater = false;
     PredCheckRunner flagger = new PredCheckRunner(this.player);
     DesyncStatus lastOnGround = DesyncStatus.FALSE;
@@ -496,6 +500,8 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                     && !teleportAcceptData.getSetback().isPlugin();
         }
         this.couldPotentiallyTickSkip = false;
+        this.certainSpinHit = false;
+        this.player.riptideSpinCertain = false;
         if (!this.player.isBedrockMovement()
                 && teleportAcceptData.getSetback() != null
                 && teleportAcceptData.getSetback().getVelocity() != null) {
@@ -1105,6 +1111,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
 
             this.lastSneaking = this.player.isSneaking;
             this.lastGliding = this.player.isGliding;
+            if (!this.player.isBedrockMovement()) this.endSpinAttack(result);
             this.player.packetStateData.riptideLevel = 0;
             this.player.packetStateData.riptideReleaseCertain = false;
             this.player.riptideSpinAttackTicks = Math.max(0, this.player.riptideSpinAttackTicks - 1);
@@ -1118,6 +1125,39 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         } else {
             this.applyProfileCommit(preparedCommit);
         }
+    }
+
+    /**
+     * Ends the spin where LivingEntity#checkAutoSpinAttack sets autoSpinAttackTicks to 0. A tick that starts from the
+     * rebound ran no check, as the last tick's hit ended the spin. A hit on a LivingEntity the travel certainly
+     * touched ends it now and leaves the next tick only the rebound.
+     */
+    private void endSpinAttack(PredictionResult result) {
+        this.certainSpinHit = false;
+        if (this.player.riptideSpinAttackTicks <= 0) return;
+        SimulationContext context = result.getSimulationContext();
+        boolean spinStarted = this.player.packetStateData.riptideLevel > 0;
+        PredVector start = result.getInitialStartingVel();
+        if (!spinStarted
+                && (context.getSpinRebound() == SpinRebound.ONLY
+                        || start != null && start.hasReason(MovementModifiers.RIPTIDE_ATTACK))) {
+            this.player.riptideSpinAttackTicks = 0;
+        } else if (this.player.riptideSpinCertain && WorldStageBuilder.certainlySpinAttacks(this.player, context)) {
+            this.player.riptideSpinAttackTicks = 0;
+            this.certainSpinHit = true;
+        } else if (context.getWorldData().isSpinAttackTarget() || !this.certainlyMissesWalls(result)) {
+            this.player.riptideSpinCertain = false;
+        }
+    }
+
+    private boolean certainlyMissesWalls(PredictionResult result) {
+        CollideAxisData collide = result.getCollideAxisData();
+        return !result.getSimulationContext().isTestingPointThree()
+                && this.player.isTickingReliablyFor(1)
+                && collide != null
+                && collide.getX() != null
+                && collide.getZ() != null
+                && !collide.couldCollideHorizontally();
     }
 
     /**
@@ -1215,6 +1255,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             return;
         }
         this.startingVelsBeforeRide = null;
+        this.player.riptideSpinCertain = false;
         Vec3 seat = this.player.compensatedEntities.lastRideTickSeat();
         if (seat == null) {
             this.passengerRideTick.record(this.player, this.player.x, this.player.y, this.player.z, true);
@@ -2015,7 +2056,21 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 movementProfile);
         if (player.packetStateData.riptideLevel == 0
                 || player.isBedrockMovement()
-                || this.currentPredictionVehicle() != null) return contexts;
+                || this.currentPredictionVehicle() != null) {
+            return this.withEndedSpinContexts(
+                    contexts,
+                    player,
+                    lastPrediction,
+                    target,
+                    start,
+                    end,
+                    lastTickSkip,
+                    testing,
+                    xRot,
+                    yRot,
+                    authoredMovementFrame,
+                    movementProfile);
+        }
         boolean certain = player.packetStateData.riptideReleaseCertain;
         List<SimulationContext> released = new ArrayList<>(contexts.size() * 2);
         if (!certain) {
@@ -2069,6 +2124,57 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             player.packetStateData.riptideReleaseCertain = certain;
         }
         return released;
+    }
+
+    /**
+     * The contexts, split where the last tick's LivingEntity#checkAutoSpinAttack may have hit and this tick's may hit
+     * too: a hit sets autoSpinAttackTicks to 0, so the rebound tick runs no spin check and travels with the sprint flag
+     * the client sent, while a spin that hit nothing starts without the rebound and may hit this tick.
+     */
+    private List<SimulationContext> withEndedSpinContexts(
+            List<SimulationContext> contexts,
+            CultPlayer player,
+            PredictionResult lastPrediction,
+            Vec3 target,
+            Vec3 start,
+            Vec3 end,
+            LastInstance lastTickSkip,
+            boolean testing,
+            float xRot,
+            float yRot,
+            AuthoredMovementFrame authoredMovementFrame,
+            MovementProfile movementProfile) {
+        if (player.isBedrockMovement()
+                || lastPrediction == null
+                || !lastPrediction.getSimulationContext().getWorldData().isSpinAttackTarget()) return contexts;
+        List<SimulationContext> split = new ArrayList<>(contexts.size() * 2);
+        for (SimulationContext context : contexts) {
+            if (!context.getWorldData().isSpinAttackTarget()) continue;
+            context.setSpinRebound(SpinRebound.NONE);
+            split.add(context);
+        }
+        if (split.isEmpty()) return contexts;
+        int spinTicks = player.riptideSpinAttackTicks;
+        player.riptideSpinAttackTicks = 0;
+        try {
+            List<SimulationContext> rebounds = this.createSimulationContexts(
+                    player,
+                    lastPrediction,
+                    target,
+                    start,
+                    end,
+                    lastTickSkip,
+                    testing,
+                    xRot,
+                    yRot,
+                    authoredMovementFrame,
+                    movementProfile);
+            for (SimulationContext context : rebounds) context.setSpinRebound(SpinRebound.ONLY);
+            split.addAll(rebounds);
+        } finally {
+            player.riptideSpinAttackTicks = spinTicks;
+        }
+        return split;
     }
 
     private List<SimulationContext> createSimulationContexts(
@@ -2225,17 +2331,18 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
      * LocalPlayer#aiStep updates the sprint flag before LivingEntity#travel, and LocalPlayer#sendPosition sends
      * the resulting START/STOP_SPRINTING before the movement, so the client's last START/STOP is the travel flag.
      * LivingEntity#checkAutoSpinAttack runs after travel and can reach Player#causeExtraKnockback ->
-     * setSprinting(false) before that START/STOP, so a riptide spin keeps both states.
+     * setSprinting(false) before that START/STOP when it hits a RemotePlayer, so a tick whose spin may hit one keeps
+     * both states.
      */
     private DesyncStatus sprintingAtTravel(CultPlayer player, @Nullable PacketEntity riding) {
         if (riding != null) return DesyncStatus.FALSE;
-        if (player.isBedrockMovement() || player.riptideSpinAttackTicks > 0) return DesyncStatus.UNKNOWN;
+        if (player.isBedrockMovement()) return DesyncStatus.UNKNOWN;
         return DesyncStatus.fromBoolean(player.isSprinting);
     }
 
     // The tick's START/STOP and movement have already reconciled ClientSprintState to post-aiStep.
     private boolean sprintModifierAtTravel(CultPlayer player, @Nullable PacketEntity riding) {
-        if (riding != null || player.isBedrockMovement() || player.riptideSpinAttackTicks > 0) return true;
+        if (riding != null || player.isBedrockMovement()) return true;
         return player.sprintState.modifier();
     }
 
@@ -2319,6 +2426,11 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         } else {
             world.attachTo(context);
         }
+        if (context.getWorldData().isSpinAttackPlayer()) {
+            context.setIsSprinting(DesyncStatus.UNKNOWN);
+            context.setSprintModifier(true);
+        }
+        if (this.certainSpinHit && riding == null) context.setSpinRebound(SpinRebound.ONLY);
         if (applyLastRequiredStuckSpeed && lastPrediction != null) {
             Vec3 lastRequiredStuckSpeed = lastPrediction
                     .getSimulationContext()

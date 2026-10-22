@@ -4,10 +4,10 @@ import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
 import static ac.cult.cultac.network.JavaTickFixture.describe;
 import static ac.cult.cultac.network.JavaTickFixture.exact;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
+import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.events.packets.listeners.PacketEntityAction;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -20,11 +20,14 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.AttributeModifier;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.BlockPos;
+import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
 import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * A 26.3 client sprinting toward the end of a stone floor, pressing shift so Player#maybeBackOffFromEdge stops it at
@@ -37,10 +40,13 @@ class JavaSneakEdgeSprintTest {
     private static final ServerboundPlayerInput SPRINT =
             new ServerboundPlayerInput(true, false, false, false, false, false, true);
 
-    @Test
-    void theVelocityTheEdgeHidesIsReleasedWithShift() throws Exception {
+    /** LivingEntity#checkAutoSpinAttack finds nothing to hit here, so a spin leaves the edge's velocity alone. */
+    @ParameterizedTest
+    @ValueSource(ints = {0, 20})
+    void theVelocityTheEdgeHidesIsReleasedWithShift(int spinTicks) throws Exception {
         try (var f = new JavaTickFixture()) {
             drop(f);
+            f.player.riptideSpinAttackTicks = spinTicks;
             // LivingEntity#travelInAir's ground friction, 0.6F * 0.91F, applied to the previous move.
             double friction = 0.6F * 0.91F;
             f.place(
@@ -181,9 +187,14 @@ class JavaSneakEdgeSprintTest {
         }
     }
 
-    /** A riptide spin can reset sprinting after travel, so its tick carries no sprint input the edge hides. */
-    @Test
-    void aRiptideSpinCarriesNoSprintInputTheEdgeHides() throws Exception {
+    /**
+     * A riptide spin with a RemotePlayer in reach can reset sprinting after travel through Player#causeExtraKnockback,
+     * so its tick carries no sprint input the edge hides. Player#attack reaches that reset only through a hit that
+     * hurts, and no other LivingEntity's Entity#hurtClient returns true, so an armor stand leaves the input carried.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void onlyARemotePlayerInReachDropsTheSprintInputTheEdgeHides(boolean player) throws Exception {
         try (var f = new JavaTickFixture()) {
             drop(f);
             float yaw = 717.3444213867188F;
@@ -202,16 +213,22 @@ class JavaSneakEdgeSprintTest {
             velocity = new Vec3(delta.x * friction, 0.0, delta.z * friction);
 
             f.player.riptideSpinAttackTicks = 1;
+            if (player) {
+                f.addRemotePlayer(71, position.add(0, 0, 0.5), GameMode.SURVIVAL);
+            } else {
+                f.player.compensatedEntities.addEntity(71, EntityTypeIds.ARMOR_STAND, position.add(0, 0, 0.5), 0, 0, 0);
+            }
             delta = velocity.add(ClientMoveInput.of(f, SPRINT_SNEAK, 0.3F, sprintSpeed, yaw));
             position = position.add(delta.x, 0.0, 0.0);
             PredictionResult result = f.tick(position, true);
             double carriedX = delta.x * friction;
             double carriedZ = delta.z * friction;
-            assertFalse(
+            assertEquals(
+                    !player,
                     f.player.checkManager.getSimulationProcessor().getValidPlayerStartingVels().stream()
                             .anyMatch(next -> Math.abs(next.x - carriedX) < 1.0E-7
                                     && Math.abs(next.z - carriedZ) < 1.0E-7),
-                    "carried the hidden sprint input: " + describe(result));
+                    "the hidden sprint input: " + describe(result));
         }
     }
 

@@ -3,6 +3,7 @@ package ac.cult.cultac.checks.impl.prediction.stage;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.SimulationContext.SpinRebound;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.EntityPush;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.Direction;
@@ -16,6 +17,7 @@ import java.util.Set;
 public class MovementModifiers {
     public static final String FLUID_HOP_REASON = "swim hop";
     public static final String SLIME_BLOCK_LAUNCH = "Slime Block";
+    public static final String RIPTIDE_ATTACK = "riptide attack";
     public static final double FLUID_HOP_Y = (double) 0.3F;
 
     // Keep fluid-hop values centralized so Bedrock prediction and Java-shaped
@@ -95,28 +97,25 @@ public class MovementModifiers {
         boolean canStartWithFluidHop =
                 fluidHopMode == FluidHopMode.INCLUDE && canStartWithFluidHop(state, lastResult, canTickSkip);
         boolean canStartWithRiddenFluidHopFloat = canStartWithRiddenFluidHopFloat(lastResult);
+        Set<Vec3> unrebounded = state.getSpinRebound() == SpinRebound.ONLY ? Set.of() : initial;
         if (canStartWithFluidHop) {
-            for (Vec3 vector : initial) {
+            for (Vec3 vector : unrebounded) {
                 addFluidHopCandidates(start, PredVector.fromStartingVector(vector), canStartWithRiddenFluidHopFloat);
             }
         }
 
-        if (player.riptideSpinAttackTicks > 0
-                && (state.getWorldData().getNumColliding() > 0
-                        || (lastResult != null
-                                && lastResult
-                                                .getSimulationContext()
-                                                .getWorldData()
-                                                .getNumColliding()
-                                        > 0))
-                && state.getVehicle() == null) {
+        if (lastResult != null
+                && lastResult.getSimulationContext().getWorldData().isSpinAttackTarget()
+                && state.getVehicle() == null
+                && state.getSpinRebound() != SpinRebound.NONE) {
             for (Vec3 vector : initial) {
-                PredVector riptideAttack = PredVector.fromStartingVector(vector).multiply(-0.2, "riptide attack");
+                PredVector riptideAttack = PredVector.fromStartingVector(vector).multiply(-0.2, RIPTIDE_ATTACK);
                 start.add(riptideAttack);
 
                 // MCP-Reborn Player#causeExtraKnockback damps attacker X/Z by 0.6
                 // before LivingEntity#checkAutoSpinAttack applies the -0.2 rebound.
-                if (state.getIsSprinting().determineOptimistically()) {
+                if (lastResult.getSimulationContext().getWorldData().isSpinAttackPlayer()
+                        && lastResult.getSimulationContext().getIsSprinting().determineOptimistically()) {
                     start.add(riptideAttack.withXYZ(
                             riptideAttack.x * 0.6, riptideAttack.y, riptideAttack.z * 0.6, "riptide sprint attack"));
                 }
@@ -150,7 +149,7 @@ public class MovementModifiers {
             packetEventsInOrder.sort(Comparator.comparingLong(TransactionVel::getOutboundSequence));
         }
 
-        for (Vec3 vector : initial) {
+        for (Vec3 vector : unrebounded) {
             start.add(PredVector.fromStartingVector(vector));
         }
 
@@ -171,7 +170,7 @@ public class MovementModifiers {
 
             if (canStartWithFluidHop) {
                 addFluidHopCandidates(start, pointThree, canStartWithRiddenFluidHopFloat);
-                for (Vec3 vector : initial) {
+                for (Vec3 vector : unrebounded) {
                     PredVector skippedVector = PredVector.fromStartingVector(vector);
                     skippedVector.setTickSkip(true);
                     addFluidHopCandidates(start, skippedVector, canStartWithRiddenFluidHopFloat);

@@ -23,7 +23,9 @@ import ac.cult.cultac.utils.collisions.datatypes.CollisionBox;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.*;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityArmorStand;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityPlayer;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
 import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
@@ -36,6 +38,7 @@ import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
 import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.FluidTypeFlowing;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
+import ac.cult.cultac.utils.nmsutil.RiptideUtil;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -171,6 +174,7 @@ public class WorldStageBuilder {
 
         boolean isSuffocating = mightBeSuffocating(player, simulationContext);
         int numColliding = getNumEntitiesCollidingWith(player, simulationContext);
+        SpinTarget spinTarget = spinTarget(player, simulationContext);
         CarriedPush carriedPush = player.checkManager.getSimulationProcessor().getCarriedPush();
         int numCarriedPushing = pushersFromLastTick(simulationContext, lastPrediction, !carriedPush.isZero());
         boolean pushable =
@@ -294,7 +298,9 @@ public class WorldStageBuilder {
                 eyeInWater,
                 underwater,
                 swimming,
-                simulationContext.getVehicle() != null && minFluidState.isInWater());
+                simulationContext.getVehicle() != null && minFluidState.isInWater(),
+                spinTarget != SpinTarget.NONE,
+                spinTarget == SpinTarget.PLAYER);
     }
 
     // EntityFluidInteraction#update finds the eye only among the fluids inside Entity#getFluidInteractionBox.
@@ -596,6 +602,83 @@ public class WorldStageBuilder {
                 hardCollidingEntityCollisions == null ? List.of() : List.copyOf(hardCollidingEntityCollisions));
 
         return numColliding;
+    }
+
+    /** What LivingEntity#checkAutoSpinAttack may hit: no LivingEntity, any LivingEntity, or possibly a RemotePlayer. */
+    private enum SpinTarget {
+        NONE,
+        LIVING,
+        PLAYER
+    }
+
+    /**
+     * The LivingEntity that may lie in the box LivingEntity#checkAutoSpinAttack searches while autoSpinAttackTicks is
+     * positive: the player's boxes before and after the travel, the box before it lifted by a release on the ground.
+     * Every LivingEntity but a spectator counts, armor stands included.
+     */
+    private static SpinTarget spinTarget(CultPlayer player, SimulationContext context) {
+        if (context.getVehicle() != null || player.riptideSpinAttackTicks <= 0) return SpinTarget.NONE;
+        Vec3 from = context.getStart();
+        SimpleCollisionBox start = GetBoundingBox.getPlayerBoundingBox(player, from.x, from.y, from.z);
+        SimpleCollisionBox sweep = start.copy().union(context.getToMaximumExtent());
+        if (RiptideUtil.releasedOnTheGround(player)) {
+            for (SimpleCollisionBox lifted : RiptideUtil.liftedBoxes(player, start)) sweep.union(lifted);
+        }
+        SimpleCollisionBox entityBounds = new SimpleCollisionBox();
+        SimpleCollisionBox entityScratch = new SimpleCollisionBox();
+        CompensatedEntities entities = context.getEntities();
+        PacketEntity selfRidingRoot = entities.selfRidingRoot();
+        PacketEntity serverVehicleRoot = entities.serverVehicleRoot();
+        SpinTarget target = SpinTarget.NONE;
+        for (PacketEntity entity : entities.entityMap.values()) {
+            if (!entity.isLivingEntity() || isSpectator(entity, entities)) continue;
+            SimpleCollisionBox entityBox;
+            if (entities.isUntrackedRider(entity, selfRidingRoot, serverVehicleRoot)) {
+                if (!entities.untrackedRiderMayReach(entity, sweep, entityBounds, entityScratch)) continue;
+                entityBox = entities.untrackedRiderPushBox(entity);
+                if (entityBox == null) continue;
+                entityBox = entity.toBoundingBox(player, entityBox);
+            } else {
+                entityBox = entity.toBoundingBox(
+                        player, entity.getPossibleMovementCollisionBoxes(entityBounds, entityScratch));
+            }
+            if (!intersects(entityBox, 0.0D, 0.0D, sweep)) continue;
+            if (entity instanceof PacketEntityPlayer) return SpinTarget.PLAYER;
+            target = SpinTarget.LIVING;
+        }
+        return target;
+    }
+
+    /**
+     * Whether LivingEntity#checkAutoSpinAttack certainly finds a LivingEntity after the travel to the context's end: a
+     * living entity at rest, in a box the client has applied, intersects the least box the player swept.
+     */
+    public static boolean certainlySpinAttacks(CultPlayer player, SimulationContext context) {
+        if (context.getVehicle() != null
+                || context.getRiptideLevel() != 0
+                || context.isTestingPointThree()
+                || !player.isTickingReliablyFor(1)) return false;
+        int received = player.lastTransactionReceived.get();
+        SimpleCollisionBox sweep = context.getFromMinimumExtent().union(context.getToMinimumExtent());
+        for (PacketEntity entity : context.getEntities().entityMap.values()) {
+            if (!entity.isLivingEntity()
+                    || entity instanceof PacketEntityPlayer
+                    || entity.type == EntityTypeIds.PUFFERFISH
+                    || entity instanceof PacketEntityArmorStand stand && !stand.hasMovementSize()
+                    || entity.isDead
+                    || !entity.hasCertainBox(received)) continue;
+            SimpleCollisionBox entityBox = entity.toBoundingBox(
+                    player, entity.getExactMovementCollisionBox().copy());
+            if (intersects(entityBox, 0.0D, 0.0D, sweep)) return true;
+        }
+        return false;
+    }
+
+    /** EntitySelector#NO_SPECTATORS, which Level#getEntities applies, for a remote player of known game mode. */
+    private static boolean isSpectator(PacketEntity entity, CompensatedEntities entities) {
+        return entity instanceof PacketEntityPlayer remote
+                && remote.profile != null
+                && remote.actionSpectator(entities.clientPlayerModes);
     }
 
     /** The boxes the player's own box may hold through the context's movement. */

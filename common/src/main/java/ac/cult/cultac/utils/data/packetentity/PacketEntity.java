@@ -92,6 +92,8 @@ public class PacketEntity {
     private float replacedScale = Float.NaN;
     // The transaction whose answer proves the client applied every replacement.
     private int sizeProvenAt = Integer.MIN_VALUE;
+    // The transaction whose answer proves the client applied the last entity data.
+    private int dataProvenAt = Integer.MIN_VALUE;
     public boolean onGround = false;
     public Vec3 deltaMovement = Vec3.ZERO;
     public Vec3 clientPhysicalPosition;
@@ -1175,6 +1177,25 @@ public class PacketEntity {
             index -= old;
         }
         return newPacketLocation.possibleMovementLocation(index, out);
+    }
+
+    /** Entity data, which the client has applied once it answers provenAt. */
+    public void onData(int provenAt) {
+        dataProvenAt = Math.max(dataProvenAt, provenAt);
+    }
+
+    /**
+     * Whether a client that answered {@code received} shows this entity at rest in the one box
+     * getExactMovementCollisionBox holds, with every entity data the server sent applied.
+     */
+    public boolean hasCertainBox(int received) {
+        return riding == null
+                && received >= dataProvenAt
+                && !hasInexactPosition()
+                && unprovenUnbundledPaths == 0
+                && replacedPoses == 0
+                && Float.isNaN(replacedScale)
+                && getExactMovementCollisionBox() != null;
     }
 
     public SimpleCollisionBox getExactMovementCollisionBox() {

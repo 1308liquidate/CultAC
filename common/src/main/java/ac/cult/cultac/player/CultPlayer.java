@@ -200,6 +200,9 @@ public class CultPlayer implements GrimUser {
     private volatile @Nullable FlagArbiter flagArbiter;
     // End manager like classes
     public int riptideSpinAttackTicks;
+    /** Whether the client is certainly in a riptide spin attack. */
+    public boolean riptideSpinCertain;
+
     private @MonotonicNonNull PacketTracker packetTracker;
     public final @NotNull PacketOrderProcessor packetOrderProcessor = new PacketOrderProcessor(this);
     // Debug stimulus: drops interactions so the resync paths can be exercised.

@@ -1052,6 +1052,7 @@ public class CompensatedEntities {
     public void updateEntityMetadata(int entityID, List<EntityMetadata.Entry> watchableObjects, int provenAt) {
         PacketEntity entity = player.compensatedEntities.getEntity(entityID);
         if (entity == null) return;
+        entity.onData(provenAt);
         if (entity instanceof PacketEntityHanging hanging) hanging.updateActionMetadata(watchableObjects);
         if (entity instanceof PacketEntityCat cat)
             cat.updateActionMetadata(

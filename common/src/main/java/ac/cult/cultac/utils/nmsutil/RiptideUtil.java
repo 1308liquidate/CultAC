@@ -130,6 +130,14 @@ public final class RiptideUtil {
     public static List<SimpleCollisionBox> glideStartBoxes(CultPlayer player) {
         SimpleCollisionBox box = GetBoundingBox.getPlayerBoundingBox(player, player.x, player.y, player.z);
         if (!releasedOnTheGround(player)) return List.of(box);
+        return liftedBoxes(player, box);
+    }
+
+    /**
+     * The boxes TridentItem#releaseUsing's lift on the ground may move {@code box} to, by a lift that consumes a
+     * carried Entity#stuckSpeedMultiplier.
+     */
+    public static List<SimpleCollisionBox> liftedBoxes(CultPlayer player, SimpleCollisionBox box) {
         PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
         StuckSpeedData stuck =
                 last == null ? null : last.getSimulationContext().getWorldData().getStuckSpeed();

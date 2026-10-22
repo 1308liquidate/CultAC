@@ -34,6 +34,19 @@ import lombok.ToString;
 @Getter
 @ToString
 public class SimulationContext {
+    /**
+     * Whether this tick starts from LivingEntity#checkAutoSpinAttack's -0.2 rebound: a hit scales deltaMovement and
+     * sets autoSpinAttackTicks to 0, while a spin that hit nothing leaves deltaMovement as it was.
+     */
+    public enum SpinRebound {
+        /** The last tick may have hit. */
+        OPTIONAL,
+        /** The last tick hit nothing. */
+        NONE,
+        /** The last tick hit. */
+        ONLY
+    }
+
     private static final Vec3 NO_STUCK_SPEED = new Vec3(1, 1, 1);
 
     @Setter
@@ -78,6 +91,8 @@ public class SimulationContext {
     Integer jumpAmplifier;
     float depthStriderLevel;
     int swiftSneakLevel;
+
+    @Setter
     DesyncStatus isSprinting;
     // Whether movement_speed may carry minecraft:sprinting during travel
     @Setter
@@ -113,6 +128,10 @@ public class SimulationContext {
      */
     @Setter
     Vec3 riptideLiftStuck;
+
+    /** The starts the last tick's LivingEntity#checkAutoSpinAttack leaves this tick. */
+    @Setter
+    SpinRebound spinRebound = SpinRebound.OPTIONAL;
 
     LastInstance lastTickSkip;
     boolean isTestingPointThree;

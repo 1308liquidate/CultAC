@@ -163,8 +163,8 @@ final class SneakEdgeBackoff {
                 && world.getClimbingAtStart() == DesyncStatus.FALSE
                 && !world.isMightBeInBlock()
                 && context.getMaxAttackSlow() == 0
-                // LivingEntity#checkAutoSpinAttack can reset sprinting after travel.
-                && player.riptideSpinAttackTicks == 0
+                // LivingEntity#checkAutoSpinAttack can reset sprinting after travel when it hits a RemotePlayer.
+                && !world.isSpinAttackPlayer()
                 // LivingEntity#travelInWater moves by moveRelative(0.02F) when no water_movement_efficiency raises it.
                 && (world.getInWater() == DesyncStatus.FALSE
                         || world.getInWater() == DesyncStatus.TRUE && context.getWaterMovementEfficiency() == 0.0F)

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.data.BlockIds;
+import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.movement.timer.AbstractTimerCheck;
 import ac.cult.cultac.checks.impl.movement.timer.DumbTimer;
 import ac.cult.cultac.checks.impl.movement.timer.TimerCheck;
@@ -27,6 +28,7 @@ import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundExplode;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerInfoUpdate;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerPosition;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundSetPassengers;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundAcceptTeleportation;
@@ -39,11 +41,16 @@ import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Relative;
 import ac.cult.cultac.protocol.value.Vec3d;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityPlayer;
+import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.lang.reflect.Field;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.mockito.Mockito;
 
 /** A 26.3 survival client over a stone floor at {@link #FLOOR_Y}, fed packets through the receive listeners. */
@@ -102,6 +109,20 @@ final class JavaTickFixture implements AutoCloseable {
         player.lastOnGround = onGround;
         player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.fromBoolean(onGround));
         player.checkManager.getSimulationProcessor().seedStartingVelocity(velocity);
+    }
+
+    /** Adds a remote player whose PlayerInfo gives it {@code mode}. */
+    void addRemotePlayer(int id, Vec3 at, GameMode mode) {
+        UUID profile = UUID.randomUUID();
+        var info = new ClientboundPlayerInfoUpdate(
+                EnumSet.of(
+                        ClientboundPlayerInfoUpdate.Action.ADD_PLAYER,
+                        ClientboundPlayerInfoUpdate.Action.UPDATE_GAME_MODE),
+                List.of(new ClientboundPlayerInfoUpdate.Entry(profile, mode, Map.of())));
+        CompensatedEntities entities = player.compensatedEntities;
+        entities.clientPlayerModes.update(info, Set.of(profile), entities.entityMap.values());
+        entities.addEntity(id, EntityTypeIds.PLAYER, at, 0, 0, 0);
+        ((PacketEntityPlayer) entities.getEntity(id)).profile = profile;
     }
 
     void input(ServerboundPlayerInput input) {
