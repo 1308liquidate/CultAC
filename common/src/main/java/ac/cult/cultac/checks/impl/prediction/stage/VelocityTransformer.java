@@ -148,19 +148,19 @@ public class VelocityTransformer {
 
     private List<PredVector> applyLegacyLivingVehicleDrag(CultPlayer player, List<PredVector> input) {
         PacketEntity vehicle = simulationContext.getVehicle();
-        if (simulationContext.getVersion() != ClientVersion.V_1_21_2
+        if (simulationContext.getVersion().isNewerThanOrEquals(ClientVersion.V_1_21_5)
                 || vehicle == null
                 || !vehicle.isLivingEntity()
                 || !player.packetStateData.isVehicleMovementFromClientTick()
                 || vehicle.newPacketLocation != null && vehicle.newPacketLocation.hasActiveInterpolationTarget()) {
             return input;
         }
-        // 1.21.2/1.21.3 LivingEntity#aiStep scales deltaMovement before
-        // thresholding and travelRidden because Entity#isEffectiveAi is false
+        // Before 1.21.5, LivingEntity#aiStep scales deltaMovement before
+        // thresholding and travelRidden because Mob#isEffectiveAi is false
         // on the client, including locally controlled living vehicles. The
         // preceding lerpSteps > 0 branch skips this drag, including the final
         // interpolation step; prediction still sees the pre-tick target here.
-        // Newer clients instead test canSimulateMovement and retain the delta.
+        // From 1.21.5 the branch tests canSimulateMovement, which keeps the delta.
         List<PredVector> transformed = new ArrayList<>(input.size());
         for (PredVector vector : input) {
             transformed.add(vector.multiply(0.98D, "legacy living vehicle drag"));
