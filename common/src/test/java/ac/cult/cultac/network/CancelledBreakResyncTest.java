@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.cultac.CultAPI;
+import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.checks.impl.breaking.FastBreak;
 import ac.cult.cultac.checks.impl.verbose.VerboseCodecs;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
@@ -103,6 +104,17 @@ class CancelledBreakResyncTest {
             assertEquals(new BlockUpdate(TARGET, state("stone")), correction.get(update));
             assertEquals(new ClientboundBlockChangedAck(2), correction.get(ack));
             assertTrue(update < ack, "the update must arrive while the break is still predicted");
+        }
+    }
+
+    @Test
+    void aRejectedBedrockDigSendsNoJavaCorrection() throws Exception {
+        try (var setup = new Setup()) {
+            setup.player.movementPlatform = MovementPlatform.BEDROCK;
+            setup.player.blockActionReconciler.rejectDig(
+                    new ServerboundPlayerAction(PlayerAction.STOP_DESTROY_BLOCK, TARGET, Direction.NORTH, 2));
+
+            assertEquals(List.of(), setup.output());
         }
     }
 

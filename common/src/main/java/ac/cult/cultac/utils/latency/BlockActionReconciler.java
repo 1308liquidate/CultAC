@@ -73,6 +73,7 @@ public final class BlockActionReconciler {
     }
 
     public void rejectDig(ServerboundPlayerAction packet) {
+        if (player.isBedrockMovement()) return;
         if (CultAPI.INSTANCE.getConfigManager().isObserveOnly()) {
             forwarded(packet.sequence());
             return;
