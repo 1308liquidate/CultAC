@@ -39,7 +39,8 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
         if (root instanceof PacketEntityNautilus nautilus) {
             nautilus.tickClientState();
         }
-        if (root instanceof PacketEntityCamel camel) {
+        // ClientLevel#tickEntities runs Camel#tick for every camel, ridden or not.
+        for (PacketEntityCamel camel : player.compensatedEntities.camels()) {
             camel.tickDashCooldown();
         }
         PacketEntityHorse horse = player.compensatedEntities.vehicles.getClientVisibleHorseRoot();
