@@ -20,6 +20,7 @@ import ac.cult.cultac.protocol.value.PlayerCommandAction;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
+import ac.cult.cultac.utils.nmsutil.ClientMiningState;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -55,7 +56,7 @@ class JavaSprintStackedWaterTest {
     @ParameterizedTest
     @EnumSource(
             value = ClientVersion.class,
-            names = {"V_26_1", "V_26_2", "V_26_3"})
+            names = {"V_1_21_2", "V_1_21_4", "V_1_21_11", "V_26_1", "V_26_2", "V_26_3"})
     void theSprintStartedWithTheEyeInTheUpperWaterIsNotSprintG(ClientVersion version) throws Exception {
         try (var f = new JavaTickFixture()) {
             JavaTickFixture.setField(CultPlayer.class, f.player, "resolvedClientVersion", version);
@@ -109,6 +110,47 @@ class JavaSprintStackedWaterTest {
             assertTrue(ClientFluidQueries.eyesInWater(f.player, body, feet, FLOOR_Y + 8 / 9.0F), version.toString());
             assertFalse(ClientFluidQueries.eyesInWater(f.player, body, feet, FLOOR_Y + 0.95), version.toString());
         }
+    }
+
+    /**
+     * From 1.20.5 Entity#updateFluidOnEyes, and from 26.1 EntityFluidInteraction#update, sample the eye itself: an eye
+     * over the 8/9 surface of a water source is dry, for movement and for Player#getDestroySpeed alike.
+     */
+    @ParameterizedTest
+    @EnumSource(
+            value = ClientVersion.class,
+            names = {"V_1_20_5", "V_1_21", "V_1_21_2", "V_1_21_4", "V_1_21_11", "V_26_1", "V_26_2", "V_26_3"})
+    void anEyeOverTheSurfaceIsDry(ClientVersion version) throws Exception {
+        try (var f = new JavaTickFixture()) {
+            water(f, FLOOR_Y + 1);
+            JavaTickFixture.setField(CultPlayer.class, f.player, "resolvedClientVersion", version);
+            assertEquals(false, eyeInWaterAt(f, FLOOR_Y + 1.95), version + " over the surface");
+            assertEquals(true, eyeInWaterAt(f, FLOOR_Y + 1.88), version + " under the surface");
+        }
+    }
+
+    /** Before 1.20.5 Entity#updateFluidOnEyes samples 0.11111111F under the eye, which reaches under the surface. */
+    @ParameterizedTest
+    @EnumSource(
+            value = ClientVersion.class,
+            names = {"V_1_20_3"})
+    void anEyeBefore1_20_5SamplesUnderItself(ClientVersion version) throws Exception {
+        try (var f = new JavaTickFixture()) {
+            water(f, FLOOR_Y + 1);
+            JavaTickFixture.setField(CultPlayer.class, f.player, "resolvedClientVersion", version);
+            assertEquals(true, eyeInWaterAt(f, FLOOR_Y + 1.95), version + " over the surface");
+            assertEquals(false, eyeInWaterAt(f, FLOOR_Y + 2.02), version + " over the lowered surface");
+        }
+    }
+
+    /** Both eye samplers for a standing player whose eye is at {@code eyeY}; they must agree. */
+    private static boolean eyeInWaterAt(JavaTickFixture f, double eyeY) {
+        double feetY = eyeY - f.player.getEyeHeight();
+        f.place(new Vec3(0.5, feetY, 0.5), Vec3.ZERO);
+        var body = new SimpleCollisionBox(0.2, feetY, 0.2, 0.8, feetY + 1.8, 0.8, false);
+        boolean movement = ClientFluidQueries.eyesInWater(f.player, body, new Vec3(0.5, feetY, 0.5), eyeY);
+        assertEquals(movement, ClientMiningState.of(f.player).eyesInWater(), "mining eye at " + eyeY);
+        return movement;
     }
 
     private static void water(JavaTickFixture f, int y) {
