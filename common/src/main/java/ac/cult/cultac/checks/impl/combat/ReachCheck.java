@@ -59,6 +59,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
     public record MeasuredAttack(
             int index, int entityId, int type, SimpleCollisionBox box, List<Vec3> origins, double reach) {}
 
+    private static final String MISSED_HITBOX = "Missed hitbox";
     // CultPlayer#getPossibleEyeHeights at scale 1.
     private static final double[] EYE_HEIGHTS = {0.4, 1.27, 1.62};
     private final ClientVisibilityProcessor visibility;
@@ -231,15 +232,18 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
                     attack.fromCandidates(),
                     attack.reach(),
                     false);
-            if (result != null) {
+            if (MISSED_HITBOX.equals(result)) {
+                player.checkManager
+                        .getCheck(hitboxes())
+                        .flag(
+                                attack.type() == EntityTypeIds.PLAYER
+                                        ? ""
+                                        : "type=" + EntityTypeUtil.getKey(attack.type()));
+            } else if (result != null) {
                 if (attack.type() != EntityTypeIds.PLAYER) {
                     result += " type=" + EntityTypeUtil.getKey(attack.type()).getPath();
                 }
-                if (result.startsWith("Missed hitbox")) {
-                    player.checkManager.getCheck(hitboxes()).flag(result);
-                } else {
-                    flag(result);
-                }
+                flag(result);
             }
         }
 
@@ -344,7 +348,7 @@ public abstract class ReachCheck extends Check implements CheckListener, ClientT
         if (enforced) {
             if (bestDistance == Double.POSITIVE_INFINITY) {
                 cancelBuffer = 1;
-                return "Missed hitbox";
+                return MISSED_HITBOX;
             } else if (excess() > 0) {
                 cancelBuffer = 1;
                 return bestFar < bestMin
