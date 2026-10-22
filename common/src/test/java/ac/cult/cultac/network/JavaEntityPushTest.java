@@ -19,9 +19,12 @@ import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketDirection;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityPositionSync;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundRemoveEntities;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.EntityPose;
+import ac.cult.cultac.protocol.value.PositionPath;
+import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
@@ -582,6 +585,29 @@ class JavaEntityPushTest {
         }
     }
 
+    /**
+     * ClientPacketListener#handleEntityPositionSync moves an entity too far to interpolate with Entity#snapTo, which
+     * leaves its InterpolationHandler running: the next interpolate shifts the steps it still owes by the jump, so they
+     * carry it on from the synced position into the player.
+     */
+    @Test
+    void anEntitySnappedMidInterpolationPushesFromWhereItsRemainingStepsLeaveIt() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            f.place(STANDING, Vec3.ZERO);
+            f.input(NONE);
+            PacketEntity entity = entity(f, 100, SNAP_FROM);
+            assertExact(f.tick(STANDING, true));
+            entity.onFirstTransaction(true, true, SNAP_STEPPING_DX, 0, 0, f.player);
+            entity.onSecondTransaction();
+            assertExact(f.tick(STANDING, true));
+
+            positionSync(f, 100, SNAPPED);
+            assertExact(f.tick(STANDING, true));
+            assertExact(f.tick(STANDING, true));
+            assertExact(f.tick(STANDING.add(-pushFrom(SNAPPED.x + 2.0 / 3.0 * SNAP_STEPPING_DX - STANDING.x), 0, 0), true));
+        }
+    }
+
     @Test
     void anEntityKeptThroughARespawnPushesThePlayerOnFirstContact() throws Exception {
         try (var f = new JavaTickFixture()) {
@@ -757,6 +783,25 @@ class JavaEntityPushTest {
         f.input(NONE);
         assertExact(f.tick(START, false));
         assertExact(f.tick(CONTACT, false));
+    }
+
+    private static final Vec3 STANDING = new Vec3(0.5, FLOOR_Y, 0.5);
+    /** Clear of {@link #STANDING}'s contact box; the last of the steps it still owes there lands the entity on it. */
+    private static final Vec3 SNAPPED = new Vec3(1.75, FLOOR_Y, 0.5);
+    /** More than 64 blocks from {@link #SNAPPED}, so a position sync there snaps rather than interpolates. */
+    private static final Vec3 SNAP_FROM = SNAPPED.add(0, 0, 80);
+    /** Three interpolation steps of -0.4 each. */
+    private static final double SNAP_STEPPING_DX = -1.2;
+
+    /** An entity_position_sync of entity {@code id} to {@code position}, answered through its pings. */
+    private static void positionSync(JavaTickFixture f, int id, Vec3 position) {
+        var sync = new ClientboundEntityPositionSync(
+                id, new PositionPath.Linear(new Vec3d(position.x, position.y, position.z)), 0.0F, 0.0F, true);
+        var event = new PacketSendEvent<>(
+                f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_POSITION_SYNC, sync, false);
+        f.player.packetEntityReplication.onEntityPositionSync(event, f.player, sync);
+        event.tasksAfter().forEach(Runnable::run);
+        f.pongThrough(f.player.lastTransactionSent.get());
     }
 
     /** An entity snapped to {@code position}, as by a position sync too far to interpolate. */

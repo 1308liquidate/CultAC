@@ -974,6 +974,32 @@ public class PacketEntity {
     }
 
     /**
+     * Entity#snapTo (Entity#moveTo before 1.21.5), which leaves the running interpolation in place: the entity sits at
+     * {@code box} and its next step lerps on from there. From 1.21.5, InterpolationHandler#interpolate first shifts the
+     * path it still follows by the jump from where its last step left the entity, where the shifted target is collision
+     * free; before it, LivingEntity#aiStep lerps toward the unshifted lerp target. A path whose current location is not
+     * exact is replaced by {@code box}.
+     */
+    public void snapTo(CultPlayer player, SimpleCollisionBox box, float yaw, float pitch) {
+        if (newPacketLocation == null
+                || !newPacketLocation.hasActiveInterpolationTarget()
+                || newPacketLocation.getExactMovementLocation() == null) {
+            setPositionRaw(box, yaw, pitch);
+            return;
+        }
+        Vec3 snappedPosition = positionFromCollisionBox(box);
+        clientPhysicalPosition = snappedPosition;
+        clientPhysicalPositionExact = true;
+        setClientPhysicalRotation(yaw, pitch);
+        if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_5)) {
+            carryInterpolationTargetByLocalPhysics(player);
+        }
+        newPacketLocation.setExactMovementLocation(box);
+        newPacketLocation.setExactRotation(yaw, pitch);
+        desyncClientPos = snappedPosition;
+    }
+
+    /**
      * Moves a root the client moves itself to {@code box}. A 26.3 path it still follows keeps its steps and
      * codec base, since ClientPacketListener#handleMoveVehicle alone cancels it; without one this is
      * {@link #setPositionRaw(SimpleCollisionBox, float, float)}.

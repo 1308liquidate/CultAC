@@ -1920,7 +1920,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 && (!player.compensatedEntities.isTicking(entity)
                         || entity.clientPhysicalPosition.distanceToSqr(path.endPosition()) > 4096.0D)) {
             Vec3 target = path.endPosition();
-            entity.setPositionRaw(
+            entity.snapTo(
+                    player,
                     ac.cult.cultac.utils.nmsutil.GetBoundingBox.getPacketEntityBoundingBox(
                             player, target.x, target.y, target.z, entity),
                     movement.yaw(),
