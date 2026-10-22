@@ -184,7 +184,12 @@ public class WorldStageBuilder {
         // If the player isn't in water, then they aren't in a bubble column
         final BubbleColumnData bubble = computeBubbleColumns(player, to, simulationContext);
 
-        PistonPushes push = player.compensatedWorld.tickPlayerInPistonPushingArea(simulationContext);
+        PistonPushes push = player.compensatedWorld.tickPlayerInPistonPushingArea(
+                simulationContext,
+                lastOnGround.determineOptimistically(),
+                lastPrediction == null
+                        ? null
+                        : lastPrediction.getSimulationContext().getWorldData().getPistonPushes());
         // Java 1.21.2+ sends tick-end after the block-entity pass. Its piston,
         // shulker and recent world state already advance in CheckManager at that
         // boundary, including idle ticks; prediction must not advance them again.
@@ -222,9 +227,12 @@ public class WorldStageBuilder {
 
         DesyncStatus desyncLastOnGround = lastOnGround;
 
+        Boolean groundAfterShove = push.onGroundAfterShoveBeforeTravel();
         if (simulationContext.isRiptideReleaseCertain()) {
             // Entity#move of TridentItem#releaseUsing's upward lift leaves onGround false before LivingEntity#aiStep.
             desyncLastOnGround = DesyncStatus.FALSE;
+        } else if (groundAfterShove != null) {
+            desyncLastOnGround = DesyncStatus.fromBoolean(groundAfterShove);
         } else if (!push.getPush().isEmpty()) {
             desyncLastOnGround = DesyncStatus.UNKNOWN;
         }

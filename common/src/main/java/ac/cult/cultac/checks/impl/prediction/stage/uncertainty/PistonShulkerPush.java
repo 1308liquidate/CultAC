@@ -8,6 +8,8 @@ import ac.cult.cultac.checks.impl.prediction.stage.MovementModifiers;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.PistonPushes;
+import ac.cult.cultac.utils.data.ShulkerBoxShoveResult;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.VectorUtils;
 import java.util.Set;
@@ -52,7 +54,14 @@ public class PistonShulkerPush implements UncertaintyHandler {
 
         if (expanded.isEmpty()) return trace;
 
-        result.getSimulationContext().getWorldData().setLastOnGround(DesyncStatus.UNKNOWN);
+        PistonPushes pushes = context.getWorldData().getPistonPushes();
+        // CollisionModifier moves the travel's end by the shulker box block shoves after it.
+        if (pushes.getShulkerBoxShovesAfterTravel() != null) return trace;
+        Boolean groundAfterShove = pushes.onGroundAfterShoveBeforeTravel();
+        result.getSimulationContext()
+                .getWorldData()
+                .setLastOnGround(
+                        groundAfterShove == null ? DesyncStatus.UNKNOWN : DesyncStatus.fromBoolean(groundAfterShove));
 
         // Clients before 26.3 report a block-entity pass's shove and launch together, before the next travel.
         if (start.hasReason(MovementModifiers.SLIME_BLOCK_LAUNCH)
@@ -60,6 +69,9 @@ public class PistonShulkerPush implements UncertaintyHandler {
                 && !player.compensatedWorld.pistons.reportsAfterBlockEntities()) {
             shoveAlongLaunch(context, snapshot.currentPistonTargetEnvelope(), expanded);
         }
+        ShulkerBoxShoveResult shulkerBoxShove = pushes.getShulkerBoxShoveResult();
+        if (shulkerBoxShove != null)
+            expanded = new SimpleCollisionBox(shulkerBoxShove.movement(), shulkerBoxShove.movement());
 
         expanded.offset(start);
         Vec3 cut = VectorUtils.cutBoxToVector(end, expanded);

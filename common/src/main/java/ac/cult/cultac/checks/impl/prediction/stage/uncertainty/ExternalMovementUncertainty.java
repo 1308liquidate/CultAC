@@ -21,7 +21,8 @@ public final class ExternalMovementUncertainty {
         return present(lastPush, true)
                 || present(lastPush, false)
                 || present(currentPush, true)
-                || present(currentPush, false);
+                || present(currentPush, false)
+                || currentPush != null && !currentPush.getShulkerBoxPush().isEmpty();
     }
 
     private static boolean present(PistonPushes pushes, boolean piston) {
@@ -51,7 +52,10 @@ public final class ExternalMovementUncertainty {
         // the current envelope here is the exact shove visible to the packet
         // presently under prediction, not a future block-entity phase.
         SimpleCollisionBox currentPiston = scalePistonPushForStuckSpeedTarget(push(currentPush, true), context);
+        // A packet carries the shulker box block shoves its own WorldData holds and no other packet's.
         SimpleCollisionBox currentShulker = push(currentPush, false);
+        if (currentPush != null && !currentPush.getShulkerBoxPush().isEmpty())
+            currentShulker.union(currentPush.getShulkerBoxPush());
 
         SimpleCollisionBox combined = null;
         combined = union(combined, lastPiston);

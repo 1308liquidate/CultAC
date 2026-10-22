@@ -1018,7 +1018,12 @@ public class CultPlayer implements GrimUser {
     }
 
     private Pose determineCurrentPoseLikeVanilla() {
-        Pose desiredPose = getDesiredPoseLikeVanilla();
+        return updatedPose(swimState.swimming(), x, y, z);
+    }
+
+    /** Player#updatePlayerPose with the player at {@code (x, y, z)} and Entity#isSwimming {@code swimming}. */
+    public Pose updatedPose(boolean swimming, double x, double y, double z) {
+        Pose desiredPose = getDesiredPoseLikeVanilla(swimming);
         if (compensatedWorld == null || compensatedEntities == null) {
             return desiredPose;
         }
@@ -1026,29 +1031,29 @@ public class CultPlayer implements GrimUser {
         // The vanilla local player only evaluates pose fallback when it can fit the
         // swimming box, then falls back from the desired pose to crouching and finally
         // to swimming based on exact collision tests at the current position.
-        if (!canPlayerFitWithinBlocksAndEntitiesWhen(Pose.SWIMMING)) {
+        if (!canPlayerFitWithinBlocksAndEntitiesWhen(Pose.SWIMMING, x, y, z)) {
             return desiredPose;
         }
 
         if (gamemode == GameMode.SPECTATOR
                 || compensatedEntities.getSelf().inVehicle()
-                || canPlayerFitWithinBlocksAndEntitiesWhen(desiredPose)) {
+                || canPlayerFitWithinBlocksAndEntitiesWhen(desiredPose, x, y, z)) {
             return desiredPose;
         }
 
-        if (canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING)) {
+        if (canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING, x, y, z)) {
             return Pose.CROUCHING;
         }
 
         return Pose.SWIMMING;
     }
 
-    private Pose getDesiredPoseLikeVanilla() {
+    private Pose getDesiredPoseLikeVanilla(boolean swimming) {
         if (isInBed) {
             return Pose.SLEEPING;
         }
         // Player#isSwimming
-        if (swimState.swimming() && !isFlying && gamemode != GameMode.SPECTATOR) {
+        if (swimming && !isFlying && gamemode != GameMode.SPECTATOR) {
             return Pose.SWIMMING;
         }
         if (isGliding) {
@@ -1058,10 +1063,6 @@ public class CultPlayer implements GrimUser {
             return Pose.SPIN_ATTACK;
         }
         return isSneaking && !isFlying ? Pose.CROUCHING : Pose.STANDING;
-    }
-
-    private boolean canPlayerFitWithinBlocksAndEntitiesWhen(Pose newPose) {
-        return canPlayerFitWithinBlocksAndEntitiesWhen(newPose, x, y, z);
     }
 
     /** Player#canPlayerFitWithinBlocksAndEntitiesWhen with the player at {@code (x, y, z)}. */

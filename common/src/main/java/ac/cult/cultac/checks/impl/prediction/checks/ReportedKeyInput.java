@@ -4,6 +4,7 @@ import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.EntityPositionWorlds;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.UnknownCollisionProvider;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
@@ -12,6 +13,7 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ClientItemUseState;
 import ac.cult.cultac.utils.data.KnownInput;
+import ac.cult.cultac.utils.data.ShulkerBoxShoveResult;
 import ac.cult.cultac.utils.data.StuckEdgeData;
 import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.math.CultMath;
@@ -107,7 +109,9 @@ final class ReportedKeyInput {
     }
 
     private static double offset(CultPlayer player, PredictionResult result, SimpleCollisionBox extents, Vec3 input) {
-        Vec3 target = result.getTarget();
+        // From 26.3 the shulker box block shoves move the player after the travel the keys drive.
+        ShulkerBoxShoveResult shove = JavaMovementEngine.shulkerBoxShoveAfterTravel(result);
+        Vec3 target = shove == null ? result.getTarget() : result.getTarget().subtract(shove.movement());
         // The starting velocity and uncertainties nearest the movement the keys leave unexplained.
         double startX = CultMath.clamp(target.x - input.x, extents.minX, extents.maxX);
         double startZ = CultMath.clamp(target.z - input.z, extents.minZ, extents.maxZ);

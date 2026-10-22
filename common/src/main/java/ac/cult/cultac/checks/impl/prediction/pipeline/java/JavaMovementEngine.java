@@ -10,6 +10,7 @@ import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
 import ac.cult.cultac.checks.impl.prediction.stage.MovementModifiers;
 import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CollisionModifier;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.ValidMovements;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldStageBuilder;
@@ -18,6 +19,8 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.CollideAxisData;
 import ac.cult.cultac.utils.data.MainSupportingBlockData;
+import ac.cult.cultac.utils.data.PistonPushes;
+import ac.cult.cultac.utils.data.ShulkerBoxShoveResult;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.BlockProperties;
 import ac.cult.cultac.utils.nmsutil.GeyserVelocity;
@@ -63,7 +66,23 @@ public final class JavaMovementEngine implements MovementEngine {
             if (filtered.isEmpty()) return new ArrayList<>();
             startingVelocities = filtered;
         }
+        // Before 26.3 the shulker box block shoves run between the last travel and this one.
+        PistonPushes pushes =
+                context.getWorldData() == null ? null : context.getWorldData().getPistonPushes();
+        ShulkerBoxShoveResult shove = pushes == null ? null : pushes.getShulkerBoxShoveResult();
+        if (shove != null) {
+            Set<Vec3> shoved = new LinkedHashSet<>(startingVelocities.size());
+            for (Vec3 velocity : startingVelocities) shoved.add(shove.velocityAfter(velocity));
+            startingVelocities = shoved;
+        }
         return modifiers.applyModifers(player, startingVelocities, context, lastPrediction, canTickSkip);
+    }
+
+    /** What the shulker box block shoves after this travel leave, from 26.3, when any reaches the player, else null. */
+    public static ShulkerBoxShoveResult shulkerBoxShoveAfterTravel(PredictionResult result) {
+        if (result.getValidMovements() == null) return null;
+        MovementTrace trace = result.getValidMovements().getClosestTrace();
+        return trace == null ? null : trace.shulkerBoxShove();
     }
 
     @Override
@@ -161,6 +180,10 @@ public final class JavaMovementEngine implements MovementEngine {
                         player, result, scan, moved.fallDistance(), stepped, moved.landed());
                 effects = afterActorTick(player, result.getSimulationContext(), moved.movement(), effects);
                 effects = GeyserVelocity.applyToState(player, result, end, effects);
+                ShulkerBoxShoveResult shove = shulkerBoxShoveAfterTravel(result);
+                if (shove != null)
+                    effects = new JavaInsideBlockEffects.State(
+                            effects.fallDistance(), shove.velocityAfter(effects.velocity()), effects.stuckSpeed());
                 var state =
                         new JavaPredictionCarry.State(effects.velocity(), effects.fallDistance(), effects.stuckSpeed());
                 if (!states.contains(state)) {
