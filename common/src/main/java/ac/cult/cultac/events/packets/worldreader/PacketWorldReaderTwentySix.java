@@ -93,7 +93,7 @@ public class PacketWorldReaderTwentySix extends BasePacketWorldReader {
             }
             decoded.add(values);
         }
-        int transaction = appendTrailingProofTransaction(event, player);
+        int transaction = appendFlushProofTransaction(event, player);
         int level = player.compensatedWorld.level();
         player.latencyUtils.addRealTimeTask(transaction, () -> {
             if (level != player.compensatedWorld.level()) return;

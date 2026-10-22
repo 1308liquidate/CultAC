@@ -126,7 +126,7 @@ public final class EngineVerdicts {
         Integer velocityPing = null;
         TransactionVel applied = null;
         for (TransactionVel modifier : chosen.getPacketModifiers()) {
-            if (applied == null || modifier.getTransaction() > applied.getTransaction()) applied = modifier;
+            if (applied == null || modifier.getOutboundSequence() > applied.getOutboundSequence()) applied = modifier;
         }
         if (applied != null && applied.getTransaction() != lastVelocity) {
             lastVelocity = applied.getTransaction();

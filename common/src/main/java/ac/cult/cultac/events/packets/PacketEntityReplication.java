@@ -556,7 +556,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         if (removedPlayerVehicleId == packet.entityId()) {
             removedPlayerVehicleId = Integer.MIN_VALUE;
         }
-        int transaction = appendTrailingProofTransactionId(event);
+        int transaction = player.appendFlushProofTransaction(event);
         var model =
                 player.user.getCultConnection().dispatcher().runtime().data().version();
         var client = player.getClientProtocol();
@@ -592,10 +592,14 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         ClientboundEntityMotion motion = packet;
         if (player.isBedrockMovement() && motion.entityId() != player.entityID) return;
         int velocityTransaction = player.checkManager.getKnockbackHandler().handleEntityVelocity(event, packet);
+        if (velocityTransaction <= 0 && readsVelocityOnReceipt(motion.entityId())) {
+            // A Bedrock flush group is not handled in one task, so its velocity keeps a ping after it.
+            velocityTransaction = player.isBedrockMovement()
+                    ? transactionOf(appendTrailingProofTransaction(event))
+                    : player.appendFlushProofTransaction(event);
+        }
         if (velocityTransaction <= 0) {
-            CultPlayer.TrackedTransaction afterVelocity = appendTrailingProofTransaction(event);
-            velocityTransaction =
-                    afterVelocity == null ? player.lastTransactionSent.get() : afterVelocity.transaction();
+            velocityTransaction = player.lastTransactionSent.get();
         }
         Vec3 movement = PacketCodecUtil.clientVelocityFromObserved(
                 event.getDecodedProtocol(),
@@ -617,6 +621,21 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             }
             clearPacketHandlerDeltaMovement(motion.entityId(), packetHandlerDeltaSequence);
         });
+    }
+
+    // Movement, projectile ticks and the camera's Entity#getKnownMovement consume receipt-time velocity.
+    // Other entities retain it until a later proven packet makes them the vehicle.
+    private boolean readsVelocityOnReceipt(int entityId) {
+        Integer serverVehicle = player.compensatedEntities.vehicles.serverPlayerVehicle;
+        TrackerData tracked = player.compensatedEntities.getTrackedEntity(entityId);
+        return entityId == player.entityID
+                || serverVehicle != null && serverVehicle == entityId
+                || player.cameraEntity.isServerCamera(entityId)
+                || player.compensatedEntities.getEntity(entityId)
+                        instanceof ac.cult.cultac.utils.data.packetentity.PacketEntityHurtingProjectile
+                || tracked != null
+                        && ac.cult.cultac.utils.data.packetentity.PacketEntityHurtingProjectile.isHurtingProjectile(
+                                tracked.getEntityType());
     }
 
     private void handleMoveEntityPacket(PacketSendEvent<ClientboundMoveEntity> event, ClientboundMoveEntity packet) {
@@ -740,7 +759,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         float finalPitch = calculateAbsolutePitch(player.yRot, change.xRot(), packetFlags);
         Vec3 deltaMovement = calculateAbsoluteDelta(
                 Vec3.ZERO, change.deltaMovement(), player.xRot, player.yRot, finalYaw, finalPitch, packetFlags);
-        int proofTransaction = appendTrailingProofTransactionId(event);
+        int proofTransaction = transactionOf(player.appendResponseProofTransaction(event));
 
         player.getSetbackTeleportUtil()
                 .addImmediatePlayerTeleport(
@@ -904,6 +923,22 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         PacketEntity entity = player.compensatedEntities.getEntity(packet.id());
         TrackerData tracked = player.compensatedEntities.getTrackedEntity(packet.id());
         int type = entity == null ? (tracked == null ? -1 : tracked.getEntityType()) : entity.type;
+        if (!player.isBedrockMovement()
+                && packet.id() == player.entityID
+                && WatchableIndexUtil.getIndex(metadata, WatchableIndexUtil.LIVING_HEALTH) != null) {
+            // DATA_HEALTH_ID controls LivingEntity#isImmobile, independently of SET_HEALTH. A leading
+            // ping cannot prove that the local player's next aiStep must clear its movement input.
+            var proof = appendTrailingProofTransaction(event, List.of(), true);
+            if (proof != null) {
+                int proven = proof.transaction();
+                player.latencyUtils.addRealTimeTask(
+                        proven, () -> player.compensatedEntities.updateEntityMetadata(packet.id(), metadata, proven));
+                if (WatchableIndexUtil.getIndex(metadata, WatchableIndexUtil.ENTITY_POSE) != null) {
+                    retireSizeAt(packet.id(), proven);
+                }
+                return;
+            }
+        }
         WatchableIndexUtil.Layout layout = WatchableIndexUtil.forModel(player.user.getCultConnection());
         boolean updatesBoost =
                 (type == EntityTypeIds.PIG && WatchableIndexUtil.getIndex(metadata, layout.pigBoostTime()) != null)
@@ -1482,15 +1517,14 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         boolean resetsVelocity = !CultAPI.INSTANCE.getConfigManager().isObserveOnly()
                 && !player.isBedrockMovement()
                 && destroyEntityIds.stream().anyMatch(player.compensatedEntities.vehicles::isServerPlayerPassengerOf);
-        CultPlayer.TrackedTransaction proof = resetsVelocity
-                ? appendTrailingProofTransaction(
-                        event, List.of(entityMotion(player.entityID, SELF_DISMOUNT_VELOCITY)), true)
-                : appendTrailingProofTransaction(event);
-        int transaction = proof == null ? -1 : proof.transaction();
+        int transaction = resetsVelocity
+                ? transactionOf(appendTrailingProofTransaction(
+                        event, List.of(entityMotion(player.entityID, SELF_DISMOUNT_VELOCITY)), true))
+                : player.appendFlushProofTransaction(event);
         if (player.compensatedEntities.mayChangeSelfPassengers(destroyEntityIds))
             player.compensatedEntities.markSelfPassengersChange(
                     transaction >= 0 ? transaction : player.lastTransactionSent.get() + 1);
-        boolean sentVelocityReset = resetsVelocity && proof != null;
+        boolean sentVelocityReset = resetsVelocity && transaction >= 0;
 
         for (int entityID : destroyEntityIds) {
             despawnedEntitiesThisTransaction.add(entityID);
@@ -1590,7 +1624,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private int appendTrailingProofTransactionId(PacketSendEvent<?> event) {
-        CultPlayer.TrackedTransaction proof = appendTrailingProofTransaction(event);
+        return transactionOf(appendTrailingProofTransaction(event));
+    }
+
+    private static int transactionOf(@Nullable CultPlayer.TrackedTransaction proof) {
         return proof == null ? -1 : proof.transaction();
     }
 
@@ -1630,7 +1667,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         var backendTicks = player.backendTicks();
         if (backendTicks != null && movement.kind() != MovementKind.TELEPORT_ENTITY)
             backendTicks.onEntityTracked(movement.entityId(), System.nanoTime());
-        boolean useDelimiterProof = useReachBundleDelimiter;
+        // Geyser hands a Bedrock client no bundle, so its movement wave keeps a pre and a post ping.
+        boolean useDelimiterProof = useReachBundleDelimiter && !player.isBedrockMovement();
         if (!useDelimiterProof && !hasSentPreWavePacket) {
             hasSentPreWavePacket = true;
             player.sendTransaction();
@@ -1717,9 +1755,14 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             return;
         }
 
-        CultPlayer.TrackedTransaction proof =
-                useDelimiterProof ? appendTrailingProofTransaction(event, List.of(), true) : null;
-        int firstTransaction = proof == null ? player.lastTransactionSent.get() : proof.transaction();
+        // Only ordinary tracker movement shares the flush bundle's ping. Explicit teleports retain
+        // their own proof because a controlled vehicle can reply inside the handler.
+        int proof = !useDelimiterProof
+                ? -1
+                : movement.kind() == MovementKind.TELEPORT_ENTITY
+                        ? transactionOf(player.appendResponseProofTransaction(event))
+                        : player.appendFlushProofTransaction(event);
+        int firstTransaction = proof < 0 ? player.lastTransactionSent.get() : proof;
         if (data != null) {
             data.setLastTransactionHung(firstTransaction);
             if (data.getEntityType() == EntityTypeIds.PLAYER) {
@@ -1782,8 +1825,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     movement.rotationPitch(),
                     movement.onGround());
         }
-        if (proof != null) {
-            scheduleBundledMovement(movement, proof.transaction());
+        if (proof >= 0) {
+            scheduleBundledMovement(movement, proof);
         } else {
             scheduleTransactionBoundMovement(movement, firstTransaction);
         }
@@ -2167,7 +2210,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     public void onEndOfTickEvent() {
-        player.sendTransaction(false);
+        player.sendEndOfTickTransaction();
     }
 
     public void onEndOfTickEvent(int serverTick) {

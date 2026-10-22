@@ -483,6 +483,25 @@ class ReachInteractionRangeTest {
     }
 
     @Test
+    void oneFlushPingProvingAMotionAndAnExplosionKeepsTheirWireOrder() throws Exception {
+        // ClientPacketListener handles the bundle in wire order: the push after the motion adds to it, from 5 to 4
+        // plus 1 leaving no segment.
+        try (var setup = new Setup()) {
+            setup.hold("{\"min_reach\":5,\"max_reach\":4,\"hitbox_margin\":1}");
+            setup.drift(0);
+            setup.sharedFlush(true, .5, .5);
+            assertEquals(List.of("PlayerReach"), setup.attackAlong(0, 4.1, 0));
+        }
+        // The motion after the push replaces it: from 5 back to 4.5 enters the box at 4.7.
+        try (var setup = new Setup()) {
+            setup.hold("{\"min_reach\":5,\"max_reach\":4,\"hitbox_margin\":1}");
+            setup.drift(0);
+            setup.sharedFlush(false, .5, .5);
+            assertEquals(List.of(), setup.attackAlong(0, 4.1, 0));
+        }
+    }
+
+    @Test
     void anAttackBeforeTheFirstTickAfterARespawnIsCancelledAfterAMotionAndAnUnloadedTickEnd() throws Exception {
         try (var setup = new Setup()) {
             setup.respawnFacing(0, SPEAR);
@@ -1520,6 +1539,34 @@ class ReachInteractionRangeTest {
             event.getTasksAfterSend().forEach(Runnable::run);
             pongThrough(player.lastTransactionSent.get());
             assertNotNull(player.checkManager.getExplosionHandler().secondBread);
+        }
+
+        // A motion and an explosion along +z in one flush bundle, both proven by its one ping, answered before the
+        // next pick.
+        void sharedFlush(boolean motionFirst, double speed, double push) {
+            bind();
+            int ping = player.sendTrailingTransaction();
+            var motionPacket = new ClientboundEntityMotion(player.entityID, new Vec3d(0, 0, speed));
+            var motion = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_MOTION, motionPacket, false);
+            var explodePacket =
+                    new ClientboundExplode(new Vec3d(player.x, player.y, player.z), new Vec3d(0, 0, push));
+            var explode = new PacketSendEvent<>(
+                    fixture.user, ConnectionPhase.PLAY, ClientboundPackets.EXPLODE, explodePacket, false);
+            motion.sharedPing(ping);
+            explode.sharedPing(ping);
+            var knockback = player.checkManager.getKnockbackHandler();
+            var explosion = player.checkManager.getExplosionHandler();
+            if (!motionFirst) explosion.onExplode(explode, player, explodePacket);
+            knockback.handleEntityVelocity(motion, motionPacket);
+            if (motionFirst) explosion.onExplode(explode, player, explodePacket);
+            motion.getTasksAfterSend().forEach(Runnable::run);
+            explode.getTasksAfterSend().forEach(Runnable::run);
+            assertEquals(ping, knockback.getLastSent().getTransaction());
+            assertEquals(ping, explosion.getLastSent().getTransaction());
+            pongThrough(ping);
+            assertNotNull(knockback.secondBread);
+            assertNotNull(explosion.secondBread);
         }
 
         // The fixture writes pings only to a bound player.

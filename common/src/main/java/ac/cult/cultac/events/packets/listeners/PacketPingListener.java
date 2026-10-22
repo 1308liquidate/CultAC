@@ -46,8 +46,10 @@ public class PacketPingListener {
     @CultPacketHandler
     public void onPing(PacketSendEvent<ClientboundPing> event, CultPlayer player, ClientboundPing packet) {
         player.packetStateData.lastServerTransWasValid = false;
-        if (player.markTransactionPacketSent(packet.id(), event.getTimestamp())) {
+        int transaction = player.markTrackedPingSent(packet.id(), event.getTimestamp());
+        if (transaction > 0) {
             player.packetStateData.lastServerTransWasValid = true;
+            event.trackedPing(transaction);
         } else {
             player.foreignPingSent(packet.id());
         }

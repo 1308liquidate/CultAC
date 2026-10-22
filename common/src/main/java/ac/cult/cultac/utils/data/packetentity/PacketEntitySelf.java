@@ -36,8 +36,13 @@ public class PacketEntitySelf extends PacketEntity {
     int opLevel;
 
     @Getter
-    @Setter
     double health;
+
+    public void setHealth(double health) {
+        this.health = health;
+        // SET_HEALTH and entity metadata both write LivingEntity's DATA_HEALTH_ID on the client.
+        this.actionAlive = health > 0.0D;
+    }
 
     // Player#blockInteractionRange and #entityInteractionRange read these attributes. Only server
     // attribute packets change them: ServerPlayer#updatePlayerAttributes owns the creative modifiers.
@@ -50,8 +55,8 @@ public class PacketEntitySelf extends PacketEntity {
     private final ClientAttributeInstance gravityAttribute = new ClientAttributeInstance(0.08D, -1.0D, 1.0D);
     private final ClientAttributeInstance stepHeight = new ClientAttributeInstance(0.6D, 0.0D, 10.0D);
     // playerSpeed leaves out the sprinting modifier, which is modelled apart.
-    private final ClientAttributeInstance movementSpeedAttribute = new ClientAttributeInstance(
-            0.1F, 0.0D, 1024.0D, Set.of(CompensatedEntities.SPRINTING_SPEED_MODIFIER.id()));
+    private final ClientAttributeInstance movementSpeedAttribute =
+            new ClientAttributeInstance(0.1F, 0.0D, 1024.0D, Set.of(CompensatedEntities.SPRINTING_SPEED_MODIFIER.id()));
     private final ClientAttributeInstance bouncinessAttribute = new ClientAttributeInstance(0.0D, 0.0D, 1.0D);
     private final ClientAttributeInstance frictionModifierAttribute = new ClientAttributeInstance(1.0D, 0.0D, 2048.0D);
     private final ClientAttributeInstance airDragModifierAttribute = new ClientAttributeInstance(1.0D, 0.0D, 2048.0D);
@@ -116,8 +121,7 @@ public class PacketEntitySelf extends PacketEntity {
             default -> null;
         };
         if (instance == null) return;
-        instance.onServerSnapshot(
-                instance == movementSpeedAttribute ? withoutClientFrost(snapshot) : snapshot);
+        instance.onServerSnapshot(instance == movementSpeedAttribute ? withoutClientFrost(snapshot) : snapshot);
         refreshAttributeValues();
     }
 

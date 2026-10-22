@@ -148,7 +148,11 @@ public final class CaptureStream {
             Session session,
             long serverTick,
             int pingKind,
-            boolean unstripped) {}
+            boolean unstripped) {
+        Raw tickedAs(long tick, int kind) {
+            return new Raw(this.kind, nanos, id, bytes, minY, height, session, tick, kind, unstripped);
+        }
+    }
 
     /** A protocol 5 terrain record in a frame, or a WORLD starting the terrain over: its kind and section. */
     private record TerrainRecord(int kind, long section) {}
@@ -771,29 +775,16 @@ public final class CaptureStream {
     }
 
     /**
-     * Server tick {@code serverTick} has ended on the wire: CultAC is writing its end-of-tick ping, called before it is
-     * tapped whether the stream keeps it or not.
+     * Server tick {@code serverTick} has ended on the wire, at its place among the tapped records and before an
+     * end-of-tick ping CultAC writes for it. The open frame's clientbound records tapped since the last tick end went
+     * out in this tick, whichever tick they were tapped with.
      */
     public void endOfTick(long serverTick) {
-        // Since the last reset, the open frame's clientbound records went out in this tick, ping record or not.
-        if (lastEndOfTick < 0) {
-            for (int i = 0; i < frame.size(); i++) {
-                Raw raw = frame.get(i);
-                if (raw.kind() != IntakeWire.CLIENTBOUND || raw.serverTick() >= 0) continue;
-                frame.set(
-                        i,
-                        new Raw(
-                                raw.kind(),
-                                raw.nanos(),
-                                raw.id(),
-                                raw.bytes(),
-                                raw.minY(),
-                                raw.height(),
-                                raw.session(),
-                                serverTick,
-                                raw.pingKind(),
-                                raw.unstripped()));
-            }
+        for (int i = frame.size() - 1; i >= 0; i--) {
+            Raw raw = frame.get(i);
+            if (raw.kind() != IntakeWire.CLIENTBOUND) continue;
+            if (raw.serverTick() >= 0 && raw.serverTick() <= lastEndOfTick) break;
+            if (raw.serverTick() != serverTick) frame.set(i, raw.tickedAs(serverTick, raw.pingKind()));
         }
         lastEndOfTick = serverTick;
     }
@@ -1242,8 +1233,8 @@ public final class CaptureStream {
     }
 
     /**
-     * Each record's server tick, by index, for the clientbound ones: the tick of the next end-of-tick ping in the frame,
-     * else the one it was tapped with. Null when a clientbound record has none, so a frame's are all known or none.
+     * Each record's server tick, by index, for the clientbound ones, as {@link #endOfTick} last set it. Null when a
+     * clientbound record has none, so a frame's are all known or none.
      */
     private long[] serverTicks(List<Raw> records) {
         if (lastEndOfTick < 0) return null;
@@ -1252,14 +1243,11 @@ public final class CaptureStream {
             ticks = new long[Math.max(records.size(), ticks.length * 2)];
             if (ticks.length <= MAX_PRESIZED_RECORDS) serverTickScratch = ticks;
         }
-        long next = -1;
-        for (int i = records.size() - 1; i >= 0; i--) {
+        for (int i = 0; i < records.size(); i++) {
             Raw raw = records.get(i);
             if (raw.kind() != IntakeWire.CLIENTBOUND) continue;
-            if (raw.pingKind() == IntakeWire.PING_END_OF_TICK) next = raw.serverTick();
-            long tick = next >= 0 ? next : raw.serverTick();
-            if (tick < 0) return null;
-            ticks[i] = tick;
+            if (raw.serverTick() < 0) return null;
+            ticks[i] = raw.serverTick();
         }
         return ticks;
     }

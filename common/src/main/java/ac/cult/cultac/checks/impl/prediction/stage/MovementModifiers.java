@@ -6,7 +6,6 @@ import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.EntityPush;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.Direction;
-import ac.cult.cultac.utils.data.TransactionOrder;
 import ac.cult.cultac.utils.data.TransactionVel;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.ArrayList;
@@ -125,7 +124,7 @@ public class MovementModifiers {
         }
 
         // There may only be one first bread at a time.
-        List<TransactionOrder> packetEventsInOrder = List.of();
+        List<TransactionVel> packetEventsInOrder = List.of();
         TransactionVel knockbackFirst = player.checkManager.getKnockbackHandler().firstBread;
         TransactionVel explosionFirst = player.checkManager.getExplosionHandler().firstBread;
         TransactionVel knockbackSecond = player.checkManager.getKnockbackHandler().secondBread;
@@ -146,12 +145,9 @@ public class MovementModifiers {
                     packetEventsInOrder.removeIf(event -> event == possibleMotion);
                 }
             }
-            packetEventsInOrder.sort(Comparator.comparingInt(TransactionOrder::getTransaction)
-                    // Within one Java transaction, confirmed Bedrock motion precedes its pending successor.
-                    .thenComparingInt(event ->
-                            player.isBedrockMovement() && event == player.checkManager.getKnockbackHandler().firstBread
-                                    ? 1
-                                    : 0));
+            // ClientPacketListener applies replacement motion and additive explosions in wire order, even
+            // when a single bundle ping proves all of them.
+            packetEventsInOrder.sort(Comparator.comparingLong(TransactionVel::getOutboundSequence));
         }
 
         for (Vec3 vector : initial) {
@@ -186,9 +182,8 @@ public class MovementModifiers {
         // TODO: This is too brute forcey, we don't need duplicates in certain situations.
         // TODO: This should just be refactored for 1.20.4+ clients with tick end and bundle packet!
         for (int eventIndex = 0, eventCount = packetEventsInOrder.size(); eventIndex < eventCount; eventIndex++) {
-            TransactionOrder event = packetEventsInOrder.get(eventIndex);
+            TransactionVel vel = packetEventsInOrder.get(eventIndex);
             for (PredVector vector : new ArrayList<>(start)) {
-                TransactionVel vel = (TransactionVel) event;
                 Vec3 eventVel = vel.getVel();
 
                 if (vel.isVelocity()) { // Velocity

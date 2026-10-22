@@ -50,6 +50,7 @@ public final class CompensatedOpenWindow implements CheckListener, ClientTickEnd
         // before a client tick, so no ping is inserted midway through a bundle.
         event.getWritesBeforeSend().add(before.packet());
         event.getWritesAfterSend().add(after.packet());
+        event.receiptProof(after.transaction());
         event.getTasksAfterSend().add(() -> {
             player.markTrackedTransactionPacketSent(before);
             player.markTrackedTransactionPacketSent(after);

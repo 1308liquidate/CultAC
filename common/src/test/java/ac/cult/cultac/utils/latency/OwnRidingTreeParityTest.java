@@ -154,10 +154,22 @@ class OwnRidingTreeParityTest {
         for (PacketSendEvent<?> event : events) event.getTasksAfterSend().forEach(Runnable::run);
         ((EmbeddedChannel) player.user.getChannel()).runPendingTasks();
         player.onEndOfTickEvent(step);
+        runWriteTasks(player);
         // Odd steps leave the last transaction unanswered, so vehicles span their old and new packet locations.
         acknowledgeThrough(player, player.lastTransactionSent.get() - (step % 2));
         replication.onPlayerTickEnd(null);
         if (step % 3 == 0) replication.onPlayerTickEnd(null);
+    }
+
+    /** Without CultEncoder the channel queues write tasks; run them at their place, as the encoder would. */
+    private static void runWriteTasks(CultPlayer player) {
+        var channel = (EmbeddedChannel) player.user.getChannel();
+        var queued = new ArrayList<Object>();
+        Object message;
+        while ((message = channel.readOutbound()) != null) queued.add(message);
+        for (Object item : queued) {
+            if (item instanceof ac.cult.cultac.network.CultConnection.WriteTask task) task.action().run();
+        }
     }
 
     /** The ids of the local player's riding tree: everything under the root of its riding chain, while it rides. */

@@ -29,6 +29,9 @@ public final class ClientKeyInput {
             float itemUseMultiplier,
             float movingSlowlyFactor,
             float speed) {
+        // LivingEntity#aiStep clears xxa/zza after applyInput when health <= 0. PLAYER_INPUT still reports the
+        // held keys. Use receipt-proven health, not the legacy isDead flag which may precede the health packet.
+        if (!player.compensatedEntities.getSelf().actionAlive) return Vec3.ZERO;
         Vec3 start = context.getStart();
         SimpleCollisionBox standing = GetBoundingBox.getBoundingBoxFromPosAndSize(
                         start.x,

@@ -8,7 +8,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class CompensatedCameraEntity extends Check {
+    private static final int NO_SERVER_CAMERA = Integer.MIN_VALUE;
+
     private final ArrayDeque<PacketEntity> entities = new ArrayDeque<>(1);
+    // The camera the server last sent; NO_SERVER_CAMERA means the player itself.
+    private int serverCamera = NO_SERVER_CAMERA;
     // The one possibility while entities holds exactly one, else null; every write to entities ends in refreshOnly.
     private PacketEntity only;
 
@@ -18,6 +22,7 @@ public class CompensatedCameraEntity extends Check {
     }
 
     public void onSetCamera(int camera) {
+        serverCamera = camera;
         player.sendTransaction();
 
         player.latencyUtils.addRealTimeTaskNow(() -> {
@@ -52,10 +57,20 @@ public class CompensatedCameraEntity extends Check {
         return true;
     }
 
+    public boolean isServerCamera(int entityId) {
+        return entityId == serverCamera;
+    }
+
     public List<PacketEntity> getPossibilities() {
         return new ArrayList<>(entities);
     }
 
+    /** The server sent a login or respawn: ClientPacketListener#handleLogin and #handleRespawn reset the camera. */
+    public void localPlayerSent() {
+        serverCamera = NO_SERVER_CAMERA;
+    }
+
+    /** The client handled a login or respawn; a camera sent after it is still the server's camera. */
     public void reset() {
         entities.clear();
         entities.add(player.compensatedEntities.getSelf());

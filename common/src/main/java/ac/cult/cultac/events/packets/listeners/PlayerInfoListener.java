@@ -66,10 +66,15 @@ public class PlayerInfoListener {
                 || !packet.actions().contains(Action.ADD_PLAYER)
                         && !packet.actions().contains(Action.UPDATE_GAME_MODE)) return;
         Set<UUID> visibleModes = visibleEntries.stream().map(Entry::profileId).collect(Collectors.toUnmodifiableSet());
-        receiver.sendTransaction();
-        receiver.latencyUtils.addRealTimeTaskNext(() -> receiver.compensatedEntities.clientPlayerModes.update(
+        prove(event, receiver, () -> receiver.compensatedEntities.clientPlayerModes.update(
                 packet, visibleModes, receiver.compensatedEntities.entityMap.values()));
-        event.getTasksAfterSend().add(receiver::sendTransaction);
+    }
+
+    /** Applies {@code task} once the client has handled the event's packet, at its flush proof. */
+    private static void prove(PacketSendEvent<?> event, CultPlayer receiver, Runnable task) {
+        int proof = receiver.appendFlushProofTransaction(event);
+        if (proof > 0) receiver.latencyUtils.addRealTimeTask(proof, task);
+        else receiver.latencyUtils.addRealTimeTaskNext(task);
     }
 
     @CultPacketHandler
@@ -79,9 +84,6 @@ public class PlayerInfoListener {
             ClientboundPlayerInfoRemove packet) {
         if (receiver.isBedrockMovement()) return;
         if (packet.profiles().isEmpty()) return;
-        receiver.sendTransaction();
-        receiver.latencyUtils.addRealTimeTaskNext(
-                () -> receiver.compensatedEntities.clientPlayerModes.remove(packet.profiles()));
-        event.getTasksAfterSend().add(receiver::sendTransaction);
+        prove(event, receiver, () -> receiver.compensatedEntities.clientPlayerModes.remove(packet.profiles()));
     }
 }

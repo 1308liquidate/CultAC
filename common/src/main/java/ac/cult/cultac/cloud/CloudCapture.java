@@ -1314,15 +1314,32 @@ public final class CloudCapture implements PlayerObserver {
         stream.tap(IntakeWire.CLIENTBOUND, id, buf, now, minY, height, sent, pingKind);
     }
 
-    /** A tapped ping's {@code PingKind}; an end-of-tick ping's server tick goes to the stream first. */
+    /**
+     * The frames written before this call were handed to the event loop first, so the mark queues behind them there
+     * and lands at the tick end's place in the stream, ahead of an end-of-tick ping written after it.
+     */
+    @Override
+    public void serverTickEnded(int serverTick) {
+        Channel tapped = channel;
+        if (tapped == null) return;
+        onLoop(tapped, () -> {
+            CaptureStream current = stream;
+            if (segment == null || current == null || !current.capturing()) return;
+            try {
+                current.endOfTick(serverTick);
+            } catch (Throwable failure) {
+                tapFailed(failure);
+            }
+        });
+    }
+
+    /** A tapped ping's {@code PingKind}. */
     private int pingKind(ByteBuf buf, int id) {
         int at = buf.readerIndex() + varIntBytes(id);
         if (buf.writerIndex() - at < 4) return IntakeWire.PING_FOREIGN;
         long provenance = player.pingProvenance(buf.getInt(at));
         int kind = (int) (provenance & 0xFF);
-        if (kind == 0) return IntakeWire.PING_FOREIGN;
-        if (kind == IntakeWire.PING_END_OF_TICK) stream.endOfTick(provenance >> 8);
-        return kind;
+        return kind == 0 ? IntakeWire.PING_FOREIGN : kind;
     }
 
     private static int varIntBytes(int value) {

@@ -54,9 +54,37 @@ public final class CultConnection implements CodecState {
 
     private volatile User user;
     private volatile CultPlayer player;
+    // Owned by the outbound connection executor. The encoder opens a flush bundle with a
+    // leading ping and closes it at the next actual Netty flush.
+    private boolean flushBundleOpen;
+
+    /** The encoder has written the opening delimiter of a flush bundle and not yet closed it. */
+    public boolean flushBundleOpen() {
+        return flushBundleOpen;
+    }
+
+    public void flushBundleOpen(boolean open) {
+        flushBundleOpen = open;
+    }
+
+    /**
+     * The CultAC ping whose pong proves the client handled every packet written before this queue position, from
+     * inside an outbound write such as an {@link #executeAfterWrites} task; 0 when there is none or no write is being
+     * prepared.
+     */
+    public int provingPing() {
+        var source = flushPingSource;
+        return source != null && isPreparingWrites() ? source.getAsInt() : 0;
+    }
+
+    public void flushPingSource(@org.jetbrains.annotations.Nullable java.util.function.IntSupplier source) {
+        flushPingSource = source;
+    }
+
     private boolean ownerResolved, prepared;
     private Consumer<CultConnection> initializer = ignored -> {};
     private BiConsumer<Object, ChannelPromise> reentrantWriter;
+    private java.util.function.IntSupplier flushPingSource;
     private volatile CompletableFuture<Void> removed;
     private volatile PacketLogObserver packetObserver = PacketLogObserver.NONE;
     private io.netty.util.concurrent.GenericFutureListener<io.netty.util.concurrent.Future<? super Void>> closeListener;

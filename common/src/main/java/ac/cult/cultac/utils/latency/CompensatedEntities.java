@@ -8,13 +8,13 @@ import ac.cult.cultac.network.packet.InventoryPackets.EquipmentEntry;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.AttributeModifier;
-import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.protocol.value.AttributeSnapshot;
 import ac.cult.cultac.protocol.value.Direction;
 import ac.cult.cultac.protocol.value.EntityPose;
 import ac.cult.cultac.protocol.value.EquipmentSlot;
 import ac.cult.cultac.protocol.value.MovementEffect;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.data.ClientSprintState;
 import ac.cult.cultac.utils.data.ShulkerData;
 import ac.cult.cultac.utils.data.TrackerData;
 import ac.cult.cultac.utils.data.packetentity.*;
@@ -37,6 +37,7 @@ public class CompensatedEntities {
     /** LivingEntity#SPEED_MODIFIER_SPRINTING, which LivingEntity#setSprinting adds to movement_speed. */
     public static final AttributeModifier SPRINTING_SPEED_MODIFIER =
             new AttributeModifier(SPRINTING_MODIFIER_ID, 0.3F, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+
     public static final String SNOW_MODIFIER_ID = "minecraft:powder_snow";
     public static final Set<String> EXCLUDED_MODIFIER_IDS = Set.of(SPRINTING_MODIFIER_ID, SNOW_MODIFIER_ID);
     private static final String ATTRIBUTE_NAMESPACE = "minecraft:";
@@ -1064,7 +1065,10 @@ public class CompensatedEntities {
                 entity.onPose(value, provenAt);
             }
             var health = WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.LIVING_HEALTH);
-            if (health != null && health.value() instanceof Float value) entity.actionAlive = value > 0.0F;
+            if (health != null && health.value() instanceof Float value) {
+                if (entity instanceof PacketEntitySelf self) self.setHealth(value);
+                else entity.actionAlive = value > 0.0F;
+            }
         }
         if (entity instanceof PacketEntityCreaking creaking) {
             var canMove = WatchableIndexUtil.getIndex(watchableObjects, 16);

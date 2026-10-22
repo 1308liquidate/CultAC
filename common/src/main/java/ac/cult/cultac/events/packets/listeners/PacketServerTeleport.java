@@ -138,7 +138,10 @@ public class PacketServerTeleport {
         float finalYaw = calculateRotation(sourceYaw, rotation.yaw(), flags, RelativeFlag.Y_ROT);
         float finalPitch =
                 clamp(calculateRotation(sourcePitch, rotation.pitch(), flags, RelativeFlag.X_ROT), -90.0F, 90.0F);
-        int proofTransaction = appendTrailingProofTransaction(event, player);
+        // The pong must follow the Rot that ClientPacketListener#handleRotatePlayer sends, so the proof never
+        // shares an earlier ping in the bundle.
+        CultPlayer.TrackedTransaction proof = player.appendResponseProofTransaction(event);
+        int proofTransaction = proof == null ? -1 : proof.transaction();
 
         player.getSetbackTeleportUtil()
                 .addImmediatePlayerRotationTeleport(
@@ -166,9 +169,14 @@ public class PacketServerTeleport {
             return;
         }
 
-        if (!player.getSetbackTeleportUtil().isSendingSetback) {
-            player.sendTransaction();
-        }
+        // ClientPacketListener#handleMoveVehicle sends the vehicle's MoveVehicle from the handler. Only a ping after
+        // the packet orders its pong after that echo, so a later packet in the flush, such as a dismount, never
+        // shares an earlier ping. A setback's echo keeps the transaction of the setback it completes.
+        int lastSent = player.lastTransactionSent.get();
+        CultPlayer.TrackedTransaction response = player.appendResponseProofTransaction(event);
+        int proofTransaction = player.getSetbackTeleportUtil().isSendingSetback || response == null
+                ? lastSent
+                : response.transaction();
         trackClientboundMoveVehicle(
                 player,
                 rootVehicleId,
@@ -176,7 +184,7 @@ public class PacketServerTeleport {
                 expectedResponsePosition,
                 finalYaw,
                 finalPitch,
-                player.lastTransactionSent.get(),
+                proofTransaction,
                 snaps);
     }
 
@@ -264,11 +272,6 @@ public class PacketServerTeleport {
             mask |= RelativeFlag.X_ROT.getMask();
         }
         return new RelativeFlag(mask);
-    }
-
-    private static int appendTrailingProofTransaction(PacketSendEvent<?> event, CultPlayer player) {
-        CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
-        return transaction == null ? -1 : transaction.transaction();
     }
 
     private static float clamp(float value, float min, float max) {
