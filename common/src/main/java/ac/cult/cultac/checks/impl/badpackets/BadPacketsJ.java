@@ -7,6 +7,7 @@ import ac.cult.cultac.checks.type.DecodedPacketReceiveListener;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItem;
@@ -114,7 +115,9 @@ public class BadPacketsJ extends Check implements DecodedPacketReceiveListener, 
     }
 
     // AbstractBoat#controlBoat turns a driven boat by deltaRotation; LinearInterpolationHandler turns another one.
+    // Before 26.3 LocalPlayer#tick sends the mounted Rot, before Entity#rideTick runs AbstractBoat#positionRider.
     private boolean turnsRider(PacketEntity boat) {
+        if (player.getClientVersion().isOlderThan(ClientVersion.V_26_3)) return false;
         return drives(boat) ? player.boatYawFollowsTurn() : boat.clientPhysicalYawCurrent;
     }
 
