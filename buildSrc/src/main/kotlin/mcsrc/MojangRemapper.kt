@@ -43,7 +43,8 @@ object MojangRemapper {
             .withMappings(mappings)
             .rebuildSourceFilenames(true)
             .build()
-        val partial = output.resolveSibling("${output.fileName}.part")
+        // OutputConsumerPath writes a directory tree unless the name ends in .jar.
+        val partial = output.resolveSibling("${output.fileName.toString().removeSuffix(".jar")}.part.jar")
         Files.deleteIfExists(partial)
         try {
             OutputConsumerPath.Builder(partial).build().use { consumer ->

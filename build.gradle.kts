@@ -48,11 +48,11 @@ tasks.register("printVersion") {
 
 // ---------- Decompiled Minecraft sources ----------
 // ./gradlew mcsrc [-Pmcsrc.version=<snapshot>] [-Pmcsrc.min=<release>] [-Pmcsrc.max=<release>]
-// Full client source of the max release plus per-class patches back to the min release, in mc-sources/.
+// Per-class patches of the decompiled client from the max release back to every release down to the min, in mc-sources/.
 // A version outside that release range (a newer snapshot) only gets a patch from the max release.
-tasks.register<mcsrc.GenerateMinecraftSources>("mcsrc") {
+tasks.register<mcsrc.GenerateMinecraftPatches>("mcsrc") {
     group = "minecraft"
-    description = "Decompiles the pinned Minecraft release and writes patches to older releases into mc-sources/"
+    description = "Writes patches of the decompiled Minecraft client from the pinned release back to older releases into mc-sources/"
     minVersion.set(providers.gradleProperty("mcsrc.min").orElse(providers.gradleProperty("runtimeHostMinVersion")))
     // The pinned max is the Minecraft version of the Paper dev bundle (26.3.build.N-beta -> 26.3).
     maxVersion.set(

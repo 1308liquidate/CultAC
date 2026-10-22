@@ -22,7 +22,6 @@ import java.nio.file.StandardCopyOption
 import javax.inject.Inject
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.PathWalkOption
-import kotlin.io.path.copyTo
 import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.exists
@@ -31,21 +30,24 @@ import kotlin.io.path.isRegularFile
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.io.path.readText
-import kotlin.io.path.relativeTo
 import kotlin.io.path.walk
 import kotlin.io.path.writeText
 
 /**
- * A local, greppable take on mcsrc.dev: decompiles the Minecraft client of [maxVersion] in full, and writes per-class
- * patches from it back to every release down to [minVersion]. A [selectedVersion] outside that release range (a snapshot
- * newer than [maxVersion], typically) only gets a patch from [maxVersion].
+ * A local, greppable take on mcsrc.dev for checking logic against older clients: writes per-class patches of the
+ * decompiled Minecraft client from [maxVersion] back to every release down to [minVersion]. A [selectedVersion]
+ * outside that release range (a snapshot newer than [maxVersion], typically) only gets a patch from [maxVersion].
+ *
+ * Only the patches are written out; [maxVersion] itself is the NMS the project already compiles against. Patches to an
+ * obfuscated release compare generated local variable and parameter names on both sides (see [LocalNames]), so they
+ * hold logic changes rather than the renames between obfuscated and unobfuscated releases.
  *
  * Downloads, remapped jars and decompiled trees are cached in [cacheDir], so other worktrees and later runs only
  * decompile what they have not seen yet.
  */
 @OptIn(ExperimentalPathApi::class)
 @UntrackedTask(because = "Manages its own cache and output; the decompiled trees are too large to snapshot.")
-abstract class GenerateMinecraftSources : DefaultTask() {
+abstract class GenerateMinecraftPatches : DefaultTask() {
     @get:Input
     abstract val minVersion: Property<String>
 
@@ -103,32 +105,33 @@ abstract class GenerateMinecraftSources : DefaultTask() {
         val output = outputDir.get().asFile.toPath()
         claimOutput(output)
 
-        val maxSources = decompile(meta, max)
-        syncSourceTree(maxSources, output.resolve(max.id))
-
+        fun obfuscated(entry: VersionEntry) = "client_mappings" in meta.versionMeta(entry).downloads
         val patchDirs = (older + listOfNotNull(extra)).map { target ->
-            val targetSources = decompile(meta, target)
-            val dir = output.resolve("patches/${max.id}_to_${target.id}")
+            val names = if (obfuscated(max) || obfuscated(target)) LocalNames.GENERATED else LocalNames.MOJANG
+            val maxSources = decompile(meta, max, names)
+            val targetSources = decompile(meta, target, names)
+            val dir = output.resolve("${max.id}_to_${target.id}")
             val stamp = "$PATCH_FORMAT\n${stampOf(maxSources)}\n${stampOf(targetSources)}"
             if (stampOf(dir) != stamp) {
                 logger.lifecycle("mcsrc: writing patches ${max.id} -> ${target.id}")
                 dir.deleteRecursively()
-                SourcePatches.write(sourcesCache, max.id, target.id, dir)
+                SourcePatches.write(sourcesCache.resolve(names.dir), max.id, target.id, dir)
                 dir.resolve(STAMP).writeText(stamp)
             }
             dir.name
         }
 
-        prune(output, setOf(MARKER, README, max.id, "patches"))
-        prune(output.resolve("patches"), patchDirs.toSet())
+        prune(output, patchDirs.toSet() + setOf(MARKER, README))
         writeReadme(output, max, min, older, extra)
-        logger.lifecycle("mcsrc: ${max.id} sources and ${patchDirs.size} patch sets are in $output")
+        logger.lifecycle("mcsrc: ${patchDirs.size} patch sets from ${max.id} are in $output")
     }
 
     /** Returns the decompiled tree of [entry], decompiling it unless the cache already holds this exact output. */
-    private fun decompile(meta: MojangMeta, entry: VersionEntry): Path {
-        val target = sourcesCache.resolve(entry.id)
-        val stamp = "$FINGERPRINT\n${entry.sha1}"
+    private fun decompile(meta: MojangMeta, entry: VersionEntry, names: LocalNames): Path {
+        val target = sourcesCache.resolve("${names.dir}/${entry.id}")
+        val options = VINEFLOWER_OPTIONS + names.options
+        // Changes whenever the decompiled output would, so cached trees and the patches made from them are rebuilt.
+        val stamp = "format=2;${VINEFLOWER_JAR.name};${options.joinToString(" ")}\n${entry.sha1}"
         if (stampOf(target) == stamp) return target
 
         val versionMeta = meta.versionMeta(entry)
@@ -151,8 +154,8 @@ abstract class GenerateMinecraftSources : DefaultTask() {
             named
         } ?: client
 
-        logger.lifecycle("mcsrc: decompiling ${entry.id}")
-        val partial = sourcesCache.resolve("${entry.id}.part")
+        logger.lifecycle("mcsrc: decompiling ${entry.id} (${names.dir} local names)")
+        val partial = target.resolveSibling("${entry.id}.part")
         partial.deleteRecursively()
         partial.createDirectories()
         execOperations.javaexec {
@@ -160,13 +163,14 @@ abstract class GenerateMinecraftSources : DefaultTask() {
             classpath(VINEFLOWER_JAR.toFile())
             mainClass.set(ConsoleDecompiler::class.java.name)
             maxHeapSize = decompilerMaxHeap.get()
-            args(VINEFLOWER_OPTIONS + listOf(jar.toString(), partial.toString()))
+            args(options + listOf(jar.toString(), partial.toString()))
         }
         // --skip-extra-files still leaves a few resources behind; only the sources are wanted.
         partial.walk().filter { it.isRegularFile() && !it.name.endsWith(".java") }.forEach(Files::delete)
-        partial.walk(PathWalkOption.INCLUDE_DIRECTORIES).toList().asReversed()
-            .filter { it.isDirectory() && it.listDirectoryEntries().isEmpty() }
-            .forEach(Files::delete)
+        // Children come before their parents in reverse walk order, so a parent emptied by them goes too.
+        for (dir in partial.walk(PathWalkOption.INCLUDE_DIRECTORIES).toList().asReversed()) {
+            if (dir.isDirectory() && dir.listDirectoryEntries().isEmpty()) Files.delete(dir)
+        }
         // Vineflower keeps going when a method runs out of heap and leaves a stub in its place; never cache that.
         val starved = partial.walk().filter { it.isRegularFile() && OUT_OF_HEAP in it.readText() }.toList()
         if (starved.isNotEmpty()) {
@@ -180,18 +184,6 @@ abstract class GenerateMinecraftSources : DefaultTask() {
         target.deleteRecursively()
         Files.move(partial, target, StandardCopyOption.ATOMIC_MOVE)
         return target
-    }
-
-    private fun syncSourceTree(from: Path, to: Path) {
-        val stamp = stampOf(from)
-        if (stampOf(to) == stamp) return
-        logger.lifecycle("mcsrc: copying ${from.name} sources to $to")
-        to.deleteRecursively()
-        from.walk().forEach { file ->
-            val copy = to.resolve(file.relativeTo(from).toString())
-            copy.parent.createDirectories()
-            file.copyTo(copy)
-        }
     }
 
     /** The output directory is wiped and rewritten, so refuse to take over one this task did not create. */
@@ -215,24 +207,42 @@ abstract class GenerateMinecraftSources : DefaultTask() {
 
     private fun writeReadme(output: Path, max: VersionEntry, min: VersionEntry, older: List<VersionEntry>, extra: VersionEntry?) {
         val text = buildString {
-            appendLine("# Decompiled Minecraft client sources")
+            appendLine("# Minecraft client patches from ${max.id}")
             appendLine()
             appendLine("Generated by `./gradlew mcsrc` (Mojang names, decompiled with Vineflower). Do not edit or commit.")
             appendLine()
-            appendLine("- `${max.id}/` - the full client source of ${max.id}, the pinned max version.")
-            appendLine("- `patches/${max.id}_to_<version>/` - one unified diff per class, from the ${max.id} source to that version.")
-            appendLine("  Each patch sits at the path of the ${max.id} file it changes (`net/minecraft/.../Entity.java.patch`);")
-            appendLine("  `CHANGES.txt` lists every class that differs. `git apply -p1` in a copy of `${max.id}/` reproduces the other version.")
+            appendLine("Each `${max.id}_to_<version>/` holds one unified diff per class, going from the ${max.id} client back to that version:")
+            appendLine("`-` lines are ${max.id}, `+` lines are the older version. A patch sits at the path of the ${max.id} class it changes")
+            appendLine("(`net/minecraft/world/entity/LivingEntity.java.patch`), and `CHANGES.txt` lists every class that differs.")
+            appendLine()
+            appendLine("Releases before 26.1 were obfuscated and carry no local variable names. Patches to them name locals and parameters")
+            appendLine("from their type (`level`, `blockpos`, `i`) on both sides, so they show logic changes rather than renames; their")
+            appendLine("context lines will not match the names in the ${max.id} NMS source. Patches to 26.1 and later keep Mojang's names.")
             appendLine()
             appendLine("Releases back to ${min.id}: ${older.joinToString(", ") { it.id }.ifEmpty { "none" }}.")
             if (extra != null) appendLine("Extra version: ${extra.id} (patch from ${max.id} only).")
             appendLine()
-            appendLine("Releases before 26.1 were obfuscated without local variable names, so their patches also rename locals and parameters.")
             appendLine("Some classes were renamed by letter case only (`Enderman` <-> `EnderMan`). Where their patch files would collide")
             appendLine("on a case-insensitive file system, the later one gets a numbered suffix (`Enderman.java.2.patch`, noted in")
-            appendLine("`CHANGES.txt`), and `git apply` cannot reproduce those renames on Windows or macOS.")
+            appendLine("`CHANGES.txt`).")
         }
         output.resolve(README).writeText(text)
+    }
+
+    /** How a decompiled tree names local variables and parameters; trees are only diffed against the same kind. */
+    private enum class LocalNames(val dir: String, val options: List<String>) {
+        /** Mojang's own names, which unobfuscated releases (26.1 and later) ship. */
+        MOJANG("mojang", emptyList()),
+
+        /**
+         * Names generated from each variable's type, the same way in every version. Obfuscated releases only carry
+         * `$$0`-style local names and no final parameter flags, so a patch against one would otherwise rename every
+         * local in every changed class.
+         */
+        GENERATED(
+            "generated",
+            listOf("--use-lvt-names=0", "--use-method-parameters=0", "--variable-renaming=jad", "--rename-parameters=1"),
+        ),
     }
 
     companion object {
@@ -253,8 +263,5 @@ abstract class GenerateMinecraftSources : DefaultTask() {
 
         /** Changes whenever the patch layout would, so patch sets are rewritten from the cached trees. */
         private const val PATCH_FORMAT = "patches=3"
-
-        /** Changes whenever the decompiled output would, so cached trees and patches are rebuilt. */
-        private val FINGERPRINT = "format=2;${VINEFLOWER_JAR.name};${VINEFLOWER_OPTIONS.joinToString(" ")}"
     }
 }
