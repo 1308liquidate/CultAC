@@ -426,6 +426,21 @@ public class CultPlayer implements GrimUser {
     }
 
     /**
+     * The yaw a client before 26.3 holds once Entity#rideTick ends, read at its tick end: AbstractBoat#positionRider
+     * turns the rider from the yaw its Rot sent by the boat's deltaRotation, and clampRotation holds it within 105
+     * degrees of the boat. A boat the player does not drive keeps the deltaRotation the player's last controlled tick
+     * of it left, as AbstractBoat#tick only changes deltaRotation on the instance that controls it. NaN when the boat
+     * the player drives reports a yaw that is not its turn.
+     */
+    public float yawAfterRideTick() {
+        PacketEntity boat = compensatedEntities.getSelf().getRiding();
+        if (boat == null || !boat.isBoat()) return xRot;
+        if (!boatYawFollowsTurn()) return Float.NaN;
+        float turn = drivesBoat(boat) ? boatData.deltaRotation : boatData.deltaRotationOf(boat);
+        return clampToBoat(xRot + turn, boat.clientPhysicalYaw);
+    }
+
+    /**
      * Whether a boat the player drives reports the yaw AbstractBoat#controlBoat gives it: the last tick's yaw turned by
      * deltaRotation. The client states that yaw in its vehicle move, so a yaw that differs says nothing about the turn
      * it gave the rider.

@@ -939,6 +939,7 @@ public class CheckManager {
             } finally {
                 dispatchingTickEnd = false;
             }
+            player.boatData.onClientTickEnd(player);
             player.tickHeadYaw();
             player.visibilityDebug.update();
         }

@@ -121,6 +121,8 @@ public class PacketEntity {
 
     public HashMap<MovementEffect, Integer> potionsMap = null;
     public BoatEntityStatus boatStatus = null;
+    // AbstractBoat#deltaRotation of this boat as the player's control moved to another boat.
+    public float boatDeltaRotation;
 
     @Getter
     private final int entityId;
