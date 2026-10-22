@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
@@ -16,6 +17,7 @@ import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.math.TrigHandler;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.Vector3dm;
 import ac.cult.cultac.utils.nmsutil.ReachUtils;
@@ -65,6 +67,26 @@ class ElytraTransformFireworkTest {
         });
     }
 
+    /** TridentItem#releaseUsing pushes in Minecraft#handleKeybinds, after the rocket boosted the stored velocity. */
+    @Test
+    void aRiptidePushAddsToTheBoostedVelocity() {
+        withPlayer(player -> {
+            player.compensatedFireworks.addNewFirework(100);
+            SimulationContext context = context(player);
+            when(context.getRiptideLevel()).thenReturn(3);
+            when(context.isRiptideReleaseCertain()).thenReturn(true);
+            when(context.getTrig()).thenReturn(new TrigHandler(player));
+            when(context.getWorldData().getCarriedOnGround()).thenReturn(DesyncStatus.FALSE);
+            PredVector pushed = Riptide.release(player, context, List.of(new PredVector(VELOCITY)))
+                    .getFirst();
+            Vec3 push = pushed.subtract(VELOCITY);
+
+            Vec3 boosted = boost(VELOCITY, ReachUtils.getLook(player, LAST_YAW, LAST_PITCH));
+            Vec3 end = glide(player, boosted.add(push));
+            assertClose(end, transform(player, context, pushed, end));
+        });
+    }
+
     private static Vec3 boost(Vec3 velocity, Vector3dm look) {
         return velocity.add(
                 look.getX() * 0.1D + (look.getX() * 1.5D - velocity.x) * 0.5D,
@@ -78,6 +100,10 @@ class ElytraTransformFireworkTest {
     }
 
     private static Vec3 transform(CultPlayer player, PredVector start, Vec3 end) {
+        return transform(player, context(player), start, end);
+    }
+
+    private static SimulationContext context(CultPlayer player) {
         WorldData worldData = mock(WorldData.class);
         SimulationContext context = mock(SimulationContext.class);
         when(context.usesFallFlyingMovement()).thenReturn(true);
@@ -87,6 +113,10 @@ class ElytraTransformFireworkTest {
         when(context.getYRot()).thenReturn(PITCH);
         when(context.getLastXRot()).thenReturn(LAST_YAW);
         when(context.getLastYRot()).thenReturn(LAST_PITCH);
+        return context;
+    }
+
+    private static Vec3 transform(CultPlayer player, SimulationContext context, PredVector start, Vec3 end) {
         PredictionResult result = mock(PredictionResult.class);
         when(result.getSimulationContext()).thenReturn(context);
         when(result.getPossibleGravity(anyDouble(), anyDouble())).thenReturn(List.of(GRAVITY));

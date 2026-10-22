@@ -74,7 +74,24 @@ public class Riptide implements UncertaintyHandler {
 
     /** Whether {@code velocity} carries this tick's push, which leaves the tick's LivingEntity#aiStep airborne. */
     public static boolean pushed(SimulationContext context, PredVector velocity) {
-        return context.getRiptideLevel() != 0 && velocity.hasReason(PUSH);
+        return pushOf(context, velocity) != null;
+    }
+
+    /** This tick's push on {@code velocity}, or null without one. */
+    static Pushed pushOf(SimulationContext context, PredVector velocity) {
+        return context.getRiptideLevel() == 0 ? null : velocity.firstInLineage(Pushed.class);
+    }
+
+    /** A velocity carrying this tick's push, and the velocity the push was added to. */
+    static final class Pushed extends PredVector {
+        final PredVector carried;
+        final Vec3 push;
+
+        private Pushed(PredVector carried, Vec3 push) {
+            super(carried.add(push), carried, PUSH);
+            this.carried = carried;
+            this.push = push;
+        }
     }
 
     /**
@@ -97,7 +114,7 @@ public class Riptide implements UncertaintyHandler {
         if (!context.isRiptideReleaseCertain()) released.addAll(velocities);
         for (Vec3 push : pushes) {
             for (PredVector velocity : velocities) {
-                PredVector pushed = velocity.add(push, PUSH);
+                PredVector pushed = new Pushed(velocity, push);
                 if (onGround.contains(false)) released.add(pushed);
                 if (!onGround.contains(true)) continue;
                 for (Vec3 moved : afterLift(player, context, pushed)) {
