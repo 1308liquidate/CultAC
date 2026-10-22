@@ -5,12 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.blocksim.data.Components;
+import ac.cult.blocksim.data.DataTables;
+import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.multiactions.MultiActionsC;
 import ac.cult.cultac.checks.impl.sprint.SprintH;
 import ac.cult.cultac.events.packets.listeners.PacketEntityAction;
+import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.packet.InventoryPackets;
+import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
+import ac.cult.cultac.protocol.value.EquipmentSlot;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityRideable;
@@ -115,6 +123,27 @@ class VehicleSprintStateTest {
     }
 
     /**
+     * AbstractHorse#getControllingPassenger needs the saddle, which the rider's client gets from
+     * ClientPacketListener#handleSetEquipment: until it reads the set_equipment, its ticks stay passenger ticks.
+     */
+    @Test
+    void aSaddleEquippedOnTheCamelGivesControlOnlyOnceTheClientReadsIt() throws Exception {
+        try (var f = ride(EntityTypeIds.CAMEL)) {
+            f.player.isSprinting = true;
+            f.rideTick();
+            sendSaddle(f);
+            f.rideTick();
+
+            assertFalse(f.player.isClientSprinting());
+
+            f.pongThrough(f.player.lastTransactionSent.get());
+            f.rideTick();
+
+            assertTrue(f.player.isClientSprinting());
+        }
+    }
+
+    /**
      * LocalPlayer#aiStep sprints a controlling rider holding forward and sprint again, which matches the last command
      * sent, so LocalPlayer#sendIsSprintingIfNeeded sends nothing.
      */
@@ -197,6 +226,26 @@ class VehicleSprintStateTest {
         var command = new ServerboundPlayerCommand(f.player.entityID, action, 0);
         new PacketEntityAction()
                 .onPlayerCommand(f.event(ServerboundPackets.PLAYER_COMMAND, command), f.player, command);
+    }
+
+    /** A set_equipment putting a saddle in the vehicle's SADDLE slot. */
+    @SuppressWarnings("unchecked")
+    private static void sendSaddle(JavaTickFixture f) {
+        var item = DataTables.defaults().items().stream()
+                .filter(definition -> definition.key().equals("minecraft:saddle"))
+                .findFirst()
+                .orElseThrow();
+        var packet = new InventoryPackets.Equipment(
+                VEHICLE,
+                List.of(new InventoryPackets.EquipmentEntry(
+                        EquipmentSlot.SADDLE, new SimItemStack(item, 1, Components.EMPTY))));
+        var type = (PacketType<InventoryPackets.Equipment>) TestProtocolRuntime.catalog().stream()
+                .filter(candidate -> candidate.recordClass() == InventoryPackets.Equipment.class)
+                .findFirst()
+                .orElseThrow();
+        var event = new PacketSendEvent<>(f.fixture.user, ConnectionPhase.PLAY, type, packet, false);
+        f.player.packetEntityReplication.onSetEquipment(event, f.player, packet);
+        event.tasksAfter().forEach(Runnable::run);
     }
 
     private static JavaTickFixture ride(int type) throws Exception {
