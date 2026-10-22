@@ -39,6 +39,23 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     private Output emission;
     private boolean removed;
 
+    // Event-loop-confined scratch. The outermost write reuses it; a write nested inside that write's model
+    // task, or a nested preparation, allocates its own as before. runInModel runs its task synchronously.
+    /** Nesting depth of {@link #write} model tasks. */
+    private int writeDepth;
+    /** Nesting depth of {@link #prepare} within the outermost write. */
+    private int prepareDepth;
+    /** Whether the innermost write's model task has started. */
+    private boolean consumed;
+
+    private ChannelHandlerContext taskContext;
+    private Object taskMessage;
+    private ChannelPromise taskPromise;
+    private final Runnable writeTask = () -> runWrite(taskContext, taskMessage, taskPromise);
+    private final Output scratchOutput = new Output();
+    private final Families scratchFamilies = new Families();
+    private final Batch scratchBatch = new Batch(false);
+
     public CultEncoder(CultConnection connection) {
         this.connection = connection;
     }
@@ -129,31 +146,50 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             }
             return;
         }
-        boolean[] consumed = {false};
+        int depth = ++writeDepth;
+        boolean outerConsumed = consumed;
+        consumed = false;
+        Runnable task;
+        if (depth == 1) {
+            taskContext = ctx;
+            taskMessage = message;
+            taskPromise = promise;
+            task = writeTask;
+        } else task = () -> runWrite(ctx, message, promise);
         try {
-            connection.runInModel(() -> {
-                consumed[0] = true;
-                Output output = null;
-                try {
-                    if (removed || !ctx.channel().isActive()) {
-                        new Pending(message, promise).discard(new ClosedChannelException());
-                        return;
-                    }
-                    output = process(ctx, message, promise);
-                    if (emission == null) emit(ctx, output);
-                    else emission.append(output);
-                } catch (Throwable failure) {
-                    if (output != null) output.discard(failure);
-                    promise.tryFailure(failure);
-                    CultNetworkManager.reportFailure("outbound packet processing", failure);
-                }
-            });
+            connection.runInModel(task);
         } catch (Throwable failure) {
             CultNetworkManager.reportFailure("outbound model context", failure);
-            if (!consumed[0]) {
+            if (!consumed) {
                 if (message instanceof ByteBuf frame) ctx.write(frame, promise);
                 else new Pending(message, promise).discard(failure);
             }
+        } finally {
+            consumed = outerConsumed;
+            writeDepth--;
+            if (depth == 1) {
+                taskContext = null;
+                taskMessage = null;
+                taskPromise = null;
+            }
+        }
+    }
+
+    private void runWrite(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
+        consumed = true;
+        Output output = null;
+        try {
+            if (removed || !ctx.channel().isActive()) {
+                new Pending(message, promise).discard(new ClosedChannelException());
+                return;
+            }
+            output = process(ctx, message, promise);
+            if (emission == null) emit(ctx, output);
+            else emission.append(output);
+        } catch (Throwable failure) {
+            if (output != null) output.discard(failure);
+            promise.tryFailure(failure);
+            CultNetworkManager.reportFailure("outbound packet processing", failure);
         }
     }
 
@@ -171,8 +207,19 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     }
 
     private Output process(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
-        var output = new Output();
-        var activeFamilies = new Families();
+        // Only the outermost write's model task uses the scratch: nothing is emitting then, and no enclosing
+        // preparation holds it.
+        Output output;
+        Families activeFamilies;
+        if (writeDepth == 1) {
+            output = scratchOutput;
+            output.reset();
+            activeFamilies = scratchFamilies;
+            activeFamilies.reset();
+        } else {
+            output = new Output();
+            activeFamilies = new Families();
+        }
         // Recursive callbacks finish first and append their complete groups here.
         // The enclosing group's frames have not been appended yet, so these writes
         // precede even its opening delimiter. No retained expansion tree is needed.
@@ -201,8 +248,13 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             ChannelHandlerContext ctx, Object message, ChannelPromise promise, Families activeFamilies, Output output) {
         // Reentrant writes observe the emitted wire state, not an enclosing
         // group's planned delimiters. I/O cannot emit while this dispatch runs.
-        var batch = new Batch(insideBundle);
         ByteBuf fallback = message instanceof ByteBuf frame ? frame.retain() : null;
+        Batch batch;
+        if (writeDepth == 1 && prepareDepth == 0) {
+            batch = scratchBatch;
+            batch.reset(insideBundle);
+        } else batch = new Batch(insideBundle);
+        prepareDepth++;
         try {
             if (message instanceof CultConnection.WriteTask task) {
                 // The active writer captures callback-generated packets at this exact
@@ -227,6 +279,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 connection.placedClientbound(type);
             } else promise.tryFailure(failure);
         } finally {
+            prepareDepth--;
             if (fallback != null) fallback.release();
         }
     }
@@ -605,6 +658,12 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             else if (second != null) second = null;
             else first = null;
         }
+
+        void reset() {
+            first = null;
+            second = null;
+            if (nested != null) nested.clear();
+        }
     }
 
     /** Local bundle cursor during expansion; it never changes the emitted wire state. */
@@ -612,6 +671,11 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         boolean inside;
 
         Batch(boolean inside) {
+            this.inside = inside;
+        }
+
+        void reset(boolean inside) {
+            reset();
             this.inside = inside;
         }
 
@@ -629,6 +693,15 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
         boolean isEmpty() {
             return first == null;
+        }
+
+        /** Readies a drained scratch output; ownership of anything left was already settled. */
+        void reset() {
+            first = null;
+            if (tail != null) tail.clear();
+            if (tasks != null) tasks.clear();
+            if (groups != null) groups.clear();
+            flush = false;
         }
 
         int size() {

@@ -150,7 +150,8 @@ public final class ProtocolRuntime {
         return slotOrAbsent(type) >= 0;
     }
 
-    private int slotOrAbsent(PacketType<?> type) {
+    /** {@link #slot} of a catalog type, or -1 when {@code type} is not this catalog's instance. */
+    public int slotOrAbsent(PacketType<?> type) {
         int index = type.index();
         return index < slots.length ? slots[index] : -1;
     }

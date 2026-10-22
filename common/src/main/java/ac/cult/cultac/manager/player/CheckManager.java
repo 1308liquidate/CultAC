@@ -699,11 +699,7 @@ public class CheckManager {
         }
 
         for (PacketHandlerScanner.ReceiveRegistration registration : registrations) {
-            PacketReceiveHandler<Object> handler = (event, player, packet) -> {
-                if (shouldDispatch(listener)) {
-                    registration.handler().handle(event, player, packet);
-                }
-            };
+            PacketReceiveHandler<Object> handler = gatedReceive(listener, registration.handler());
             packetRegistrations.receive.receiveRoute(
                     registration.packetType(), PacketListenerPriority.NORMAL, handler, ReceiveStage.EARLY);
         }
@@ -771,11 +767,7 @@ public class CheckManager {
             return;
         }
         for (PacketHandlerScanner.ReceiveRegistration registration : registrations) {
-            PacketReceiveHandler<Object> handler = (event, player, packet) -> {
-                if (shouldDispatch(listener)) {
-                    registration.handler().handle(event, player, packet);
-                }
-            };
+            PacketReceiveHandler<Object> handler = gatedReceive(listener, registration.handler());
             handlers.receiveRoute(
                     registration.packetType(), PacketListenerPriority.NORMAL, handler, ReceiveStage.ORDINARY);
         }
@@ -800,11 +792,7 @@ public class CheckManager {
             return;
         }
         for (PacketHandlerScanner.SendRegistration registration : registrations) {
-            PacketSendHandler<Object> handler = (event, player, packet) -> {
-                if (shouldDispatch(listener)) {
-                    registration.handler().handle(event, player, packet);
-                }
-            };
+            PacketSendHandler<Object> handler = gatedSend(listener, registration.handler());
             handlers.sendRoute(registration.packetType(), PacketListenerPriority.NORMAL, handler);
         }
     }
@@ -876,6 +864,29 @@ public class CheckManager {
 
     private boolean shouldDispatch(CheckListener listener) {
         return shouldRegister(listener);
+    }
+
+    /**
+     * Only a check without Bedrock support can stop dispatching, and only while the player's movement platform
+     * is Bedrock: {@link Check#isBedrockSupported} reads the class's annotation, so every other listener's
+     * {@link #shouldDispatch} is always true and its handler runs ungated.
+     */
+    private static boolean bedrockGated(CheckListener listener) {
+        return listener instanceof Check check && !check.isBedrockSupported();
+    }
+
+    private PacketReceiveHandler<Object> gatedReceive(CheckListener listener, PacketReceiveHandler<Object> handler) {
+        if (!bedrockGated(listener)) return handler;
+        return (event, player, packet) -> {
+            if (!this.player.isBedrockMovement()) handler.handle(event, player, packet);
+        };
+    }
+
+    private PacketSendHandler<Object> gatedSend(CheckListener listener, PacketSendHandler<Object> handler) {
+        if (!bedrockGated(listener)) return handler;
+        return (event, player, packet) -> {
+            if (!this.player.isBedrockMovement()) handler.handle(event, player, packet);
+        };
     }
 
     public void reload() {

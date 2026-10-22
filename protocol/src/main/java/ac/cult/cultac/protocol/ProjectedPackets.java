@@ -23,12 +23,15 @@ public final class ProjectedPackets implements AutoCloseable {
     private final Supplier<PacketValueAdapter> adapter;
     private final byte[][] bundleDelimiters = new byte[ConnectionPhase.values().length][];
     private final Object[][][] modelTypes;
+    /** Both runtimes and their data are final, so whether they differ never changes. */
+    private final boolean translated;
     private boolean closed;
 
     public ProjectedPackets(ProtocolRuntime observed, ProtocolRuntime model, Supplier<PacketValueAdapter> adapter) {
         this.observed = Objects.requireNonNull(observed);
         this.model = Objects.requireNonNull(model);
         this.adapter = Objects.requireNonNull(adapter);
+        translated = observed.data().version() != model.data().version();
         modelTypes = new Object[ConnectionPhase.values().length][PacketDirection.values().length][];
         for (ConnectionPhase phase : ConnectionPhase.values()) {
             for (PacketDirection direction : PacketDirection.values()) {
@@ -47,7 +50,7 @@ public final class ProjectedPackets implements AutoCloseable {
     }
 
     public boolean translated() {
-        return observed.data().version() != model.data().version();
+        return translated;
     }
 
     /** The model family of observed wire packet {@code id}; null when the model has none. */
