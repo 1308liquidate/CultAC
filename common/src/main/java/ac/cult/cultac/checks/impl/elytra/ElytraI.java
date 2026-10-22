@@ -48,8 +48,8 @@ public class ElytraI extends Check implements PostPredictionListener {
                         .getWorldData()
                         .getInWater()
                         .determinePessimistically()) return false;
-        if (!RiptideUtil.releasedOnTheGround(player)) return true;
-        // LivingEntity#baseTick refreshes Entity#wasTouchingWater after TridentItem#releaseUsing's lift.
+        // LivingEntity#baseTick refreshes Entity#wasTouchingWater at the end of the last move, and after
+        // TridentItem#releaseUsing's lift, before LocalPlayer#aiStep calls Player#tryToStartFallFlying.
         for (SimpleCollisionBox box : RiptideUtil.glideStartBoxes(player)) {
             if (!JavaFallDistance.touchesWater(player, box)) return false;
         }
