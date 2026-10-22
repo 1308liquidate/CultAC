@@ -205,8 +205,10 @@ public class CollisionModifier implements UncertaintyHandler {
 
         if (collide.getYNeg() != null
                 && collide.getYNeg().isLikelyCollide()
+                && start.y < 0
                 && start.y < collide.getYNeg().getResult()
-                && end.y <= 0
+                // VoxelShape#collideX keeps a floor up to 1e-7 above the feet, so a fall can clip slightly upward.
+                && end.y <= Math.max(0.0D, collide.getYNeg().getResult())
                 && end.y > start.y) {
             double clamped = CultMath.clamp(end.y, start.y, collide.getYNeg().getResult());
             start = start.withY(clamped, "collide -y");
@@ -214,8 +216,10 @@ public class CollisionModifier implements UncertaintyHandler {
 
         if (collide.getYPos() != null
                 && collide.getYPos().isLikelyCollide()
+                && start.y > 0
                 && start.y > collide.getYPos().getResult()
-                && end.y >= 0
+                // Mirrored: a ceiling up to 1e-7 below the head can clip a rise slightly downward.
+                && end.y >= Math.min(0.0D, collide.getYPos().getResult())
                 && end.y < start.y) {
             double clamped = CultMath.clamp(end.y, start.y, collide.getYPos().getResult());
             start = start.withY(clamped, "collide +y");
