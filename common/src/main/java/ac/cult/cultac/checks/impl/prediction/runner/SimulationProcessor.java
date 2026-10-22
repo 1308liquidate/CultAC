@@ -1608,7 +1608,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         List<ValidMovements> valid = new ArrayList<>();
         MovementEngine engine = MovementEngines.requireForProfile(movementProfile);
 
-        for (SimulationContext curSimulationContext : this.createSimulationContexts(
+        for (SimulationContext curSimulationContext : this.createReleaseSimulationContexts(
                 player,
                 lastPrediction,
                 target,
@@ -1854,6 +1854,71 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 result.getInitialStartingVel(),
                 attemptedExtents,
                 canStep);
+    }
+
+    /**
+     * The carried contexts, each split by TridentItem#releaseUsing's outcome on a release tick: the release spins
+     * only when Entity#isInWaterOrRain holds, and a spin leaves onGround false for the tick's LivingEntity#aiStep.
+     */
+    private List<SimulationContext> createReleaseSimulationContexts(
+            CultPlayer player,
+            PredictionResult lastPrediction,
+            Vec3 target,
+            Vec3 start,
+            Vec3 end,
+            LastInstance lastTickSkip,
+            boolean testing,
+            float xRot,
+            float yRot,
+            AuthoredMovementFrame authoredMovementFrame,
+            MovementProfile movementProfile) {
+        List<SimulationContext> contexts = this.createSimulationContexts(
+                player,
+                lastPrediction,
+                target,
+                start,
+                end,
+                lastTickSkip,
+                testing,
+                xRot,
+                yRot,
+                authoredMovementFrame,
+                movementProfile);
+        if (player.packetStateData.riptideLevel == 0
+                || player.isBedrockMovement()
+                || this.currentPredictionVehicle() != null) return contexts;
+        List<SimulationContext> released = new ArrayList<>(contexts.size() * 2);
+        for (SimulationContext context : contexts) {
+            SimulationContext spin = context;
+            if (!context.isRiptideReleaseCertain()) {
+                spin = this.createSimulationContext(
+                        player,
+                        lastPrediction,
+                        target,
+                        start,
+                        end,
+                        lastTickSkip,
+                        testing,
+                        xRot,
+                        yRot,
+                        authoredMovementFrame,
+                        movementProfile,
+                        false,
+                        null,
+                        CarryWorld.of(context));
+                spin.setProfileCarry(context.getProfileCarry());
+                spin.setRequiredCurrentMoveStuckSpeed(context.getRequiredCurrentMoveStuckSpeed());
+                spin.handleLastRequiredStuckSpeed(context.getRequiredCurrentMoveStuckSpeed());
+                spin.setRiptideReleaseCertain(true);
+                spin.getWorldData().setLastOnGround(DesyncStatus.FALSE);
+                context.setRiptideLevel(0);
+                released.add(context);
+            }
+            spin.setWaterMovementEfficiency(
+                    getWaterMovementEfficiency(player.compensatedEntities.getSelf(), DesyncStatus.FALSE));
+            released.add(spin);
+        }
+        return released;
     }
 
     private List<SimulationContext> createSimulationContexts(

@@ -224,7 +224,7 @@ public class WorldStageBuilder {
         if (simulationContext.isRiptideReleaseCertain()) {
             // Entity#move of TridentItem#releaseUsing's upward lift leaves onGround false before LivingEntity#aiStep.
             desyncLastOnGround = DesyncStatus.FALSE;
-        } else if (!push.getPush().isEmpty() || player.packetStateData.riptideLevel > 0) {
+        } else if (!push.getPush().isEmpty()) {
             desyncLastOnGround = DesyncStatus.UNKNOWN;
         }
         if (simulationContext.getVehicle() != null

@@ -20,6 +20,8 @@ import org.junit.jupiter.api.Test;
 class JavaRiptideGroundReleaseTest {
     private static final ServerboundPlayerInput JUMP_KEY =
             new ServerboundPlayerInput(false, false, false, false, true, false, false);
+    private static final ServerboundPlayerInput FORWARD_KEY =
+            new ServerboundPlayerInput(true, false, false, false, false, false, false);
     private static final float YAW = 0.0F, PITCH = -90.0F;
     private static final int RIPTIDE = 3;
     private static final Vec3 START = new Vec3(0.5, FLOOR_Y, 0.5);
@@ -60,6 +62,24 @@ class JavaRiptideGroundReleaseTest {
         }
     }
 
+    /**
+     * A spin on the ground lifts the player off it: the tick's LivingEntity#travel reads onGround false and
+     * Player#getFlyingSpeed moves the input.
+     */
+    @Test
+    void aSpinMovesTheInputAtTheAirSpeed() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            Vec3 pushed = release(f, false, FORWARD_KEY);
+            Vec3 walked = new Vec3(0, 0, 0.98F * 0.02F);
+            assertExact(f.tick(START.add(new Vec3(0, LIFT, 0)).add(pushed).add(walked), false));
+        }
+        try (var f = new JavaTickFixture()) {
+            Vec3 pushed = release(f, false, FORWARD_KEY);
+            Vec3 walked = new Vec3(0, 0, 0.98F * 0.1F);
+            assertRejected(f.tick(START.add(new Vec3(0, LIFT, 0)).add(pushed).add(walked), false), "Strafe");
+        }
+    }
+
     private static Vec3 releaseExactly(JavaTickFixture f) {
         Vec3 position = START.add(new Vec3(0, LIFT, 0)).add(release(f));
         assertExact(f.tick(position, false));
@@ -68,13 +88,17 @@ class JavaRiptideGroundReleaseTest {
 
     /** Sets up a certain grounded release when {@code f} is given; the pushed velocity the tick moves by. */
     private static Vec3 release(JavaTickFixture f) {
+        return release(f, true, JUMP_KEY);
+    }
+
+    private static Vec3 release(JavaTickFixture f, boolean certain, ServerboundPlayerInput input) {
         if (f != null) {
             f.player.xRot = YAW;
             f.player.yRot = PITCH;
-            f.input(JUMP_KEY);
+            f.input(input);
             f.place(START, CARRIED);
             f.player.packetStateData.riptideLevel = RIPTIDE;
-            f.player.packetStateData.riptideReleaseCertain = true;
+            f.player.packetStateData.riptideReleaseCertain = certain;
             f.player.riptideSpinAttackTicks = 20;
         }
         Vec3 pushed = CARRIED.add(push());

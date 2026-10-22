@@ -96,6 +96,7 @@ public class SimulationContext {
     @Setter
     WorldData worldData;
 
+    @Setter
     int riptideLevel;
 
     /** TridentItem#releaseUsing spins this tick: it pushes, and lifts a player on ground. */

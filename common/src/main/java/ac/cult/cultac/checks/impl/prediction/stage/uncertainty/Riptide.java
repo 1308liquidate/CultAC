@@ -1,7 +1,6 @@
 package ac.cult.cultac.checks.impl.prediction.stage.uncertainty;
 
 import ac.cult.blocksim.data.BlockIds;
-import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
@@ -54,9 +53,6 @@ public class Riptide implements UncertaintyHandler {
             MovementTrace trace,
             Vec3 end) {
         if (context.getRiptideLevel() == 0) return trace;
-        if (!context.isRiptideReleaseCertain()) {
-            result.getSimulationContext().getWorldData().setLastOnGround(DesyncStatus.UNKNOWN);
-        }
         PredVector start = trace.position();
         if (!lifted(context, start)) return trace;
         Vec3 lift = new Vec3(0, context.getRiptideGroundLift(), 0);
@@ -111,7 +107,6 @@ public class Riptide implements UncertaintyHandler {
         if (onGround.contains(true)) context.setRiptideGroundLift(groundLift(player, context));
 
         List<PredVector> released = new ArrayList<>();
-        if (!context.isRiptideReleaseCertain()) released.addAll(velocities);
         for (Vec3 push : pushes) {
             for (PredVector velocity : velocities) {
                 PredVector pushed = new Pushed(velocity, push);
