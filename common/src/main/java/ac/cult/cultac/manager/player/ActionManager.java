@@ -26,6 +26,7 @@ import ac.cult.cultac.utils.data.ItemUseInventory;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.inventory.ItemTypes;
 import ac.cult.cultac.utils.inventory.ItemUtil;
+import ac.cult.cultac.utils.nmsutil.RiptideUtil;
 import lombok.Getter;
 
 @Getter
@@ -62,7 +63,9 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
                         hand,
                         heldStack,
                         ClientItemUseState.duration(heldStack),
-                        !ItemUseInventory.possiblyRefused(player, hand));
+                        !ItemUseInventory.possiblyRefused(player, hand)
+                                && (RiptideUtil.getRiptideLevel(heldStack) <= 0
+                                        || RiptideUtil.inWaterOrRain(player).determinePessimistically()));
             return;
         }
         if (canStartUsingItem(heldStack)) {
@@ -110,7 +113,10 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
                 return false;
             }
             if (stack.getItem() == ItemTypes.TRIDENT) {
-                return !nms.nextDamageWillBreak() && ItemUtil.enchantmentLevel(stack, "minecraft:riptide") <= 0;
+                // TridentItem#use refuses a riptide trident only while !Player#isInWaterOrRain.
+                return !nms.nextDamageWillBreak()
+                        && (ItemUtil.enchantmentLevel(stack, "minecraft:riptide") <= 0
+                                || RiptideUtil.inWaterOrRain(player).determineOptimistically());
             }
 
             var consumable = ItemComponents.consumable(nms.components());
@@ -131,7 +137,10 @@ public class ActionManager extends CultProcessor implements CheckListener, Clien
             return true;
         }
         if (material == ItemTypes.TRIDENT) {
-            return !nms.nextDamageWillBreak() && ItemUtil.enchantmentLevel(stack, "minecraft:riptide") <= 0;
+            // TridentItem#use refuses a riptide trident only while !Player#isInWaterOrRain.
+            return !nms.nextDamageWillBreak()
+                    && (ItemUtil.enchantmentLevel(stack, "minecraft:riptide") <= 0
+                            || RiptideUtil.inWaterOrRain(player).determineOptimistically());
         }
         if (material == ItemTypes.BOW || material == ItemTypes.CROSSBOW) {
             return false;

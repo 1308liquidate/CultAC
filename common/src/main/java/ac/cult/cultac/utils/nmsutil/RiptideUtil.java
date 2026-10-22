@@ -1,9 +1,11 @@
 package ac.cult.cultac.utils.nmsutil;
 
 import ac.cult.blocksim.engine.SimItemStack;
+import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaFallDistance;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 
@@ -53,17 +55,31 @@ public final class RiptideUtil {
         if (player.compensatedEntities.getSelf().inVehicle()) {
             return false;
         }
-        return wasTouchingWater(player) || player.compensatedWorld.isRaining;
+        return inWaterOrRain(player).determineOptimistically();
+    }
+
+    /** Player#isInWaterOrRain as TridentItem#use and TridentItem#releaseUsing read it from Minecraft#handleKeybinds. */
+    public static DesyncStatus inWaterOrRain(CultPlayer player) {
+        return isInRain(player) ? DesyncStatus.TRUE : wasTouchingWater(player);
+    }
+
+    /** Entity#isInRain: Level#isRainingAt at Entity#blockPosition or at its column's bounding-box top. */
+    private static boolean isInRain(CultPlayer player) {
+        BlockPos pos = new BlockPos(
+                (int) Math.floor(player.x), (int) Math.floor(player.y), (int) Math.floor(player.z));
+        return player.compensatedWorld.clientIsRainingAt(pos)
+                || player.compensatedWorld.clientIsRainingAt(
+                        new BlockPos(pos.getX(), (int) Math.floor(player.boundingBox.maxY), pos.getZ()));
     }
 
     /**
      * Entity#wasTouchingWater as TridentItem#releaseUsing reads it: Minecraft#handleKeybinds runs before the tick's
      * baseTick, so the flag is the one the last move left after LivingEntity#checkFallDamage refreshed fluids.
      */
-    private static boolean wasTouchingWater(CultPlayer player) {
+    private static DesyncStatus wasTouchingWater(CultPlayer player) {
         PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
         JavaFallDistance.Moved moved = last == null ? null : last.getJavaCommittedMove();
-        return moved != null ? moved.touchingWater().determineOptimistically() : isTouchingWater(player);
+        return moved != null ? moved.touchingWater() : DesyncStatus.fromBoolean(isTouchingWater(player));
     }
 
     public static boolean isTouchingWater(CultPlayer player) {
