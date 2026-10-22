@@ -1426,6 +1426,11 @@ public class CompensatedWorld {
         clientBlockEntities.predict(pos, getBlockStateIdAt(pos), data);
     }
 
+    /** ClientLevel#getGameTime after the last client tick end. */
+    public long clientGameTime() {
+        return clientGameTime;
+    }
+
     /** ClientPacketListener.handleSetTime updates clocks before invalidating attributes. */
     public void applyClientTime(ac.cult.cultac.network.packet.WorldPackets.TimeUpdate packet) {
         clientGameTime = packet.gameTime();

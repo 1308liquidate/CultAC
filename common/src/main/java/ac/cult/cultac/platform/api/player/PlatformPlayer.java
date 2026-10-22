@@ -1,5 +1,6 @@
 package ac.cult.cultac.platform.api.player;
 
+import ac.cult.cultac.bridge.protocol.BridgeMessage.ClientMods;
 import ac.cult.cultac.bridge.protocol.ServerCapability;
 import ac.cult.cultac.platform.api.ServerFacts;
 import ac.cult.cultac.platform.api.entity.CultEntity;
@@ -7,6 +8,7 @@ import ac.cult.cultac.protocol.value.GameMode;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.ItemUseState;
 import ac.cult.cultac.utils.math.Vec3;
+import java.util.concurrent.CompletableFuture;
 import net.kyori.adventure.text.Component;
 import org.jetbrains.annotations.Nullable;
 
@@ -68,5 +70,13 @@ public interface PlatformPlayer extends CultEntity, OfflinePlatformPlayer {
     /** This player's settings for its capture's JOIN, such as its attack speed; read on the event loop. */
     default ServerFacts cloudFacts() {
         return ServerFacts.NONE;
+    }
+
+    /**
+     * Asks the player's current server for the Lunar Client mods its Apollo reports. Completes null when no server
+     * serves {@link ServerCapability#APOLLO_MODS} or it does not answer.
+     */
+    default CompletableFuture<@Nullable ClientMods> requestClientMods() {
+        return CompletableFuture.completedFuture(null);
     }
 }

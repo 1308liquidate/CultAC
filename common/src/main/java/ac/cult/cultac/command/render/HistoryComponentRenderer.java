@@ -502,7 +502,7 @@ public final class HistoryComponentRenderer {
     }
 
     /** Renders untrusted template values as plain text before MiniMessage parsing. */
-    private static String mmSafe(@Nullable String raw) {
+    public static String mmSafe(@Nullable String raw) {
         if (raw == null || raw.isEmpty()) return "";
         // Strip '%' first so '&%c' cannot become '&c' after placeholder removal.
         String stripped = LEGACY_FORMAT_PATTERN.matcher(raw.replace("%", "")).replaceAll("");
@@ -536,7 +536,7 @@ public final class HistoryComponentRenderer {
         return s == null ? "unknown" : s;
     }
 
-    static @NotNull String clientVersionDisplay(int pvn) {
+    public static @NotNull String clientVersionDisplay(int pvn) {
         if (pvn <= 0) return "unknown";
 
         for (ClientVersion version : ClientVersion.values()) {

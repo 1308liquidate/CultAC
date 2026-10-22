@@ -452,6 +452,20 @@ public class SimulationContext {
         return getFrictionInfluencedSpeed(blockUnderPlayer, player, onGround, water, lava);
     }
 
+    /** The moveRelative speed of a ridden camel whose controller's sprint flag is {@code riderSprinting}. */
+    public float getMoveRelativeSpeed(
+            CultPlayer player, boolean onGround, boolean water, boolean lava, boolean riderSprinting) {
+        float blockUnderPlayer = BlockProperties.getFriction(player, lastTickMainSupportingBlockData, start);
+        return getFrictionInfluencedSpeed(
+                blockUnderPlayer,
+                player,
+                getPlayerMovementSpeed(player, riderSprinting),
+                onGround,
+                water,
+                lava,
+                ClientSprintState.Outcome.ANY);
+    }
+
     public float getMaxWidth() {
         if (getVehicle() != null) {
             return BoundingBoxSize.getWidth(getVehicle(), version, getBedrockInput() != null);
@@ -573,16 +587,32 @@ public class SimulationContext {
         return 0.02F;
     }
 
+    /**
+     * The controller's sprint flag when Camel#getRiddenSpeed reads it. Minecraft#tick handles the attack key before
+     * the level tick, so Player#causeExtraKnockback's setSprinting(false) holds through the camel's travel; the
+     * passenger's LocalPlayer#aiStep then re-sprints before sendIsSprintingIfNeeded, so no STOP_SPRINTING is sent.
+     */
+    public DesyncStatus getCamelRiderSprinting(CultPlayer player) {
+        if (player.vehicleData.camelSprintingState == SprintingState.STOPPED
+                || minAttackSlow > 0) {
+            return DesyncStatus.FALSE;
+        }
+        return maxAttackSlow > 0 ? DesyncStatus.UNKNOWN : DesyncStatus.TRUE;
+    }
+
     private double getPlayerMovementSpeed(CultPlayer player) {
+        return getPlayerMovementSpeed(
+                player,
+                vehicle instanceof PacketEntityCamel
+                        && getCamelRiderSprinting(player).determineOptimistically());
+    }
+
+    private double getPlayerMovementSpeed(CultPlayer player, boolean riderSprinting) {
         if (vehicle == null) {
             return entities.getPlayerMovementSpeed();
         }
         if (vehicle instanceof PacketEntityCamel camel) {
-            final double sprintBonus = player.vehicleData.camelSprintingState != SprintingState.STOPPED
-                            && camel.dashCooldown == 0
-                            && !camel.dashing
-                    ? 0.1
-                    : 0;
+            final double sprintBonus = riderSprinting && camel.dashCooldown == 0 && !camel.dashing ? 0.1 : 0;
             return camel.movementSpeedAttribute + sprintBonus;
         }
 

@@ -6,6 +6,7 @@ import ac.cult.cultac.bridge.protocol.BridgeMessage;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Auth;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Challenge;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.ClearActiveItem;
+import ac.cult.cultac.bridge.protocol.BridgeMessage.ClientMods;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Close;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Hello;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Listeners;
@@ -287,6 +288,7 @@ final class ProxyBridgeSession implements BridgeSession {
             }
             case Result result -> reply(result.requestId(), result);
             case PlayerStateResult result -> reply(result.requestId(), result);
+            case ClientMods mods -> reply(mods.requestId(), mods);
             default -> {}
         }
         service.onMessage(this, message);

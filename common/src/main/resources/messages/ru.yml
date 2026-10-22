@@ -47,7 +47,7 @@ experimental-symbol: "*"
 
 profile:
     - "&7======================"
-    - "%prefix% &bПрофиль для &f%player%"
+    - "&bПрофиль для &f%player%"
     - "&bПинг: &f%ping%"
     - "&bВерсия: &f%version%"
     - "&bБренд клиента: &f%brand%"

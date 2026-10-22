@@ -101,7 +101,17 @@ final class PacketConnections {
         promote(user);
         var continued = session.continuation();
         if (continued != null && session.player() != null) continued.restore(session.player());
+        observePlatformBrand(session);
         return user;
+    }
+
+    /** The brand packet can pass before Cult's decoder is installed; the platform then still holds what it read. */
+    private static void observePlatformBrand(CultConnection session) {
+        var player = session.player();
+        var platform = session.platform();
+        if (player == null || platform == null) return;
+        var brand = player.checkManager.getCheck(ac.cult.cultac.checks.impl.misc.ClientBrand.class);
+        if (brand != null) brand.observe(platform.clientBrand());
     }
 
     private void promote(User user) {

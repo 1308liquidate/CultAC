@@ -1232,6 +1232,11 @@ public class CompensatedEntities {
             if (dashData != null && dashData.value() instanceof Boolean dashing) {
                 camel.setDashingFromMetadata(dashing);
             }
+            // Camel defines LAST_POSE_CHANGE_TICK directly after DASH.
+            EntityMetadata.Entry poseTickData = WatchableIndexUtil.getIndex(watchableObjects, layout.camelDash() + 1);
+            if (poseTickData != null && poseTickData.value() instanceof Number poseTick) {
+                camel.lastPoseChangeTick = poseTick.longValue();
+            }
         }
     }
 

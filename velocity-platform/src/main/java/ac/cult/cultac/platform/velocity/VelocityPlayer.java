@@ -1,7 +1,9 @@
 package ac.cult.cultac.platform.velocity;
 
 import ac.cult.cultac.bridge.protocol.BridgeMessage.ClearActiveItem;
+import ac.cult.cultac.bridge.protocol.BridgeMessage.ClientMods;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.CloseInventory;
+import ac.cult.cultac.bridge.protocol.BridgeMessage.ModsRequest;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.SetGameMode;
 import ac.cult.cultac.bridge.protocol.BridgeMessage.Teleport;
 import ac.cult.cultac.bridge.protocol.ServerCapability;
@@ -36,6 +38,8 @@ import org.jetbrains.annotations.Nullable;
 
 final class VelocityPlayer implements PlatformPlayer {
     private static final long TELEPORT_TIMEOUT_MILLIS = 5000;
+    /** Apollo asks the client and waits for every page of its answer. */
+    private static final long MODS_TIMEOUT_MILLIS = 5000;
 
     private final Player player;
     private final UUID id;
@@ -76,6 +80,14 @@ final class VelocityPlayer implements PlatformPlayer {
     BridgeSession bridge(ServerCapability capability) {
         var session = VelocityBridge.sessions().current(id);
         return session != null && session.isReady() && session.has(capability) ? session : null;
+    }
+
+    @Override
+    public CompletableFuture<@Nullable ClientMods> requestClientMods() {
+        var session = bridge(ServerCapability.APOLLO_MODS);
+        if (session == null) return CompletableFuture.completedFuture(null);
+        return session.exchange(ModsRequest::new, MODS_TIMEOUT_MILLIS)
+                .thenApply(reply -> reply instanceof ClientMods mods ? mods : null);
     }
 
     @Override

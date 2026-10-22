@@ -45,7 +45,7 @@ alerts-format-proxy: "%prefix% &f[&cproxy&f] &f%player% &bfalhou em <hover:show_
 experimental-symbol: "*"
 profile:
     - "&7======================"
-    - "%prefix% &bPerfil de &f%player%"
+    - "&bPerfil de &f%player%"
     - "&bPing: &f%ping%"
     - "&bVersão: &f%version%"
     - "&bNome do Cliente: &f%brand%"

@@ -290,6 +290,9 @@ public class CultPlayer implements GrimUser {
     public final @NotNull ExplosionHandler explosionHandler;
     public final @NotNull KeepSprint keepSprint;
     public final @NotNull PluginChannelManager pluginChannelManager;
+    /** The Lunar Client mods the player's server last reported through Apollo; null before any report. */
+    public volatile ac.cult.cultac.bridge.protocol.BridgeMessage.@Nullable ClientMods clientMods;
+
     public final @NotNull PacketEntityReplication packetEntityReplication;
     private final @NotNull GhostBlockMitigator ghostBlockMitigator;
     private final @NotNull ItemUseDesync itemUseDesync;

@@ -6,6 +6,7 @@ import ac.cult.cultac.manager.init.start.StartableInitable;
 import ac.cult.cultac.manager.init.stop.StoppableInitable;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.runtime.RuntimeEnvironment;
+import ac.cult.cultac.utils.anticheat.AlertDetails;
 import ac.cult.cultac.utils.anticheat.LogUtil;
 import ac.cult.cultac.utils.anticheat.MessageUtil;
 import ac.cult.cultac.utils.common.arguments.CommonCultArguments;
@@ -56,13 +57,15 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
     private static final WebhookQueue queue =
             new WebhookQueue(DiscordManager::post, System::currentTimeMillis, LogUtil::getLogger);
     private static final AtomicBoolean taskStarted = new AtomicBoolean();
+    static final String DEFAULT_TITLE = "%player% has been detected for %check% [%violations%]";
     private URI url;
     private int embedColor;
     private CompiledDiscordTemplate compiledContent;
     private char backtickReplacement = '\u02CB';
-    private String embedTitle = "";
+    private CompiledDiscordTemplate compiledTitle = CompiledDiscordTemplate.compile("");
     private boolean includeTimestamp;
     private boolean includeVerbose;
+    private boolean includeState;
     private @Nullable String embedImageUrl;
     private @Nullable String embedThumbnailUrl;
     private @Nullable String embedFooterUrl;
@@ -73,12 +76,12 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
             Pattern.CASE_INSENSITIVE);
 
     private static String validatedConfigURL(String configPath, String defaultURL) {
-        String url = CultAPI.INSTANCE.getConfigManager().getConfig().getStringElse("embed-image-url", defaultURL);
+        String url = CultAPI.INSTANCE.getConfigManager().getConfig().getStringElse(configPath, defaultURL);
         if (url == null || url.isBlank()) return null;
         if (URL_PATTERN.matcher(url).matches()) {
             return url;
         } else {
-            LogUtil.warn("Invalid embed url for config path " + configPath + ": " + configPath);
+            LogUtil.warn("Invalid embed url for config path " + configPath + ": " + url);
             return defaultURL;
         }
     }
@@ -135,9 +138,9 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
             // mainly for just for allowing more customization
             embedImageUrl = validatedConfigURL("embed-image-url", null);
             embedThumbnailUrl = validatedConfigURL("embed-thumbnail-url", "https://crafthead.net/helm/%uuid%");
-            embedFooterUrl = validatedConfigURL("embed-footer-url", "https://grim.ac/images/grim.png");
+            embedFooterUrl = validatedConfigURL("embed-footer-url", null);
             embedFooterText = config.getStringElse("embed-footer-text", "v%cult_version%");
-            embedTitle = config.getStringElse("embed-title", "**Cult Alert**");
+            compiledTitle = CompiledDiscordTemplate.compile(config.getStringElse("embed-title", DEFAULT_TITLE));
 
             try {
                 embedColor = Color.decode(config.getStringElse("embed-color", "#00FFFF"))
@@ -152,6 +155,7 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
             }
             includeTimestamp = config.getBooleanElse("include-timestamp", true);
             includeVerbose = config.getBooleanElse("include-verbose", true);
+            includeState = config.getBooleanElse("include-state", true);
             String btReplace = config.getStringElse("backtick-replacement-char", "\u02CB");
             backtickReplacement = (btReplace.isEmpty()) ? '\u02CB' : btReplace.charAt(0);
             compiledContent = CompiledDiscordTemplate.compile(sb.toString());
@@ -164,12 +168,15 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
     private @NotNull @Unmodifiable List<@NotNull String> getDefaultContents() {
         return List.of(
                 "**Player**: `%player%`",
-                "**Check**: %check%",
-                "**Violations**: %violations%",
-                "**Client Version**: %version%",
+                "**UUID**: `%uuid%`",
+                "**Check**: `%check%`",
+                "**Client Version**: `%version%`",
                 "**Brand**: `%brand%`",
-                "**Ping**: %ping%",
-                "**TPS**: %tps%");
+                "**Sensitivity**: `H %h_sensitivity%% / V %v_sensitivity%%`",
+                "**Ping**: `%ping%`",
+                "**TPS**: `%tps%`",
+                "**Server**: `%server%`",
+                "**World**: `%world% (%world_type%)`");
     }
 
     public void sendAlert(@NotNull CultPlayer player, String verbose, String checkName, int violations) {
@@ -187,10 +194,11 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
                 CultAPI.INSTANCE.getExternalAPI().getVariableReplacements();
 
         String content = compiledContent.render(player, statics, dynamics, backtickReplacement);
+        String title = compiledTitle.render(player, statics, dynamics, backtickReplacement);
 
-        Embed embed = new Embed(content)
+        Embed embed = new Embed(truncate(content, Embed.MAX_DESCRIPTION_LENGTH))
                 .color(embedColor)
-                .title(embedTitle)
+                .title(truncate(title, Embed.MAX_TITLE_LENGTH))
                 .imageURL(MessageUtil.replacePlaceholders(player, embedImageUrl))
                 .thumbnailURL(MessageUtil.replacePlaceholders(player, embedThumbnailUrl))
                 .footer(new EmbedFooter(
@@ -200,10 +208,30 @@ public class DiscordManager implements StartableInitable, ReloadableInitable, St
         if (includeTimestamp) embed.timestamp(Instant.now());
 
         if (!verbose.isEmpty() && includeVerbose) {
-            embed.addFields(new EmbedField("Verbose", CompiledDiscordTemplate.escapeMarkdown(verbose), true));
+            embed.addFields(new EmbedField("Verbose", codeBlock(verbose)));
+        }
+        if (includeState) {
+            embed.addFields(new EmbedField("State", codeBlock(AlertDetails.state(player))));
         }
 
         sendWebhookMessage(new WebhookMessage().addEmbeds(embed));
+    }
+
+    /** A code block that fits a field value, cutting the value rather than the fence. */
+    private String codeBlock(String value) {
+        int room = EmbedField.MAX_VALUE_LENGTH
+                - CompiledDiscordTemplate.codeBlock("", backtickReplacement).length();
+        String block = CompiledDiscordTemplate.codeBlock(value, backtickReplacement);
+        // Zero-width splits can grow the value; shrink until the whole block fits.
+        while (block.length() > EmbedField.MAX_VALUE_LENGTH && room > 1) {
+            room -= block.length() - EmbedField.MAX_VALUE_LENGTH;
+            block = CompiledDiscordTemplate.codeBlock(truncate(value, room), backtickReplacement);
+        }
+        return block;
+    }
+
+    private static String truncate(String value, int max) {
+        return value.length() <= max ? value : value.substring(0, max - 1) + "…";
     }
 
     public CompletableFuture<Boolean> sendWebhookMessage(WebhookMessage message) {

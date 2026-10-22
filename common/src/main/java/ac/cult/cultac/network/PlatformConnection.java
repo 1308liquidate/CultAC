@@ -51,6 +51,15 @@ public interface PlatformConnection {
         return false;
     }
 
+    /**
+     * The brand the platform already received on this connection before Cult attached; null when the platform does not
+     * keep it or none was sent yet.
+     */
+    @Nullable
+    default String clientBrand() {
+        return null;
+    }
+
     /** The backend server this connection is in, where the platform has several; null otherwise. */
     @Nullable
     default String backendName() {

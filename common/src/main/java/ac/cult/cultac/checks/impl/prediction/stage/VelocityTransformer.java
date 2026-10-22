@@ -346,45 +346,54 @@ public class VelocityTransformer {
             return vectors;
         }
 
-        for (boolean water : simulationContext.getWorldData().getInWater().getStates()) {
-            if (water) {
-                addDistinctInputVector(
-                        vectors,
-                        inputVectorForSpeed(
-                                player,
-                                riddenInput,
-                                simulationContext.getMoveRelativeSpeed(player, false, true, false)));
+        // Camel#getRiddenSpeed reads the controller's sprint flag, which an attack this tick may have reset.
+        List<Boolean> riderSprintStates = horse instanceof PacketEntityCamel
+                ? simulationContext.getCamelRiderSprinting(player).getStates()
+                : List.of(true);
+        for (boolean riderSprinting : riderSprintStates) {
+            for (boolean water : simulationContext.getWorldData().getInWater().getStates()) {
+                if (water) {
+                    addDistinctInputVector(
+                            vectors,
+                            inputVectorForSpeed(
+                                    player,
+                                    riddenInput,
+                                    simulationContext.getMoveRelativeSpeed(
+                                            player, false, true, false, riderSprinting)));
+                }
             }
-        }
 
-        for (boolean lava : simulationContext.getWorldData().getInLava().getStates()) {
-            if (lava) {
-                addDistinctInputVector(
-                        vectors,
-                        inputVectorForSpeed(
-                                player,
-                                riddenInput,
-                                simulationContext.getMoveRelativeSpeed(player, false, false, true)));
+            for (boolean lava : simulationContext.getWorldData().getInLava().getStates()) {
+                if (lava) {
+                    addDistinctInputVector(
+                            vectors,
+                            inputVectorForSpeed(
+                                    player,
+                                    riddenInput,
+                                    simulationContext.getMoveRelativeSpeed(
+                                            player, false, false, true, riderSprinting)));
+                }
             }
-        }
 
-        boolean canBeNonFluid = simulationContext
-                        .getWorldData()
-                        .getInWater()
-                        .getStates()
-                        .contains(false)
-                && simulationContext.getWorldData().getInLava().getStates().contains(false);
-        if (canBeNonFluid) {
-            // LivingEntity#travelInFluid branches on exact isInWater()/isInLava(). When Cult can
-            // only narrow the mount to maybe-fluid, preserve the non-fluid travel branch too.
-            for (boolean onGround :
-                    simulationContext.getWorldData().getLastOnGround().getStates()) {
-                addDistinctInputVector(
-                        vectors,
-                        inputVectorForSpeed(
-                                player,
-                                riddenInput,
-                                simulationContext.getMoveRelativeSpeed(player, onGround, false, false)));
+            boolean canBeNonFluid = simulationContext
+                            .getWorldData()
+                            .getInWater()
+                            .getStates()
+                            .contains(false)
+                    && simulationContext.getWorldData().getInLava().getStates().contains(false);
+            if (canBeNonFluid) {
+                // LivingEntity#travelInFluid branches on exact isInWater()/isInLava(). When Cult can
+                // only narrow the mount to maybe-fluid, preserve the non-fluid travel branch too.
+                for (boolean onGround :
+                        simulationContext.getWorldData().getLastOnGround().getStates()) {
+                    addDistinctInputVector(
+                            vectors,
+                            inputVectorForSpeed(
+                                    player,
+                                    riddenInput,
+                                    simulationContext.getMoveRelativeSpeed(
+                                            player, onGround, false, false, riderSprinting)));
+                }
             }
         }
 
