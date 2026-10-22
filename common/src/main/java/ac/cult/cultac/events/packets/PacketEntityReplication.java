@@ -623,16 +623,19 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         });
     }
 
-    // Only the player, the vehicle the server last put it on and the server's camera read a velocity at the
-    // moment the client handles it: movement and vehicle prediction, and the camera's Entity#getKnownMovement in
-    // ProjectileUtil#getHitEntitiesAlong. Another entity's velocity is read only once a later packet with its own
-    // proof makes it the vehicle (an unridden LivingEntity keeps it through aiStep), so the last sent ping is
-    // early enough and it gets no ping of its own.
+    // Movement, projectile ticks and the camera's Entity#getKnownMovement consume receipt-time velocity.
+    // Other entities retain it until a later proven packet makes them the vehicle.
     private boolean readsVelocityOnReceipt(int entityId) {
         Integer serverVehicle = player.compensatedEntities.vehicles.serverPlayerVehicle;
+        TrackerData tracked = player.compensatedEntities.getTrackedEntity(entityId);
         return entityId == player.entityID
                 || serverVehicle != null && serverVehicle == entityId
-                || player.cameraEntity.isServerCamera(entityId);
+                || player.cameraEntity.isServerCamera(entityId)
+                || player.compensatedEntities.getEntity(entityId)
+                        instanceof ac.cult.cultac.utils.data.packetentity.PacketEntityHurtingProjectile
+                || tracked != null
+                        && ac.cult.cultac.utils.data.packetentity.PacketEntityHurtingProjectile.isHurtingProjectile(
+                                tracked.getEntityType());
     }
 
     private void handleMoveEntityPacket(PacketSendEvent<ClientboundMoveEntity> event, ClientboundMoveEntity packet) {
@@ -756,7 +759,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         float finalPitch = calculateAbsolutePitch(player.yRot, change.xRot(), packetFlags);
         Vec3 deltaMovement = calculateAbsoluteDelta(
                 Vec3.ZERO, change.deltaMovement(), player.xRot, player.yRot, finalYaw, finalPitch, packetFlags);
-        int proofTransaction = appendTrailingProofTransactionId(event);
+        int proofTransaction = transactionOf(player.appendResponseProofTransaction(event));
 
         player.getSetbackTeleportUtil()
                 .addImmediatePlayerTeleport(
@@ -1741,7 +1744,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         int proof = !useDelimiterProof
                 ? -1
                 : movement.kind() == MovementKind.TELEPORT_ENTITY
-                        ? transactionOf(appendTrailingProofTransaction(event, List.of(), true))
+                        ? transactionOf(player.appendResponseProofTransaction(event))
                         : player.appendFlushProofTransaction(event);
         int firstTransaction = proof < 0 ? player.lastTransactionSent.get() : proof;
         if (data != null) {
@@ -2198,7 +2201,6 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     public void tickStartTick() {
         hasSentPreWavePacket = false;
     }
-
 
     private static MovementEffect toMovementEffect(String effect) {
         return switch (effect) {

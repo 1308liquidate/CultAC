@@ -13,6 +13,7 @@ public final class PacketBundlePolicy {
      */
     public static boolean requiresStandalone(PacketType<?> type) {
         return type == ClientboundPackets.KEEP_ALIVE
+                || type == ClientboundPackets.DISCONNECT
                 || type == ClientboundPackets.LOGIN
                 || type == ClientboundPackets.RESPAWN
                 || ConnectionLifecycle.handles(type);

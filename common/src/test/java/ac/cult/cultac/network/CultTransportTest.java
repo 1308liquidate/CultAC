@@ -2377,6 +2377,62 @@ class CultTransportTest {
         return buffer;
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void aReentrantWriteDuringFlushClosureGetsANewProof(boolean standalone) {
+        try (var f = new Fixture(false)) {
+            var proofs = proveCameras(f);
+            var delimiters = new AtomicInteger();
+            f.channel.pipeline().addBefore(CultEncoder.NAME, "reentrant-close", new ChannelOutboundHandlerAdapter() {
+                @Override
+                public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
+                    boolean closing = message instanceof ByteBuf bytes
+                            && f.name(bytes).equals("D")
+                            && delimiters.incrementAndGet() == 2;
+                    ctx.write(message, promise);
+                    if (closing) f.channel.write(wireCamera(f, 2));
+                }
+            });
+            f.channel.write(wireCamera(f, 1));
+            if (standalone) f.channel.write(f.keepAlive(101));
+            f.channel.flush();
+            f.pump();
+            f.channel.flush();
+            f.pump();
+            assertEquals(List.of(41, 42), proofs);
+            var emitted = f.output();
+            assertEquals(
+                    2,
+                    emitted.stream()
+                            .filter(name -> name.equals("P41") || name.equals("P42"))
+                            .count());
+            assertKeepAlivesOutsideBundles(emitted);
+            assertFalse(f.connection.flushBundleOpen());
+        }
+    }
+
+    @Test
+    void disconnectClosesTheBundleBeforeItsCompletionCanCloseTheChannel() {
+        try (var f = new Fixture(false)) {
+            proveCameras(f);
+            f.channel.write(wireCamera(f, 1));
+            var completion = f.channel.newPromise();
+            completion.addListener(ignored -> f.channel.close());
+            // The raw packet retains the host's completion callback even without a model send route.
+            f.channel
+                    .pipeline()
+                    .write(
+                            f.frame(CLIENTBOUND, PLAY, "disconnect")
+                                    .writeByte(10)
+                                    .writeByte(0),
+                            completion);
+            f.channel.flush();
+            f.pump();
+            assertEquals(List.of("D", "P41", "minecraft:set_camera", "D", "minecraft:disconnect"), f.output());
+            assertFalse(f.channel.isOpen());
+        }
+    }
+
     private static final class Fixture implements AutoCloseable {
         final EmbeddedChannel channel = new EmbeddedChannel();
         final TestTransportRoutes routes = new TestTransportRoutes(RUNTIME);

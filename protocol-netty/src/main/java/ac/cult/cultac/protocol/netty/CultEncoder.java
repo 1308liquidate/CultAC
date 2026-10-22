@@ -609,11 +609,17 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     private void writeFrame(ChannelHandlerContext ctx, Frame frame) {
         connection.observePacket(
                 PacketDirection.CLIENTBOUND, connection.phase(PacketDirection.CLIENTBOUND), frame.bytes);
-        ctx.write(frame.bytes, frame.promise);
+        // Downstream handlers can synchronously write another packet. Publish this frame's wire state first.
         if (frame.type == ClientboundPackets.BUNDLE_DELIMITER) {
             insideBundle = !insideBundle;
             flushBundleMembers = 0;
-        } else if (frame.type != null) {
+        }
+        // A later ping in the bundle proves the same task, so it replaces the one packets share.
+        if (frame.ping != 0 && connection.flushBundleOpen()) flushPing = frame.ping;
+        if (frame.ping != 0) provingPing = frame.ping;
+        else if (frame.type != ClientboundPackets.BUNDLE_DELIMITER) outrunProvingPing();
+        ctx.write(frame.bytes, frame.promise);
+        if (frame.type != null && frame.type != ClientboundPackets.BUNDLE_DELIMITER) {
             try {
                 var phase = connection.phase(PacketDirection.CLIENTBOUND);
                 if (ConnectionLifecycle.nextPhase(PacketDirection.CLIENTBOUND, phase, frame.type, null) != phase)
@@ -623,10 +629,6 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                 CultNetworkManager.reportFailure("outbound protocol transition", failure);
             }
         }
-        // A later ping in the bundle proves the same task, so it replaces the one packets share.
-        if (frame.ping != 0 && connection.flushBundleOpen()) flushPing = frame.ping;
-        if (frame.ping != 0) provingPing = frame.ping;
-        else if (frame.type != ClientboundPackets.BUNDLE_DELIMITER) outrunProvingPing();
     }
 
     /** A packet written outside the proving ping's client bundle is handled after its pong. */
@@ -735,14 +737,28 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
     private void closeFlushBundle(ChannelHandlerContext ctx) {
         if (!connection.flushBundleOpen()) return;
-        if (delimitsFlushBundle()) {
-            writeFrame(ctx, delimiter(ctx));
-            // The rest of a held host bundle stays in a bundle of its own, closed by its own delimiter.
-            if (heldHostBundle) writeFrame(ctx, delimiter(ctx));
-            heldHostBundle = false;
+        // Deferred closure runs outside emit(). Queue downstream reentry until the closing delimiters and
+        // any held host continuation have been written, just as closure before a standalone packet does.
+        if (emission == null) {
+            var output = new Output();
+            emission = output;
+            try {
+                closeFlushBundle(ctx);
+            } finally {
+                emission = null;
+            }
+            emit(ctx, output);
+            return;
         }
         connection.flushBundleOpen(false);
         flushPing = 0;
+        boolean resumeHostBundle = heldHostBundle;
+        heldHostBundle = false;
+        if (delimitsFlushBundle()) {
+            writeFrame(ctx, delimiter(ctx));
+            // The rest of a held host bundle stays in a bundle of its own, closed by its own delimiter.
+            if (resumeHostBundle) writeFrame(ctx, delimiter(ctx));
+        }
     }
 
     /**

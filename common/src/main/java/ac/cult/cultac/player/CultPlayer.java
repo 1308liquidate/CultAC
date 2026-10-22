@@ -169,6 +169,7 @@ public class CultPlayer implements GrimUser {
 
     public final @NotNull AtomicInteger lastTransactionSent = new AtomicInteger(0);
     public final @NotNull AtomicInteger lastTransactionReceived = new AtomicInteger(0);
+    private final AtomicLong impulseSequence = new AtomicLong();
     /** Whether transactions record their provenance; the rings below are null until it first turns on. */
     private boolean recordProvenance;
     /** The wire ids of the last {@link #RECENT_WIRE_IDS} transactions, by transaction. */
@@ -781,6 +782,9 @@ public class CultPlayer implements GrimUser {
      * not hand the client the group as one task. Standalone level/player packets require a trailing proof instead.
      */
     public int appendFlushProofTransaction(PacketSendEvent<?> event) {
+        // A listener may already have bracketed this packet. A new leading ping would be allocated later
+        // but emitted before those older proofs, violating transaction order on the wire.
+        if (event.receiptProof() > 0) return event.receiptProof();
         var connection = user.getCultConnection();
         if (!connection.isPreparingWrites() || PacketBundlePolicy.requiresStandalone(event.getPacketType())) {
             TrackedTransaction proof = appendTrailingProofTransaction(event);
@@ -793,6 +797,10 @@ public class CultPlayer implements GrimUser {
         event.leadWith(lead.packet(), lead.transaction());
         event.getTasksAfterSend().add(() -> markTrackedTransactionPacketSent(lead));
         return lead.transaction();
+    }
+
+    public long nextImpulseSequence() {
+        return impulseSequence.incrementAndGet();
     }
 
     @Nullable
@@ -817,7 +825,9 @@ public class CultPlayer implements GrimUser {
     @Nullable
     public TrackedTransaction appendTrailingProofTransaction(
             PacketSendEvent<?> event, List<CultWrite> packetsBeforeProof) {
-        int shared = !isBedrockMovement() && PacketBundlePolicy.requiresStandalone(event.getPacketType()) ? 0 : event.flushPing();
+        int shared = !isBedrockMovement() && PacketBundlePolicy.requiresStandalone(event.getPacketType())
+                ? 0
+                : event.flushPing();
         if (shared > 0) {
             event.getWritesAfterSend().addAll(packetsBeforeProof);
             return new TrackedTransaction(shared, null);

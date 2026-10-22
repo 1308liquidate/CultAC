@@ -21,6 +21,16 @@ public final class PacketSendEvent<R> extends PacketEvent<R> {
     private CultWrite leadingPing;
     private int leadingTransaction;
     private int trackedPing;
+    private int receiptProof;
+
+    /** A proof already written after this packet by an earlier listener. */
+    public int receiptProof() {
+        return receiptProof;
+    }
+
+    public void receiptProof(int transaction) {
+        receiptProof = transaction;
+    }
 
     public PacketSendEvent(User user, ConnectionPhase phase, PacketType<R> type, R packet, boolean insideBundle) {
         super(user, phase, type, packet);
@@ -124,6 +134,7 @@ public final class PacketSendEvent<R> extends PacketEvent<R> {
         if (tasks != null) tasks.clear();
         bundle = false;
         leadingPing = null;
+        receiptProof = 0;
         // trackedPing stays: the packet is still forwarded, and its ping was marked sent.
     }
 }

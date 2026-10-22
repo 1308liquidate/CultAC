@@ -76,8 +76,13 @@ public class KnockbackHandler extends PacketModHandler {
             long teleportRevision,
             CultPlayer.BedrockTransaction before,
             CultPlayer.BedrockTransaction receipt) {
-        var entry =
-                new TransactionVel.Bedrock(velocity, receipt.transaction(), isSetbackVal, entityId, teleportRevision);
+        var entry = new TransactionVel.Bedrock(
+                velocity,
+                receipt.transaction(),
+                isSetbackVal,
+                entityId,
+                teleportRevision,
+                player.nextImpulseSequence());
         player.runSafely(() -> {
             lastSent = entry;
             player.addBedrockTransactionTask(before, () -> makeVelocityPossible(entry, velocity));
