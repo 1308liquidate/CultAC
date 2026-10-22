@@ -220,21 +220,21 @@ public class PredictionResult {
         return falling;
     }
 
-    public List<Double> getPossibleGravity() {
+    /** LivingEntity#getEffectiveGravity for every stored deltaMovement with a y in this range. */
+    public List<Double> getPossibleGravity(double minVelocityY, double maxVelocityY) {
         if (!getSimulationContext().getEntities().getEntityInControl().hasGravity) {
             return Collections.singletonList(0.0);
         }
 
-        DesyncStatus falling = getIsFalling();
         boolean hasSlowFalling = getSimulationContext().getEntities().getSlowFallingAmplifier() != null;
 
         double gravity = getSimulationContext().getEntities().getEntityInControl().gravity;
-        if (!hasSlowFalling || falling == DesyncStatus.FALSE) { // No slow falling, or not falling
+        if (!hasSlowFalling) {
             return Collections.singletonList(gravity);
-        } else if (falling == DesyncStatus.UNKNOWN) { // We don't know
+        } else if (initialStartingVel.isTickSkip() || (minVelocityY <= 0.0D && maxVelocityY > 0.0D)) {
             return Arrays.asList(Math.min(gravity, 0.01D), gravity);
-        } else { // Slow falling
-            return Collections.singletonList(Math.min(gravity, 0.01D));
+        } else {
+            return Collections.singletonList(maxVelocityY <= 0.0D ? Math.min(gravity, 0.01D) : gravity);
         }
     }
 

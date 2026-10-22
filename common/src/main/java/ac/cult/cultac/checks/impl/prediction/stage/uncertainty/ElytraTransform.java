@@ -84,15 +84,10 @@ public class ElytraTransform implements UncertaintyHandler {
                 }
                 Vec3 min = boostedMin[loopFastmath];
                 Vec3 max = boostedMax[loopFastmath];
-                for (double gravity : result.getPossibleGravity()) {
-                    Vec3 elytraResult = transformElytra(player, context, min, gravity);
-                    Vec3 maxElytraResult =
-                            min.y == max.y ? elytraResult : transformElytra(player, context, max, gravity);
-                    if (allowed == null) {
-                        allowed = new SimpleCollisionBox(elytraResult, maxElytraResult).sort();
-                    } else {
-                        allowed = allowed.union(new SimpleCollisionBox(elytraResult, maxElytraResult).sort());
-                    }
+                // LivingEntity#updateFallFlyingMovement reads the gravity from the velocity it starts from.
+                for (double gravity : result.getPossibleGravity(Math.min(min.y, max.y), Math.max(min.y, max.y))) {
+                    allowed = union(allowed, transformElytra(player, context, min, gravity));
+                    if (min.y != max.y) allowed = union(allowed, transformElytra(player, context, max, gravity));
                 }
                 player.trigHandler.toggleShitMath();
             }
@@ -110,6 +105,11 @@ public class ElytraTransform implements UncertaintyHandler {
         player.trigHandler.toggleShitMath();
 
         return start.withXYZ(cut.x, cut.y, cut.z, "elytra");
+    }
+
+    private static SimpleCollisionBox union(SimpleCollisionBox allowed, Vec3 movement) {
+        SimpleCollisionBox box = new SimpleCollisionBox(movement, movement);
+        return allowed == null ? box : allowed.union(box);
     }
 
     private static Vec3 boostFirework(Vec3 velocity, Vector3dm look) {

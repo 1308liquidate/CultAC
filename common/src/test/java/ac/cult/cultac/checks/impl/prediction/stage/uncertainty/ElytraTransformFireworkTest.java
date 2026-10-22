@@ -2,6 +2,7 @@ package ac.cult.cultac.checks.impl.prediction.stage.uncertainty;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -88,7 +89,7 @@ class ElytraTransformFireworkTest {
         when(context.getLastYRot()).thenReturn(LAST_PITCH);
         PredictionResult result = mock(PredictionResult.class);
         when(result.getSimulationContext()).thenReturn(context);
-        when(result.getPossibleGravity()).thenReturn(List.of(GRAVITY));
+        when(result.getPossibleGravity(anyDouble(), anyDouble())).thenReturn(List.of(GRAVITY));
         return new ElytraTransform()
                 .handleUncertainty(player, mock(ValidMovements.class), result, context, null, start, end);
     }
