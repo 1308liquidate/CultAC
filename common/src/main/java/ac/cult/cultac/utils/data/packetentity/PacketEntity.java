@@ -103,6 +103,8 @@ public class PacketEntity {
     public ReachInterpolationData newPacketLocation;
     // Set by an unproven receipt, fold, teleport, far sync, seat placement or uncertain vehicle; holds for life.
     private boolean trackedPositionInexact;
+    // Unbundled position paths received but not yet proven by the transaction after them.
+    private int unprovenUnbundledPaths;
     private long clientTickOrder = Long.MAX_VALUE;
     // Reused: valid only until the client tick that computed it applies it.
     private SimpleCollisionBox exactAfterClientTickBox;
@@ -365,7 +367,7 @@ public class PacketEntity {
             newPacketLocation.setPhysicalBeforePathAppend(
                     actualPath, targetYaw, targetPitch, clientPhysicalPosition, clientPhysicalYaw, clientPhysicalPitch);
             newPacketLocation.appendPath(actualPath, targetYaw, targetPitch);
-            if (!bundled) trackedPositionInexact = true;
+            if (!bundled) unprovenUnbundledPaths++;
             keepPositionCertainty();
             return;
         }
@@ -559,6 +561,26 @@ public class PacketEntity {
         this.oldPacketLocation = null;
     }
 
+    public int unprovenUnbundledPaths() {
+        return unprovenUnbundledPaths;
+    }
+
+    /**
+     * The transaction after an unbundled position path proves the client handled it. With no client tick since the one
+     * before it, the client handled the path between the same two client ticks as both pings.
+     */
+    public void onUnbundledPathProven() {
+        if (unprovenUnbundledPaths > 0) unprovenUnbundledPaths--;
+    }
+
+    /**
+     * Minecraft#runTick handles queued packets before each frame's client ticks, so a client tick between an unbundled
+     * path's two transactions leaves the path handled before or after that tick.
+     */
+    private void tickWithUnprovenUnbundledPath() {
+        if (unprovenUnbundledPaths > 0) markPositionInexact();
+    }
+
     /** Entity data replacing the pose, which the client has applied once it answers provenAt. */
     public void onPose(EntityPose pose, int provenAt) {
         if (pose == actionPose) return;
@@ -636,6 +658,7 @@ public class PacketEntity {
             }
             return;
         }
+        tickWithUnprovenUnbundledPath();
         ReachInterpolationData interpolation = newPacketLocation;
         Vec3 physicalBefore = clientPhysicalPosition;
         boolean idleProbe = false;
@@ -703,6 +726,7 @@ public class PacketEntity {
      * LivingEntity#aiStep reaches travelRidden. Covers 26.3's stepped interpolation and a boat's LinearInterpolationHandler.
      */
     public void interpolateBeforeLocalTravel(CultPlayer player) {
+        tickWithUnprovenUnbundledPath();
         if (!hasActiveLocalRootInterpolation()) {
             return;
         }
@@ -742,6 +766,7 @@ public class PacketEntity {
 
     private void tickPacketInterpolationPreservingPhysical(
             CultPlayer player, Vec3 physicalPosition, float physicalYaw, float physicalPitch, boolean carryTarget) {
+        tickWithUnprovenUnbundledPath();
         if (carryTarget) {
             carryInterpolationTargetByLocalPhysics(player);
         }

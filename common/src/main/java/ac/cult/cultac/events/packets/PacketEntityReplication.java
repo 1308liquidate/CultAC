@@ -1878,6 +1878,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         private final MovementKind kind;
         private final int deltaMovementSequence;
         private boolean second;
+        private @Nullable PacketEntity unbundledPathEntity;
 
         private TransactionBoundMovement(EntityMovement movement, int firstTransaction) {
             this.movement = movement;
@@ -1890,6 +1891,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         @Override
         public void run() {
             if (second) {
+                if (unbundledPathEntity != null) unbundledPathEntity.onUnbundledPathProven();
                 applySecondMovement(entityId, kind, deltaMovementSequence, false);
                 return;
             }
@@ -1898,7 +1900,9 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 return;
             }
             applyEntityRotationAndGround(entity, movement);
+            int unprovenPaths = entity.unprovenUnbundledPaths();
             applyFirstMovement(entity, movement);
+            if (entity.unprovenUnbundledPaths() > unprovenPaths) unbundledPathEntity = entity;
             markUncertainPosition(entity, movement);
             applyDeltaMovementUpdate(entity, movement.deltaMovement());
             clearPacketHandlerDeltaMovement(movement);
