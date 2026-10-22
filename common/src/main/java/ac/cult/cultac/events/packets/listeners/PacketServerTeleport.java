@@ -137,7 +137,10 @@ public class PacketServerTeleport {
         float finalYaw = calculateRotation(sourceYaw, rotation.yaw(), flags, RelativeFlag.Y_ROT);
         float finalPitch =
                 clamp(calculateRotation(sourcePitch, rotation.pitch(), flags, RelativeFlag.X_ROT), -90.0F, 90.0F);
-        int proofTransaction = appendTrailingProofTransaction(event, player);
+        // The pong must follow the Rot that ClientPacketListener#handleRotatePlayer sends, so the proof never
+        // shares an earlier ping in the bundle.
+        CultPlayer.TrackedTransaction proof = player.appendResponseProofTransaction(event);
+        int proofTransaction = proof == null ? -1 : proof.transaction();
 
         player.getSetbackTeleportUtil()
                 .addImmediatePlayerRotationTeleport(
@@ -260,11 +263,6 @@ public class PacketServerTeleport {
             mask |= RelativeFlag.X_ROT.getMask();
         }
         return new RelativeFlag(mask);
-    }
-
-    private static int appendTrailingProofTransaction(PacketSendEvent<?> event, CultPlayer player) {
-        CultPlayer.TrackedTransaction transaction = player.appendTrailingProofTransaction(event);
-        return transaction == null ? -1 : transaction.transaction();
     }
 
     private static float clamp(float value, float min, float max) {

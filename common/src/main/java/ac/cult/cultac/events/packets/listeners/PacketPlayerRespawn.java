@@ -76,6 +76,7 @@ public class PacketPlayerRespawn {
     public void onLogin(PacketSendEvent<ClientboundLogin> event, CultPlayer player, ClientboundLogin packet) {
         PlayerObserver observer = player.observer;
         if (observer != null) observer.loginSent(packet);
+        player.cameraEntity.localPlayerSent();
         // for the purposes of detecting mineflayer stuff, send a transaction
         // handles transaction split between JOIN_GAME and server teleport
 
@@ -200,6 +201,7 @@ public class PacketPlayerRespawn {
     public void onRespawn(PacketSendEvent<ClientboundRespawn> event, CultPlayer player, ClientboundRespawn packet) {
         PlayerObserver observer = player.observer;
         if (observer != null) observer.respawnSent(packet);
+        player.cameraEntity.localPlayerSent();
         var spawnInfo = packet.spawnInfo();
         String dimension = HolderSets.identifier(spawnInfo.dimension());
         String worldName = spawnInfo.dimension();

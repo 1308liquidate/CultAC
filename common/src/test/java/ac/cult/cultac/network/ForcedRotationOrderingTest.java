@@ -1,13 +1,18 @@
 package ac.cult.cultac.network;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
 import ac.cult.cultac.events.packets.listeners.PacketServerTeleport;
 import ac.cult.cultac.network.event.PacketListenerPriority;
+import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundEntityMotion;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerRotation;
+import ac.cult.cultac.protocol.value.Vec3d;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -71,6 +76,38 @@ class ForcedRotationOrderingTest {
             assertEquals(1, teleports.pendingTeleports.size());
             assertTrue(teleports.checkRotationTeleportQueue(90, 30).isTeleport());
             assertTrue(teleports.pendingTeleports.isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ProtocolVersion.class,
+            names = {"V1_21_9", "V1_21_11", "V26_1", "V26_2", "V26_3"})
+    void aRotationInAFlushBundleIsProvenByAPingAfterItsEcho(ProtocolVersion version) {
+        OfflineCultTestBootstrap.installConfig();
+        try (var fixture = new RecordReceiveFixture(version)) {
+            fixture.user.bind(mock(PlatformPlayer.class));
+            register(fixture);
+            var flushProof = new AtomicInteger();
+            fixture.registrar.register(routes -> routes.send(
+                    ClientboundPackets.ENTITY_MOTION,
+                    PacketListenerPriority.LOW,
+                    (event, player, packet) -> flushProof.set(player.appendFlushProofTransaction(event))));
+            // A flush closes the flush bundle; the watchdog's would land between the writes.
+            fixture.player.nettyScheduler.removeScheduler();
+            fixture.channel.runPendingTasks();
+            fixture.channel.write(new CultWrite(new ClientboundEntityMotion(1, new Vec3d(0, 0, 0)), false));
+            fixture.channel.write(new CultWrite(new ClientboundPlayerRotation(90, false, 30, false), false));
+            assertTrue(fixture.connection.flushBundleOpen());
+            var teleports = fixture.player.getSetbackTeleportUtil();
+            assertEquals(1, teleports.pendingTeleports.size(), "The rotation was handled");
+            // ClientPacketListener#handleRotatePlayer sends Rot after the bundle's earlier ping is answered.
+            assertTrue(flushProof.get() > 0, "The motion opens the flush bundle with a ping");
+            int rotationProof = teleports.pendingTeleports.peek().getTransaction();
+            assertTrue(rotationProof > flushProof.get(), "The rotation needs a ping after its echo");
+            assertEquals(fixture.player.lastTransactionSent.get(), rotationProof);
+            fixture.channel.flush();
+            fixture.channel.releaseOutbound();
         }
     }
 

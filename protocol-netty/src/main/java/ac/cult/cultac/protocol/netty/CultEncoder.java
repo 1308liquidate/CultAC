@@ -39,7 +39,7 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
     private int flushPing;
     private static final int MAX_BUNDLE_PACKETS = 4096;
     // A packet shares the bundle's ping only while the frames prepared around it still fit.
-    private static final int SHARE_HEADROOM = 256;
+    private static final int SHARE_HEADROOM = 16;
     private Output emission;
     // The latest CultAC ping that every frame written since shares a client bundle with; 0 when there is none.
     private int provingPing;
@@ -388,7 +388,8 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
                     var event = new PacketSendEvent<>(
                             connection.user(), phase, type, (ClientboundPacket) value.packet(), batch.inside);
                     if (authored) event.authored();
-                    event.sharedPing(sharedPing(batch));
+                    // Emission closes the flush bundle before a structural packet, so its ping cannot prove one.
+                    event.sharedPing(structural(type) ? 0 : sharedPing(batch));
                     connection.dispatcher().send(event, route.send());
                     if (event.isCancelled()) {
                         promise.trySuccess();
@@ -597,7 +598,10 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         }
     }
 
-    /** A leading ping opens the flush bundle, or a new physical bundle when the current one is nearly full. */
+    /**
+     * A leading ping opens the flush bundle, or a new physical bundle when the current one is nearly full. A ping
+     * and its packet must share a client bundle, so the lead leaves them the headroom a sharing packet keeps.
+     */
     private void openFlushBundle(ChannelHandlerContext ctx) {
         if (connection.flushBundleOpen()) {
             if (flushBundleMembers < MAX_BUNDLE_PACKETS - SHARE_HEADROOM) return;
@@ -608,8 +612,14 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
             if (!connection.clientHasLevel()) return;
             if (delimitsFlushBundle()) {
                 // The host's open bundle becomes the flush bundle, which then owes it its closing delimiter.
-                if (insideBundle) heldHostBundle = true;
-                else writeFrame(ctx, delimiter(ctx));
+                if (insideBundle) {
+                    heldHostBundle = true;
+                    // The host's packets so far stay in their own bundle; the rest continue after the ping.
+                    if (flushBundleMembers >= MAX_BUNDLE_PACKETS - SHARE_HEADROOM) {
+                        writeFrame(ctx, delimiter(ctx));
+                        writeFrame(ctx, delimiter(ctx));
+                    }
+                } else writeFrame(ctx, delimiter(ctx));
             }
             connection.flushBundleOpen(true);
             flushBundles++;

@@ -773,6 +773,23 @@ public class CultPlayer implements GrimUser {
             event.getWritesAfterSend().addAll(packetsBeforeProof);
             return new TrackedTransaction(shared, null);
         }
+        return writeTrailingProofTransaction(event, packetsBeforeProof);
+    }
+
+    /**
+     * Writes a tracked ping of its own directly after the event's packet, for a packet whose client handler sends a
+     * response, such as ClientPacketListener#handleRotatePlayer's Rot. A ping earlier in the bundle is answered
+     * before that handler runs, so only a ping after the packet orders its pong after the response. Returns null,
+     * writing nothing, when no transaction can be sent.
+     */
+    @Nullable
+    public TrackedTransaction appendResponseProofTransaction(PacketSendEvent<?> event) {
+        return writeTrailingProofTransaction(event, List.of());
+    }
+
+    @Nullable
+    private TrackedTransaction writeTrailingProofTransaction(
+            PacketSendEvent<?> event, List<CultWrite> packetsBeforeProof) {
         TrackedTransaction proof = createTrackedTransactionPacketForDeferredSend();
         if (proof == null) {
             return null;

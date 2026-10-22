@@ -1530,6 +1530,32 @@ class CultTransportTest {
     }
 
     @Test
+    void aLeadAdoptingAFullHostBundleStaysWithItsPacket() {
+        try (var f = new Fixture(false)) {
+            var proofs = proveCameras(f);
+            // A valid host bundle: 4,095 unlistened packets, then one CultAC proves.
+            f.channel.write(f.delimiter());
+            for (int i = 0; i < 4095; i++) {
+                f.channel.write(f.frame(CLIENTBOUND, PLAY, "game_event").writeByte(7).writeFloat(1));
+            }
+            f.channel.write(wireCamera(f, 1));
+            f.channel.write(f.delimiter());
+            f.channel.flush();
+            f.pump();
+            List<String> emitted = f.output();
+            assertEquals(List.of(41), proofs);
+            int ping = emitted.indexOf("P41");
+            // ClientPacketListener#handleBundlePacket answers the ping in the camera's task only within one bundle.
+            assertEquals("minecraft:set_camera", emitted.get(ping + 1));
+            int members = 0;
+            for (String name : emitted) {
+                if (name.equals("D")) members = 0;
+                else assertTrue(++members <= 4096, "A client bundle holds at most 4,096 packets");
+            }
+        }
+    }
+
+    @Test
     void removingTheEncoderClosesAnOpenFlushBundle() {
         try (var f = new Fixture(false)) {
             proveCameras(f);

@@ -60,8 +60,13 @@ public class CompensatedCameraEntity extends Check {
         return new ArrayList<>(entities);
     }
 
-    public void reset() {
+    /** The server sent a login or respawn: ClientPacketListener#handleLogin and #handleRespawn reset the camera. */
+    public void localPlayerSent() {
         serverCamera = NO_SERVER_CAMERA;
+    }
+
+    /** The client handled a login or respawn; a camera sent after it is still the server's camera. */
+    public void reset() {
         entities.clear();
         entities.add(player.compensatedEntities.getSelf());
     }
