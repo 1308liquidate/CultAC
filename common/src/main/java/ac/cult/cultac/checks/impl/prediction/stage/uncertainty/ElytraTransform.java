@@ -85,9 +85,15 @@ public class ElytraTransform implements UncertaintyHandler {
                 Vec3 min = boostedMin[loopFastmath];
                 Vec3 max = boostedMax[loopFastmath];
                 // LivingEntity#updateFallFlyingMovement reads the gravity from the velocity it starts from.
-                for (double gravity : result.getPossibleGravity(Math.min(min.y, max.y), Math.max(min.y, max.y))) {
-                    allowed = union(allowed, transformElytra(player, context, min, gravity));
-                    if (min.y != max.y) allowed = union(allowed, transformElytra(player, context, max, gravity));
+                allowed = glide(player, result, context, allowed, min);
+                if (min.y != max.y) {
+                    allowed = glide(player, result, context, allowed, max);
+                    if (Math.min(min.y, max.y) <= 0 && Math.max(min.y, max.y) > 0) {
+                        // LivingEntity#getEffectiveGravity switches at a y of zero; on either side the glide is
+                        // monotonic in y, so each side's ends bound it.
+                        allowed = glide(player, result, context, allowed, new Vec3(min.x, 0, min.z));
+                        allowed = glide(player, result, context, allowed, new Vec3(min.x, Double.MIN_VALUE, min.z));
+                    }
                 }
                 player.trigHandler.toggleShitMath();
             }
@@ -105,6 +111,18 @@ public class ElytraTransform implements UncertaintyHandler {
         player.trigHandler.toggleShitMath();
 
         return start.withXYZ(cut.x, cut.y, cut.z, "elytra");
+    }
+
+    private SimpleCollisionBox glide(
+            CultPlayer player,
+            PredictionResult result,
+            SimulationContext context,
+            SimpleCollisionBox allowed,
+            Vec3 velocity) {
+        for (double gravity : result.getPossibleGravity(velocity.y, velocity.y)) {
+            allowed = union(allowed, transformElytra(player, context, velocity, gravity));
+        }
+        return allowed;
     }
 
     private static SimpleCollisionBox union(SimpleCollisionBox allowed, Vec3 movement) {
