@@ -114,7 +114,8 @@ public final class ClientFluidQueries {
     }
 
     public static boolean eyesInWater(CultPlayer player, SimpleCollisionBox body, Vec3 feet, double eyeY) {
-        if (usesTagBasedFluidRules(player)) {
+        // EntityFluidInteraction#update samples the eye from 26.1.
+        if (!player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_1)) {
             return eyesInside(player, body, feet, eyeY, FluidTags.WATER);
         }
         double legacyEyeY = eyeY - 0.1111111119389534D;
@@ -176,7 +177,9 @@ public final class ClientFluidQueries {
             float ordinaryHeight = height(player.compensatedWorld, pos, fluid);
             if ((double) y + ordinaryHeight < box.minY || eyeY < y) continue;
             BlockPos above = pos.above();
-            float eyeHeight = fluid.isSource()
+            // 26.3 measures the eye against FluidState#getHeightForCamera, 26.1 and 26.2 against FluidState#getHeight.
+            float eyeHeight = player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)
+                            && fluid.isSource()
                             && player.compensatedWorld
                                     .geometry()
                                     .isFaceSturdy(
