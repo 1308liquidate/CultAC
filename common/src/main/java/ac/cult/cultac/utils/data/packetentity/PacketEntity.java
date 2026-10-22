@@ -702,10 +702,10 @@ public class PacketEntity {
     /**
      * Entity#commonTick for the root of a client tick's ServerboundMoveVehiclePacket, whether or not the server accepts
      * that packet: InterpolationHandler#interpolate advances the server path the root still follows before
-     * LivingEntity#aiStep reaches travelRidden. Covers the 26.3 stepped interpolation only.
+     * LivingEntity#aiStep reaches travelRidden. Covers 26.3's stepped interpolation and a boat's LinearInterpolationHandler.
      */
     public void interpolateBeforeLocalTravel(CultPlayer player) {
-        if (!hasActiveSteppedInterpolation()) {
+        if (!hasActiveLocalRootInterpolation()) {
             return;
         }
         stepInterpolation(player, true);
@@ -713,6 +713,18 @@ public class PacketEntity {
             oldPacketLocation.tickMovement(true, true);
             widenStartingLocationByOldLocation();
         }
+        // AbstractBoat#controlBoat turns the yaw this step leaves.
+        if (boat && this == player.compensatedEntities.getSelf().getRiding()) {
+            player.boatYawBeforeTurn = clientPhysicalYawCurrent ? clientPhysicalYaw : Float.NaN;
+        }
+    }
+
+    private boolean hasActiveLocalRootInterpolation() {
+        return hasActiveSteppedInterpolation()
+                || (boat
+                        && newPacketLocation != null
+                        && newPacketLocation.followsInterpolationHandler()
+                        && newPacketLocation.hasActiveInterpolationTarget());
     }
 
     private boolean hasActiveSteppedInterpolation() {
@@ -962,12 +974,12 @@ public class PacketEntity {
     }
 
     /**
-     * Moves a root the client moves itself to {@code box}. A 26.3 stepped path it still follows keeps its steps and
+     * Moves a root the client moves itself to {@code box}. A 26.3 path it still follows keeps its steps and
      * codec base, since ClientPacketListener#handleMoveVehicle alone cancels it; without one this is
      * {@link #setPositionRaw(SimpleCollisionBox, float, float)}.
      */
     public void moveLocallyControlledRoot(SimpleCollisionBox box, float yaw, float pitch) {
-        if (!hasActiveSteppedInterpolation()) {
+        if (!hasActiveLocalRootInterpolation()) {
             setPositionRaw(box, yaw, pitch);
             return;
         }

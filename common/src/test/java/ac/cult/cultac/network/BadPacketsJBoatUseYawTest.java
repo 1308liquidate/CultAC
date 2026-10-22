@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ac.cult.blocksim.data.BlockIds;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsJ;
 import ac.cult.cultac.events.packets.listeners.PacketServerTeleport;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -16,10 +17,12 @@ import ac.cult.cultac.protocol.packet.clientbound.ClientboundAddEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveEntity;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundMoveVehicle;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPacket;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundTeleportEntity;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMoveVehicle;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItem;
+import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.EntityDelta;
 import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.Vec3d;
@@ -40,6 +43,8 @@ class BadPacketsJBoatUseYawTest {
     private static final int DRIVER = 101;
     private static final Vec3 SEAT = new Vec3(0.5, FLOOR_Y, 0.5);
     private static final float PITCH = 19.679043f;
+    private static final int FAR_X = 88;
+    private static final Vec3 DRIFT = new Vec3(0.01, 0.0, 0.0);
 
     @Test
     void useYawsPastTheClampOfADrivenBoatFlag() throws Exception {
@@ -268,6 +273,121 @@ class BadPacketsJBoatUseYawTest {
             assertEquals(boatYaw, riding(f).clientPhysicalYaw);
             assertEquals(0, check.getViolations());
         }
+    }
+
+    /**
+     * ClientPacketListener#handleTeleportEntity snaps a boat more than 64 blocks away, runs the rider's
+     * AbstractBoat#positionRider against the boat's new yaw and echoes the boat's move; AbstractBoat#controlBoat turns
+     * that yaw in the next tick.
+     */
+    @Test
+    void aDriverUsesItemsAfterItsBoatIsTeleportedOutOfInterpolationRange() throws Exception {
+        assertEquals(0, useItemsThroughATeleport(true));
+    }
+
+    /**
+     * ClientPacketListener#handleTeleportEntity interpolates a ticking boat within 64 blocks: for three ticks
+     * Entity#commonTick runs LinearInterpolationHandler#interpolate before AbstractBoat#controlBoat turns the boat.
+     */
+    @Test
+    void aDriverUsesItemsWhileItsTeleportedBoatInterpolates() throws Exception {
+        assertEquals(0, useItemsThroughATeleport(false));
+    }
+
+    /**
+     * Steers left on stone, has the server teleport the boat 150 degrees round, past 64 blocks when {@code far}, and
+     * uses an item every tick after, the rider's yaw held 105 degrees from the boat by clampRotation. The boat drifts
+     * {@link #DRIFT} a tick from the teleport on. Returns BadPacketsJ's violations.
+     */
+    private static double useItemsThroughATeleport(boolean far) throws Exception {
+        try (var f = new JavaTickFixture()) {
+            layFarFloor(f);
+            ride(f, 0.0F, false);
+            BadPacketsJ check = f.player.checkManager.getListener(BadPacketsJ.class);
+            float friction = stoneFriction();
+            float deltaRotation = 0.0F;
+            float boatYaw = 0.0F;
+            float yaw = 0.0F;
+            for (int tick = 0; tick < 6; tick++) {
+                if (tick == 0) f.input(new ServerboundPlayerInput(false, false, true, false, false, false, false));
+                deltaRotation *= friction;
+                if (tick > 0) deltaRotation--;
+                boatYaw += deltaRotation;
+                yaw = clampRotation(yaw + deltaRotation, boatYaw);
+                rot(f, yaw);
+                moveBoat(f, boatYaw);
+                f.tickEnd();
+            }
+            Vec3 target = far ? new Vec3(FAR_X + 0.5, SEAT.y, SEAT.z) : new Vec3(SEAT.x, SEAT.y, SEAT.z + 5.0);
+            float targetYaw = boatYaw + 150.0F;
+            teleportBoat(f, target, targetYaw);
+            Vec3 boat = far ? target : SEAT;
+            if (far) {
+                boatYaw = targetYaw;
+                yaw = clampRotation(yaw + deltaRotation, boatYaw);
+                moveBoat(f, new Vec3d(boat.x, boat.y, boat.z), boatYaw);
+            }
+            f.pongThrough(f.player.lastTransactionSent.get());
+            int steps = far ? 0 : 3;
+            Vec3 lastStep = boat;
+            float lastStepYaw = boatYaw;
+            int clamped = 0;
+            for (int tick = 0; tick < 5; tick++) {
+                if (steps > 0) {
+                    // AbstractInterpolationHandler#interpolate carries the boat's own move and turn into the target.
+                    Vec3 moved = boat.subtract(lastStep);
+                    if (moved.lengthSqr() > 1.0E-5F) target = target.add(moved);
+                    targetYaw += boatYaw - lastStepYaw;
+                    boat = boat.lerp(target, 1.0 / steps);
+                    boatYaw = rotLerp(1.0 / steps, boatYaw, targetYaw);
+                    lastStep = boat;
+                    lastStepYaw = boatYaw;
+                    steps--;
+                }
+                use(f, yaw);
+                deltaRotation *= friction;
+                deltaRotation--;
+                boatYaw += deltaRotation;
+                float turned = yaw + deltaRotation;
+                yaw = clampRotation(turned, boatYaw);
+                if (yaw != turned) clamped++;
+                boat = boat.add(DRIFT);
+                rot(f, yaw);
+                moveBoat(f, new Vec3d(boat.x, boat.y, boat.z), boatYaw);
+                f.tickEnd();
+            }
+            assertTrue(clamped > 0);
+            return check.getViolations();
+        }
+    }
+
+    // Stone around FAR_X, more than 64 blocks from SEAT, in the chunks that hold it.
+    private static void layFarFloor(JavaTickFixture f) {
+        for (int chunkZ = -1; chunkZ <= 0; chunkZ++) {
+            f.player.compensatedWorld.ensureValidationChunkLoaded(FAR_X >> 4, chunkZ);
+        }
+        for (int x = FAR_X - 6; x <= FAR_X + 6; x++) {
+            for (int z = -8; z <= 8; z++) {
+                f.player.compensatedWorld.updateBlock(new BlockPos(x, FLOOR_Y - 1, z), BlockIds.STONE.defaultState());
+            }
+        }
+        for (int tick = 0; tick < 3; tick++) f.player.compensatedWorld.removeInvalidPistonLikeStuff(0);
+    }
+
+    // AbstractBoat#getGroundFriction averages the friction of the nine stone blocks under the boat.
+    private static float stoneFriction() {
+        float friction = 0.0F;
+        for (int i = 0; i < 9; i++) friction += 0.6F;
+        return friction / 9;
+    }
+
+    private static void teleportBoat(JavaTickFixture f, Vec3 target, float yaw) {
+        var packet = new ClientboundTeleportEntity(
+                BOAT, new Vec3d(target.x, target.y, target.z), Vec3d.ZERO, yaw, 0, Set.of(), true);
+        var event = new PacketSendEvent<>(
+                f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.TELEPORT_ENTITY, packet, false);
+        f.player.packetEntityReplication.onTeleportEntity(event, f.player, packet);
+        event.tasksAfter().forEach(Runnable::run);
     }
 
     private static void ride(JavaTickFixture f, float boatYaw, boolean passenger) {

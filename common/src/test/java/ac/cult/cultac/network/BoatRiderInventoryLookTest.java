@@ -6,13 +6,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.multiactions.MultiActionsO;
+import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.protocol.ConnectionPhase;
+import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.clientbound.ClientboundTeleportEntity;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMoveVehicle;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -36,6 +41,9 @@ class BoatRiderInventoryLookTest {
     private static final int TICKS = 40;
     private static final float LOOK_YAW = 30;
     private static final float LOOK_PITCH = 10;
+    private static final int TELEPORT_TICK = OPEN_TICK + 2;
+    // A boat that moves 0.01 blocks a tick from the teleport on.
+    private static final Vec3 DRIFT = new Vec3(0.01, 0.0, 0.0);
 
     @Test
     void aRiderTheReleasedBoatKeepsTurningInItsInventoryIsNotRotating() throws Exception {
@@ -73,6 +81,68 @@ class BoatRiderInventoryLookTest {
         Run run = drive(true, OPEN_TICK + 2, 0, 0, -120);
 
         assertEquals(1, run.violations);
+    }
+
+    /**
+     * ClientPacketListener#handleTeleportEntity interpolates a ticking boat within 64 blocks: for three ticks
+     * Entity#commonTick runs LinearInterpolationHandler#interpolate before AbstractBoat#controlBoat turns the boat, and
+     * positionRider turns the rider by the same deltaRotation.
+     */
+    @Test
+    void aRiderTheInterpolatingTeleportedBoatTurnsInItsInventoryIsNotRotating() throws Exception {
+        float[] turns = deltaRotations();
+        try (var f = board(true)) {
+            MultiActionsO check = f.player.checkManager.getCheck(MultiActionsO.class);
+            f.player.setExperimentalChecks(true);
+            check.setEnabled(true);
+            check.reload();
+            check.violations = 0;
+            float boatYaw = 0;
+            float yaw = clampRotation(LOOK_YAW, boatYaw);
+            Vec3 boat = SEAT;
+            Vec3 target = SEAT;
+            float targetYaw = 0;
+            Vec3 lastStep = SEAT;
+            float lastStepYaw = 0;
+            int steps = 0;
+            int turnedLooks = 0;
+            for (int tick = 0; tick <= TELEPORT_TICK + 4; tick++) {
+                if (tick == OPEN_TICK) f.player.openWindow.onClientOpenOrCloseWindow(true);
+                if (tick == TELEPORT_TICK) {
+                    target = new Vec3(SEAT.x, SEAT.y, SEAT.z + 5.0);
+                    targetYaw = boatYaw + 150.0F;
+                    teleportBoat(f, target, targetYaw);
+                    f.pongThrough(f.player.lastTransactionSent.get());
+                    lastStep = boat;
+                    lastStepYaw = boatYaw;
+                    steps = 3;
+                }
+                steer(f, tick);
+                if (steps > 0) {
+                    // AbstractInterpolationHandler#interpolate carries the boat's own move and turn into the target.
+                    Vec3 moved = boat.subtract(lastStep);
+                    if (moved.lengthSqr() > 1.0E-5F) target = target.add(moved);
+                    targetYaw += boatYaw - lastStepYaw;
+                    boat = boat.lerp(target, 1.0 / steps);
+                    boatYaw = rotLerp(1.0 / steps, boatYaw, targetYaw);
+                    lastStep = boat;
+                    lastStepYaw = boatYaw;
+                    steps--;
+                }
+                boatYaw += turns[tick];
+                float previousYaw = yaw;
+                yaw = clampRotation(yaw + turns[tick], boatYaw);
+                if (tick >= TELEPORT_TICK) {
+                    if (yaw != previousYaw) turnedLooks++;
+                    boat = boat.add(DRIFT);
+                }
+                rot(f, yaw, LOOK_PITCH);
+                moveBoat(f, boat, boatYaw);
+                f.tickEnd();
+            }
+            assertTrue(turnedLooks > 0, "the boat turned no judged look");
+            assertEquals(0, check.violations);
+        }
     }
 
     private record Run(double violations, int turnedLooks) {}
@@ -162,6 +232,28 @@ class BoatRiderInventoryLookTest {
     private static void moveBoat(JavaTickFixture f, float boatYaw) {
         var packet = new ServerboundMoveVehicle(new Vec3d(SEAT.x, SEAT.y, SEAT.z), boatYaw, 0, true, true);
         f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, packet), f.player, packet);
+    }
+
+    private static void moveBoat(JavaTickFixture f, Vec3 position, float boatYaw) {
+        var packet = new ServerboundMoveVehicle(new Vec3d(position.x, position.y, position.z), boatYaw, 0, true, true);
+        f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, packet), f.player, packet);
+    }
+
+    private static void teleportBoat(JavaTickFixture f, Vec3 target, float yaw) {
+        var packet = new ClientboundTeleportEntity(
+                BOAT, new Vec3d(target.x, target.y, target.z), Vec3d.ZERO, yaw, 0, Set.of(), true);
+        var event = new PacketSendEvent<>(
+                f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.TELEPORT_ENTITY, packet, false);
+        f.player.packetEntityReplication.onTeleportEntity(event, f.player, packet);
+        event.tasksAfter().forEach(Runnable::run);
+    }
+
+    // Mth#rotLerp in double, as LinearInterpolationHandler#doInterpolate calls it.
+    private static float rotLerp(double alpha, float from, float to) {
+        double delta = ((double) to - from) % 360.0;
+        if (delta >= 180.0) delta -= 360.0;
+        if (delta < -180.0) delta += 360.0;
+        return (float) (from + alpha * delta);
     }
 
     // AbstractBoat#clampRotation's yaw for a player passenger, in Mth's float operations.

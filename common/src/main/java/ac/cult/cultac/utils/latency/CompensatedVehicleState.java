@@ -191,6 +191,8 @@ public final class CompensatedVehicleState implements Debuggable {
             if (onGround != null) {
                 entity.onGround = onGround;
             }
+            // ClientPacketListener#setValuesFromPositionPacket sets the yaw AbstractBoat#controlBoat turns next tick.
+            if (entity.isBoat() && entity == entities.getSelf().getRiding()) player.boatYawBeforeTurn = yaw;
         }
 
         if (player.isBedrockMovement()

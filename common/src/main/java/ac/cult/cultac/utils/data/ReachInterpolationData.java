@@ -238,6 +238,11 @@ public class ReachInterpolationData {
             interpolationStepsHighBound = getInterpolationSteps();
     }
 
+    /** Whether this follows the 26.3 client's InterpolationHandler, which Entity#commonTick runs for every entity. */
+    public boolean followsInterpolationHandler() {
+        return interpolationPlayer != null;
+    }
+
     public boolean usesSteppedInterpolation() {
         return interpolationQueue != null;
     }
@@ -890,6 +895,9 @@ public class ReachInterpolationData {
             return physicalYaw;
         }
 
+        // LinearInterpolationHandler#doInterpolate lerps the yaw in double.
+        if (followsInterpolationHandler() && !usesSteppedInterpolation())
+            return (float) CultMath.rotLerp(1.0 / remainingSteps, physicalYaw, targetYaw);
         return CultMath.rotLerp(1.0F / remainingSteps, physicalYaw, targetYaw);
     }
 
