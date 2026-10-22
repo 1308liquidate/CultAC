@@ -817,9 +817,7 @@ public class CultPlayer implements GrimUser {
     @Nullable
     public TrackedTransaction appendTrailingProofTransaction(
             PacketSendEvent<?> event, List<CultWrite> packetsBeforeProof) {
-        int shared = isBedrockMovement() || PacketBundlePolicy.requiresStandalone(event.getPacketType())
-                ? 0
-                : event.flushPing();
+        int shared = !isBedrockMovement() && PacketBundlePolicy.requiresStandalone(event.getPacketType()) ? 0 : event.flushPing();
         if (shared > 0) {
             event.getWritesAfterSend().addAll(packetsBeforeProof);
             return new TrackedTransaction(shared, null);
