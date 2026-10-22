@@ -7,6 +7,7 @@ import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
+import ac.cult.cultac.utils.nmsutil.Collisions;
 
 public class Riptide implements UncertaintyHandler {
 
@@ -56,15 +57,17 @@ public class Riptide implements UncertaintyHandler {
 
         // TODO: Force people to be touching water to use riptide
         // TODO: Rate limit riptide
-        // TODO: Fix false for the next tick when riptiding on ground
         if (releasedOnGround.determineOptimistically()) {
-            double bestY = CultMath.clamp(end.y, start.y, start.y + 1.2);
+            boolean onGround = releasedOnGround == DesyncStatus.TRUE;
+            double lift = onGround ? Collisions.collide(player, context.getFromActualPose(), 0, 1.1999999F, 0).y : 1.2;
+            double bestY = CultMath.clamp(end.y, start.y, start.y + lift);
             PredVector lifted = start.withY(bestY, "riptide ground lift");
             // MCP-Reborn TridentItem#releaseUsing first writes the riptide
             // impulse with Entity#push, then grounded players are moved upward
             // by Entity#move(MoverType.SELF, 0, 1.1999999, 0). That lift is a
             // packet-visible position move, not additional carried velocity.
-            trace = trace.withPosition(lifted).addPositionOnlyDelta(lifted.subtract(start));
+            Vec3 positionOnly = onGround ? new Vec3(0, lift, 0) : lifted.subtract(start);
+            trace = trace.withPosition(lifted).addPositionOnlyDelta(positionOnly);
             start = lifted;
         }
 
