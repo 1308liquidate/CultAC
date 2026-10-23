@@ -84,6 +84,7 @@ public class MultiActionsG extends BlockPlaceCheck {
                 && player.inVehicle()
                 && riding != null
                 && EntityTypeUtil.isBoat(riding.type)
-                && (player.boatData.nextVehicleForward != 0 || player.boatData.nextVehicleHoriz != 0);
+                && player.compensatedEntities.vehicles.mayLocalPlayerControl(riding)
+                && player.boatData.nextVehicleKeys.movingNoJump();
     }
 }
