@@ -159,7 +159,7 @@ public class CheckManager {
     public final Map<Class<? extends Check>, Check> allChecks = new HashMap<>();
     private final PacketHandlerScanner recordScanner;
     private final List<TickEndHandlerRegistration> tickEndHandlers = new ArrayList<>();
-    /** Set on the packet thread while a tick end's handlers run. */
+    /** Set on the packet thread while a received tick end's handlers run; synthetic recovery cuts no capture frame. */
     private boolean dispatchingTickEnd;
 
     private PacketTypeTable<PacketReceiveRoute<Object>> earlyReceiveRoutes = PacketTypeTable.empty();
@@ -929,13 +929,13 @@ public class CheckManager {
             // tick therefore must see the post-block-entity piston phase and the
             // post-entity interpolation state, not the stale pre-tick-end cache.
             player.compensatedWorld.onClientTickEnd();
-            dispatchingTickEnd = true;
+            dispatchingTickEnd = !packet.isSynthetic();
             try {
                 for (TickEndHandlerRegistration handler : tickEndHandlers) {
                     handler.handle(packet, player);
                 }
                 PlayerObserver observer = player.observer;
-                if (observer != null) observer.tickEnded();
+                if (observer != null && !packet.isSynthetic()) observer.tickEnded();
             } finally {
                 dispatchingTickEnd = false;
             }

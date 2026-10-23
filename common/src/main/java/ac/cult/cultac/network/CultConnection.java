@@ -430,7 +430,8 @@ public final class CultConnection implements CodecState {
         afterClientTick.add(Objects.requireNonNull(task));
     }
 
-    private void clientTickEnded() {
+    /** Releases tick-bound tasks after a forwarded tick end, leaving play, or the synthetic tick-end timeout. */
+    public void clientTickEnded() {
         midClientTick = false;
         if (afterClientTick.isEmpty()) return;
         var tasks = List.copyOf(afterClientTick);

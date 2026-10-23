@@ -338,6 +338,8 @@ public class CultPlayer implements GrimUser {
      * cannot shift the count.
      */
     public final @NotNull AtomicLong clientTickEnds = new AtomicLong();
+
+    public final @NotNull ClientTickEndTimeout clientTickEndTimeout = new ClientTickEndTimeout(this);
     /** Follows this player's engine events; null while nothing does. */
     public volatile @Nullable PlayerObserver observer;
 

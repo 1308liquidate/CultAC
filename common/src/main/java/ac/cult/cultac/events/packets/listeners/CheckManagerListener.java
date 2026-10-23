@@ -1162,6 +1162,7 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
 
     public void processClientTickEndReceive(PacketReceiveEvent event, CultPlayer player) {
         if (event.getPhase() != ConnectionPhase.PLAY) return;
+        player.clientTickEndTimeout.onTickEnd(System.nanoTime());
         // The Geyser bridge ends each Bedrock client tick after translating its frame. Geyser's
         // tick end here only closes that frame's Java projection.
         if (player.user.getBedrockBridgeConnection() == null) {
