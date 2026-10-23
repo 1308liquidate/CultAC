@@ -4,9 +4,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import ac.cult.blocksim.engine.SimItemStack;
+import ac.cult.cultac.checks.impl.badpackets.BadPacketsP;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsWindow;
 import ac.cult.cultac.checks.impl.multiactions.MultiActionsH;
 import ac.cult.cultac.checks.impl.multiactions.MultiActionsS;
+import ac.cult.cultac.checks.impl.verbose.VerboseCodecs;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerWindow;
 import ac.cult.cultac.network.event.PacketListenerPriority;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
@@ -32,6 +34,7 @@ import ac.cult.cultac.utils.inventory.inventory.WindowClickType;
 import io.netty.buffer.ByteBuf;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -356,6 +359,40 @@ class InventoryWindowChecksTest {
         var packet = new ClientboundOpenScreen(id, "minecraft:generic_9x1");
         var event = new PacketSendEvent<>(f.user, ConnectionPhase.PLAY, ClientboundPackets.OPEN_SCREEN, packet, false);
         f.player.openWindow.onServerWindow(event, id, MenuType.GENERIC_9x1);
+    }
+
+    @Test
+    void aCarriedItemReleasedWithAGlfwMouseButtonIsAValidClick() throws Exception {
+        assertCarriedClickFlags(ProtocolVersion.V26_1, 3, false);
+        assertCarriedClickFlags(ProtocolVersion.V26_1, 4, false);
+        assertCarriedClickFlags(ProtocolVersion.V26_1, 7, false);
+        assertCarriedClickFlags(ProtocolVersion.V26_1, 8, true);
+    }
+
+    @Test
+    void aCarriedItemReleasedWithAnSdlMouseButtonIsAValidClick() throws Exception {
+        assertCarriedClickFlags(ProtocolVersion.V26_3, 4, false);
+        assertCarriedClickFlags(ProtocolVersion.V26_3, 5, false);
+        assertCarriedClickFlags(ProtocolVersion.V26_3, -1, false);
+        assertCarriedClickFlags(ProtocolVersion.V26_3, 127, false);
+        assertCarriedClickFlags(ProtocolVersion.V26_3, -128, false);
+        assertCarriedClickFlags(ProtocolVersion.V26_3, 3, true);
+    }
+
+    private static void assertCarriedClickFlags(ProtocolVersion version, int button, boolean flags) throws Exception {
+        VerboseCodecs.ensureRegistered();
+        try (var services = new RecordConsumerServices();
+                var f = new RecordReceiveFixture(version)) {
+            when(f.connection.platform().getClientProtocol()).thenReturn(version);
+            f.player.setExperimentalChecks(true);
+            var check = spy(new BadPacketsP(f.player));
+            doReturn(true).when(check).alert(any(Supplier.class));
+            doReturn(true).when(check).shouldModifyPackets();
+            var click = new InventoryClick(0, 0, 36, button, WindowClickType.PICKUP, Map.of(), SimItemStack.EMPTY);
+            var event = clickEvent(f, click);
+            check.onContainerClick(event, f.player, click);
+            assertEquals(flags, event.isCancelled(), version + " button " + button);
+        }
     }
 
     private static void acknowledge(RecordReceiveFixture f, int transaction) {
