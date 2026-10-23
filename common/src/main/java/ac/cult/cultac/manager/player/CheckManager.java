@@ -374,7 +374,7 @@ public class CheckManager {
                 new NoSwingBreak(player),
                 new FarBreak(player),
                 new InvalidBreak(player),
-                new PositionBreakA(player),
+                new PositionBreakA(player, visibility),
                 new PositionBreakB(player),
                 new MultiBreak(player),
                 new AutoclickerLimit(player),

@@ -585,6 +585,22 @@ public final class ClientVisibility {
         return range + Math.sqrt(3) * speed;
     }
 
+    /** The longest Minecraft#pick ray any of this tick's selections may have cast. */
+    public double maxPickRange() {
+        if (selections.isEmpty()) return nativePickRange();
+        Selection previous = activeSelection;
+        try {
+            double range = 0;
+            for (Selection selection : selections) {
+                activeSelection = selection;
+                range = Math.max(range, nativePickRange());
+            }
+            return range;
+        } finally {
+            activeSelection = previous;
+        }
+    }
+
     private double nativePickRange() {
         double pickRange = Math.max(
                 player.compensatedEntities.getSelf().getBlockInteractionRange(),

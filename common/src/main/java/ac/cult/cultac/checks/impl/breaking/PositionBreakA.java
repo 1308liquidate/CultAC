@@ -13,6 +13,7 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.utils.anticheat.update.BlockBreak;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
+import ac.cult.cultac.utils.visibility.ClientVisibilityProcessor;
 import ac.grim.grimac.api.storage.verbose.Verbose;
 import ac.grim.grimac.api.storage.verbose.VerboseTags;
 
@@ -23,10 +24,12 @@ import ac.grim.grimac.api.storage.verbose.VerboseTags;
 public class PositionBreakA extends Check implements BlockBreakListener {
     private static final Verbose V = Verbose.of("action={digging}, face={face}");
 
+    private final ClientVisibilityProcessor visibility;
     private boolean didLastMovementIncludePosition;
 
-    public PositionBreakA(CultPlayer player) {
+    public PositionBreakA(CultPlayer player, ClientVisibilityProcessor visibility) {
         super(player);
+        this.visibility = visibility;
     }
 
     @CultPacketHandler
@@ -47,9 +50,11 @@ public class PositionBreakA extends Check implements BlockBreakListener {
             eyePositions.expand(player.getMovementThreshold());
         }
 
-        // If the player is inside a block, then they can ray trace through the block and hit the other side of the
-        // block
-        if (eyePositions.isIntersected(combined)) {
+        // VoxelShape#clip returns an inside hit, on any face, when eye + 0.001 * (rayEnd - eye) lies in the
+        // outline. The pick ray is a unit view vector times the pick range, so that point is within
+        // 0.001 * range of the eye.
+        double insideSample = Math.nextUp(0.001 * visibility.maxPickRange());
+        if (eyePositions.copy().expand(insideSample).isIntersected(combined)) {
             return;
         }
 

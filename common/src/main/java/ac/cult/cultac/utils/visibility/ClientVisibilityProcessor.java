@@ -88,6 +88,11 @@ public final class ClientVisibilityProcessor extends CultProcessor implements Ch
                 () -> visibility.entityHidden(entity, box, positionError()));
     }
 
+    /** The longest Java pick ray of this tick's selections; Bedrock rays are not modeled here. */
+    public double maxPickRange() {
+        return player.isBedrockMovement() ? 0 : visibility.maxPickRange();
+    }
+
     public List<ClientVisibility.ItemPick> attackItemPicks() {
         return player.isBedrockMovement() ? List.of() : visibility.attackItemPicks();
     }
