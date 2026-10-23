@@ -2390,7 +2390,12 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         }
     }
 
-    public void handleBlockChange(BlockPos pos, int to) {
+    /**
+     * Opens the last movement's state that a block change near it may have touched. {@code fluidTimingKnown}: the
+     * client handled the change before every tick still to be simulated, so the last movement's fluid state stays as
+     * it was.
+     */
+    public void handleBlockChange(BlockPos pos, int to, boolean fluidTimingKnown) {
         if (this.lastPrediction != null) {
             if (!this.player.compensatedEntities.getSelf().inVehicle()) {
                 SimulationContext context = this.lastPrediction.getSimulationContext();
@@ -2399,8 +2404,9 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                     SimpleCollisionBox playerMaxExtent = context.getToMaximumExtent();
                     playerMaxExtent.expand(1.0);
                     if (blockCollisionBox.isIntersected(playerMaxExtent)) {
-                        if (ClientFluidQueries.modelFluid(to)
-                                .isSame(ClientFluidQueries.modelFluid(BlockIds.WATER.defaultState()))) {
+                        if (!fluidTimingKnown
+                                && ClientFluidQueries.modelFluid(to)
+                                        .isSame(ClientFluidQueries.modelFluid(BlockIds.WATER.defaultState()))) {
                             this.lastPrediction
                                     .getSimulationContext()
                                     .getWorldData()
@@ -2411,7 +2417,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                                     .setInFlowingLiquid(DesyncStatus.UNKNOWN);
                         }
 
-                        if (BlockIds.is(to, BlockIds.LAVA)) {
+                        if (!fluidTimingKnown && BlockIds.is(to, BlockIds.LAVA)) {
                             this.lastPrediction
                                     .getSimulationContext()
                                     .getWorldData()
