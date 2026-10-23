@@ -18,6 +18,7 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.math.Vec3;
 import java.lang.reflect.Field;
 import java.util.List;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -43,6 +44,8 @@ class LegacyHorseDragTest {
 
     private static final ServerboundPlayerInput FORWARD =
             new ServerboundPlayerInput(true, false, false, false, false, false, false);
+    private static final ServerboundPlayerInput FORWARD_RIGHT =
+            new ServerboundPlayerInput(true, false, false, true, false, false, false);
 
     /**
      * Each move scales the carried velocity by the client's drag, zeroes it under LivingEntity#aiStep's 0.003
@@ -55,7 +58,7 @@ class LegacyHorseDragTest {
         try (var f = new JavaTickFixture()) {
             setClientVersion(f.player, version);
             Vec3 start = new Vec3(0.5, FLOOR_Y, 0.5);
-            mount(f, start);
+            mount(f, start, FORWARD, SPEED);
 
             double velocity = 0.0;
             double z = start.z;
@@ -64,35 +67,51 @@ class LegacyHorseDragTest {
                 if (Math.abs(move) < 0.003) move = 0.0;
                 move += GROUND_INPUT;
                 z += move;
-                assertVehicleExact(ride(f, new Vec3(start.x, FLOOR_Y, z)), tick);
+                assertVehicleExact(ride(f, new Vec3(start.x, FLOOR_Y, z), 0F), tick);
                 velocity = move * GROUND_FRICTION;
             }
         }
     }
 
-    /** The saddled horse at rest at {@code start} facing +z, ridden with forward held. */
-    private static void mount(JavaTickFixture f, Vec3 start) {
+    /**
+     * The reported 1.21.4 move from rest with forward and right held (CultAC issue #128). Before 1.21.5,
+     * LocalPlayer#serverAiStep stores the raw impulses in xxa/zza and LivingEntity#aiStep scales them by 0.98F, so
+     * AbstractHorse#getRiddenInput returns (-0.49, 0, 0.98); its squared length is over 1, so
+     * Entity#getInputVector normalizes it and the move covers the whole movement_speed.
+     */
+    @Test
+    void aLegacyRiddenHorseMovesAtFullSpeedWithForwardAndStrafeHeld() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            setClientVersion(f.player, ClientVersion.V_1_21_4);
+            Vec3 start = new Vec3(3.17404, FLOOR_Y, 5.16243);
+            mount(f, start, FORWARD_RIGHT, 0.22499502F);
+            assertVehicleExact(ride(f, start.add(0.17158700747256717, 0.0, 0.14553574750553366), -76.26071F), 0);
+        }
+    }
+
+    /** The saddled horse at rest at {@code start} facing +z, ridden with {@code input} held. */
+    private static void mount(JavaTickFixture f, Vec3 start, ServerboundPlayerInput input, float speed) {
         f.player.compensatedEntities.addEntity(HORSE, EntityTypeIds.HORSE, start, 0F, 0, 0);
         PacketEntityHorse horse = (PacketEntityHorse) f.player.compensatedEntities.getEntity(HORSE);
         horse.hasSaddle = true;
         horse.isTame = true;
-        horse.movementSpeedAttribute = SPEED;
+        horse.movementSpeedAttribute = speed;
         horse.onGround = true;
         f.setPassengers(HORSE, List.of(f.player.entityID));
         f.pongThrough(f.player.lastTransactionSent.get());
         // AbstractHorse#tick runs before LocalPlayer#rideTick hands it this tick's keys.
-        f.input(FORWARD);
+        f.input(input);
         f.tickEnd();
         f.player.checkManager.getSimulationProcessor().seedStartingVelocity(new Vec3(0, GROUNDED_Y, 0));
         f.player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.TRUE);
     }
 
-    /** One client tick: the rider's Rot, the horse's move and the tick end. */
-    private static PredictionResult ride(JavaTickFixture f, Vec3 to) {
+    /** One client tick: the rider's Rot at {@code yaw}, the horse's move and the tick end. */
+    private static PredictionResult ride(JavaTickFixture f, Vec3 to, float yaw) {
         PredictionResult before = f.player.checkManager.getSimulationProcessor().getLastPrediction();
-        var rot = new ServerboundMovePlayer(0, 0, 0, 0F, 0F, false, false, false, true);
+        var rot = new ServerboundMovePlayer(0, 0, 0, yaw, 0F, false, false, false, true);
         f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
-        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), 0F, 0F, true, true);
+        var move = new ServerboundMoveVehicle(new Vec3d(to.x, to.y, to.z), yaw, 0F, true, true);
         f.listener.onMoveVehicle(f.event(ServerboundPackets.MOVE_VEHICLE, move), f.player, move);
         f.tickEnd();
         PredictionResult result = f.player.checkManager.getSimulationProcessor().getLastPrediction();

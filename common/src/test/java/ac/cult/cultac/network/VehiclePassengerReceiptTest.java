@@ -195,6 +195,8 @@ class VehiclePassengerReceiptTest {
             p.packetStateData.markVehicleMove(true, true);
             var ctx = mock(SimulationContext.class);
             var world = mock(WorldData.class);
+            var version = p.getClientVersion();
+            when(ctx.getVersion()).thenReturn(version);
             when(ctx.getVehicle()).thenReturn(p.compensatedEntities.getEntity(CAMEL));
             when(ctx.getHorseInputs()).thenReturn(new Vec3(0, 0, 1));
             when(ctx.getXRot()).thenReturn(324.39648F);

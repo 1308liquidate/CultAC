@@ -478,7 +478,11 @@ public class VelocityTransformer {
     private Vec3 getExactHorseFamilyRiddenInput(Vec3 rawInputState) {
         // KeyboardInput#tick normalizes key impulses, LocalPlayer#applyInput stores modifyInput(...)
         // into xxa/zza, and AbstractHorse#getRiddenInput maps that exact pair to ridden Vec3.
-        Vec3 modifiedInput = getExactControllerModifiedInput(rawInputState);
+        // Before 1.21.5, LocalPlayer#serverAiStep stores the raw impulses and LivingEntity#aiStep
+        // scales them by 0.98.
+        Vec3 modifiedInput = simulationContext.getVersion().isOlderThan(ClientVersion.V_1_21_5)
+                ? new Vec3((float) rawInputState.x * 0.98F, 0.0D, (float) rawInputState.z * 0.98F)
+                : getExactControllerModifiedInput(rawInputState);
         float modifiedX = (float) modifiedInput.x;
         float modifiedZ = (float) modifiedInput.z;
         if (modifiedInput.lengthSqr() < 1.0E-7D) {
