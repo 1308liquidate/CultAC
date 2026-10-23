@@ -496,6 +496,9 @@ public class SimulationContext {
     }
 
     public float getMaxHeight() {
+        if (getVehicle() instanceof PacketEntityCamel camel && getBedrockInput() == null) {
+            return BoundingBoxSize.getCamelPoseHeight(camel, version);
+        }
         if (getVehicle() != null) {
             return BoundingBoxSize.getHeight(getVehicle(), version, getBedrockInput() != null);
         }

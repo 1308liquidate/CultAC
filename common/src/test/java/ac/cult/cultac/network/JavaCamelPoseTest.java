@@ -188,6 +188,36 @@ class JavaCamelPoseTest {
         }
     }
 
+    /** Camel#getDefaultDimensions: water held by slabs over a sitting camel lies above its box, so it stays seated. */
+    @Test
+    void aSittingCamelUnderWaterloggedSlabsStaysSeatedAndTakesNoJump() throws Exception {
+        try (var f = sitting()) {
+            var registry = DataTables.defaults().registry();
+            int slab = registry.with(
+                    registry.with(registry.block("minecraft:oak_slab").defaultState(), "type", "top"),
+                    "waterlogged",
+                    "true");
+            layer(f, FLOOR_Y + 1, slab);
+            expireBlockChangeUncertainty(f);
+            releaseJump(f);
+            assertExactTick(f.rideTick(SEAT, true), "jump");
+            assertTrue(camel(f).isCamelSitting());
+            assertEquals(0.0D, camel(f).horseJump);
+            assertExactTick(f.rideTick(SEAT, true), "seated");
+        }
+    }
+
+    /** Camel#getDefaultDimensions: water above a sitting camel's box leaves it seated, and forward stands it up slowly. */
+    @Test
+    void aSittingCamelBelowWaterStandsUpThroughItsTransition() throws Exception {
+        try (var f = sitting()) {
+            layer(f, FLOOR_Y + 1, BlockIds.WATER.defaultState());
+            expireBlockChangeUncertainty(f);
+            f.input(FORWARD);
+            for (int tick = 0; tick < 6; tick++) assertExactTick(f.rideTick(SEAT, true), "transition " + tick);
+        }
+    }
+
     /** A camel that stood up on a tick it was in water stays standing once the water is gone, and can jump. */
     @Test
     void aCamelThatStoodUpInBriefWaterStaysStanding() throws Exception {

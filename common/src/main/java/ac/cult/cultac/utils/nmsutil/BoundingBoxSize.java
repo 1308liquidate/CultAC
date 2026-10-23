@@ -235,7 +235,7 @@ public class BoundingBoxSize {
     }
 
     /** The camel's getDimensions(getPose()).height(): Camel#getDefaultDimensions swaps in sitting dimensions. */
-    private static float getCamelPoseHeight(PacketEntityCamel camel, ClientVersion version) {
+    public static float getCamelPoseHeight(PacketEntityCamel camel, ClientVersion version) {
         if (camel.actionPose != EntityPose.SITTING) {
             return getHeight(camel, version);
         }
