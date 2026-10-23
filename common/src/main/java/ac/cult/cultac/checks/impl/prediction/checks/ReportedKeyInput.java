@@ -6,6 +6,7 @@ import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.EntityPositionWorlds;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.SneakEdge;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.UnknownCollisionProvider;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.network.protocol.ClientVersion;
@@ -14,8 +15,6 @@ import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ClientItemUseState;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.data.ShulkerBoxShoveResult;
-import ac.cult.cultac.utils.data.StuckEdgeData;
-import ac.cult.cultac.utils.enums.Pose;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientKeyInput;
@@ -40,13 +39,13 @@ final class ReportedKeyInput {
      */
     static double offset(CultPlayer player, PredictionResult result, PredictionResult lastResult) {
         SimulationContext context = result.getSimulationContext();
-        if (!appliesTo(player, result, lastResult)) return 0.0D;
+        if (!appliesTo(player, result)) return 0.0D;
         SimpleCollisionBox extents = result.getValidMovements().getCollisionIgnoredMaxStartingVelExtents();
         if (extents == null) return 0.0D;
 
         KnownInput keys = player.packetStateData.knownInput;
         ClientItemUseState.Snapshot use = context.getItemUse();
-        float[] slows = slows(player, context);
+        float[] slows = ClientKeyInput.movingSlowlyFactors(player, context);
         float walk = context.getMoveRelativeSpeed(player, true, false, false);
         // LivingEntity#getFrictionInfluencedSpeed reads getSpeed(), which carries minecraft:sprinting while applied.
         // ClientSprintState can still hold the modifier after one aiStep started and stopped a wall sprint.
@@ -78,28 +77,6 @@ final class ReportedKeyInput {
             }
         }
         return best;
-    }
-
-    /**
-     * LocalPlayer#modifyInput's slow multipliers: LocalPlayer#isMovingSlowly is crouching or Entity#isVisuallyCrawling,
-     * which out of water is a SWIMMING pose or, through LivingEntity#isVisuallySwimming, a FALL_FLYING pose without
-     * fall flying. Player#updatePlayerPose sets the pose only after LocalPlayer#aiStep, which crouches a player whose
-     * previous keys held shift only where the crouching pose fits blocks and entities
-     * (Player#canPlayerFitWithinBlocksAndEntitiesWhen).
-     */
-    private static float[] slows(CultPlayer player, SimulationContext context) {
-        float sneaking =
-                (float) player.compensatedEntities.getSelf().sneakingSpeed.value();
-        if (context.getPose() == Pose.SWIMMING || context.getPose() == Pose.FALL_FLYING) return new float[] {sneaking};
-        if (!context.isLastSneaking()) return new float[] {1.0F};
-        if (player.getClientVersion().isOlderThan(ClientVersion.V_1_14)) return new float[] {sneaking};
-        Vec3 from = context.getStart();
-        if (player.canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING, from.x, from.y, from.z)) {
-            return new float[] {sneaking};
-        }
-        return player.mayPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING, from.x, from.y, from.z)
-                ? new float[] {sneaking, 1.0F}
-                : new float[] {1.0F};
     }
 
     private static boolean repeats(float[] values, int index) {
@@ -178,13 +155,9 @@ final class ReportedKeyInput {
         return offset;
     }
 
-    private static boolean appliesTo(CultPlayer player, PredictionResult result, PredictionResult lastResult) {
+    private static boolean appliesTo(CultPlayer player, PredictionResult result) {
         SimulationContext context = result.getSimulationContext();
         WorldData world = context.getWorldData();
-        StuckEdgeData edge = world.getSneak();
-        StuckEdgeData lastEdge = lastResult == null
-                ? null
-                : lastResult.getSimulationContext().getWorldData().getSneak();
         return player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_6)
                 && !player.isBedrockMovement()
                 // No PLAYER_INPUT yet leaves the keys at Input.EMPTY, which MultiPlayerGameMode#createPlayer starts
@@ -204,8 +177,13 @@ final class ReportedKeyInput {
                 // Entity#move scales the delta by the stuck speed before Entity#collide.
                 && NO_STUCK_SPEED.equals(context.getLastStuckSpeed())
                 && world.getStuckSpeed().getUnknownStuckSpeedMultiplier() == null
-                // A shift edge shortens the delta through Player#maybeBackOffFromEdge; Sneaking models that movement.
-                && !edge.isOnEdge()
-                && (lastEdge == null || !lastEdge.isOnEdge());
+                // A shift edge shortens the delta through Player#maybeBackOffFromEdge; SneakEdge already moved every
+                // legal input through it, and carries the delta the edge withheld exactly.
+                && !backedOffFromEdge(result);
+    }
+
+    private static boolean backedOffFromEdge(PredictionResult result) {
+        var trace = result.getValidMovements().getClosestTrace();
+        return trace != null && trace.position().hasReason(SneakEdge.BACKED_OFF);
     }
 }

@@ -65,6 +65,8 @@ public class PacketEntity {
     // The tracker whose entityMap holds this entity; null while untracked.
     private @Nullable CompensatedEntities tracker;
     public boolean isDead = false;
+    // Entity#firstTick: true until the client first ticks the entity, so its spawn metadata precedes it.
+    public boolean firstTick = true;
     public boolean isBaby = false;
     public boolean hasGravity = true;
     public double gravity = 0.08D;

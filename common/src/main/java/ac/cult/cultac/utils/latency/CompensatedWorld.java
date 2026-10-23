@@ -679,7 +679,6 @@ public class CompensatedWorld {
         int state = stateIdOrAir(originalBlockId);
         if (getBlockStateIdAt(vector3i) != state) {
             updateBlock(vector3i.getX(), vector3i.getY(), vector3i.getZ(), state);
-
             if (playerPosition == null) {
                 // Fuck you player. You tried teleporting and then causing an illegal block change to try to validate
                 // your illegal teleport.
@@ -759,10 +758,10 @@ public class CompensatedWorld {
         return originalServerBlocks.containsKey(pos.asLong());
     }
 
-    /** Retained server state, excluding a locally predicted placement or destruction. */
+    /** Newest applied server state, excluding a locally predicted placement or destruction. */
     public int getServerBlockStateIdAt(BlockPos pos) {
         BlockPrediction pending = originalServerBlocks.get(pos.asLong());
-        return pending == null ? getBlockStateIdAt(pos) : pending.getOriginalBlockId();
+        return pending == null ? getBlockStateIdAt(pos) : pending.getServerBlockId();
     }
 
     /** ClientPacketListener.handleGameEvent and Level.setRainLevel (26.3). */
@@ -1081,6 +1080,7 @@ public class CompensatedWorld {
             // Only update the stored rollback target; the actual local block stays client-predicted until
             // confirmation handling decides whether to keep it or restore the original server state.
             prediction.setOriginalBlockId(newState);
+            prediction.setServerBlockId(newState);
             ghostBlockMitigator.handleUpdateServerBlockState(asVector, newState);
             return original;
         }
@@ -1800,7 +1800,7 @@ public class CompensatedWorld {
                 }
             }
             if (motionBlocking != null) applyClientMotionHeightmap(dimension, chunkX, chunkZ, motionBlocking);
-            preservePendingPredictions(chunk, chunkX, chunkZ);
+            recordPendingPredictionServerStates(chunk, chunkX, chunkZ);
             if (dimension.equals(visibleDimension)) {
                 geysers.replaceChunk(chunkX, chunkZ, geyserTickers);
                 pistons.forgetChunk(chunkX, chunkZ);
@@ -1833,7 +1833,7 @@ public class CompensatedWorld {
         removePendingReinternSections(toMerge, chunkX, chunkZ);
         releaseMergedChunkSections(existingColumn, toMerge, dimension, chunkX, chunkZ);
         existingColumn.mergeSections(toMerge);
-        preservePendingPredictions(existingColumn, chunkX, chunkZ);
+        recordPendingPredictionServerStates(existingColumn, chunkX, chunkZ);
         if (terrainListener != null) terrainListener.columnLoaded(chunkX, chunkZ);
     }
 
@@ -1886,7 +1886,11 @@ public class CompensatedWorld {
         }
     }
 
-    private void preservePendingPredictions(CachedChunk chunk, int chunkX, int chunkZ) {
+    /**
+     * LevelChunk#replaceWithPacketData reads the sections raw: the chunk replaces a predicted block,
+     * while BlockStatePredictionHandler keeps the retained state the ack later restores.
+     */
+    private void recordPendingPredictionServerStates(CachedChunk chunk, int chunkX, int chunkZ) {
         if (originalServerBlocks.isEmpty()) {
             return;
         }
@@ -1899,10 +1903,8 @@ public class CompensatedWorld {
 
             int serverState = getCachedChunkStateId(chunk, position);
             if (serverState != -1) {
-                prediction.setOriginalBlockId(serverState);
+                prediction.setServerBlockId(serverState);
             }
-
-            setCachedChunkState(chunk, position, prediction.getPredictedBlockId());
         }
     }
 
@@ -1918,19 +1920,6 @@ public class CompensatedWorld {
             return 0;
         }
         return section.getStateId(CachedChunk.index(position.getX() & 0xF, offsetY & 0xF, position.getZ() & 0xF));
-    }
-
-    private void setCachedChunkState(CachedChunk chunk, BlockPos position, int state) {
-        int offsetY = position.getY() - minHeight;
-        int sectionIndex = offsetY >> 4;
-        CachedSection section = chunk.getOrCreateSection(sectionIndex);
-        if (section == null) return;
-        if (section.isShared()) {
-            section = prepareSectionForWrite(position.getX() >> 4, sectionIndex, position.getZ() >> 4, section);
-            chunk.setSection(sectionIndex, section);
-        }
-        section.setStateId(CachedChunk.index(position.getX() & 0xF, offsetY & 0xF, position.getZ() & 0xF), state);
-        queuePendingReintern(position.getX() >> 4, sectionIndex, position.getZ() >> 4, section);
     }
 
     public double getFluidLevelAt(int x, int y, int z) {

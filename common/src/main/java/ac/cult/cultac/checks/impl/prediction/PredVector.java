@@ -32,9 +32,9 @@ public class PredVector extends Vec3 {
     @Getter
     boolean isBoundedStep = false;
 
+    // The movement already holds LivingEntity#moveRelative's input, so no input allowance is added around it.
     @Getter
-    @Setter
-    boolean isTickSkip = false;
+    boolean isInputApplied = false;
 
     // Player#causeExtraKnockback 0.6 X/Z dampings applied to this starting velocity
     @Getter
@@ -58,7 +58,7 @@ public class PredVector extends Vec3 {
         this.isKnockback = lastVector.isKnockback;
         this.isEntityMotion = lastVector.isEntityMotion;
         this.isBoundedStep = lastVector.isBoundedStep;
-        this.isTickSkip = lastVector.isTickSkip;
+        this.isInputApplied = lastVector.isInputApplied;
         this.attackSlows = lastVector.attackSlows;
         this.sprintOutcome = lastVector.sprintOutcome;
         this.reason = reason;
@@ -217,21 +217,22 @@ public class PredVector extends Vec3 {
         return packetModifiers == null ? List.of() : Collections.unmodifiableList(packetModifiers);
     }
 
-    /** Same tick-skip state and the same packet velocities, the keys the start-velocity sort orders by first. */
+    /** The same packet velocities, the key the start-velocity sort orders by first. */
     public boolean hasSameStartAs(PredVector other) {
-        if (isTickSkip != other.isTickSkip || packetModifiersLength() != other.packetModifiersLength()) return false;
+        if (packetModifiersLength() != other.packetModifiersLength()) return false;
         for (int i = 0, size = packetModifiersLength(); i < size; i++) {
             if (!other.packetModifiers.contains(packetModifiers.get(i))) return false;
         }
         return true;
     }
 
-    public int tickSkippingComparator() {
-        return isTickSkip ? 0 : 1;
-    }
-
     public void setJump() {
         this.isJump = true;
+    }
+
+    public PredVector markInputApplied() {
+        this.isInputApplied = true;
+        return this;
     }
 
     public PredVector markBoundedStep() {
@@ -328,8 +329,7 @@ public class PredVector extends Vec3 {
                 + z + ", reason='"
                 + reason + '\'' + ", isJump="
                 + isJump + ", isKnockback="
-                + isKnockback + ", isTickSkip="
-                + isTickSkip + ", packetModifiers="
+                + isKnockback + ", packetModifiers="
                 + packetModifiers + ", lastVector="
                 + lastVector + '}';
     }

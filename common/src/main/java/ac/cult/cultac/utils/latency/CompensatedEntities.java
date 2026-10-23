@@ -1112,8 +1112,13 @@ public class CompensatedEntities {
         }
 
         WatchableIndexUtil.Layout layout = WatchableIndexUtil.forModel(player.user.getCultConnection());
-        applyAgeableMetadata(entity, watchableObjects);
-        applySizeMetadata(entity, watchableObjects, layout);
+        // AgeableMob, Zombie, Piglin, Zoglin and AbstractCubeMob/Phantom#onSyncedDataUpdated refresh
+        // dimensions whenever SynchedEntityData#assignValues assigns the baby flag or size, changed or not.
+        boolean babyAssigned = applyAgeableMetadata(entity, watchableObjects);
+        boolean sizeAssigned = applySizeMetadata(entity, watchableObjects, layout);
+        if (babyAssigned || sizeAssigned) {
+            entity.refreshDimensions(player);
+        }
         if (entity instanceof PacketEntityShulker) {
             applyShulkerMetadata(entity, watchableObjects);
         }
@@ -1160,11 +1165,12 @@ public class CompensatedEntities {
         }
     }
 
-    private void applyAgeableMetadata(PacketEntity entity, List<EntityMetadata.Entry> watchableObjects) {
-        if (!entity.isAgeable()) return;
+    private boolean applyAgeableMetadata(PacketEntity entity, List<EntityMetadata.Entry> watchableObjects) {
+        int babyIndex = babyIndex(entity);
+        if (babyIndex < 0) return false;
 
-        EntityMetadata.Entry babyData = WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.AGEABLE_BABY);
-        if (babyData == null) return;
+        EntityMetadata.Entry babyData = WatchableIndexUtil.getIndex(watchableObjects, babyIndex);
+        if (babyData == null) return false;
 
         Object value = babyData.value();
         // Required because bukkit Ageable doesn't align with minecraft's ageable
@@ -1173,24 +1179,37 @@ public class CompensatedEntities {
         } else if (value instanceof Byte) {
             entity.isBaby = ((Byte) value) < 0;
         }
+        return true;
     }
 
-    private void applySizeMetadata(
+    /** The index of the entity's baby flag, or -1 when its class defines none. */
+    private static int babyIndex(PacketEntity entity) {
+        if (entity.isAgeable()) return WatchableIndexUtil.AGEABLE_BABY;
+        return switch (EntityTypeUtil.getKey(entity.type).getPath()) {
+            case "zombie", "drowned", "husk", "zombie_villager", "zombified_piglin", "zoglin" ->
+                WatchableIndexUtil.ZOMBIE_BABY;
+            case "piglin" -> WatchableIndexUtil.PIGLIN_BABY;
+            default -> -1;
+        };
+    }
+
+    private boolean applySizeMetadata(
             PacketEntity entity, List<EntityMetadata.Entry> watchableObjects, WatchableIndexUtil.Layout layout) {
-        if (!entity.isSize()) return;
+        if (!entity.isSize()) return false;
 
         int sizeIndex = entity.type == EntityTypeIds.PHANTOM ? WatchableIndexUtil.PHANTOM_SIZE : layout.slimeSize();
         EntityMetadata.Entry sizeData = WatchableIndexUtil.getIndex(watchableObjects, sizeIndex);
-        if (sizeData == null) return;
+        if (sizeData == null) return false;
 
+        // The client stores the synched size as sent; only the server clamps it.
+        PacketEntitySizeable sizeable = (PacketEntitySizeable) entity;
         Object value = sizeData.value();
         if (value instanceof Integer) {
-            ((PacketEntitySizeable) entity).size = (int) value;
+            sizeable.size = (int) value;
         } else if (value instanceof Byte) {
-            ((PacketEntitySizeable) entity).size = (byte) value;
+            sizeable.size = (byte) value;
         }
-        // AbstractCubeMob#onSyncedDataUpdated and Phantom#onSyncedDataUpdated refresh dimensions on ID_SIZE.
-        entity.refreshDimensions(player);
+        return true;
     }
 
     private void applyShulkerMetadata(PacketEntity entity, List<EntityMetadata.Entry> watchableObjects) {

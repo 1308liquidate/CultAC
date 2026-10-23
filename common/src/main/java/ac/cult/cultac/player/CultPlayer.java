@@ -329,6 +329,7 @@ public class CultPlayer implements GrimUser {
     public @MonotonicNonNull GameMode gamemode;
     /** The mode of the last packet the server sent, which the client only adopts once it acknowledges that packet. */
     public @MonotonicNonNull GameMode serverGamemode;
+
     public @MonotonicNonNull String dimension;
     public @Nullable String world;
     public @Nullable Vec3 bedPosition;
@@ -1150,11 +1151,11 @@ public class CultPlayer implements GrimUser {
             return desiredPose;
         }
 
-        // The vanilla local player only evaluates pose fallback when it can fit the
-        // swimming box, then falls back from the desired pose to crouching and finally
-        // to swimming based on exact collision tests at the current position.
+        // Player#updatePlayerPose only sets a pose when the swimming box fits, falling
+        // back from the desired pose to crouching and finally to swimming based on
+        // exact collision tests at the current position; otherwise the pose is kept.
         if (!canPlayerFitWithinBlocksAndEntitiesWhen(Pose.SWIMMING, x, y, z)) {
-            return desiredPose;
+            return pose;
         }
 
         if (gamemode == GameMode.SPECTATOR
@@ -1469,23 +1470,13 @@ public class CultPlayer implements GrimUser {
         return 0.0002;
     }
 
-    // Alright, someone at mojang decided to not send a flying packet every tick with 1.9
-    // Thanks for wasting my time to save 1 MB an hour
-    //
-    // MEANING, to get an "acceptable" 1.9+ reach check, we must only treat it like a 1.8 clients
-    // when it is acting like one and sending a packet every tick.
-    //
-    // There are two predictable scenarios where this happens:
-    // 1. The player moves more than 0.03/0.0002 blocks every tick
-    //     - This code runs after the prediction engine to prevent a false when immediately switching back to 1.9-like
-    // movements
-    //     - 3 ticks is a magic value, but it should buffer out incorrect predictions somewhat.
-    // 2. The player is in a vehicle
+    // True when LocalPlayer#sendPosition sent a position on each of the last ticks: it withholds one within
+    // the movement threshold of the last sent position. A vehicle's movement is not withheld this way.
     public boolean isTickingReliablyFor(int ticks) {
         if (compensatedEntities.getSelf().inVehicle()) {
             return true;
         }
-        return !checkManager.getSimulationProcessor().getLastTickSkip().hasOccurredSince(ticks);
+        return !checkManager.getSimulationProcessor().getLastNoPositionTick().hasOccurredSince(ticks);
     }
 
     @Contract(pure = true)
@@ -1501,10 +1492,6 @@ public class CultPlayer implements GrimUser {
 
     public ac.cult.cultac.protocol.value.Hand getClientItemUseHand() {
         return usesModernJavaItemUse() ? clientItemUse.hand() : packetStateData.itemInUseHand;
-    }
-
-    public boolean canThePlayerBeCloseToZeroMovement(int ticks) {
-        return checkManager.getSimulationProcessor().getLastTickSkip().hasOccurredSince(ticks);
     }
 
     public ac.cult.cultac.utils.latency.ClientWorldRegistries getWorldRegistries() {

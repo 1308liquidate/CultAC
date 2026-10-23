@@ -58,7 +58,6 @@ public class WorldData {
     @Setter
     int onBlock;
 
-    StuckEdgeData sneak;
     BubbleColumnData bubbleColumn;
     PistonPushes pistonPushes;
 
@@ -123,7 +122,6 @@ public class WorldData {
                 carriedPush,
                 pushable,
                 onBlock,
-                sneak,
                 bubbleColumn,
                 pistonPushes,
                 stuckSpeed,

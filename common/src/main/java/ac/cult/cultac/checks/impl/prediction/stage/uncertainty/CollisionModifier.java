@@ -218,6 +218,7 @@ public class CollisionModifier implements UncertaintyHandler {
 
     private static Vec3 horizontalInputTowards(Vec3 movement, Vec3 end, PredictionResult inputSource) {
         if (inputSource == null || inputSource.getSimulationContext() == null) return Vec3.ZERO;
+        if (movement instanceof PredVector vector && vector.isInputApplied()) return Vec3.ZERO;
         double dx = end.x - movement.x;
         double dz = end.z - movement.z;
         double distance = Math.sqrt(dx * dx + dz * dz);
