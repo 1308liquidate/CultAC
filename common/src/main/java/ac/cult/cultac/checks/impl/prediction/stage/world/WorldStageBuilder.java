@@ -412,7 +412,7 @@ public class WorldStageBuilder {
         Vec3 oldPos = context.getStart();
         if (player.isBedrockMovement()) return false;
         // TODO: Does 0.03 affect this and if so, how?
-        float bbWidth = 0.6f;
+        float bbWidth = context.getPose().width * context.getScale();
         return this.moveToClosestSpace(player, oldPos.x - bbWidth * 0.35D, oldPos.y, oldPos.z + bbWidth * 0.35D)
                 || this.moveToClosestSpace(player, oldPos.x - bbWidth * 0.35D, oldPos.y, oldPos.z - bbWidth * 0.35D)
                 || this.moveToClosestSpace(player, oldPos.x + bbWidth * 0.35D, oldPos.y, oldPos.z - bbWidth * 0.35D)
