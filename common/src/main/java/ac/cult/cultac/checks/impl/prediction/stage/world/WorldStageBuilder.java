@@ -293,7 +293,8 @@ public class WorldStageBuilder {
                 lastOnGround,
                 eyeInWater,
                 underwater,
-                swimming);
+                swimming,
+                simulationContext.getVehicle() != null && minFluidState.isInWater());
     }
 
     // EntityFluidInteraction#update finds the eye only among the fluids inside Entity#getFluidInteractionBox.

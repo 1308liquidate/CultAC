@@ -16,9 +16,7 @@ import ac.cult.cultac.utils.data.packetentity.PacketEntityCamel;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityNautilus;
 import ac.cult.cultac.utils.inventory.ClientGlider;
-import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientFluidQueries;
-import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import ac.cult.cultac.utils.nmsutil.RiptideUtil;
 
 public class PacketEntityAction {
@@ -71,13 +69,9 @@ public class PacketEntityAction {
                     break;
                 }
                 PacketEntityHorse horse = player.compensatedEntities.vehicles.getClientVisibleHorseRoot();
-                // LocalPlayer#jumpableVehicle requires Camel#canJump, false while the camel refuses to move. The
-                // passenger tick sending this follows the root camel's tick at the same client game time.
+                // Camel#onPlayerJump. The client releases the jump only if Camel#canJump holds after the camel's tick.
                 if (horse instanceof PacketEntityCamel camel
-                        && (!camel.hasSaddle
-                                || camel.dashCooldown > 0
-                                || !camel.onGround
-                                || camelRefusesToMoveAfterItsTick(player, camel))) {
+                        && (!camel.hasSaddle || camel.dashCooldown > 0 || !camel.onGround)) {
                     break;
                 }
                 if (horse != null && horse.hasSaddle) {
@@ -99,25 +93,6 @@ public class PacketEntityAction {
             default:
                 break;
         }
-    }
-
-    /**
-     * Camel#refuseToMove after the root camel's tick this command follows. Cult applies the pose changes of that tick
-     * only at its later MoveVehicle, so model the one that frees the camel: Camel#tick ends by standing a sitting camel
-     * up instantly in water, unless Camel#tickRidden already stood it up into its transition on forward input.
-     */
-    static boolean camelRefusesToMoveAfterItsTick(CultPlayer player, PacketEntityCamel camel) {
-        long gameTime = player.compensatedWorld.clientGameTime();
-        if (!camel.refuseToMove(gameTime)) return false;
-        if (!camel.isCamelSitting()) return true;
-        if (player.boatData.vehicleForward > 0.0F && !camel.isInPoseTransition(gameTime)) return true;
-        // Entity#baseTick set isInWater from where the camel started the tick, before it moved.
-        Vec3 start = camel.clientPhysicalPosition != null
-                ? camel.clientPhysicalPosition
-                : camel.desyncClientPos != null ? camel.desyncClientPos : new Vec3(player.x, player.y, player.z);
-        SimpleCollisionBox box = GetBoundingBox.getPacketEntityBoundingBox(player, start.x, start.y, start.z, camel);
-        return !(ClientFluidQueries.depth(player, box, FluidTags.WATER) > 0.0D
-                || player.compensatedWorld.hasRecentClientWaterChanges(box));
     }
 
     static boolean lavaPreventsGlideActivation(CultPlayer player) {

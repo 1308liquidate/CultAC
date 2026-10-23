@@ -79,6 +79,13 @@ public class PacketEntityHorse extends PacketEntityTrackXRot {
         }
     }
 
+    /** The riding jump LocalPlayer#aiStep would release this tick, for a vehicle that cannot jump after its tick. */
+    public void dropRidingJump() {
+        nextHorseJump = 0.0D;
+        nextAllowStandSliding = false;
+        nextClientRidingJumpStandTicks = 0;
+    }
+
     public void armClientRidingJumpStand() {
         // MCP-Reborn AbstractHorse#onPlayerJump calls standIfPossible(), which
         // sets the client-visible standing flag for 20 ticks. Because the root

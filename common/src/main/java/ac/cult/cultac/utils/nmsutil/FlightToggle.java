@@ -122,8 +122,8 @@ public final class FlightToggle {
     }
 
     // LocalPlayer#aiStep toggles in a vehicle only through jumpableVehicle(): a horse or nautilus the player controls
-    // (saddled, first passenger) that canJump. A camel also needs !refuseToMove(), and the engine doesn't track its
-    // sitting pose.
+    // (saddled, first passenger) that canJump. A camel also needs !refuseToMove() after its root tick, so any camel
+    // may block.
     private static boolean vehicleCanBlock(CultPlayer player) {
         PacketEntity vehicle = player.compensatedEntities.getSelf().getRiding();
         if (vehicle == null) return false;

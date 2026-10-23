@@ -88,6 +88,9 @@ public class WorldData {
     /** Entity#isSwimming after this tick's Entity#updateSwimming; true if the client may swim. */
     boolean swimming;
 
+    /** A vehicle's Entity#isInWater after this tick's Entity#baseTick, from the blocks the client holds this tick. */
+    boolean vehicleInWater;
+
     /** A shallow copy: carry contexts share its sub-objects and boxes, so none may be mutated in place. */
     public WorldData copy() {
         return new WorldData(
@@ -123,7 +126,8 @@ public class WorldData {
                 carriedOnGround,
                 eyeInWater,
                 underwater,
-                swimming);
+                swimming,
+                vehicleInWater);
     }
 
     public boolean mustBeInLiquid() {

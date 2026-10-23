@@ -52,6 +52,12 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
         }
         PacketEntityHorse horse = player.compensatedEntities.vehicles.getClientVisibleHorseRoot();
         if (horse != null) {
+            // LocalPlayer#jumpableVehicle releases a camel rider's jump only while Camel#canJump holds after the
+            // camel's tick, and Camel#canJump is false while the camel refuses to move.
+            if (horse instanceof PacketEntityCamel camel
+                    && camel.refuseToMove(player.compensatedWorld.endedTickGameTime())) {
+                camel.dropRidingJump();
+            }
             // MCP-Reborn ClientLevel#tickPassenger runs LocalPlayer#rideTick
             // after the root horse tick. LocalPlayer#aiStep therefore arms
             // playerJumpPendingScale for the next client horse tick, and
@@ -192,11 +198,7 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
             camel.tickRidden(player.boatData.vehicleForward > 0.0F, player.compensatedWorld.clientGameTime());
             // Camel#tick then stands a sitting camel up at once in water; Entity#baseTick set isInWater at the start.
             if (camel.isCamelSitting()
-                    && !result.getSimulationContext()
-                            .getWorldData()
-                            .getInWater()
-                            .getStates()
-                            .contains(false)) {
+                    && result.getSimulationContext().getWorldData().isVehicleInWater()) {
                 camel.standUpInstantly(player.compensatedWorld.clientGameTime());
             }
         }

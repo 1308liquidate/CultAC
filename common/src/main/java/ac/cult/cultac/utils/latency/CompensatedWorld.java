@@ -66,6 +66,7 @@ public class CompensatedWorld {
     private final ac.cult.blocksim.engine.ClientClocks clientClocks = new ac.cult.blocksim.engine.ClientClocks();
     private final ClientEnvironment clientEnvironment = new ClientEnvironment();
     private long clientGameTime;
+    private long endedTickGameTime;
     private Map<String, Set<String>> clientRecipeInputs = Map.of();
     // Initial ClientListenerCookie uses DEFAULT_FLAGS; ClientLevelData begins at NORMAL.
     private Set<String> clientEnabledFeatures = Set.of("minecraft:vanilla");
@@ -1160,6 +1161,7 @@ public class CompensatedWorld {
     }
 
     public void onClientTickEnd() {
+        endedTickGameTime = clientGameTime;
         if (!player.isBedrockMovement() && clientRunsNormally()) {
             clientClocks.tick(++clientGameTime);
             clientBlockEntities.tick();
@@ -1622,6 +1624,11 @@ public class CompensatedWorld {
     /** ClientLevel#getGameTime after the last client tick end. */
     public long clientGameTime() {
         return clientGameTime;
+    }
+
+    /** ClientLevel#getGameTime during the client tick whose tick end was processed last. */
+    public long endedTickGameTime() {
+        return endedTickGameTime;
     }
 
     /** ClientPacketListener.handleSetTime updates clocks before invalidating attributes. */
