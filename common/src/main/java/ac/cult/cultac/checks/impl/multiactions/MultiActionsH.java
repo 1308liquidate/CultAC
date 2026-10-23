@@ -13,8 +13,7 @@ import ac.cult.cultac.protocol.value.*;
 @CheckData(
         name = "MultiActionsH",
         stableKey = "cult.multiactions.inventory_move",
-        description = "Moving while in an inventory",
-        experimental = true)
+        description = "Moving while in an inventory")
 public class MultiActionsH extends Check implements CheckListener, ClientTickEndListener {
     public MultiActionsH(CultPlayer player) {
         super(player);

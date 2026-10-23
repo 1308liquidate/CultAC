@@ -2,6 +2,7 @@ package ac.cult.cultac.cloud;
 
 import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.checks.Check;
+import ac.cult.cultac.checks.impl.cloud.Cloud;
 import ac.cult.cultac.checks.impl.combat.EntityReach;
 import ac.cult.cultac.checks.impl.combat.PlayerReach;
 import ac.cult.cultac.checks.impl.combat.ReachCheck;
@@ -275,7 +276,8 @@ public final class CloudCapture implements PlayerObserver {
 
     @Override
     public void flagged(Check check, double violations) {
-        if (channel == null) return;
+        // The service's own findings, which it already has.
+        if (channel == null || check instanceof Cloud) return;
         try {
             String name = check.getCheckName();
             if (name == null || name.isEmpty()) name = check.getClass().getSimpleName();

@@ -1,6 +1,7 @@
 package ac.cult.cultac.cloud;
 
 import ac.cult.cultac.CultAPI;
+import ac.cult.cultac.checks.impl.cloud.Cloud;
 import ac.cult.cultac.cloud.capture.PlayerText;
 import ac.cult.cultac.cloud.capture.Sections;
 import ac.cult.cultac.cloud.diag.Diagnostics;
@@ -21,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -189,6 +191,24 @@ public final class CloudService {
                         event.confidence(),
                         event.detail(),
                         event.tick()));
+        if (player != null) punish(player, event);
+    }
+
+    /** Hands {@code event} to the player's {@link Cloud} check on its packet thread, where checks flag. */
+    private static void punish(CultPlayer player, IntakeWire.Event event) {
+        Cloud cloud = player.checkManager.getCheck(Cloud.class);
+        if (cloud == null) return;
+        Runnable flag = () -> cloud.finding(event.checkId(), event.confidence(), event.detail());
+        var owner = player.user.getPacketExecutor();
+        if (owner.inEventLoop()) {
+            flag.run();
+            return;
+        }
+        try {
+            owner.execute(flag);
+        } catch (RejectedExecutionException closed) {
+            // The player's connection is gone; nothing is left to punish.
+        }
     }
 
     private static boolean tracked(UUID player) {
