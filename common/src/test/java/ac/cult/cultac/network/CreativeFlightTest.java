@@ -19,7 +19,9 @@ import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
 import ac.cult.cultac.events.packets.listeners.PacketServerTeleport;
 import ac.cult.cultac.network.codec.ModelRegistryNamesState;
 import ac.cult.cultac.network.event.PacketSendEvent;
+import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.network.protocol.teleport.RelativeFlag;
+import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.Opaque;
@@ -1003,6 +1005,33 @@ class CreativeFlightTest {
             assertFalse(f.player.isFlying, "the toggle did not stop flight");
             assertFalse(result.hasFlag(NoSneakSlow.class), describe(result));
             assertPredicted(result);
+        }
+    }
+
+    /**
+     * A join writes LOGIN and player_abilities before the platform player exists to send a ping.
+     * ClientPacketListener#handlePlayerAbilities sets flying after handleLogin's MultiPlayerGameMode#setLocalMode.
+     */
+    @Test
+    void aJoinFliesFromTheAbilitiesAfterItsLogin() throws Exception {
+        try (var f = new JavaTickFixture()) {
+            PlatformPlayer platform = f.fixture.user.getPlayer();
+            JavaTickFixture.setField(User.class, f.fixture.user, "player", null);
+            ItemUseTestSupport.login(f.player, GameMode.CREATIVE);
+            var packet = new ClientboundPlayerAbilities(true, true, true, true, FLYING_SPEED, 0.1F);
+            var event = new PacketSendEvent<>(
+                    f.fixture.user, ConnectionPhase.PLAY, ClientboundPackets.PLAYER_ABILITIES, packet, false);
+            f.player.checkManager.getListener(PacketPlayerAbilities.class).onPlayerAbilities(event, f.player, packet);
+            event.getTasksAfterSend().forEach(Runnable::run);
+            f.fixture.user.bind(platform);
+            f.player.sendTransaction();
+            f.pongThrough(f.player.lastTransactionSent.get());
+            relayTheFloor(f);
+            f.player.packetStateData.playerLoadedIntoLevel = true;
+            f.teleport(HOVER, new RelativeFlag(0));
+
+            assertTrue(f.player.isFlying, "the abilities did not set flying");
+            assertPredicted(f.tick(HOVER, false));
         }
     }
 

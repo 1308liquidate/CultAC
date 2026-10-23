@@ -10,7 +10,8 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundPlayerAbilities;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerAbilities;
 
-// Flight abilities apply at the preceding transaction, item-use abilities at the trailing proof.
+// Flight abilities apply at the preceding transaction, or after every earlier packet's state when no ping precedes
+// them; item-use abilities apply at the trailing proof.
 public class PacketPlayerAbilities extends CultProcessor implements CheckListener {
 
     public PacketPlayerAbilities(CultPlayer player) {
@@ -35,7 +36,7 @@ public class PacketPlayerAbilities extends CultProcessor implements CheckListene
     @CultPacketHandler
     public void onPlayerAbilities(
             PacketSendEvent<ClientboundPlayerAbilities> event, CultPlayer player, ClientboundPlayerAbilities packet) {
-        player.sendTransaction();
+        boolean pingPrecedes = player.sendTransactionAndGetId() != -1;
 
         if (lastSentPlayerCanFly && !packet.canFly()) {
             int noFlying = player.lastTransactionSent.get();
@@ -54,11 +55,14 @@ public class PacketPlayerAbilities extends CultProcessor implements CheckListene
         lastSentPlayerCanFly = packet.canFly();
 
         int preceding = player.lastTransactionSent.get();
-        player.latencyUtils.addRealTimeTaskNow(() -> {
+        Runnable flight = () -> {
             player.canFly = packet.canFly();
             player.isFlying = packet.flying();
             player.flySpeed = packet.flyingSpeed();
-        });
+        };
+        // Without a ping ahead of it, the flight follows every earlier packet's state, such as LOGIN's game mode.
+        if (pingPrecedes) player.latencyUtils.addRealTimeTask(preceding, flight);
+        else player.latencyUtils.addRealTimeTaskNext(flight);
 
         // Player#canEat and the projectile ammo check read these at the client's USE_ITEM.
         if (!player.runAtTrailingProof(
