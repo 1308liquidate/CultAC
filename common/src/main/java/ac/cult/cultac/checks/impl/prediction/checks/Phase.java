@@ -86,6 +86,14 @@ public class Phase extends Check implements PostPredictionListener {
             return;
         }
 
+        // Entity.refreshDimensions resizes the client box in place before travel.
+        // Compare movement against that resized history, including after shrinking.
+        if (!bedrock && oldBox != null) {
+            oldBox = boxAt(
+                    new Vec3((oldBox.minX + oldBox.maxX) / 2.0, oldBox.minY, (oldBox.minZ + oldBox.maxZ) / 2.0),
+                    1.8f,
+                    false);
+        }
         SimpleCollisionBox newBox = boxAt(location, 0.6f, bedrock);
 
         List<SimpleCollisionBox> boxes = new ArrayList<>();
