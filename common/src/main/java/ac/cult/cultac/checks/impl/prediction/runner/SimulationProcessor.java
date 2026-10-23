@@ -134,6 +134,9 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     private JavaPredictionCarry carryWithChangedStuckBlock;
     /** Whether the last client tick ended with the local player a passenger. */
     private boolean rideTicked;
+    /** The on-foot candidates a mount temporarily replaces before the first actual passenger tick. */
+    @Nullable
+    private Set<Vec3> startingVelsBeforeRide;
     /** The multipliers that ride tick can have left, as RideTickStuckContact bits. */
     private int rideTickStuckSpeeds;
     /** Whether a dismount after a passenger tick precedes the next prediction. */
@@ -1196,6 +1199,11 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         this.validPlayerStartingVels = new HashSet<>(velocities);
     }
 
+    /** A passenger packet changes the simulated actor, but does not consume the player's on-foot motion. */
+    public void beginRide() {
+        this.startingVelsBeforeRide = new HashSet<>(this.validPlayerStartingVels);
+    }
+
     /** Records whether this client tick ran the local player's Entity#rideTick. */
     public void recordRideTick() {
         this.rideTicked =
@@ -1205,6 +1213,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.passengerRideTick.clearBoat();
             return;
         }
+        this.startingVelsBeforeRide = null;
         Vec3 seat = this.player.compensatedEntities.lastRideTickSeat();
         if (seat == null) {
             this.passengerRideTick.record(this.player, this.player.x, this.player.y, this.player.z, true);
@@ -1219,6 +1228,11 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 this.passengerRideTick.inFluid());
     }
 
+    /** Whether the current ride has executed Entity#rideTick, rather than only passenger packet handlers. */
+    public boolean hasRideTick() {
+        return this.rideTicked;
+    }
+
     /** A set_entity_motion of the local passenger after its last Entity#rideTick sets the delta a dismount keeps. */
     public void replaceRideTickVelocity(Vec3 velocity) {
         if (this.rideTicked) this.passengerRideTick.setMotion(velocity);
@@ -1226,7 +1240,10 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
 
     /** Seeds the delta movements the last Entity#rideTick can have left, which a dismount with no velocity resync keeps. */
     public void seedRideTickVelocity() {
-        if (!this.rideTicked) return;
+        if (!this.rideTicked) {
+            if (this.startingVelsBeforeRide != null) this.seedStartingVelocities(this.startingVelsBeforeRide);
+            return;
+        }
         List<Vec3> velocities = this.passengerRideTick.velocities();
         if (velocities.isEmpty()) return;
         this.player.compensatedEntities.playerEntity.deltaMovement = velocities.get(0);
@@ -1235,6 +1252,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
 
     /** Carries what the last ride tick can have left once the player leaves its vehicle; with none, the on-foot carry stays. */
     public void endRide() {
+        this.startingVelsBeforeRide = null;
         if (!this.rideTicked) return;
         this.rideTicked = false;
         this.rideTicksSinceLastPrediction = true;

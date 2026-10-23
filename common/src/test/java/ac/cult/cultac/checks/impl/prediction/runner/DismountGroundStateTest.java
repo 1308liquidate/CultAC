@@ -40,6 +40,8 @@ class DismountGroundStateTest {
             vehicles.setServerVehicle(VEHICLE, new int[] {player.entityID}, player.lastTransactionSent.get());
             player.onGround = true;
             SimulationProcessor simulation = player.checkManager.getSimulationProcessor();
+            // This assertion concerns a completed ride, not just two passenger packet handlers.
+            simulation.recordRideTick();
             simulation.setLastOnGround(DesyncStatus.TRUE);
 
             var dismount = new ClientboundSetPassengers(VEHICLE, List.of());

@@ -1256,8 +1256,13 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             boolean resyncTeleports = dismountResyncState != null && proof != null;
             player.compensatedEntities.vehicles.setServerVehicleDismount(vehicleId, transaction);
             player.latencyUtils.addRealTimeTask(transaction, () -> {
-                player.compensatedEntities.playerEntity.deltaMovement =
-                        PacketCodecUtil.quantizeLpVec3(SELF_DISMOUNT_VELOCITY);
+                // The passenger packet handlers do not change delta movement. Only an actual
+                // resync replaces it; otherwise seedRideTickVelocity keeps the last real ride tick,
+                // or leaves the on-foot velocity/carry intact if no ride tick occurred.
+                if (resyncTeleports || player.isBedrockMovement() || !tracksPassengerTicks()) {
+                    player.compensatedEntities.playerEntity.deltaMovement =
+                            PacketCodecUtil.quantizeLpVec3(SELF_DISMOUNT_VELOCITY);
+                }
                 // The resync teleport is accepted before this transaction and already set the position.
                 PacketEntity riding = player.compensatedEntities.playerEntity.getRiding();
                 Vec3 dismountSeat = resyncTeleports || riding == null || riding.getEntityId() != vehicleId
@@ -1269,9 +1274,13 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                     player.compensatedEntities.commitDismountSeat(dismountSeat);
                 }
                 if (!player.isBedrockMovement()) {
-                    // Player#tick clears a passenger's ground state every ride tick.
-                    player.onGround = false;
-                    player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.FALSE);
+                    // Player#tick clears ground during a ride tick, not on receipt of a
+                    // mount/dismount pair. Teleport response ground bits do not prove a ride tick.
+                    if (!tracksPassengerTicks()
+                            || player.checkManager.getSimulationProcessor().hasRideTick()) {
+                        player.onGround = false;
+                        player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.FALSE);
+                    }
                     if (!player.compensatedEntities.getSelf().inVehicle()) {
                         if (!resyncTeleports)
                             player.checkManager.getSimulationProcessor().seedRideTickVelocity();
@@ -1311,6 +1320,13 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         player.latencyUtils.addRealTimeTask(transaction, () -> {
             PacketEntity mounted = player.compensatedEntities.getEntity(vehicleId);
             boolean firstMount = mountsLocalPlayer && mounted != null && !ridesIndirectly(mounted);
+            if (mountsLocalPlayer
+                    && mounted != null
+                    && !player.isBedrockMovement()
+                    && tracksPassengerTicks()
+                    && !player.compensatedEntities.getSelf().inVehicle()) {
+                player.checkManager.getSimulationProcessor().beginRide();
+            }
             player.compensatedEntities.vehicles.applyVehiclePassengers(vehicleId, passengers);
             if (mountsLocalPlayer) {
                 player.vehicleData.wasVehicleSwitch = true;
@@ -1331,6 +1347,16 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 applyVehicleProtocolResync(transaction, resyncState);
             }
         });
+    }
+
+    // Without an explicit delimiter, absence of a recorded ride tick cannot prove a zero-tick ride.
+    private boolean tracksPassengerTicks() {
+        return player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)
+                && player.user
+                        .getCultConnection()
+                        .packets()
+                        .observed()
+                        .supports(ac.cult.cultac.protocol.packet.ServerboundPackets.CLIENT_TICK_END);
     }
 
     // Entity#hasIndirectPassenger for the local player.
@@ -1542,6 +1568,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         int level = player.compensatedWorld.level();
         Runnable removeTask = () -> {
             boolean wasPassenger = player.compensatedEntities.getSelf().inVehicle();
+            boolean hadRideTick = player.checkManager.getSimulationProcessor().hasRideTick();
             for (int integer : destroyEntityIds) {
                 if (!player.isBedrockMovement() && level == player.compensatedWorld.level())
                     player.compensatedEntities.removeEntity(integer);
@@ -1561,6 +1588,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             }
             if (wasPassenger
                     && !player.compensatedEntities.getSelf().inVehicle()
+                    && hadRideTick
                     && !player.isBedrockMovement()
                     && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
                 // Player#tick clears the passenger's ground state; vehicle reports
@@ -1568,12 +1596,8 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 // sends a PosRot teleport echo to restore it before the next travel.
                 // After a ride tick it is false whatever the client claimed: that
                 // tick's travel cannot land, since Entity#rideTick zeroed the velocity.
-                player.onGround =
-                        !player.compensatedEntities.rodeLastClientTick() && player.packetStateData.packetPlayerOnGround;
-                player.checkManager
-                        .getSimulationProcessor()
-                        .setLastOnGround(
-                                ac.cult.cultac.checks.impl.prediction.DesyncStatus.fromBoolean(player.onGround));
+                player.onGround = false;
+                player.checkManager.getSimulationProcessor().setLastOnGround(DesyncStatus.FALSE);
             }
         };
         if (transaction >= 0) {
