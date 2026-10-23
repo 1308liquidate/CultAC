@@ -1,7 +1,8 @@
 package ac.cult.cultac.network;
 
 import static ac.cult.cultac.network.JavaTickFixture.FLOOR_Y;
-import static ac.cult.cultac.network.JavaTickFixture.describe;
+import static ac.cult.cultac.network.JavaTickFixture.assertVehicleExact;
+import static ac.cult.cultac.network.JavaTickFixture.setField;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
@@ -16,7 +17,6 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.Vec3d;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.math.Vec3;
-import java.lang.reflect.Field;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -56,7 +56,7 @@ class LegacyHorseDragTest {
     @CsvSource({"V_1_21_2, 0.98", "V_1_21_4, 0.98", "V_1_21_5, 1.0", "V_26_3, 1.0"})
     void aRiddenHorseCarriesTheClientsDrag(ClientVersion version, double drag) throws Exception {
         try (var f = new JavaTickFixture()) {
-            setClientVersion(f.player, version);
+            setField(CultPlayer.class, f.player, "resolvedClientVersion", version);
             Vec3 start = new Vec3(0.5, FLOOR_Y, 0.5);
             mount(f, start, FORWARD, SPEED);
 
@@ -82,7 +82,7 @@ class LegacyHorseDragTest {
     @Test
     void aLegacyRiddenHorseMovesAtFullSpeedWithForwardAndStrafeHeld() throws Exception {
         try (var f = new JavaTickFixture()) {
-            setClientVersion(f.player, ClientVersion.V_1_21_4);
+            setField(CultPlayer.class, f.player, "resolvedClientVersion", ClientVersion.V_1_21_4);
             Vec3 start = new Vec3(3.17404, FLOOR_Y, 5.16243);
             mount(f, start, FORWARD_RIGHT, 0.22499502F);
             assertVehicleExact(ride(f, start.add(0.17158700747256717, 0.0, 0.14553574750553366), -76.26071F), 0);
@@ -117,23 +117,5 @@ class LegacyHorseDragTest {
         PredictionResult result = f.player.checkManager.getSimulationProcessor().getLastPrediction();
         assertTrue(result != null && result != before, "the vehicle move was not predicted");
         return result;
-    }
-
-    /** VehicleOffset's own comparison: the reported move against the closest simulated one, input included. */
-    private static void assertVehicleExact(PredictionResult result, int tick) {
-        double offset =
-                result.getTarget().subtract(result.getAcceptedClosestToTarget()).length();
-        StringBuilder report =
-                new StringBuilder("tick " + tick + " vehicle offset " + offset + " ").append(describe(result));
-        for (PredictionResult.Flag flag : result.getFlags()) {
-            report.append(' ').append(flag.getVerbose().getString());
-        }
-        assertTrue(offset < 1.0E-5 && result.getFlags().isEmpty() && !result.isExempt(), report.toString());
-    }
-
-    private static void setClientVersion(CultPlayer player, ClientVersion version) throws ReflectiveOperationException {
-        Field field = CultPlayer.class.getDeclaredField("resolvedClientVersion");
-        field.setAccessible(true);
-        field.set(player, version);
     }
 }

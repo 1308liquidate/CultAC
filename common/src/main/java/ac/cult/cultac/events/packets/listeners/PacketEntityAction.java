@@ -7,6 +7,7 @@ import ac.cult.cultac.checks.impl.elytra.ElytraA;
 import ac.cult.cultac.manager.player.SetbackTeleportUtil;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
 import ac.cult.cultac.protocol.value.EquipmentSlot;
@@ -87,7 +88,10 @@ public class PacketEntityAction {
                     // standIfPossible() for that next tick.
                     horse.nextHorseJump = jumpScale;
                     horse.nextAllowStandSliding = true;
-                    horse.armClientRidingJumpStand();
+                    // Before 1.21.5, Entity#isEffectiveAi is !level().isClientSide, so the client horse never stands.
+                    if (player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_5)) {
+                        horse.armClientRidingJumpStand();
+                    }
                 }
                 break;
             default:

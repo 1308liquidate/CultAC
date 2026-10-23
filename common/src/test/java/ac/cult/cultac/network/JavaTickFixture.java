@@ -284,6 +284,17 @@ final class JavaTickFixture implements AutoCloseable {
                 describe(result));
     }
 
+    /** VehicleOffset's own comparison: the reported move against the closest simulated one, input included. */
+    static void assertVehicleExact(PredictionResult result, int tick) {
+        double offset = result.getTarget().subtract(result.getAcceptedClosestToTarget()).length();
+        StringBuilder report =
+                new StringBuilder("tick " + tick + " vehicle offset " + offset + " ").append(describe(result));
+        for (PredictionResult.Flag flag : result.getFlags()) {
+            report.append(' ').append(flag.getVerbose().getString());
+        }
+        assertTrue(offset < 1.0E-5 && result.getFlags().isEmpty() && !result.isExempt(), report.toString());
+    }
+
     static void setField(Class<?> owner, Object value, String name, Object setting) throws Exception {
         Field field = owner.getDeclaredField(name);
         field.setAccessible(true);
