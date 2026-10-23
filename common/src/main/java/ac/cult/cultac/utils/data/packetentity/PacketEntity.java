@@ -84,6 +84,8 @@ public class PacketEntity {
     public byte actionSharedFlags;
     public boolean actionArrowInGround;
     public float scale = 1.0f;
+    // A display's teleport_duration, which Display#onSyncedDataUpdated makes its handler's step count.
+    private int displayTeleportDuration;
     // The poses actionPose replaced, as bits by ordinal, and the least scale scale replaced, while the client may not
     // have handled the replacements.
     private int replacedPoses;
@@ -324,7 +326,7 @@ public class PacketEntity {
             CultPlayer player,
             boolean bundled) {
         if (hasPosition) desyncClientPos = path.endPosition();
-        if (type == EntityTypeIds.SHULKER || (!living && !boat && !minecart && type != EntityTypeIds.FISHING_BOBBER)) {
+        if (skipsInterpolation(player)) {
             setPositionRaw(
                     GetBoundingBox.getPacketEntityBoundingBox(
                             player, desyncClientPos.x, desyncClientPos.y, desyncClientPos.z, this),
@@ -430,11 +432,15 @@ public class PacketEntity {
             return;
         }
 
-        boolean placed = placedAtPacketPosition(player);
-        SimpleCollisionBox startingLocation =
-                placed ? packetPositionBox(player) : interpolationStartingLocation(player);
         float targetYaw = interpolationTargetYaw(yaw);
         float targetPitch = interpolationTargetPitch(pitch);
+        if (placedAtPacketPosition(player)) {
+            // The client has handled the packet: setPos moves the physical position with the packet position, even
+            // where local physics has carried it off an unchanged target. Delta movement is kept.
+            this.oldPacketLocation = null;
+            setPositionRaw(packetPositionBox(player), targetYaw, targetPitch);
+            return;
+        }
         if (matchesActiveInterpolationTarget(
                 desyncClientPos.x, desyncClientPos.y, desyncClientPos.z, targetYaw, targetPitch)) {
             return;
@@ -442,12 +448,12 @@ public class PacketEntity {
         this.oldPacketLocation = null;
         this.newPacketLocation = ReachInterpolationData.takingStart(
                 player,
-                startingLocation,
+                interpolationStartingLocation(player),
                 desyncClientPos.x,
                 desyncClientPos.y,
                 desyncClientPos.z,
-                placed ? targetYaw : clientPhysicalYaw,
-                placed ? targetPitch : clientPhysicalPitch,
+                clientPhysicalYaw,
+                clientPhysicalPitch,
                 targetYaw,
                 targetPitch,
                 !player.compensatedEntities.getSelf().inVehicle(),
@@ -508,22 +514,46 @@ public class PacketEntity {
     /**
      * Whether a pre-26.3 Java client sets this entity straight onto a packet position: {@code Entity#lerpTo} (1.20.2,
      * 1.21.1) and {@code Entity#moveOrInterpolateTo} without an {@code InterpolationHandler} (1.21.11) call
-     * {@code setPos}. Living entities other than shulkers, boats, minecarts, fishing hooks, experience orbs and
-     * displays interpolate in some of those versions.
+     * {@code setPos}.
      */
     private boolean placedAtPacketPosition(CultPlayer player) {
         if (player.isBedrockMovement() || player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
             return false;
         }
+        return skipsInterpolation(player);
+    }
+
+    /**
+     * Whether a Java client puts this entity straight onto a packet position. Living entities other than shulkers,
+     * boats, minecarts, fishing hooks and experience orbs interpolate. From 1.21.11 a display's handler takes its steps
+     * from teleport_duration, and with 0 steps {@code interpolateTo} calls {@code snapTo}.
+     */
+    private boolean skipsInterpolation(CultPlayer player) {
         if (type == EntityTypeIds.SHULKER) return true;
-        return !living
-                && !boat
-                && !minecart
-                && type != EntityTypeIds.FISHING_BOBBER
-                && type != EntityTypeIds.EXPERIENCE_ORB
-                && type != EntityTypeIds.BLOCK_DISPLAY
-                && type != EntityTypeIds.ITEM_DISPLAY
-                && type != EntityTypeIds.TEXT_DISPLAY;
+        if (living
+                || boat
+                || minecart
+                || type == EntityTypeIds.FISHING_BOBBER
+                || type == EntityTypeIds.EXPERIENCE_ORB) {
+            return false;
+        }
+        if (!isDisplay()) return true;
+        return player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_11) && displayTeleportDuration == 0;
+    }
+
+    public boolean isDisplay() {
+        return type == EntityTypeIds.BLOCK_DISPLAY
+                || type == EntityTypeIds.ITEM_DISPLAY
+                || type == EntityTypeIds.TEXT_DISPLAY;
+    }
+
+    public int displayTeleportDuration() {
+        return displayTeleportDuration;
+    }
+
+    /** Entity data the client has applied: later position packets interpolate over this many steps. */
+    public void onDisplayTeleportDuration(int duration) {
+        displayTeleportDuration = duration;
     }
 
     private SimpleCollisionBox packetPositionBox(CultPlayer player) {

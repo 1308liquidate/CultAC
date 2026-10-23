@@ -216,7 +216,7 @@ public class ReachInterpolationData {
         this.targetPitch = targetPitch;
         this.reachesUsePacketPositionUncertainty = true;
         this.positionExact = !player.isBedrockMovement();
-        this.interpolationSteps = vanillaInterpolationStepsFor(entity);
+        this.interpolationSteps = vanillaInterpolationStepsFor(player, entity);
 
         if (!player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3)) {
             interpolationPlayer = player;
@@ -485,7 +485,14 @@ public class ReachInterpolationData {
         return steppedTarget;
     }
 
-    private static int vanillaInterpolationStepsFor(PacketEntity entity) {
+    private static int vanillaInterpolationStepsFor(CultPlayer player, PacketEntity entity) {
+        if (!player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_11)) {
+            // ExperienceOrb's handler takes the default 3 steps.
+            if (entity.type == EntityTypeIds.EXPERIENCE_ORB) return 3;
+            // A display's handler takes teleport_duration steps. A 0-step display snaps to each packet position,
+            // so only its spawn path, which covers no distance, is built with these steps.
+            if (entity.isDisplay()) return Math.max(entity.displayTeleportDuration(), 1);
+        }
         if (EntityTypeUtil.isBoat(entity.type)) {
             // MCP-Reborn AbstractBoat constructs its client interpolation handler
             // with 3 steps. Older 10-step assumptions leave collision entities

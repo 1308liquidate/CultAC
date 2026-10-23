@@ -1059,6 +1059,11 @@ public class CompensatedEntities {
         if (entity instanceof PacketEntityArmorStand stand) stand.updateActionMetadata(watchableObjects);
         var flags = WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.ENTITY_SHARED_FLAGS);
         if (flags != null && flags.value() instanceof Byte value) entity.actionSharedFlags = value;
+        if (entity.isDisplay()) {
+            var duration = WatchableIndexUtil.getIndex(
+                    watchableObjects, WatchableIndexUtil.DISPLAY_POS_ROT_INTERPOLATION_DURATION);
+            if (duration != null && duration.value() instanceof Integer value) entity.onDisplayTeleportDuration(value);
+        }
         if (entity.isLivingEntity()) {
             var pose = WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.ENTITY_POSE);
             if (pose != null && pose.value() instanceof EntityPose value) {

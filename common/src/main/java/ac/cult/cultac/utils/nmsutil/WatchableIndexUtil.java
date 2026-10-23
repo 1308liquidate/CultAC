@@ -21,6 +21,7 @@ public final class WatchableIndexUtil {
     public static final int SHULKER_PEEK = 17;
     public static final int FIREWORK_ATTACHED_TO_TARGET = 9;
     public static final int FISHING_HOOKED_ENTITY = 8;
+    public static final int DISPLAY_POS_ROT_INTERPOLATION_DURATION = 10;
 
     private WatchableIndexUtil() {}
 
