@@ -854,10 +854,8 @@ public class CompensatedEntities {
 
     /** Adds the entity and replays its held attributes; returns the greatest replayed proof, or Integer.MIN_VALUE. */
     public int addEntity(int entityID, int entityType, Vec3 position, float xRot, float yRot, int data) {
-        // Dropped items are all server sided and players can't interact with them (except create them!), save the
-        // performance
-        if (entityType == EntityTypeIds.ITEM) return Integer.MIN_VALUE;
-
+        // Dropped items are tracked too: Level#getEntities, which EndCrystalItem#useOn reads above its support,
+        // returns them although they neither collide nor block building. Only the own riding tree is ticked.
         PacketEntity packetEntity = createTrackedEntity(entityID, entityType, position, xRot, data);
         packetEntity.setClientPhysicalRotation(xRot, yRot);
         if (packetEntity.newPacketLocation != null) {
