@@ -655,9 +655,13 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
         return pendingFrames ? 0 : provingPing;
     }
 
-    /** As {@link #sharedPing(Batch)}, at the current queue position. */
+    /**
+     * As {@link #sharedPing(Batch)}, at the current queue position. A Bedrock client answers a ping before it handles
+     * the packets after it, so none share one.
+     */
     private int sharedPing() {
         if (!connection.flushBundleOpen()
+                || !delimitsFlushBundle()
                 || flushPing == 0
                 || flushBundleMembers >= MAX_BUNDLE_PACKETS - SHARE_HEADROOM) return 0;
         boolean pendingFrames =
@@ -756,8 +760,8 @@ public final class CultEncoder extends ChannelOutboundHandlerAdapter {
 
     /**
      * Geyser translates a Java bundle into separate Bedrock packets, so a Bedrock player's flush group is tracked
-     * without delimiters: its packets share one ping as a Java bundle's do, without the client handling them in one
-     * task.
+     * without delimiters. The client does not handle the group in one task, so its packets cannot share a ping; each
+     * proof trails its packet.
      */
     private boolean delimitsFlushBundle() {
         return connection.bedrockBridge() == null;

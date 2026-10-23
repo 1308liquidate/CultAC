@@ -1409,7 +1409,8 @@ public class CompensatedWorld {
         SimpleCollisionBox envelope = new SimpleCollisionBox();
         if (!pistons.reportsAfterBlockEntities()) {
             ShulkerBoxShoveResult result =
-                    shoveByShulkerBoxes(context, shoves, context.getStart(), context.getPose(), onGround, false);
+                    // CollisionModifier and PistonShulkerPush scale this shove by the stuck speed themselves.
+                    shoveByShulkerBoxes(context, shoves, context.getStart(), context.getPose(), onGround, false, null);
             if (result == null) return;
             envelope.unionX(result.movement().x);
             envelope.unionY(result.movement().y);
@@ -1493,7 +1494,9 @@ public class CompensatedWorld {
      * calls before, intersects the call's area. Each move starts from the Entity#onGround the last left,
      * {@code onGround} first. Null when no call reaches the player. From 26.3 ({@code restitution})
      * Entity#restituteMovementAfterCollisions zeroes the vertical velocity only after a vertical move or a horizontal
-     * collision (Entity#move, 26.1 :800-808, 26.3 :820-821).
+     * collision (Entity#move, 26.1 :800-808, 26.3 :820-821). {@code stuckSpeed}: the Entity#stuckSpeedMultiplier the
+     * first call meets, or null for none; that call scales its movement by it, consumes it and clears
+     * Entity#deltaMovement (Entity#move, 26.3 :761-767).
      */
     public ShulkerBoxShoveResult shoveByShulkerBoxes(
             SimulationContext context,
@@ -1501,31 +1504,43 @@ public class CompensatedWorld {
             Vec3 position,
             Pose pose,
             boolean onGround,
-            boolean restitution) {
+            boolean restitution,
+            Vec3 stuckSpeed) {
         boolean vehicle = context.getVehicle() != null;
         float width = vehicle ? context.getMaxWidth() : pose.width * context.getScale();
         float height = vehicle ? context.getMaxHeight() : pose.height * context.getScale();
         Vec3 start = position;
-        boolean reached = false, zeroX = false, zeroY = false, zeroZ = false;
+        boolean reached = false, zeroX = false, zeroY = false, zeroZ = false, consumedStuckSpeed = false;
+        boolean stuck = stuckSpeed != null && stuckSpeed.lengthSqr() > 1.0E-7D;
         for (CompensatedBlockEntities.ShulkerShove shove : shoves) {
             SimpleCollisionBox box =
                     GetBoundingBox.getBoundingBoxFromPosAndSize(position.x, position.y, position.z, width, height);
             if (!intersects(box, shove.area())) continue;
             reached = true;
-            Vec3 movement = Collisions.collide(player, box, shove.x(), shove.y(), shove.z(), onGround);
+            double x = shove.x(), y = shove.y(), z = shove.z();
+            if (stuck) {
+                x *= stuckSpeed.x;
+                y *= stuckSpeed.y;
+                z *= stuckSpeed.z;
+                stuck = false;
+                consumedStuckSpeed = true;
+            }
+            Vec3 movement = Collisions.collide(player, box, x, y, z, onGround);
             double movementLength = movement.lengthSqr();
-            double deltaLength = shove.x() * shove.x() + shove.y() * shove.y() + shove.z() * shove.z();
+            double deltaLength = x * x + y * y + z * z;
             if (movementLength > 1.0E-7D || deltaLength - movementLength < 1.0E-7D) position = position.add(movement);
             // Mth#equal
-            boolean xCollision = !(Math.abs(movement.x - shove.x()) < 1.0E-5F);
-            boolean zCollision = !(Math.abs(movement.z - shove.z()) < 1.0E-5F);
-            boolean verticalCollision = shove.y() != movement.y;
-            onGround = verticalCollision && shove.y() < 0.0D;
+            boolean xCollision = !(Math.abs(movement.x - x) < 1.0E-5F);
+            boolean zCollision = !(Math.abs(movement.z - z) < 1.0E-5F);
+            boolean verticalCollision = y != movement.y;
+            onGround = verticalCollision && y < 0.0D;
             zeroX |= xCollision;
             zeroZ |= zCollision;
-            if (verticalCollision && (!restitution || shove.y() != 0.0D || xCollision || zCollision)) zeroY = true;
+            if (verticalCollision && (!restitution || y != 0.0D || xCollision || zCollision)) zeroY = true;
         }
-        return reached ? new ShulkerBoxShoveResult(position.subtract(start), zeroX, zeroY, zeroZ, onGround) : null;
+        return reached
+                ? new ShulkerBoxShoveResult(position.subtract(start), zeroX, zeroY, zeroZ, onGround, consumedStuckSpeed)
+                : null;
     }
 
     private static boolean intersects(SimpleCollisionBox box, SimpleCollisionBox area) {

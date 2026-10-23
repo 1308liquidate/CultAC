@@ -1027,7 +1027,7 @@ public class WorldStageBuilder {
         boolean inVehicle = context.getVehicle() != null;
         SimpleCollisionBox primaryFrom = inVehicle ? context.getFromMaximumExtent() : context.getFromMinimumExtent();
         SimpleCollisionBox primaryTo = inVehicle ? context.getToMaximumExtent() : context.getToMinimumExtent();
-        boolean powderSnowCanApply = powderSnowCanApplyToRootEntity(player, context);
+        boolean powderSnowCanApply = powderSnowCanApplyToRootEntity(player, context, context.getEnd());
         Vec3 required = resolveStuckSpeedForExtent(player, context, primaryFrom, primaryTo, powderSnowCanApply);
         Vec3 optional = inVehicle
                 ? null
@@ -1056,7 +1056,17 @@ public class WorldStageBuilder {
         return new StuckSpeedData(required, optional);
     }
 
-    private Vec3 resolveStuckSpeedForExtent(
+    /**
+     * The Entity#stuckSpeedMultiplier the inside-block pass of a move of the root entity from {@code from} to
+     * {@code to}, ending at {@code end}, leaves; null for none.
+     */
+    public static Vec3 stuckSpeedAlong(
+            CultPlayer player, SimulationContext context, SimpleCollisionBox from, SimpleCollisionBox to, Vec3 end) {
+        return resolveStuckSpeedForExtent(
+                player, context, from, to, powderSnowCanApplyToRootEntity(player, context, end));
+    }
+
+    private static Vec3 resolveStuckSpeedForExtent(
             CultPlayer player,
             SimulationContext context,
             SimpleCollisionBox from,
@@ -1099,7 +1109,7 @@ public class WorldStageBuilder {
         return dx * dx + dy * dy + dz * dz;
     }
 
-    private boolean powderSnowCanApplyToRootEntity(CultPlayer player, SimulationContext context) {
+    private static boolean powderSnowCanApplyToRootEntity(CultPlayer player, SimulationContext context, Vec3 end) {
         PacketEntity rootVehicle = context.getVehicle();
         if (rootVehicle != null && !rootVehicle.isLivingEntity()) {
             return true;
@@ -1109,13 +1119,12 @@ public class WorldStageBuilder {
         // LivingEntity when entity.getInBlockState().is(this). Entity#getInBlockState
         // is the block at the root entity's current blockPosition, not every block
         // intersected by its body AABB during Entity#checkInsideBlocks.
-        Vec3 end = context.getEnd();
         return BlockIds.is(
                 player.compensatedWorld.getBlockStateIdAt(BlockPos.containing(end.x, end.y, end.z)),
                 BlockIds.POWDER_SNOW);
     }
 
-    private Vec3 firstKnownStuckSpeed(Vec3 primary, Vec3 swept) {
+    private static Vec3 firstKnownStuckSpeed(Vec3 primary, Vec3 swept) {
         return primary != null ? primary : swept;
     }
 

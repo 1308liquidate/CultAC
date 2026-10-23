@@ -804,15 +804,17 @@ public class CultPlayer implements GrimUser {
      * a ping. ClientPacketListener#handleBundlePacket handles the whole bundle in one task and handlePing answers
      * inside it, so the update shares the latest CultAC ping already in that bundle. Without one, a ping is
      * written directly before the update and opens the bundle, or makes the host bundle it is in the flush bundle.
-     * A Bedrock player's flush group shares its ping the same way, to keep one ping per flush, though Geyser does
-     * not hand the client the group as one task. Standalone level/player packets require a trailing proof instead.
+     * Geyser hands a Bedrock client each packet of the group separately, so a ping before the update can be answered
+     * before the client applies it; a Bedrock update, like a standalone level/player packet, needs a trailing proof.
      */
     public int appendFlushProofTransaction(PacketSendEvent<?> event) {
         // A listener may already have bracketed this packet. A new leading ping would be allocated later
         // but emitted before those older proofs, violating transaction order on the wire.
         if (event.receiptProof() > 0) return event.receiptProof();
         var connection = user.getCultConnection();
-        if (!connection.isPreparingWrites() || PacketBundlePolicy.requiresStandalone(event.getPacketType())) {
+        if (!connection.isPreparingWrites()
+                || !clientHandlesBundles()
+                || PacketBundlePolicy.requiresStandalone(event.getPacketType())) {
             TrackedTransaction proof = appendTrailingProofTransaction(event);
             return proof == null ? -1 : proof.transaction();
         }
@@ -857,14 +859,15 @@ public class CultPlayer implements GrimUser {
      * encoder bundles a packet that expands to several frames, and ClientPacketListener#handleBundlePacket
      * handles the sub-packets in order in one task, so the pong proves the packet was applied before the
      * client's next tick. In a Java flush bundle that already holds a CultAC ping, that ping is handled in the
-     * same task and proves the packet without another. Standalone packets instead retain a FIFO trailing proof,
-     * without claiming bundle atomicity or application before the next client tick. Protocol transitions cannot
-     * carry an old-phase proof. Returns null, writing nothing, when no transaction can be sent.
+     * same task and proves the packet without another. Standalone packets, and every packet to a Bedrock client,
+     * which has no bundles, instead retain a FIFO trailing proof, without claiming bundle atomicity or application
+     * before the next client tick. Protocol transitions cannot carry an old-phase proof. Returns null, writing
+     * nothing, when no transaction can be sent.
      */
     @Nullable
     public TrackedTransaction appendTrailingProofTransaction(
             PacketSendEvent<?> event, List<CultWrite> packetsBeforeProof) {
-        int shared = !isBedrockMovement() && PacketBundlePolicy.requiresStandalone(event.getPacketType())
+        int shared = !clientHandlesBundles() || PacketBundlePolicy.requiresStandalone(event.getPacketType())
                 ? 0
                 : event.flushPing();
         if (shared > 0) {
@@ -872,6 +875,14 @@ public class CultPlayer implements GrimUser {
             return new TrackedTransaction(shared, null);
         }
         return writeTrailingProofTransaction(event, packetsBeforeProof);
+    }
+
+    /**
+     * Whether the client handles a flush bundle in one task, so any ping in it proves every packet in it. Geyser
+     * translates a Java bundle into separate Bedrock packets.
+     */
+    private boolean clientHandlesBundles() {
+        return user.getCultConnection().bedrockBridge() == null;
     }
 
     /**

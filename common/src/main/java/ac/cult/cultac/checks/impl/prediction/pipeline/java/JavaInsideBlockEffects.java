@@ -149,7 +149,8 @@ public final class JavaInsideBlockEffects {
                         from,
                         to,
                         pass == 0 && !legacyBlocks,
-                        legacyBlocks,
+                        // BlockGetter#boxTraverseBlocks nudges its corner endpoints only on 1.21.2-1.21.3.
+                        version.isOlderThan(ClientVersion.V_1_21_4),
                         pos -> isAir(player.compensatedWorld.getBlockStateIdAt(pos)),
                         visitor);
             }

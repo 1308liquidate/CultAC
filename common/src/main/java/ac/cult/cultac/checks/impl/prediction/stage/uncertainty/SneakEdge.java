@@ -175,8 +175,10 @@ public class SneakEdge implements UncertaintyHandler {
         float[] slows = ClientKeyInput.movingSlowlyFactors(player, context);
         float yaw = context.getXRot() * (float) (Math.PI / 180.0);
         // Like the sprint-jump boost, both vanilla Mth and OptiFine fast math.
+        ClientVersion version = context.getVersion();
         float[][] rotations = {
-            {VanillaMath.sin(yaw), VanillaMath.cos(yaw)}, {OptifineFastMath.sin(yaw), OptifineFastMath.cos(yaw)}
+            {VanillaMath.sin(version, yaw), VanillaMath.cos(version, yaw)},
+            {OptifineFastMath.sin(yaw), OptifineFastMath.cos(yaw)}
         };
         List<Double> speeds = context.getMoveRelativeInputSpeeds(player, start);
         List<Input> inputs = new ArrayList<>(72);

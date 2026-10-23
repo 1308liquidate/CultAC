@@ -193,9 +193,13 @@ public final class JavaMovementEngine implements MovementEngine {
                     effects = afterActorTick(player, result.getSimulationContext(), moved.movement(), effects);
                     effects = GeyserVelocity.applyToState(player, result, end, effects);
                     ShulkerBoxShoveResult shove = shulkerBoxShoveAfterTravel(result);
+                    // The first shove's Entity#move consumes the multiplier this travel's pass set and clears
+                    // Entity#deltaMovement (26.3 :761-767).
                     if (shove != null)
                         effects = new JavaInsideBlockEffects.State(
-                                effects.fallDistance(), shove.velocityAfter(effects.velocity()), effects.stuckSpeed());
+                                effects.fallDistance(),
+                                effects.stuckSpeed() != null ? Vec3.ZERO : shove.velocityAfter(effects.velocity()),
+                                null);
                     var state = new JavaPredictionCarry.State(
                             effects.velocity(), effects.fallDistance(), effects.stuckSpeed());
                     if (!states.contains(state)) {
