@@ -123,10 +123,13 @@ final class ItemUseTestSupport {
     }
 
     static void useOffhand(CultPlayer player, int sequence) {
+        use(player, Hand.OFF_HAND, sequence);
+    }
+
+    static void use(CultPlayer player, Hand hand, int sequence) {
         player.packetStateData.clientSidePosition = new Vec3(player.x, player.y, player.z);
         player.compensatedWorld.advanceClientPredictionSequence();
-        PlaceHandler.handleQueuedUseItem(
-                player, new ServerboundUseItem(Hand.OFF_HAND, sequence, player.xRot, player.yRot));
+        PlaceHandler.handleQueuedUseItem(player, new ServerboundUseItem(hand, sequence, player.xRot, player.yRot));
     }
 
     /** One unslowed walking tick through the item-use analyzer and NoSlow; returns whether NoSlow flagged it. */

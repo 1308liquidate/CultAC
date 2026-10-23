@@ -13,6 +13,8 @@ import ac.cult.blocksim.engine.SimPlayer;
 import ac.cult.blocksim.engine.Vec3;
 import ac.cult.blocksim.interaction.BlockHit;
 import ac.cult.blocksim.interaction.BreakSession;
+import ac.cult.blocksim.interaction.SimInteraction;
+import ac.cult.cultac.checks.impl.multiactions.MultiActionsE;
 import ac.cult.cultac.events.packets.PacketWorldBorder;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ProtocolVersion;
@@ -81,8 +83,15 @@ public final class ClientBlockActions {
             return;
         }
         var item = player.getInventory().getHandItem(hand);
+        boolean wasUsingItem = player.isClientUsingItem();
         var prediction = predict(player, new SimAction.Use(hand(hand)), player.xRot, player.yRot);
         apply(player, prediction, null);
+        var result = prediction.result();
+        if (!wasUsingItem
+                && result.decline() == null
+                && result.interaction().swing() == SimInteraction.Swing.PREDICTED) {
+            player.checkManager.getCheck(MultiActionsE.class).onPredictedUseSwing(hand);
+        }
         debugPlacement(player, prediction, item, null);
     }
 
