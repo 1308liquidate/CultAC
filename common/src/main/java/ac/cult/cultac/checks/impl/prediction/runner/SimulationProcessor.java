@@ -98,6 +98,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import lombok.Generated;
 import org.cloudburstmc.protocol.bedrock.data.PlayerAuthInputData;
 import org.jetbrains.annotations.Nullable;
@@ -1705,7 +1706,11 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 Vec3 collisionTarget = useSelectedMovement
                         ? validMovements.computeCollisionIgnoredMovement(lastPrediction)
                         : probeAtStepHeight
-                                ? stepHeightCollisionTarget(player, thisResult, attemptedExtents)
+                                ? stepHeightCollisionTarget(
+                                        player,
+                                        thisResult,
+                                        attemptedExtents,
+                                        stepHorizontal(validMovements, lastPrediction))
                                 : thisResult.getSimulationContext().getTarget();
                 CollideAxisData collisionData = probeCollisions(
                         player,
@@ -1719,8 +1724,20 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                 if (useSelectedMovement) {
                     validMovements.applyCollisionsToSelectedMovement(lastPrediction);
                     reselectPastClippedAxes(player, engine, validMovements, attemptedExtents, lastPrediction);
+                    probeOtherAxisOrder(
+                            player, engine, validMovements, attemptedExtents, collisionTarget, lastPrediction, false);
                 } else {
                     validMovements.computeClosest(lastPrediction);
+                    if (probeAtStepHeight) {
+                        probeOtherAxisOrder(
+                                player,
+                                engine,
+                                validMovements,
+                                attemptedExtents,
+                                collisionTarget,
+                                lastPrediction,
+                                true);
+                    }
                 }
                 engine.evaluateCandidate(player, thisResult);
                 this.flagger.handleResult(thisResult, lastPrediction);
@@ -1813,19 +1830,29 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
     }
 
     /**
-     * The target movement with its Y replaced by {@link #stepHeightProbeY}; probing with it moves the box to the
-     * step height before the horizontal axes.
+     * The movement whose X and Z order a step probe's horizontal axes. Entity#collide orders a step by the move
+     * before collision.
+     */
+    private static Vec3 stepHorizontal(ValidMovements validMovements, PredictionResult lastPrediction) {
+        PredictionResult result = validMovements.getResult();
+        return !CollisionModifier.isJavaVehicleMove(result.getSimulationContext())
+                ? result.getSimulationContext().getTarget()
+                : validMovements.computeCollisionIgnoredMovement(lastPrediction);
+    }
+
+    /**
+     * {@code horizontal} with its Y replaced by {@link #stepHeightProbeY}; probing with it moves the box to the step
+     * height before the horizontal axes.
      */
     private static Vec3 stepHeightCollisionTarget(
-            CultPlayer player, PredictionResult result, SimpleCollisionBox attemptedExtents) {
+            CultPlayer player, PredictionResult result, SimpleCollisionBox attemptedExtents, Vec3 horizontal) {
         SimulationContext context = result.getSimulationContext();
-        Vec3 target = context.getTarget();
         double probeY = stepHeightProbeY(
-                target.y,
+                context.getTarget().y,
                 attemptedExtents.minY,
                 context.getLastStuckSpeed().y,
                 result.getInitialStartingVel().maxUpStep(player));
-        return new Vec3(target.x, probeY, target.z);
+        return new Vec3(horizontal.x, probeY, horizontal.z);
     }
 
     /**
@@ -1852,13 +1879,90 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         Vec3 retarget = validMovements.targetPastClippedAxes();
         if (retarget == result.getTarget()) return;
 
-        MovementTrace firstTrace = validMovements.getClosestTrace();
-        CollideAxisData firstCollisions = result.getCollideAxisData();
-        Vec3 reselected = validMovements.computeCollisionIgnoredMovement(retarget, lastPrediction);
         // Entity#collideWithShapes orders X and Z by magnitude, so the reselected movement needs its own probe.
-        result.setCollideAxisData(probeCollisions(player, engine, result, attemptedExtents, reselected, false));
-        validMovements.applyCollisionsToSelectedMovement(lastPrediction);
+        keepNearerReselection(validMovements, retarget, lastPrediction, reselected -> {
+            result.setCollideAxisData(probeCollisions(player, engine, result, attemptedExtents, reselected, false));
+            validMovements.applyCollisionsToSelectedMovement(lastPrediction);
+        });
+    }
+
+    /**
+     * Entity#collide moves X and Z in Direction#axisStepOrder of the move before collision. When a vehicle's
+     * collision-ignored extents hold moves of both orders, selects a move of the order {@code selected} does not
+     * take, probes collisions for it, and keeps whichever clipped movement ends nearer the target.
+     */
+    private void probeOtherAxisOrder(
+            CultPlayer player,
+            MovementEngine engine,
+            ValidMovements validMovements,
+            SimpleCollisionBox attemptedExtents,
+            Vec3 selected,
+            PredictionResult lastPrediction,
+            boolean step) {
+        PredictionResult result = validMovements.getResult();
+        if (!CollisionModifier.isJavaVehicleMove(result.getSimulationContext())
+                || !holdsBothAxisOrders(attemptedExtents)) {
+            return;
+        }
+        Vec3 retarget = otherAxisOrderTarget(result.getTarget(), selected, attemptedExtents);
+        if (retarget == null) return;
+
+        keepNearerReselection(validMovements, retarget, lastPrediction, reselected -> {
+            if (step) {
+                Vec3 stepTarget = stepHeightCollisionTarget(player, result, attemptedExtents, reselected);
+                result.setCollideAxisData(probeCollisions(player, engine, result, attemptedExtents, stepTarget, false));
+                validMovements.computeClosest(lastPrediction);
+            } else {
+                result.setCollideAxisData(probeCollisions(player, engine, result, attemptedExtents, reselected, false));
+                validMovements.applyCollisionsToSelectedMovement(lastPrediction);
+            }
+        });
+    }
+
+    /**
+     * Selects the collision-ignored movement towards {@code retarget}, has {@code clip} probe and clip it, and keeps
+     * whichever clipped movement ends nearer the target.
+     */
+    private static void keepNearerReselection(
+            ValidMovements validMovements, Vec3 retarget, PredictionResult lastPrediction, Consumer<Vec3> clip) {
+        MovementTrace firstTrace = validMovements.getClosestTrace();
+        CollideAxisData firstCollisions = validMovements.getResult().getCollideAxisData();
+        clip.accept(validMovements.computeCollisionIgnoredMovement(retarget, lastPrediction));
         validMovements.keepNearerToTarget(firstTrace, firstCollisions);
+    }
+
+    /** Whether {@code extents} holds a move with |x| < |z| and one without. */
+    private static boolean holdsBothAxisOrders(SimpleCollisionBox extents) {
+        if (extents == null) return false;
+        return nearestToZero(extents.minX, extents.maxX) < farthestFromZero(extents.minZ, extents.maxZ)
+                && farthestFromZero(extents.minX, extents.maxX) >= nearestToZero(extents.minZ, extents.maxZ);
+    }
+
+    private static double nearestToZero(double min, double max) {
+        return min <= 0.0D && max >= 0.0D ? 0.0D : Math.min(Math.abs(min), Math.abs(max));
+    }
+
+    private static double farthestFromZero(double min, double max) {
+        return Math.max(Math.abs(min), Math.abs(max));
+    }
+
+    /**
+     * {@code target} with the axis {@code selected} moves second carried to the edge of {@code extents} in its
+     * direction, where that axis moves first; null when that edge does not reverse the order.
+     */
+    private static Vec3 otherAxisOrderTarget(Vec3 target, Vec3 selected, SimpleCollisionBox extents) {
+        boolean xFirst = Math.abs(selected.x) >= Math.abs(selected.z);
+        if (xFirst) {
+            double z = farEdge(target.z, selected.z, extents.minZ, extents.maxZ);
+            return Math.abs(target.x) < Math.abs(z) ? new Vec3(target.x, target.y, z) : null;
+        }
+        double x = farEdge(target.x, selected.x, extents.minX, extents.maxX);
+        return Math.abs(x) >= Math.abs(target.z) && x != 0.0D ? new Vec3(x, target.y, target.z) : null;
+    }
+
+    private static double farEdge(double target, double selected, double min, double max) {
+        double side = target != 0.0D ? target : selected;
+        return side > 0.0D ? max : side < 0.0D ? min : 0.0D;
     }
 
     private CollideAxisData probeCollisions(

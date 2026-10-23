@@ -192,6 +192,58 @@ public class CollisionModifier implements UncertaintyHandler {
             return nearest;
         }
         PredVector attempted = start;
+        if (!isJavaVehicleMove(context)) {
+            start = clampWithinCollisions(collide, start, end);
+        } else if (collide.getUnknown().isEmpty()) {
+            start = clipExactly(collide, start);
+        } else {
+            start = clipWithinBlocks(collide, start, end);
+        }
+        Vec3 stuckSpeed = attempted.collisionStuckSpeedMultiplier(context);
+        if (applyEntityMovePositionCommitGuard(attempted, start, stuckSpeed) == start) return start;
+        // LivingEntity#travel adds moveRelative's input before Entity#move; the guard measures the full delta.
+        Vec3 input = horizontalInputTowards(start, end, inputSource);
+        if (input != Vec3.ZERO
+                && applyEntityMovePositionCommitGuard(attempted.add(input), start.add(input), stuckSpeed)
+                        != Vec3.ZERO) {
+            return start;
+        }
+        return start.with(Vec3.ZERO, "Entity#move setPos guard");
+    }
+
+    /** Whether {@code context} moves a vehicle a Java client controls, which Entity#collide clips axis by axis. */
+    public static boolean isJavaVehicleMove(SimulationContext context) {
+        return context.getVehicle() != null && context.getBedrockInput() == null;
+    }
+
+    private static Vec3 horizontalInputTowards(Vec3 movement, Vec3 end, PredictionResult inputSource) {
+        if (inputSource == null || inputSource.getSimulationContext() == null) return Vec3.ZERO;
+        double dx = end.x - movement.x;
+        double dz = end.z - movement.z;
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        if (!Double.isFinite(distance) || distance < 1.0E-5F) return Vec3.ZERO;
+        double radius = inputSource.getHorizontalInputRadius();
+        if (!(radius > 0.0D)) return Vec3.ZERO;
+        double scale = Math.min(radius, distance) / distance;
+        return new Vec3(dx * scale, 0.0D, dz * scale);
+    }
+
+    private static Vec3 applyEntityMovePositionCommitGuard(
+            Vec3 attemptedMovement, Vec3 clippedMovement, Vec3 stuckSpeed) {
+        double mx = stuckSpeed == null ? 1.0D : stuckSpeed.x;
+        double my = stuckSpeed == null ? 1.0D : stuckSpeed.y;
+        double mz = stuckSpeed == null ? 1.0D : stuckSpeed.z;
+        double ax = attemptedMovement.x * mx, ay = attemptedMovement.y * my, az = attemptedMovement.z * mz;
+        double cx = clippedMovement.x * mx, cy = clippedMovement.y * my, cz = clippedMovement.z * mz;
+        double clippedLengthSqr = cx * cx + cy * cy + cz * cz;
+        if (clippedLengthSqr <= 1.0E-7D && ax * ax + ay * ay + az * az - clippedLengthSqr >= 1.0E-7D) {
+            return Vec3.ZERO;
+        }
+
+        return clippedMovement;
+    }
+
+    private static PredVector clampWithinCollisions(CollideAxisData collide, PredVector start, Vec3 end) {
         // Collisions mean that movement from the start of the collision to the max extent is possible
         if (isValidCollision(collide.getX(), start.x, end.x)) {
             double clamped = CultMath.clamp(end.x, start.x, collide.getX().getResult());
@@ -224,43 +276,49 @@ public class CollisionModifier implements UncertaintyHandler {
             double clamped = CultMath.clamp(end.y, start.y, collide.getYPos().getResult());
             start = start.withY(clamped, "collide +y");
         }
-        Vec3 stuckSpeed = attempted.collisionStuckSpeedMultiplier(context);
-        if (applyEntityMovePositionCommitGuard(attempted, start, stuckSpeed) == start) return start;
-        // LivingEntity#travel adds moveRelative's input before Entity#move; the guard measures the full delta.
-        Vec3 input = horizontalInputTowards(start, end, inputSource);
-        if (input != Vec3.ZERO
-                && applyEntityMovePositionCommitGuard(attempted.add(input), start.add(input), stuckSpeed)
-                        != Vec3.ZERO) {
-            return start;
-        }
-        return start.with(Vec3.ZERO, "Entity#move setPos guard");
+        return start;
     }
 
-    private static Vec3 horizontalInputTowards(Vec3 movement, Vec3 end, PredictionResult inputSource) {
-        if (inputSource == null || inputSource.getSimulationContext() == null) return Vec3.ZERO;
-        double dx = end.x - movement.x;
-        double dz = end.z - movement.z;
-        double distance = Math.sqrt(dx * dx + dz * dz);
-        if (!Double.isFinite(distance) || distance < 1.0E-5F) return Vec3.ZERO;
-        double radius = inputSource.getHorizontalInputRadius();
-        if (!(radius > 0.0D)) return Vec3.ZERO;
-        double scale = Math.min(radius, distance) / distance;
-        return new Vec3(dx * scale, 0.0D, dz * scale);
+    /** Entity#collide: the move along each axis stops at the first shape in its way. */
+    private static PredVector clipExactly(CollideAxisData collide, PredVector movement) {
+        movement = movement.withXYZOrSelf(movement.x, clipY(collide, movement.y), movement.z, "collide y");
+        movement = movement.withXYZOrSelf(clip(collide.getX(), movement.x), movement.y, movement.z, "collide x");
+        return movement.withXYZOrSelf(movement.x, movement.y, clip(collide.getZ(), movement.z), "collide z");
     }
 
-    private static Vec3 applyEntityMovePositionCommitGuard(
-            Vec3 attemptedMovement, Vec3 clippedMovement, Vec3 stuckSpeed) {
-        double mx = stuckSpeed == null ? 1.0D : stuckSpeed.x;
-        double my = stuckSpeed == null ? 1.0D : stuckSpeed.y;
-        double mz = stuckSpeed == null ? 1.0D : stuckSpeed.z;
-        double ax = attemptedMovement.x * mx, ay = attemptedMovement.y * my, az = attemptedMovement.z * mz;
-        double cx = clippedMovement.x * mx, cy = clippedMovement.y * my, cz = clippedMovement.z * mz;
-        double clippedLengthSqr = cx * cx + cy * cy + cz * cz;
-        if (clippedLengthSqr <= 1.0E-7D && ax * ax + ay * ay + az * az - clippedLengthSqr >= 1.0E-7D) {
-            return Vec3.ZERO;
-        }
+    /**
+     * {@link #clipExactly} against the blocks, where {@code collide} leaves out entity shapes Entity#collide may also
+     * meet: those only stop an axis sooner, so each axis ends between its start and where the blocks stop it.
+     */
+    private static PredVector clipWithinBlocks(CollideAxisData collide, PredVector movement, Vec3 end) {
+        PredVector blocks = clipExactly(collide, movement);
+        return blocks.withXYZOrSelf(
+                towardsStart(end.x, blocks.x),
+                towardsStart(end.y, blocks.y),
+                towardsStart(end.z, blocks.z),
+                "collide unknown entities");
+    }
 
-        return clippedMovement;
+    private static double towardsStart(double end, double limit) {
+        return CultMath.clamp(end, Math.min(0.0D, limit), Math.max(0.0D, limit));
+    }
+
+    private static double clipY(CollideAxisData collide, double movement) {
+        CollideAxisData.CollideResult floor = collide.getYNeg();
+        if (movement < 0.0D && floor != null && floor.isLikelyCollide() && movement < floor.getResult()) {
+            return floor.getResult();
+        }
+        CollideAxisData.CollideResult ceiling = collide.getYPos();
+        if (movement > 0.0D && ceiling != null && ceiling.isLikelyCollide() && movement > ceiling.getResult()) {
+            return ceiling.getResult();
+        }
+        return movement;
+    }
+
+    /** {@code movement} along one horizontal axis, stopped at the shape {@code data} found on its side. */
+    private static double clip(CollideAxisData.CollideResult data, double movement) {
+        if (!data.isLikelyCollide() || Math.signum(movement) != data.getSide()) return movement;
+        return Math.abs(movement) < Math.abs(data.getResult()) ? movement : data.getResult();
     }
 
     private static boolean isValidCollision(CollideAxisData.CollideResult data, double start, double end) {
@@ -416,6 +474,7 @@ public class CollisionModifier implements UncertaintyHandler {
         }
 
         double candidateY = target.y * stuckSpeed.y;
+        Vec3 beforeCollision = target;
         target = context.getPacketMovement();
         if (clientShove != null) target = target.subtract(clientShove);
         minY *= stuckSpeed.y;
@@ -459,6 +518,21 @@ public class CollisionModifier implements UncertaintyHandler {
             }
             EntityPositionWorlds.withStepEntities(player, region);
             List<List<SimpleCollisionBox>> worlds = EntityPositionWorlds.of(player, context, playerPos, region);
+            if (worlds == null && isJavaVehicleMove(context)) {
+                CollideAxisData blocks = probeAxes(
+                        context,
+                        minY,
+                        candidateY,
+                        target,
+                        beforeCollision,
+                        playerPos,
+                        attemptedMovementExtents,
+                        dimensions,
+                        followCandidateVerticalMovement,
+                        collisions);
+                blocks.setUnknown(List.copyOf(found));
+                return blocks;
+            }
             if (worlds == null) {
                 return new CollideAxisData(
                         new CollideAxisData.CollideResult(true, 0),
@@ -478,6 +552,7 @@ public class CollisionModifier implements UncertaintyHandler {
                             minY,
                             candidateY,
                             target,
+                            beforeCollision,
                             playerPos,
                             attemptedMovementExtents,
                             dimensions,
@@ -493,6 +568,7 @@ public class CollisionModifier implements UncertaintyHandler {
                 minY,
                 candidateY,
                 target,
+                beforeCollision,
                 playerPos,
                 attemptedMovementExtents,
                 dimensions,
@@ -505,6 +581,7 @@ public class CollisionModifier implements UncertaintyHandler {
             double minY,
             double candidateY,
             Vec3 target,
+            Vec3 beforeCollision,
             Vec3 playerPos,
             SimpleCollisionBox attemptedMovementExtents,
             ProbeDimensions dimensions,
@@ -529,11 +606,14 @@ public class CollisionModifier implements UncertaintyHandler {
         }
 
         boolean groundedOrder = context.getLastOnGround().determineOptimistically();
+        boolean vehicle = isJavaVehicleMove(context);
+        // Entity#collide moves along Y, then along X and Z in Direction#axisStepOrder of the move before collision.
+        int stepOrder = Math.abs(beforeCollision.x) < Math.abs(beforeCollision.z) ? 1 : 0;
         resolvedStepCount = 0;
 
         // Brute force the current-client axis order possibilities exposed by the server-observable movement envelope.
         for (int orderIndex = 0; orderIndex < PROBE_ORDERS.length; orderIndex++) {
-            if (orderIndex >= 2 && !groundedOrder) continue;
+            if (vehicle ? orderIndex != stepOrder : orderIndex >= 2 && !groundedOrder) continue;
             var order = PROBE_ORDERS[orderIndex];
             double iterX = playerPos.x, iterY = playerPos.y, iterZ = playerPos.z;
             for (Collisions.Axis axis : order) {

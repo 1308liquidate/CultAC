@@ -152,10 +152,15 @@ final class PredictionScenarios {
     }
 
     private static void fill(JavaTickFixture f, int x0, int y0, int z0, int x1, int y1, int z1, BlockDefinition block) {
+        fill(f, x0, y0, z0, x1, y1, z1, block.defaultState());
+    }
+
+    /** {@code state} in every block from {@code x0, y0, z0} to {@code x1, y1, z1}. */
+    static void fill(JavaTickFixture f, int x0, int y0, int z0, int x1, int y1, int z1, int state) {
         for (int x = x0; x <= x1; x++) {
             for (int y = y0; y <= y1; y++) {
                 for (int z = z0; z <= z1; z++) {
-                    f.player.compensatedWorld.updateBlock(new BlockPos(x, y, z), block.defaultState());
+                    f.player.compensatedWorld.updateBlock(new BlockPos(x, y, z), state);
                 }
             }
         }
