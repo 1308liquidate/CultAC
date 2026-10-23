@@ -182,13 +182,20 @@ final class JavaTickFixture implements AutoCloseable {
 
     /** An explosion knocking the player by {@code knockback}, answered through its trailing ping. */
     void explosion(Vec3 knockback) {
+        explode(knockback);
+        pongThrough(player.lastTransactionSent.get());
+    }
+
+    /** An unanswered explosion knocking the player by {@code knockback}; its proof, or -1 when none was sent. */
+    int explode(Vec3 knockback) {
         var packet = new ClientboundExplode(
                 new Vec3d(player.x, player.y, player.z), new Vec3d(knockback.x, knockback.y, knockback.z));
         var event =
                 new PacketSendEvent<>(fixture.user, ConnectionPhase.PLAY, ClientboundPackets.EXPLODE, packet, false);
+        int sent = player.lastTransactionSent.get();
         player.checkManager.getExplosionHandler().onExplode(event, player, packet);
         event.getTasksAfterSend().forEach(Runnable::run);
-        pongThrough(player.lastTransactionSent.get());
+        return player.lastTransactionSent.get() > sent ? player.lastTransactionSent.get() : -1;
     }
 
     /** A teleport after a leading ping, answered by the client with a 26.3 acceptance at {@code target}. */

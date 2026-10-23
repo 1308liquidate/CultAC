@@ -31,8 +31,9 @@ public class ExplosionHandler extends PacketModHandler {
 
     @CultPacketHandler
     public void onExplode(PacketSendEvent<ClientboundExplode> event, CultPlayer player, ClientboundExplode packet) {
-        // The player will be in a vehicle when this packet arrives, don't bother
-        if (player.compensatedEntities.vehicles.serverPlayerVehicle != null) return;
+        // The client handles a sent dismount before this packet, so the knockback pushes the player.
+        if (player.compensatedEntities.vehicles.serverPlayerVehicle != null
+                && !player.compensatedEntities.vehicles.hasPendingServerDismount()) return;
 
         Vec3 velocity = new Vec3(
                 packet.knockback().x(),
