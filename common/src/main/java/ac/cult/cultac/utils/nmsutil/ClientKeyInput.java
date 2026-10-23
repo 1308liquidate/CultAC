@@ -1,5 +1,6 @@
 package ac.cult.cultac.utils.nmsutil;
 
+import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
@@ -96,9 +97,9 @@ public final class ClientKeyInput {
      * a FALL_FLYING pose without fall flying. LocalPlayer#aiStep crouches a player whose previous keys held shift, not
      * while Entity#isSwimming, which this tick's Entity#baseTick already updated, and only where the crouching pose
      * fits blocks and entities (Player#canPlayerFitWithinBlocksAndEntitiesWhen); Player#updatePlayerPose sets the pose
-     * only after LocalPlayer#aiStep.
+     * only after LocalPlayer#aiStep. {@code candidate}'s swim state decides Entity#isSwimming where it carries one.
      */
-    public static float[] movingSlowlyFactors(CultPlayer player, SimulationContext context) {
+    public static float[] movingSlowlyFactors(CultPlayer player, SimulationContext context, PredVector candidate) {
         float sneaking =
                 (float) player.compensatedEntities.getSelf().sneakingSpeed.value();
         WorldData world = context.getWorldData();
@@ -114,9 +115,10 @@ public final class ClientKeyInput {
                     : player.mayPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING, from.x, from.y, from.z)
                             ? EITHER
                             : NO;
-            // WorldData#isSwimming holds whenever the client may swim; only an unknown water state leaves it open.
-            List<Boolean> swimming =
-                    !world.isSwimming() ? NO : world.getInWater().isDesync() ? EITHER : YES;
+            // Only an unknown water state leaves Entity#isSwimming open, until a candidate travels with one.
+            List<Boolean> swimming = world.isSwimmingOpen() && (candidate == null || candidate.getSwimming() == null)
+                    ? EITHER
+                    : world.isSwimming(candidate) ? YES : NO;
             boolean crouches = fits.contains(true) && swimming.contains(false);
             boolean standsUp = fits.contains(false) || swimming.contains(true);
             crouching = crouches ? standsUp ? EITHER : YES : NO;

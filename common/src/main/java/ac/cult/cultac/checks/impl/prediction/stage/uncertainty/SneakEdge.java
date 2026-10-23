@@ -172,7 +172,7 @@ public class SneakEdge implements UncertaintyHandler {
         var keys = player.packetStateData.knownInput;
         int keyLeft = (int) keys.strafeImpulse();
         int keyForward = (int) keys.forwardImpulse();
-        float[] slows = ClientKeyInput.movingSlowlyFactors(player, context);
+        float[] slows = ClientKeyInput.movingSlowlyFactors(player, context, start);
         float yaw = context.getXRot() * (float) (Math.PI / 180.0);
         // Like the sprint-jump boost, both vanilla Mth and OptiFine fast math.
         ClientVersion version = context.getVersion();

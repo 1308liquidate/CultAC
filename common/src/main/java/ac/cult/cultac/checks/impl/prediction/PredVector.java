@@ -45,6 +45,10 @@ public class PredVector extends Vec3 {
     @Getter
     ClientSprintState.Outcome sprintOutcome = ClientSprintState.Outcome.ANY;
 
+    // Entity#isSwimming this candidate travels with while WorldData#isSwimmingOpen; null where WorldData decides it
+    @Getter
+    Boolean swimming = null;
+
     List<TransactionVel> packetModifiers = null;
 
     public PredVector(Vec3 vec, PredVector lastVector, String reason) {
@@ -61,6 +65,7 @@ public class PredVector extends Vec3 {
         this.isInputApplied = lastVector.isInputApplied;
         this.attackSlows = lastVector.attackSlows;
         this.sprintOutcome = lastVector.sprintOutcome;
+        this.swimming = lastVector.swimming;
         this.reason = reason;
         this.packetModifiers = lastVector.packetModifiers;
     }
@@ -76,9 +81,19 @@ public class PredVector extends Vec3 {
         return candidate;
     }
 
+    /** This candidate travelling with Entity#isSwimming {@code swimming}. */
+    public PredVector withSwimming(boolean swimming) {
+        PredVector candidate = new PredVector(this, this, "swimming");
+        candidate.swimming = swimming;
+        return candidate;
+    }
+
     public static PredVector fromStartingVector(Vec3 input) {
         if (input instanceof PredVector predVector) {
-            return new PredVector(predVector, predVector, "starting velocity");
+            PredVector start = new PredVector(predVector, predVector, "starting velocity");
+            // Each tick's Entity#updateSwimming decides its own swim state.
+            start.swimming = null;
+            return start;
         }
         return new PredVector(input);
     }

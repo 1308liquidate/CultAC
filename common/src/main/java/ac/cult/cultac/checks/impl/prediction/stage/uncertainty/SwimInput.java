@@ -15,12 +15,15 @@ import java.util.List;
 /**
  * The vertical fluid input before travel, in client order: LocalPlayer#aiStep's goDownInWater while the shift key
  * is down, LivingEntity#aiStep's 0.003 threshold and jumpInLiquid, then Player#travel's swimming look pull. Each is
- * applied whole or not at all; the jump key and the client's own swimming flag are the only open choices.
+ * applied whole or not at all; the jump key and the client's own swimming flag are the only open choices. While the
+ * swimming flag is open the candidate carries the one it travelled with, which the tick commits.
  */
 public class SwimInput implements UncertaintyHandler {
     private static final List<Boolean> NO = List.of(false);
     private static final List<Boolean> YES = List.of(true);
     private static final List<Boolean> EITHER = List.of(false, true);
+    // Swimming first: a movement that cannot tell the two apart keeps WorldData's optimistic swim.
+    private static final List<Boolean> SWIMMING_FIRST = List.of(true, false);
 
     @Override
     public PredVector handleUncertainty(
@@ -37,7 +40,8 @@ public class SwimInput implements UncertaintyHandler {
         // Entity#isAffectedByFluids is !abilities.flying; goDownInWater reads isInWater and the shift key.
         List<Boolean> goingDown = context.isSneaking() ? world.getInWater().getStates() : NO;
         // Entity#updateSwimming in this tick's Entity#baseTick; only an unknown water state leaves it open.
-        List<Boolean> swimming = !world.isSwimming() ? NO : world.getInWater().isDesync() ? EITHER : YES;
+        boolean open = world.isSwimmingOpen();
+        List<Boolean> swimming = open ? SWIMMING_FIRST : world.isSwimming() ? YES : NO;
         double lookY =
                 ReachUtils.getLook(player, context.getXRot(), context.getYRot()).getY();
         Vec3 from = context.getStart();
@@ -56,6 +60,7 @@ public class SwimInput implements UncertaintyHandler {
         Vec3 stuck = start.collisionStuckSpeedMultiplier(context);
         double stuckY = stuck == null || stuck.y == 0.0 ? 1.0 : stuck.y;
         double bestY = start.y;
+        boolean bestSwimming = world.isSwimming();
         double bestDistance = Double.MAX_VALUE;
         for (boolean down : goingDown) {
             double y = down ? startY - 0.04F : startY;
@@ -72,11 +77,13 @@ public class SwimInput implements UncertaintyHandler {
                     if (distance < bestDistance) {
                         bestDistance = distance;
                         bestY = travelY;
+                        bestSwimming = swim;
                     }
                 }
             }
         }
-        return start.withXYZOrSelf(start.x, bestY, start.z, "swim input");
+        PredVector moved = start.withXYZOrSelf(start.x, bestY, start.z, "swim input");
+        return open ? moved.withSwimming(bestSwimming) : moved;
     }
 
     /**

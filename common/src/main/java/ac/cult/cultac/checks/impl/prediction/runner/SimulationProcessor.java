@@ -1098,8 +1098,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.player.riptideSpinAttackTicks = Math.max(0, this.player.riptideSpinAttackTicks - 1);
             this.player.compensatedEntities.fishingRodPulls.clear();
             if (!this.player.isBedrockMovement()) {
-                this.player.swimState.onClientTick(
-                        result.getSimulationContext().getWorldData().isSwimming(), this.player.isFlying);
+                this.player.swimState.onClientTick(committedSwimming(result), this.player.isFlying);
             }
             this.player.refreshPlayerPose();
         } else {
@@ -1179,6 +1178,17 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             case HELD -> used[1] = true;
             default -> used[0] = used[1] = true;
         }
+    }
+
+    /**
+     * Entity#isSwimming the committed movement travelled with. While an unknown water state leaves the swim open, the
+     * selected movement carries the one SwimInput chose for it, so the swim the next tick and Player#updatePlayerPose
+     * build on is the one this movement proved, not the optimistic one.
+     */
+    private static boolean committedSwimming(PredictionResult result) {
+        ValidMovements valid = result.getValidMovements();
+        MovementTrace selected = valid == null ? null : valid.getClosestTrace();
+        return result.getSimulationContext().getWorldData().isSwimming(selected == null ? null : selected.position());
     }
 
     /** Each candidate once per sprint modifier it can travel with while a possible attack reset leaves it open. */

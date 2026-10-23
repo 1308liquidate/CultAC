@@ -106,7 +106,7 @@ public class CollisionModifier implements UncertaintyHandler {
                 : context.getStart();
         boolean onGround = delta.y < 0.0D && delta.y != travel.y;
         // Player#tick ends with updatePlayerPose (26.3 :284), at the travel's end, before Level#tickBlockEntities.
-        Pose pose = player.updatedPose(context.getWorldData().isSwimming(), end.x, end.y, end.z);
+        Pose pose = player.updatedPose(context.getWorldData().isSwimming(trace.position()), end.x, end.y, end.z);
         // LivingEntity#aiStep's applyEffectsFromBlocks sets the multiplier the first shove meets from the travel.
         SimpleCollisionBox travelFrom = context.getFromActualPose().copy();
         SimpleCollisionBox travelTo = travelFrom.copy().offset(end.subtract(context.getStart()));

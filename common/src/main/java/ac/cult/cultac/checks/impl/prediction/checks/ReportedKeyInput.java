@@ -45,7 +45,9 @@ final class ReportedKeyInput {
 
         KnownInput keys = player.packetStateData.knownInput;
         ClientItemUseState.Snapshot use = context.getItemUse();
-        float[] slows = ClientKeyInput.movingSlowlyFactors(player, context);
+        MovementTrace selected = result.getValidMovements().getClosestTrace();
+        float[] slows =
+                ClientKeyInput.movingSlowlyFactors(player, context, selected == null ? null : selected.position());
         boolean onGround = context.getWorldData().getLastOnGround() == DesyncStatus.TRUE;
         float[] speeds = onGround ? groundSpeeds(player, result) : airSpeeds(context);
         // LocalPlayer#modifyInput's item multiplier is the legal one, the required one of a use the client owes, or
