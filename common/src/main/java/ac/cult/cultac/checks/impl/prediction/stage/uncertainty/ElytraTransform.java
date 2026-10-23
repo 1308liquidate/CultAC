@@ -122,7 +122,6 @@ public class ElytraTransform implements UncertaintyHandler {
                 cut = candidate;
             }
         }
-        player.trigHandler.toggleShitMath();
 
         return start.withXYZ(cut.x, cut.y, cut.z, "elytra");
     }

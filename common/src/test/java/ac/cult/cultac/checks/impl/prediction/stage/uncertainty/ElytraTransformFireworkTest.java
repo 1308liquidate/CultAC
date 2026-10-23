@@ -105,6 +105,20 @@ class ElytraTransformFireworkTest {
         });
     }
 
+    /** Mth#sin and Mth#cos read one table, so the glide leaves the table of every later tick as it was. */
+    @Test
+    void aGlideLeavesTheTrigTableUnchanged() {
+        withPlayer(player -> {
+            Vec3 end = glide(player, VELOCITY);
+            transform(player, new PredVector(VELOCITY), end);
+            assertTrue(player.isVanillaMath());
+
+            player.compensatedFireworks.addNewFirework(100);
+            transform(player, new PredVector(VELOCITY), end);
+            assertTrue(player.isVanillaMath());
+        });
+    }
+
     private static Vec3 boost(Vec3 velocity, Vector3dm look) {
         return velocity.add(
                 look.getX() * 0.1D + (look.getX() * 1.5D - velocity.x) * 0.5D,
