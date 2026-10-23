@@ -92,11 +92,21 @@ public final class JavaMovementEngine implements MovementEngine {
     }
 
     /**
-     * Of two equally flagged candidates from the same start (tick skip and packet velocities), the one nearer the
-     * client's move is the movement it ran; across starts the start-velocity sort order stands.
+     * A clean candidate from the carried velocity beats a clean tick-skip start. Of two equally flagged candidates from
+     * the same start (tick skip and packet velocities), the one nearer the client's move is the movement it ran; across
+     * other starts the start-velocity sort order stands.
      */
     @Override
     public boolean isBetterCandidate(PredictionResult candidate, PredictionResult currentBest) {
+        // A tick end proves LocalPlayer#tick ran each unsent tick, so the carried velocity is the client's
+        // start; its Entity#move collisions drive SlimeBlock#bounceUp, SlimeBlock#stepOn and Entity#onGround.
+        if (currentBest != null
+                && candidate.getFlagSeverity() == 0.0
+                && currentBest.getFlagSeverity() == 0.0
+                && currentBest.getInitialStartingVel().isTickSkip()
+                && !candidate.getInitialStartingVel().isTickSkip()) {
+            return true;
+        }
         if (currentBest == null
                 || candidate.getFlagSeverity() != currentBest.getFlagSeverity()
                 || !candidate.getInitialStartingVel().hasSameStartAs(currentBest.getInitialStartingVel())) {
