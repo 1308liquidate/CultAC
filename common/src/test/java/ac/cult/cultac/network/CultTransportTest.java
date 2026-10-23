@@ -2131,8 +2131,11 @@ class CultTransportTest {
             f.user.bind(mock(ac.cult.cultac.platform.api.player.PlatformPlayer.class));
             f.player.nettyScheduler.removeScheduler();
             var processor = new ac.cult.cultac.utils.latency.KeepAliveProcessor(f.player);
+            var keepAliveCheck =
+                    f.player.checkManager.getCheck(ac.cult.cultac.checks.impl.badpackets.BadPacketsO.class);
             f.registrar.register(routes -> {
                 routes.registerSendListener(ac.cult.cultac.network.event.PacketListenerPriority.NORMAL, processor);
+                routes.registerSendListener(ac.cult.cultac.network.event.PacketListenerPriority.NORMAL, keepAliveCheck);
                 routes.registerSendListener(
                         ac.cult.cultac.network.event.PacketListenerPriority.NORMAL,
                         new ac.cult.cultac.events.packets.listeners.PacketPingListener());
@@ -2187,6 +2190,30 @@ class CultTransportTest {
             assertEquals(0, f.player.lastTransactionReceived.get(), "Outbound KA must not acknowledge a transaction");
             assertNotNull(processor.getPingMap().get(101L));
             assertTrue(sent.isSuccess());
+
+            var pendingField = ac.cult.cultac.checks.impl.badpackets.BadPacketsO.class.getDeclaredField("keepalives");
+            pendingField.setAccessible(true);
+            var pending = (java.util.Collection<?>) pendingField.get(keepAliveCheck);
+            var pongListener = new ac.cult.cultac.events.packets.listeners.PacketPingListener();
+            var tickEnd = new ac.cult.cultac.protocol.packet.Opaque(ServerboundPackets.CLIENT_TICK_END);
+            var tickEvent = new ac.cult.cultac.network.event.PacketReceiveEvent<>(
+                    f.user, PLAY, ServerboundPackets.CLIENT_TICK_END, tickEnd);
+            for (int i = 0; i < 3; i++) {
+                var pong = new ac.cult.cultac.protocol.packet.serverbound.ServerboundPong(pingIds.get(i));
+                pongListener.onPong(
+                        new ac.cult.cultac.network.event.PacketReceiveEvent<>(
+                                f.user, PLAY, ServerboundPackets.PONG, pong),
+                        f.player,
+                        pong);
+                assertEquals(1, pending.size(), "a pong alone cannot retire a deferred reply");
+                if (i == 1) {
+                    keepAliveCheck.onClientTickEnd(tickEvent, f.player, tickEnd);
+                    assertEquals(1, pending.size(), "the leading ping does not prove the standalone challenge");
+                }
+            }
+            keepAliveCheck.onClientTickEnd(tickEvent, f.player, tickEnd);
+            assertEquals(0, pending.size(), "the tick after the actual trailing pong retires the challenge");
+            assertEquals(0, keepAliveCheck.getViolations());
         }
     }
 

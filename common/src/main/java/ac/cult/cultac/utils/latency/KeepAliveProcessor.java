@@ -65,6 +65,10 @@ public class KeepAliveProcessor extends CultProcessor implements CheckListener {
             final long receivedAt = System.currentTimeMillis();
             keepAliveData.setTransReceived(receivedAt);
         });
-        event.getTasksAfterSend().add(player::sendTrailingTransaction);
+        event.getTasksAfterSend().add(() -> {
+            int proof = player.sendTrailingTransaction();
+            // BadPacketsO uses this proof at client tick-end to retire deferred replies safely.
+            if (proof > 0) event.receiptProof(proof);
+        });
     }
 }
