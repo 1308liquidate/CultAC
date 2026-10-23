@@ -10,6 +10,7 @@ import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.multiactions.MultiActionsC;
+import ac.cult.cultac.checks.impl.multiactions.MultiActionsD;
 import ac.cult.cultac.checks.impl.sprint.SprintH;
 import ac.cult.cultac.events.packets.listeners.PacketEntityAction;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -17,14 +18,20 @@ import ac.cult.cultac.network.packet.InventoryPackets;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.PacketType;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundContainerClose;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerCommand;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
 import ac.cult.cultac.protocol.value.EquipmentSlot;
 import ac.cult.cultac.protocol.value.PlayerCommandAction;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHorse;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityRideable;
+import ac.cult.cultac.utils.inventory.InventoryClick;
 import ac.cult.cultac.utils.inventory.ItemUtil;
+import ac.cult.cultac.utils.inventory.inventory.WindowClickType;
+import ac.cult.cultac.utils.latency.CompensatedEntities;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -35,6 +42,99 @@ import org.junit.jupiter.api.Test;
 class VehicleSprintStateTest {
     private static final int VEHICLE = 100;
     private static final Vec3 SEAT = new Vec3(0.5, FLOOR_Y + 1, 0.5);
+
+    @Test
+    void aBatClearsTheLocalFlagAndModifierOnItsFirstRideTickWithoutChangingTheAnnouncement() throws Exception {
+        try (var f = ride(EntityTypeIds.BAT, true)) {
+            // SetPassengers itself never calls LivingEntity#setSprinting.
+            assertTrue(f.player.isClientSprinting());
+            assertTrue(f.player.sprintState.flag());
+            assertTrue(f.player.sprintState.modifier());
+            f.rideTick();
+
+            assertTrue(f.player.isSprinting, "noncontrolling passengers send no STOP_SPRINTING");
+            assertFalse(f.player.isClientSprinting());
+            assertFalse(f.player.sprintState.flag());
+            assertFalse(f.player.sprintState.modifier());
+        }
+    }
+
+    @Test
+    void aMountedTickEndWithoutMovementAlsoAdvancesTheLocalSprintState() throws Exception {
+        try (var f = ride(EntityTypeIds.BAT)) {
+            f.player.isSprinting = true;
+            f.player.sprintState.onClientTick(true);
+            f.player.sprintState.onClientTickEnd();
+            f.player.packetStateData.playerLoadedIntoLevel = true;
+            f.tickEnd();
+
+            assertTrue(f.player.isSprinting);
+            assertFalse(f.player.sprintState.flag());
+            assertFalse(f.player.sprintState.modifier());
+        }
+    }
+
+    @Test
+    void aPassengerOnlyRemovesTheModifierWhenVanillaActuallyStopsSprinting() throws Exception {
+        try (var f = ride(EntityTypeIds.BAT)) {
+            // Attribute replacement can add a modifier independently of the flag. With the flag already false,
+            // aiStep does not call setSprinting(false), so the modifier survives the passenger tick.
+            f.player.sprintState.onServerModifier(CompensatedEntities.SPRINTING_SPEED_MODIFIER);
+            f.rideTick();
+            assertFalse(f.player.sprintState.flag());
+            assertTrue(f.player.sprintState.modifier());
+
+            // A later self-metadata update sets only the flag; the next aiStep stops it and removes the modifier.
+            f.player.sprintState.onServerFlag(true);
+            f.rideTick();
+            assertFalse(f.player.sprintState.flag());
+            assertFalse(f.player.sprintState.modifier());
+        }
+    }
+
+    @Test
+    void neutralBatPassengerInventoryActionsDoNotUseTheStaleSprintAnnouncement() throws Exception {
+        try (var f = ride(EntityTypeIds.BAT)) {
+            f.player.isSprinting = true;
+            f.player.sprintState.onClientTick(true);
+            f.player.sprintState.onClientTickEnd();
+            f.input(new ServerboundPlayerInput(false, false, false, false, false, false, false));
+            for (int tick = 0; tick < 12; tick++) f.rideTick();
+            inventoryActions(f, 0);
+            assertTrue(f.player.isSprinting);
+        }
+    }
+
+    @Test
+    void aControllingCamelStillEnforcesSprintForInventoryActions() throws Exception {
+        try (var f = ride(EntityTypeIds.CAMEL)) {
+            ((PacketEntityHorse) f.player.compensatedEntities.getEntity(VEHICLE)).hasSaddle = true;
+            f.player.isSprinting = true;
+            f.rideTick();
+            assertTrue(f.player.sprintState.flag());
+            assertTrue(f.player.sprintState.modifier());
+            inventoryActions(f, 1);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void inventoryActions(JavaTickFixture f, int violations) {
+        var clickCheck = f.player.checkManager.getCheck(MultiActionsC.class);
+        var closeCheck = f.player.checkManager.getCheck(MultiActionsD.class);
+        f.player.setExperimentalChecks(true);
+        clickCheck.setEnabled(true);
+        closeCheck.setEnabled(true);
+        clickCheck.violations = closeCheck.violations = 0;
+        assertFalse(MultiActionsC.isVerboseInput(f.player));
+        var click = new InventoryClick(0, 0, 36, 0, WindowClickType.SWAP, Map.of(), SimItemStack.EMPTY);
+        var type = (PacketType<InventoryClick>)
+                f.fixture.registrar.scanner().runtime().typeForRecord(InventoryClick.class);
+        clickCheck.onContainerClick(f.event(type, click), f.player, click);
+        var close = new ServerboundContainerClose(0);
+        closeCheck.onContainerClose(f.event(ServerboundPackets.CONTAINER_CLOSE, close), f.player, close);
+        assertEquals(violations, clickCheck.violations);
+        assertEquals(violations, closeCheck.violations);
+    }
 
     @Test
     void aPassengerOfAnUnsaddledHorseThatMountedSprintingIsNotSprinting() throws Exception {
@@ -249,8 +349,15 @@ class VehicleSprintStateTest {
     }
 
     private static JavaTickFixture ride(int type) throws Exception {
+        return ride(type, false);
+    }
+
+    private static JavaTickFixture ride(int type, boolean sprinting) throws Exception {
         var f = new JavaTickFixture();
         f.place(SEAT, Vec3.ZERO);
+        f.player.isSprinting = sprinting;
+        f.player.sprintState.onClientTick(sprinting);
+        f.player.sprintState.onClientTickEnd();
         f.player.compensatedEntities.addEntity(VEHICLE, type, SEAT, 0, 0, 0);
         f.setPassengers(VEHICLE, List.of(f.player.entityID));
         f.pongThrough(f.player.lastTransactionSent.get());

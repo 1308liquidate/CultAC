@@ -101,26 +101,27 @@ public final class ClientSprintState {
     }
 
     /**
-     * A locally controlled LocalPlayer#tick finished. LocalPlayer#sendIsSprintingIfNeeded makes the
-     * flag equal wasSprinting. The flag differing from wasSprinting before aiStep proves aiStep called
-     * LivingEntity#setSprinting, which resynchronized the modifier to the flag.
+     * Reconciles a completed LocalPlayer#aiStep with its known sprint flag. A tick that reaches
+     * sendIsSprintingIfNeeded makes it equal the last announcement; a noncontrolling passenger can stop sprinting
+     * without announcing it. A changed flag proves setSprinting ran and resynchronized the modifier. An already-false
+     * flag does not remove a modifier installed independently by an attribute packet.
      */
-    public void onClientTick(boolean wasSprinting) {
+    public void onClientTick(boolean sprinting) {
         if (!aiStepReconciled) {
             flagBeforeAiStep = flag;
             aiStepReconciled = true;
         }
         // Unmodeled: wall-sprinting start->stop in one aiStep can clear the modifier early; this only errs lenient.
         // An attack reset that aiStep re-sprinted re-added the modifier.
-        if (flag != wasSprinting) {
-            modifier = wasSprinting ? CompensatedEntities.SPRINTING_SPEED_MODIFIER : null;
+        if (flag != sprinting) {
+            modifier = sprinting ? CompensatedEntities.SPRINTING_SPEED_MODIFIER : null;
             onCertainEvent();
-        } else if (sprintResetThisTick && wasSprinting) {
+        } else if (sprintResetThisTick && sprinting) {
             // Only a possible reset leaves the flag: Player#attack resets only after damage and positive knockback.
             resetOutcomePending = !CompensatedEntities.SPRINTING_SPEED_MODIFIER.equals(modifier);
             if (resetOutcomePending) possibleResets++;
         }
-        flag = wasSprinting;
+        flag = sprinting;
         sprintResetThisTick = false;
         flagUncertain = false;
     }
