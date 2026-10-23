@@ -572,6 +572,23 @@ public class CompensatedInventory extends CultProcessor implements CheckListener
             return false;
         }
 
+        if (click.clickType() == WindowClickType.QUICK_CRAFT) {
+            int slot = menu.quickCraft(click.slot(), click.button(), player.canInstabuild);
+            if (slot >= 0) {
+                return applyContainerClick(new InventoryClick(
+                        click.windowId(),
+                        click.stateId(),
+                        slot,
+                        menu.quickcraftType(),
+                        WindowClickType.PICKUP,
+                        click.changedSlots(),
+                        click.carriedItem(),
+                        matches));
+            }
+        } else if (menu.endQuickCraft()) {
+            return true;
+        }
+
         if (mirrorBundleClick(click)) {
             return true;
         }
