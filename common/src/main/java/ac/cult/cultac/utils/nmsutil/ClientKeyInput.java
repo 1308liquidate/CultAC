@@ -50,9 +50,44 @@ public final class ClientKeyInput {
         // LocalPlayer#isMovingSlowly: with room to stand, the player crouches exactly when shift was held.
         if (!Collisions.isEmpty(player, standing)) return null;
 
-        Vec3 modified = VelocityTransformer.getExactControllerModifiedInputStatic(
-                new Vec3(keys.strafeImpulse(), 0.0D, keys.forwardImpulse()), itemUseMultiplier, movingSlowlyFactor);
+        Vec3 modified = context.getVersion().isNewerThanOrEquals(ClientVersion.V_1_21_5)
+                ? VelocityTransformer.getExactControllerModifiedInputStatic(
+                        new Vec3(keys.strafeImpulse(), 0.0D, keys.forwardImpulse()),
+                        itemUseMultiplier,
+                        movingSlowlyFactor)
+                : legacyKeyboardInput(
+                        context.getVersion(),
+                        keys.strafeImpulse(),
+                        keys.forwardImpulse(),
+                        movingSlowlyFactor,
+                        itemUseMultiplier);
         return inputVector(context, modified, speed);
+    }
+
+    /**
+     * xxa/zza before 1.21.5, where the keys' impulses are scaled per axis without normalizing. 1.21.2 and 1.21.3
+     * KeyboardInput#tick applies the moving-slowly factor before LocalPlayer#aiStep's 0.2F item slow; 1.21.4
+     * LocalPlayer#aiStep applies the item slow first. LivingEntity#aiStep then scales both by 0.98F, and
+     * Entity#getInputVector normalizes a diagonal.
+     */
+    public static Vec3 legacyKeyboardInput(
+            ClientVersion version, float left, float forward, float movingSlowlyFactor, float itemUseMultiplier) {
+        float xxa = left;
+        float zza = forward;
+        if (version.isNewerThanOrEquals(ClientVersion.V_1_21_4)) {
+            xxa *= itemUseMultiplier;
+            zza *= itemUseMultiplier;
+            xxa *= movingSlowlyFactor;
+            zza *= movingSlowlyFactor;
+        } else {
+            xxa *= movingSlowlyFactor;
+            zza *= movingSlowlyFactor;
+            xxa *= itemUseMultiplier;
+            zza *= itemUseMultiplier;
+        }
+        xxa *= 0.98F;
+        zza *= 0.98F;
+        return new Vec3(xxa, 0.0D, zza);
     }
 
     /**

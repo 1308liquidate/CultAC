@@ -202,15 +202,7 @@ public class SneakEdge implements UncertaintyHandler {
         float x = left;
         float z = forward;
         if (version.isOlderThan(ClientVersion.V_1_21_5)) {
-            if (slow != 1.0F) {
-                x *= slow;
-                z *= slow;
-            }
-            if (item != 1.0F) {
-                x *= item;
-                z *= item;
-            }
-            return new Vec3(x * 0.98F, 0, z * 0.98F);
+            return ClientKeyInput.legacyKeyboardInput(version, x, z, slow, item);
         }
 
         // KeyboardInput#tick normalizes; LocalPlayer#modifyInput scales and reshapes to the unit square.

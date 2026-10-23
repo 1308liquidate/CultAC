@@ -4,8 +4,8 @@ import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredVector;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
-import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaMovementEngine;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.EntityPositionWorlds;
+import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.SneakEdge;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.UnknownCollisionProvider;
 import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
@@ -14,7 +14,6 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.ClientItemUseState;
 import ac.cult.cultac.utils.data.KnownInput;
-import ac.cult.cultac.utils.data.ShulkerBoxShoveResult;
 import ac.cult.cultac.utils.math.CultMath;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.ClientKeyInput;
@@ -24,9 +23,10 @@ import java.util.List;
 
 /**
  * Whether the keys of the client's latest PLAYER_INPUT move the player the way it moved. LocalPlayer#sendChanges sends
- * them before the tick's position with the keys KeyboardInput#tick read for that tick's travel, so on the ground the
- * tick adds exactly their input to the starting velocity before Entity#move collides it. Player#maybeBackOffFromEdge
- * shortens that move only while Player#isStayingOnGroundSurface, which is LocalPlayer#isShiftKeyDown.
+ * them before the tick's position with the keys KeyboardInput#tick read for that tick's travel, so on the ground and in
+ * the air the tick adds exactly their input to the starting velocity before Entity#move collides it.
+ * Player#maybeBackOffFromEdge shortens that move only while Player#isStayingOnGroundSurface, which is
+ * LocalPlayer#isShiftKeyDown.
  */
 final class ReportedKeyInput {
     private static final Vec3 NO_STUCK_SPEED = new Vec3(1, 1, 1);
@@ -46,16 +46,8 @@ final class ReportedKeyInput {
         KnownInput keys = player.packetStateData.knownInput;
         ClientItemUseState.Snapshot use = context.getItemUse();
         float[] slows = ClientKeyInput.movingSlowlyFactors(player, context);
-        float walk = context.getMoveRelativeSpeed(player, true, false, false);
-        // LivingEntity#getFrictionInfluencedSpeed reads getSpeed(), which carries minecraft:sprinting while applied.
-        // ClientSprintState can still hold the modifier after one aiStep started and stopped a wall sprint.
-        float[] sprint = context.isSprintModifier()
-                ? context.getGroundMoveRelativeSpeeds(
-                        player, context.getSprintOutcome(player, result.getInitialStartingVel()))
-                : new float[0];
-        float[] speeds = new float[sprint.length + 1];
-        speeds[0] = walk;
-        System.arraycopy(sprint, 0, speeds, 1, sprint.length);
+        boolean onGround = context.getWorldData().getLastOnGround() == DesyncStatus.TRUE;
+        float[] speeds = onGround ? groundSpeeds(player, result) : airSpeeds(context);
         // LocalPlayer#modifyInput's item multiplier is the legal one, the required one of a use the client owes, or
         // that of a use it may have started: Minecraft#tick runs handleKeybinds, whose startUseItem precedes the
         // tick's LocalPlayer#aiStep, so a use slows the tick that sends its USE_ITEM.
@@ -71,12 +63,40 @@ final class ReportedKeyInput {
                     if (repeats(itemUses, u)) continue;
                     Vec3 input = ClientKeyInput.travelInput(player, context, keys, itemUse, slow, speed);
                     if (input == null) return 0.0D;
-                    best = Math.min(best, offset(player, result, extents, input));
+                    best = Math.min(best, offset(player, result, extents, input, onGround));
                     if (best == 0.0D) return 0.0D;
                 }
             }
         }
         return best;
+    }
+
+    /**
+     * LivingEntity#getFrictionInfluencedSpeed on the ground reads getSpeed(), which carries minecraft:sprinting while
+     * applied. ClientSprintState can still hold the modifier after one aiStep started and stopped a wall sprint.
+     */
+    private static float[] groundSpeeds(CultPlayer player, PredictionResult result) {
+        SimulationContext context = result.getSimulationContext();
+        float walk = context.getMoveRelativeSpeed(player, true, false, false);
+        float[] sprint = context.isSprintModifier()
+                ? context.getGroundMoveRelativeSpeeds(
+                        player, context.getSprintOutcome(player, result.getInitialStartingVel()))
+                : new float[0];
+        float[] speeds = new float[sprint.length + 1];
+        speeds[0] = walk;
+        System.arraycopy(sprint, 0, speeds, 1, sprint.length);
+        return speeds;
+    }
+
+    /**
+     * LivingEntity#getFrictionInfluencedSpeed in the air is Player#getFlyingSpeed, which reads the sprint flag the
+     * client's last START/STOP_SPRINTING reports for this travel.
+     */
+    private static float[] airSpeeds(SimulationContext context) {
+        List<Boolean> sprinting = context.getIsSprinting().getStates();
+        float[] speeds = new float[sprinting.size()];
+        for (int i = 0; i < speeds.length; i++) speeds[i] = sprinting.get(i) ? 0.025999999F : 0.02F;
+        return speeds;
     }
 
     private static boolean repeats(float[] values, int index) {
@@ -85,10 +105,12 @@ final class ReportedKeyInput {
         return false;
     }
 
-    private static double offset(CultPlayer player, PredictionResult result, SimpleCollisionBox extents, Vec3 input) {
-        // From 26.3 the shulker box block shoves move the player after the travel the keys drive.
-        ShulkerBoxShoveResult shove = JavaMovementEngine.shulkerBoxShoveAfterTravel(result);
-        Vec3 target = shove == null ? result.getTarget() : result.getTarget().subtract(shove.movement());
+    private static double offset(
+            CultPlayer player, PredictionResult result, SimpleCollisionBox extents, Vec3 input, boolean onGround) {
+        // Piston and shulker box shoves move the player in their own Entity#move calls, before the travel the keys
+        // drive or, from 26.3, a shulker box's after it; the trace carries what they moved apart from that travel.
+        MovementTrace trace = result.getValidMovements().getClosestTrace();
+        Vec3 target = trace == null ? result.getTarget() : result.getTarget().subtract(trace.collisionBaseOffset());
         // The starting velocity and uncertainties nearest the movement the keys leave unexplained.
         double startX = CultMath.clamp(target.x - input.x, extents.minX, extents.maxX);
         double startZ = CultMath.clamp(target.z - input.z, extents.minZ, extents.maxZ);
@@ -101,8 +123,8 @@ final class ReportedKeyInput {
         SimulationContext context = result.getSimulationContext();
         PredVector start = result.getInitialStartingVel();
         SimpleCollisionBox box = context.getFromActualPose();
-        // Entity#collide steps from Entity#onGround, which appliesTo requires at the tick's start.
-        Vec3 movement = Collisions.collide(player, box, deltaX, start.y, deltaZ, true);
+        // Entity#collide steps from Entity#onGround at the tick's start, or from a downward move that lands.
+        Vec3 movement = Collisions.collide(player, box, deltaX, start.y, deltaZ, onGround);
         offset = Math.min(offset, Math.hypot(movement.x - target.x, movement.z - target.z));
         if (offset <= HorizontalAnalyzer.HORIZONTAL_INPUT_UNCERTAINTY) return offset;
 
@@ -114,7 +136,7 @@ final class ReportedKeyInput {
             double x = (far & 1) != 0 ? farX : deltaX;
             double z = (far & 2) != 0 ? farZ : deltaZ;
             if (x == deltaX && z == deltaZ) continue;
-            Vec3 clipped = Collisions.collide(player, box, x, start.y, z, true);
+            Vec3 clipped = Collisions.collide(player, box, x, start.y, z, onGround);
             double clippedOffset = Math.hypot(clipped.x - target.x, clipped.z - target.z);
             if (clippedOffset >= offset) continue;
             offset = clippedOffset;
@@ -147,7 +169,7 @@ final class ReportedKeyInput {
                 double z = (far & 2) != 0 ? farZ : deltaZ;
                 if (far != 0 && x == deltaX && z == deltaZ) continue;
                 Vec3 clipped =
-                        Collisions.collideWithAdditionalCollisionBoxes(player, box, x, start.y, z, colliders, true);
+                        Collisions.collideWithAdditionalCollisionBoxes(player, box, x, start.y, z, colliders, onGround);
                 offset = Math.min(offset, Math.hypot(clipped.x - target.x, clipped.z - target.z));
                 if (offset <= HorizontalAnalyzer.HORIZONTAL_INPUT_UNCERTAINTY) return offset;
             }
@@ -158,7 +180,8 @@ final class ReportedKeyInput {
     private static boolean appliesTo(CultPlayer player, PredictionResult result) {
         SimulationContext context = result.getSimulationContext();
         WorldData world = context.getWorldData();
-        return player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_6)
+        // PLAYER_INPUT carries the full key state from 1.21.2.
+        return player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)
                 && !player.isBedrockMovement()
                 // No PLAYER_INPUT yet leaves the keys at Input.EMPTY, which MultiPlayerGameMode#createPlayer starts
                 // every LocalPlayer from; LocalPlayer#sendChanges only sends keys that differ from the last sent.
@@ -169,7 +192,9 @@ final class ReportedKeyInput {
                 && !context.usesFallFlyingMovement()
                 && result.getInitialStartingVel() != null
                 && result.getValidMovements() != null
-                && world.getLastOnGround() == DesyncStatus.TRUE
+                // LivingEntity#travelInAir moves by the keys on the ground and in the air alike; the start's
+                // Entity#onGround picks the speed and whether Entity#collide may step without landing.
+                && !world.getLastOnGround().isDesync()
                 && world.getInWater() == DesyncStatus.FALSE
                 && world.getInLava() == DesyncStatus.FALSE
                 && world.getClimbingAtStart() == DesyncStatus.FALSE
