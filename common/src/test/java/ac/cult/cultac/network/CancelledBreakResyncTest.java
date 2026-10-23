@@ -49,11 +49,14 @@ import org.junit.jupiter.api.Test;
  * MultiPlayerGameMode#continueDestroyBlock destroys the block inside BlockStatePredictionHandler#startPredicting
  * before it sends STOP_DESTROY_BLOCK with that prediction's sequence. ClientLevel#setServerVerifiedBlockState keeps a
  * block update for a predicted position as its known server state, and ClientLevel#handleBlockChangedAck restores
- * that state only once an acknowledgement reaches the prediction's sequence. A break the server never receives is
+ * that state only once an acknowledgement reaches the prediction's sequence. ServerPlayerGameMode#tick sends level
+ * events 2019 and 2020 each tick of a destroy session, which only a STOP at its position or an ABORT ends, and
+ * ServerGamePacketListenerImpl#handlePlayerAction acknowledges either. A break the server never receives is
  * acknowledged by no one else, so the correction must carry the server's block and an acknowledgement of the break.
  */
 class CancelledBreakResyncTest {
     private static final BlockPos TARGET = new BlockPos(0, 64, 2);
+    private static final BlockPos OTHER = new BlockPos(1, 64, 2);
 
     @BeforeAll
     static void registerVerboseTags() {
@@ -74,24 +77,48 @@ class CancelledBreakResyncTest {
 
             client.startPredicting();
             client.destroy(TARGET, state("stone"));
-            setup.reject(new ServerboundPlayerAction(PlayerAction.STOP_DESTROY_BLOCK, TARGET, Direction.NORTH, 2));
+            var received = setup.replaced(
+                    new ServerboundPlayerAction(PlayerAction.STOP_DESTROY_BLOCK, TARGET, Direction.NORTH, 2));
             assertTrue(setup.check.getViolations() > 0, "FastBreak let the break through");
+            assertEquals(
+                    new ServerboundPlayerAction(PlayerAction.ABORT_DESTROY_BLOCK, TARGET, Direction.NORTH, 2),
+                    received);
+            assertEquals(List.of(), setup.output());
 
-            var correction = setup.output();
-            client.receive(correction);
+            setup.fixture.user.write(new ClientboundBlockChangedAck(2));
+            var acknowledgement = setup.output();
+            client.receive(acknowledgement);
             assertEquals(state("stone"), client.blockAt(TARGET));
             assertTrue(client.pending.isEmpty(), "the break is still predicted");
 
-            setup.confirm(correction);
+            setup.confirm(acknowledgement);
             assertEquals(state("stone"), setup.player.compensatedWorld.getBlockStateIdAt(TARGET));
             assertTrue(setup.player.compensatedWorld.pendingPredictionSnapshot().isEmpty());
         }
     }
 
     @Test
-    void theCorrectionIsHeldUntilTheServerAcknowledgesTheStart() throws Exception {
+    void aStopAtAnotherPositionLeavesTheServersDestroySession() throws Exception {
         try (var setup = new Setup()) {
             setup.forward(new ServerboundPlayerAction(PlayerAction.START_DESTROY_BLOCK, TARGET, Direction.NORTH, 1));
+            setup.player.blockActionReconciler.digReachedServer(
+                    new ServerboundPlayerAction(PlayerAction.STOP_DESTROY_BLOCK, OTHER, Direction.NORTH, 2));
+            setup.fixture.user.write(new ClientboundBlockChangedAck(2));
+            setup.confirm(setup.output());
+
+            var received = setup.replaced(
+                    new ServerboundPlayerAction(PlayerAction.STOP_DESTROY_BLOCK, TARGET, Direction.NORTH, 3));
+            assertEquals(
+                    new ServerboundPlayerAction(PlayerAction.ABORT_DESTROY_BLOCK, TARGET, Direction.NORTH, 3),
+                    received);
+        }
+    }
+
+    @Test
+    void theCorrectionIsHeldUntilTheServerAcknowledgesTheStart() throws Exception {
+        try (var setup = new Setup()) {
+            setup.player.compensatedWorld.applyBlockChangeRawDANGER(OTHER.x(), OTHER.y(), OTHER.z(), state("stone"));
+            setup.forward(new ServerboundPlayerAction(PlayerAction.START_DESTROY_BLOCK, OTHER, Direction.NORTH, 1));
             setup.output();
             setup.reject(new ServerboundPlayerAction(PlayerAction.STOP_DESTROY_BLOCK, TARGET, Direction.NORTH, 2));
             assertTrue(setup.output().isEmpty(), "an acknowledgement of 2 would end the server's pending 1");
@@ -220,6 +247,17 @@ class CancelledBreakResyncTest {
         void reject(ServerboundPlayerAction packet) {
             assertFalse(fixture.channel.writeInbound(encode(packet)));
             assertNull(fixture.channel.readInbound());
+        }
+
+        ServerboundPlayerAction replaced(ServerboundPlayerAction packet) {
+            assertTrue(fixture.channel.writeInbound(encode(packet)));
+            ByteBuf frame = fixture.channel.readInbound();
+            try {
+                int id = Wire.readVarInt(frame);
+                return (ServerboundPlayerAction) fixture.codec.read(PacketDirection.SERVERBOUND, id, frame);
+            } finally {
+                frame.release();
+            }
         }
 
         ByteBuf encode(ServerboundPlayerAction packet) {
