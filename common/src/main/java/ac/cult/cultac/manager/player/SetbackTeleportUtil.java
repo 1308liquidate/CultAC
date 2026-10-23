@@ -1188,10 +1188,10 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 return teleportData;
             }
 
-            // ClientPacketListener handles bundled rotations in order and immediately
-            // sends each Rot. In-flight ordinary look updates also precede that echo.
-            // Relative angles therefore use the receive timeline, not the send snapshot.
-            TeleportData resolved = teleportPos.resolvePlayerRotation(player.xRot, player.yRot);
+            // The first Rot after a ping that handleRotatePlayer's bundle task answered first is its echo.
+            TeleportData resolved = player.lastTransactionReceived.get() >= teleportPos.getBundleTransaction()
+                    ? teleportPos.resolvePlayerRotationEcho(yaw, pitch, player.xRot, player.yRot)
+                    : teleportPos.resolvePlayerRotation(player.xRot, player.yRot);
             if (matchesRotationTeleport(resolved, yaw, pitch)) {
                 pendingTeleports.poll();
                 teleportData.setTeleportData(resolved.copyWithLocation(new Vec3(player.x, player.y, player.z)));
@@ -1917,6 +1917,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
 
     public void addImmediatePlayerRotationTeleport(
             RelativeFlag flags,
+            int bundleTransaction,
             int proofTransaction,
             float sourceYaw,
             float sourcePitch,
@@ -1928,6 +1929,7 @@ public class SetbackTeleportUtil extends CultProcessor implements PostPrediction
                 Vec3.ZERO, flags, Vec3.ZERO, transaction, 0, sourceYaw, sourcePitch, finalYaw, finalPitch);
         data.setRotationOnly(true);
         data.setPlayerRotation(rotation);
+        data.setBundleTransaction(bundleTransaction < 0 ? Integer.MAX_VALUE : bundleTransaction);
         pendingTeleports.add(data);
         if (proofTransaction >= 0) {
             player.latencyUtils.addRealTimeTask(transaction, () -> {

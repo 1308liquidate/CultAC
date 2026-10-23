@@ -138,6 +138,9 @@ public class PacketServerTeleport {
         float finalYaw = calculateRotation(sourceYaw, rotation.yaw(), flags, RelativeFlag.Y_ROT);
         float finalPitch =
                 clamp(calculateRotation(sourcePitch, rotation.pitch(), flags, RelativeFlag.X_ROT), -90.0F, 90.0F);
+        // A ping earlier in the bundle is answered in the task that handles the rotation, so the next Rot after its
+        // pong is the echo.
+        int bundleTransaction = player.appendLeadingFlushProofTransaction(event);
         // The pong must follow the Rot that ClientPacketListener#handleRotatePlayer sends, so the proof never
         // shares an earlier ping in the bundle.
         CultPlayer.TrackedTransaction proof = player.appendResponseProofTransaction(event);
@@ -145,7 +148,14 @@ public class PacketServerTeleport {
 
         player.getSetbackTeleportUtil()
                 .addImmediatePlayerRotationTeleport(
-                        flags, proofTransaction, sourceYaw, sourcePitch, finalYaw, finalPitch, rotation);
+                        flags,
+                        bundleTransaction,
+                        proofTransaction,
+                        sourceYaw,
+                        sourcePitch,
+                        finalYaw,
+                        finalPitch,
+                        rotation);
     }
 
     private void handleMoveVehicle(

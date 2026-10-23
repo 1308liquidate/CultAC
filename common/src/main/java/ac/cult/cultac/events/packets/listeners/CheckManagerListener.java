@@ -1276,6 +1276,12 @@ public class CheckManagerListener implements ac.cult.cultac.network.OpaqueReceiv
                 && (!sent.isSentWhileVehicle() || sent.isRotationOnly())
                 && yaw == sent.getFinalYaw()
                 && pitch == sent.getFinalPitch()) {
+            if (sent.getPlayerRotation() != null) {
+                // The turn from the last report to the rotation handleRotatePlayer started from is the player's.
+                return new HeadRotation(
+                        sent.getFinalYaw() - (sent.getSourceYaw() - previousYaw),
+                        sent.getFinalPitch() - (sent.getSourcePitch() - previousPitch));
+            }
             return new HeadRotation(sent.getFinalYaw(), sent.getFinalPitch());
         }
         return new HeadRotation(previousYaw, previousPitch);

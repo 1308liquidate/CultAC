@@ -821,6 +821,19 @@ public class CultPlayer implements GrimUser {
         return lead.transaction();
     }
 
+    /**
+     * As {@link #appendFlushProofTransaction}, but only a ping the client answers before it handles the event's
+     * packet, in the same bundle task; -1 when the packet cannot have one.
+     */
+    public int appendLeadingFlushProofTransaction(PacketSendEvent<?> event) {
+        int shared = event.flushPing();
+        if (shared > 0) return shared;
+        if (event.receiptProof() > 0
+                || !user.getCultConnection().isPreparingWrites()
+                || PacketBundlePolicy.requiresStandalone(event.getPacketType())) return -1;
+        return appendFlushProofTransaction(event);
+    }
+
     public long nextImpulseSequence() {
         return impulseSequence.incrementAndGet();
     }
