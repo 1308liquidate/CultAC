@@ -959,7 +959,8 @@ public class CompensatedWorld {
     }
 
     private SimpleCollisionBox openShulkerCollisionBox(ShulkerData data) {
-        return data.getCollision().copy().expand(data.getFacing(player));
+        Direction facing = data.getFacing(player);
+        return data.getCollision().copy().expandToCoordinate(facing.getModX(), facing.getModY(), facing.getModZ());
     }
 
     void markRecentClientCollisionChange(BlockPos pos) {
