@@ -84,8 +84,8 @@ public final class JavaInsideBlockEffects {
                         if (stuckAllowed) {
                             if (powder && powderAllowed) speed = new Vec3(0.9F, 1.5, 0.9F);
                             if (web) speed = Collisions.getCobwebStuckSpeed(player);
-                            if (berry && living && actor.type != EntityTypeIds.FOX && actor.type != EntityTypeIds.BEE)
-                                speed = new Vec3(0.8F, 0.75, 0.8F);
+                            if (berry && actor.type != EntityTypeIds.FOX && actor.type != EntityTypeIds.BEE)
+                                speed = Collisions.getSweetBerryBushStuckSpeed(living);
                         }
                         if (speed != null) state = new State(0, state.velocity(), speed);
                         if (honey && slides(end, pos, to.maxX - to.minX, landed, state.velocity().y)) {

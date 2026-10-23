@@ -1785,7 +1785,8 @@ public class Collisions {
         }
 
         if (BlockFamilies.SWEET_BERRY_BUSH.test(state)) {
-            return SWEET_BERRY_BUSH_STUCK_SPEED;
+            return getSweetBerryBushStuckSpeed(
+                    player.compensatedEntities.getEntityInControl().isLivingEntity());
         }
 
         if (BlockFamilies.POWDER_SNOW.test(state)) {
@@ -1802,6 +1803,11 @@ public class Collisions {
 
     static Vec3 getCobwebStuckSpeed(boolean living, boolean weaving) {
         return living && weaving ? WEAVING_COBWEB_STUCK_SPEED : COBWEB_STUCK_SPEED;
+    }
+
+    /** SweetBerryBushBlock#entityInside slows only a LivingEntity. */
+    public static Vec3 getSweetBerryBushStuckSpeed(boolean living) {
+        return living ? SWEET_BERRY_BUSH_STUCK_SPEED : null;
     }
 
     public static boolean suffocatesAt(CultPlayer player, SimpleCollisionBox playerBB) {
