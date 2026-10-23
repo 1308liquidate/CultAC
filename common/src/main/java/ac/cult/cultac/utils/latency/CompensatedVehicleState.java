@@ -21,6 +21,7 @@ import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.nmsutil.GetBoundingBox;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import org.jetbrains.annotations.Nullable;
@@ -308,9 +309,21 @@ public final class CompensatedVehicleState implements Debuggable {
         if (serverPlayerVehicle == null || serverPlayerVehicle != vehicleId) {
             player.getSetbackTeleportUtil().clearVehicleTeleports();
         }
+        // Rebuilding passengers does not interrupt the same first passenger's control of this root.
+        // Keep its attachment proof; the full passenger graph still updates at this packet's receipt boundary.
+        boolean unchangedAttachment = serverPlayerVehicle != null
+                && serverPlayerVehicle == vehicleId
+                && (Arrays.equals(serverPlayerVehiclePassengers, passengers)
+                        || (serverPlayerVehiclePassengers != null
+                                && serverPlayerVehiclePassengers.length > 0
+                                && passengers.length > 0
+                                && serverPlayerVehiclePassengers[0] == player.entityID
+                                && passengers[0] == player.entityID));
         serverPlayerVehicle = vehicleId;
         serverPlayerVehiclePassengers = passengers.clone();
-        serverPlayerVehicleTransaction = transaction;
+        if (!unchangedAttachment) {
+            serverPlayerVehicleTransaction = transaction;
+        }
         if (canLocalClientAuthoritativelyMoveMountedVehicle(vehicle, passengers)) {
             markVehicleSwitchBufferWindow(vehicle);
         }
