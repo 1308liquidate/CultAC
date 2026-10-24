@@ -1689,7 +1689,10 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
             backendTicks.onEntityTracked(movement.entityId(), System.nanoTime());
         // Geyser hands a Bedrock client no bundle, so its movement wave keeps a pre and a post ping.
         boolean useDelimiterProof = useReachBundleDelimiter && !player.isBedrockMovement();
-        if (!useDelimiterProof && !hasSentPreWavePacket) {
+        // Without the flush bundle, a 26.3 position path still carries a proof in a bundle of its own.
+        boolean bundlesPathProof = !useDelimiterProof && appendsClientPath();
+        boolean bracketsWithPings = !useDelimiterProof && !bundlesPathProof;
+        if (bracketsWithPings && !hasSentPreWavePacket) {
             hasSentPreWavePacket = true;
             player.sendTransaction();
         }
@@ -1740,7 +1743,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
                 data.setOnGround(movement.onGround());
             }
 
-            if (!useDelimiterProof && data.getLastTransactionHung() == player.lastTransactionSent.get()) {
+            if (bracketsWithPings && data.getLastTransactionHung() == player.lastTransactionSent.get()) {
                 player.sendTransaction();
             }
         }
@@ -1777,11 +1780,11 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
 
         // Only ordinary tracker movement shares the flush bundle's ping. Explicit teleports retain
         // their own proof because a controlled vehicle can reply inside the handler.
-        int proof = !useDelimiterProof
-                ? -1
-                : movement.kind() == MovementKind.TELEPORT_ENTITY
+        int proof = useDelimiterProof
+                ? movement.kind() == MovementKind.TELEPORT_ENTITY
                         ? transactionOf(player.appendResponseProofTransaction(event))
-                        : player.appendFlushProofTransaction(event);
+                        : player.appendFlushProofTransaction(event)
+                : bundlesPathProof ? appendBundledPathProof(event, movement.kind()) : -1;
         int firstTransaction = proof < 0 ? player.lastTransactionSent.get() : proof;
         if (data != null) {
             data.setLastTransactionHung(firstTransaction);
@@ -1850,6 +1853,31 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
         } else {
             scheduleTransactionBoundMovement(movement, firstTransaction);
         }
+    }
+
+    /**
+     * Whether the client appends this movement to a 26.3 SteppedInterpolationHandler path, as {@link #applyClientPath}
+     * models it. Minecraft#runTick handles the queued packets before each frame's client ticks, so with only a ping
+     * before and a ping after the packet, a client tick between their pongs may run before or after the append, and
+     * SteppedInterpolationHandler#startInterpolating starts or extends the path from the state that tick leaves.
+     * ClientPacketListener#handleBundlePacket handles a bundle in one task, so a ping in the packet's bundle proves
+     * which client tick the path was appended before.
+     */
+    private boolean appendsClientPath() {
+        return !player.isBedrockMovement() && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_26_3);
+    }
+
+    /**
+     * Bundles the movement with a proof of its own: a trailing ping, or the flush bundle's ping it already shares. An
+     * explicit teleport keeps a ping after it, since a controlled vehicle replies inside its handler.
+     */
+    private int appendBundledPathProof(PacketSendEvent<?> event, MovementKind kind) {
+        if (kind != MovementKind.TELEPORT_ENTITY) {
+            return transactionOf(appendTrailingProofTransaction(event, List.of(), true));
+        }
+        CultPlayer.TrackedTransaction proof = player.appendResponseProofTransaction(event);
+        if (proof != null) event.bundle();
+        return transactionOf(proof);
     }
 
     /**
@@ -2011,7 +2039,7 @@ public class PacketEntityReplication extends CultProcessor implements CheckListe
     }
 
     private void applyFirstMovement(PacketEntity entity, EntityMovement movement) {
-        // TODO: Figure out how to accomplish this pathing type interpolation without bundles
+        // Reached by a 26.3 path only when no proof could be bundled with it.
         if (applyClientPath(entity, movement, false)) return;
         PositionChange position = movement.position();
         entity.onFirstTransaction(
