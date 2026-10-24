@@ -19,14 +19,19 @@ public final class TravelVelocityTransformer {
             Vec3 playerVelocity,
             PredictionResult result,
             float additionalBlockFriction) {
-        // Boat friction is special, not handled here
+        // Boat friction is special, not handled here: AbstractBoat#floatBoat applies it at the start of the next tick.
         if (result.getSimulationContext().getVehicle() != null
                 && EntityTypeUtil.isBoat(result.getSimulationContext().getVehicle().type)) {
+            // AbstractBoat#tick moves through Entity#move, which ends by multiplying the carried deltaMovement by
+            // Entity#getBlockSpeedFactor (soul sand and honey 0.4F) like any other entity's move.
+            Vec3 movedVelocity = additionalBlockFriction == 1.0F
+                    ? playerVelocity
+                    : playerVelocity.multiply(additionalBlockFriction, 1, additionalBlockFriction);
             // edge case with teleporting to top of water
             if (player.boatData.nullifyNextY) {
-                return Collections.singletonList(new Vec3(playerVelocity.x, 0, playerVelocity.z));
+                return Collections.singletonList(new Vec3(movedVelocity.x, 0, movedVelocity.z));
             }
-            return Collections.singletonList(playerVelocity);
+            return Collections.singletonList(movedVelocity);
         }
 
         List<Vec3> frictions = new ArrayList<>(4);
