@@ -6,6 +6,7 @@ import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityHappyGhast;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityShulker;
 import ac.cult.cultac.utils.data.packetentity.PacketEntityStrider;
 import ac.cult.cultac.utils.math.Vec3;
 import java.util.List;
@@ -92,6 +93,11 @@ public final class UnknownCollisionProvider {
                         queryBox);
             }
 
+            if (!inVehicle && !player.isBedrockMovement() && isCollidableShulker(entity)) {
+                // Shulker#canBeCollidedWith is Entity#isAlive. EntityPositionWorlds collides with the exact box.
+                addIntersecting(boxes, movementCollisionBox(player, entity, entityBox, scratch), queryBox);
+            }
+
             if (!inVehicle
                     && entity instanceof PacketEntityHappyGhast happyGhast
                     && !happyGhast.isBaby
@@ -110,8 +116,8 @@ public final class UnknownCollisionProvider {
     }
 
     /**
-     * Whether {@code entity} collides with a player outside a vehicle at each of its possible positions: a boat, or a
-     * happy ghast that HappyGhast#canBeCollidedWith admits. {@code envelope} and {@code scratch} are working space
+     * Whether {@code entity} collides with a player outside a vehicle at each of its possible positions: a boat, a live
+     * shulker of a Java client, or a happy ghast that HappyGhast#canBeCollidedWith admits. {@code envelope} and {@code scratch} are working space
      * owned by the caller.
      */
     public static boolean collidesAtPossiblePositions(
@@ -121,6 +127,7 @@ public final class UnknownCollisionProvider {
             SimpleCollisionBox envelope,
             SimpleCollisionBox scratch) {
         if (entity.isBoat()) return true;
+        if (!player.isBedrockMovement() && isCollidableShulker(entity)) return true;
         return entity instanceof PacketEntityHappyGhast happyGhast
                 && !happyGhast.isBaby
                 && !happyGhast.isDead
@@ -129,6 +136,32 @@ public final class UnknownCollisionProvider {
                         || playerPos.y
                                 >= happyGhast.getPossibleMovementCollisionBoxes(envelope, scratch).maxY
                                         - SimpleCollisionBox.COLLISION_EPSILON);
+    }
+
+    /** Shulker#canBeCollidedWith: the shulker is alive. */
+    private static boolean isCollidableShulker(PacketEntity entity) {
+        return entity instanceof PacketEntityShulker && !entity.isDead && entity.actionAlive;
+    }
+
+    /**
+     * The bounds of {@code entity}'s possible movement collision boxes in {@code out}, with a shulker's box at its
+     * settled peek; {@code scratch} must be distinct.
+     */
+    public static SimpleCollisionBox movementCollisionBox(
+            CultPlayer player, PacketEntity entity, SimpleCollisionBox out, SimpleCollisionBox scratch) {
+        return movementCollisionBox(player, entity, entity.getPossibleMovementCollisionBoxes(out, scratch));
+    }
+
+    /**
+     * Writes into {@code box}, one of {@code entity}'s movement collision boxes, the box it collides as. A shulker
+     * collides as Shulker#makeBoundingBox; a peek animation in progress is a dynamic collision instead, so once none
+     * is pending currentPeekAmount sits on the last synced peek.
+     */
+    public static SimpleCollisionBox movementCollisionBox(
+            CultPlayer player, PacketEntity entity, SimpleCollisionBox box) {
+        return entity instanceof PacketEntityShulker shulker
+                ? shulker.settledPeekBox(box, player.getClientVersion())
+                : box;
     }
 
     private static void addIntersecting(

@@ -14,7 +14,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * The entity colliders a Java move outside a vehicle may meet. Entity#collide collides with each entity at the one
  * position the client holds it, as its bounding box (EntityGetter#getEntityCollisions, EntityGetter.java:54-69), so
- * each world holds one possible box of each boat, or of each happy ghast the player collides with, that may lie in
+ * each world holds one possible box of each boat, shulker, or happy ghast the player collides with, that may lie in
  * the move's region, and no box for an entity the client may hold outside it.
  */
 public final class EntityPositionWorlds {
@@ -47,11 +47,13 @@ public final class EntityPositionWorlds {
             if (!UnknownCollisionProvider.collidesAtPossiblePositions(player, playerPos, entity, envelope, scratch)) {
                 continue;
             }
-            if (!entity.getPossibleMovementCollisionBoxes(envelope, scratch).isIntersected(region)) continue;
+            if (!UnknownCollisionProvider.movementCollisionBox(player, entity, envelope, scratch)
+                    .isIntersected(region)) continue;
             List<SimpleCollisionBox> boxes = new ArrayList<>();
             boolean outside = false;
             for (int i = 0, count = entity.possibleMovementCollisionBoxCandidateCount(); i < count; i++) {
-                SimpleCollisionBox box = entity.possibleMovementCollisionBoxCandidate(i, scratch);
+                SimpleCollisionBox box = UnknownCollisionProvider.movementCollisionBox(
+                        player, entity, entity.possibleMovementCollisionBoxCandidate(i, scratch));
                 if (!box.isIntersected(region)) {
                     outside = true;
                 } else if (!containsBox(boxes, box)) {

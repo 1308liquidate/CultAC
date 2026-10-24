@@ -1101,8 +1101,8 @@ public class CompensatedEntities {
         WatchableIndexUtil.Layout layout = WatchableIndexUtil.forModel(player.user.getCultConnection());
         applyAgeableMetadata(entity, watchableObjects);
         applySizeMetadata(entity, watchableObjects, layout);
-        if (entity instanceof PacketEntityShulker) {
-            applyShulkerMetadata(entity, watchableObjects);
+        if (entity instanceof PacketEntityShulker shulker) {
+            applyShulkerMetadata(shulker, watchableObjects, provenAt);
         }
         if (entity instanceof PacketEntityRideable) {
             applyRideableMetadata(entity, watchableObjects, layout);
@@ -1180,32 +1180,50 @@ public class CompensatedEntities {
         entity.refreshDimensions(player);
     }
 
-    private void applyShulkerMetadata(PacketEntity entity, List<EntityMetadata.Entry> watchableObjects) {
+    private void applyShulkerMetadata(
+            PacketEntityShulker shulker, List<EntityMetadata.Entry> watchableObjects, int provenAt) {
         EntityMetadata.Entry attachFaceData =
                 WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.SHULKER_ATTACH_FACE);
         if (attachFaceData != null) {
             // This NMS -> Bukkit conversion is great and works in all 11 versions.
-            ((PacketEntityShulker) entity).facing =
-                    Direction.valueOf(attachFaceData.value().toString().toUpperCase());
+            shulker.facing = Direction.valueOf(attachFaceData.value().toString().toUpperCase());
         }
 
         EntityMetadata.Entry peekData = WatchableIndexUtil.getIndex(watchableObjects, WatchableIndexUtil.SHULKER_PEEK);
         if (peekData == null) return;
 
-        int peek = Byte.toUnsignedInt((byte) peekData.value());
-        if (peek == 0) {
-            ShulkerData opened = new ShulkerData(entity, player.lastTransactionSent.get(), true);
-            player.compensatedWorld.openShulkerBoxes.remove(opened);
-            player.compensatedWorld.openShulkerBoxes.add(opened);
-            return;
+        // Shulker#getRawPeekAmount reads the synced byte.
+        int peek = (byte) peekData.value();
+        int previous = shulker.rawPeek;
+        shulker.rawPeek = peek;
+
+        ShulkerData pending = null;
+        for (ShulkerData data : player.compensatedWorld.openShulkerBoxes) {
+            if (data.entity == shulker) {
+                pending = data;
+                break;
+            }
         }
 
-        // MCP-Reborn Shulker#updatePeekAmount changes currentPeekAmount
-        // by 0.05 toward DATA_PEEK_ID * 0.01 each client tick.
-        int closingTicks = Math.max(1, (peek + 4) / 5);
-        ShulkerData closing = new ShulkerData(entity, player.lastTransactionSent.get(), false, closingTicks);
-        player.compensatedWorld.openShulkerBoxes.remove(closing);
-        player.compensatedWorld.openShulkerBoxes.add(closing);
+        // MCP-Reborn Shulker#updatePeekAmount changes currentPeekAmount by 0.05
+        // toward DATA_PEEK_ID * 0.01 each client tick. With no animation pending,
+        // currentPeekAmount sits on the previous peek; otherwise it may be anywhere
+        // between closed and fully open.
+        int ticks = PacketEntityShulker.peekAnimationTicks(previous, peek);
+        if (pending != null) {
+            ticks = Math.max(
+                    ticks,
+                    Math.max(
+                            PacketEntityShulker.peekAnimationTicks(0, peek),
+                            PacketEntityShulker.peekAnimationTicks(100, peek)));
+        }
+        if (ticks == 0) return;
+
+        // Shulker#onPeekAmountChange only moves entities while the physical peek grows.
+        boolean mayOpen = pending != null ? peek > 0 : peek > previous;
+        ShulkerData animation = new ShulkerData(shulker, player.lastTransactionSent.get(), !mayOpen, ticks, provenAt);
+        player.compensatedWorld.openShulkerBoxes.remove(animation);
+        player.compensatedWorld.openShulkerBoxes.add(animation);
     }
 
     private void applyRideableMetadata(

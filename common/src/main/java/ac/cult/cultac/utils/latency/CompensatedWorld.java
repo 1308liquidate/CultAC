@@ -1322,7 +1322,10 @@ public class CompensatedWorld {
         } else {
             // Transaction path: drop entries the client has provably seen.
             pistons.removeSentBefore(transactionId);
-            openShulkerBoxes.removeIf(box -> box.isClosing() && box.lastTransactionSent < transactionId);
+            // Only a shulker box block's closing entry: Shulker#updatePeekAmount keeps
+            // animating an entity's box for client ticks after it applied the peek.
+            openShulkerBoxes.removeIf(
+                    box -> box.blockPos != null && box.isClosing() && box.lastTransactionSent < transactionId);
         }
         pruneOrphanedShulkerBoxes();
     }
@@ -1331,7 +1334,8 @@ public class CompensatedWorld {
         tickRecentClientCollisionChanges();
         tickRecentClientFluidChanges();
         pistons.tickClientTickEnd();
-        openShulkerBoxes.removeIf(ShulkerData::tickIfGuaranteedFinished);
+        int lastTransactionReceived = player.lastTransactionReceived.get();
+        openShulkerBoxes.removeIf(box -> box.tickIfGuaranteedFinished(lastTransactionReceived));
     }
 
     // Drop shulker boxes whose backing block or entity no longer exists.
