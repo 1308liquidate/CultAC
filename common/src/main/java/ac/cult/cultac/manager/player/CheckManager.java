@@ -58,10 +58,11 @@ import ac.cult.cultac.checks.impl.prediction.runner.SimulationProcessor;
 import ac.cult.cultac.checks.impl.scaffolding.*;
 import ac.cult.cultac.checks.impl.sprint.*;
 import ac.cult.cultac.checks.impl.vehicle.*;
-import ac.cult.cultac.checks.impl.visibility.AttackMobVisibility;
+import ac.cult.cultac.checks.impl.visibility.AttackEntityVisibility;
 import ac.cult.cultac.checks.impl.visibility.AttackPlayerVisibility;
 import ac.cult.cultac.checks.impl.visibility.BreakVisibility;
 import ac.cult.cultac.checks.impl.visibility.InteractEntityVisibility;
+import ac.cult.cultac.checks.impl.visibility.InteractPlayerVisibility;
 import ac.cult.cultac.checks.impl.visibility.PlaceVisibility;
 import ac.cult.cultac.checks.type.*;
 import ac.cult.cultac.events.packets.*;
@@ -285,7 +286,8 @@ public class CheckManager {
                 new PlaceVisibility(player, visibility),
                 new BreakVisibility(player, visibility),
                 new AttackPlayerVisibility(player, visibility),
-                new AttackMobVisibility(player, visibility),
+                new AttackEntityVisibility(player, visibility),
+                new InteractPlayerVisibility(player, visibility),
                 new InteractEntityVisibility(player, visibility),
                 new PlayerHitboxes(player),
                 new EntityHitboxes(player),
@@ -574,7 +576,8 @@ public class CheckManager {
         registerEarlyReceive(registrations, packetChecks.get(PlaceVisibility.class));
         registerEarlyReceive(registrations, packetChecks.get(BreakVisibility.class));
         registerEarlyReceive(registrations, packetChecks.get(AttackPlayerVisibility.class));
-        registerEarlyReceive(registrations, packetChecks.get(AttackMobVisibility.class));
+        registerEarlyReceive(registrations, packetChecks.get(AttackEntityVisibility.class));
+        registerEarlyReceive(registrations, packetChecks.get(InteractPlayerVisibility.class));
         registerEarlyReceive(registrations, packetChecks.get(InteractEntityVisibility.class));
 
         registerReceive(registrations, packetChecks.get(SimulationProcessor.class));

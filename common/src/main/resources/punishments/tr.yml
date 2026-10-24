@@ -106,7 +106,7 @@ Punishments:
     checks:
       - "Interact"
       - "AttackPlayerVisibility"
-      - "AttackMobVisibility"
+      - "AttackEntityVisibility"
       - "Aim"
     commands:
       - "20:40 [alert]"
@@ -129,4 +129,4 @@ Punishments:
       - "3:3 [webhook]"
       - "3:3 [proxy]"
 
-cult-config-version: 4
+cult-config-version: 5

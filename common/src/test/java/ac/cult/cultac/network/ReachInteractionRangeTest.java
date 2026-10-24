@@ -14,7 +14,7 @@ import ac.cult.cultac.checks.impl.combat.EntityReach;
 import ac.cult.cultac.checks.impl.combat.PlayerHitboxes;
 import ac.cult.cultac.checks.impl.combat.PlayerReach;
 import ac.cult.cultac.checks.impl.combat.ReachCheck;
-import ac.cult.cultac.checks.impl.visibility.AttackMobVisibility;
+import ac.cult.cultac.checks.impl.visibility.AttackEntityVisibility;
 import ac.cult.cultac.checks.impl.visibility.AttackPlayerVisibility;
 import ac.cult.cultac.events.packets.listeners.CheckManagerListener;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
@@ -209,7 +209,7 @@ class ReachInteractionRangeTest {
     @Test
     void aJavaClientsBoatBeyondReachInPlainSightIsEntityReachsToFlag() throws Exception {
         try (var setup = new Setup()) {
-            Check visibility = setup.player.checkManager.getCheck(AttackMobVisibility.class);
+            Check visibility = setup.player.checkManager.getCheck(AttackEntityVisibility.class);
             visibility.setEnabled(true);
             // The boat's near face 3.7 blocks ahead at the eye's height.
             var ahead = new Vec3(setup.player.x, setup.player.y + 1.62 - .3, setup.player.z + 3.7 + 1.375 / 2);
@@ -289,9 +289,9 @@ class ReachInteractionRangeTest {
 
     @Test
     void anExemptPlayersAttackThroughAWallBeyondRangeStaysWithVisibility() throws Exception {
-        for (String permission : new String[] {
-            "cult.exempt.playerreach", "cult.nomodifypacket.playerreach", "cult.exempt.playerhitboxes"
-        }) {
+        for (String permission :
+                new String[] {"cult.exempt.playerreach", "cult.nomodifypacket.playerreach", "cult.exempt.playerhitboxes"
+                }) {
             try (var setup = new Setup()) {
                 Check visibility = setup.player.checkManager.getCheck(AttackPlayerVisibility.class);
                 visibility.setEnabled(true);
@@ -1549,8 +1549,7 @@ class ReachInteractionRangeTest {
             var motionPacket = new ClientboundEntityMotion(player.entityID, new Vec3d(0, 0, speed));
             var motion = new PacketSendEvent<>(
                     fixture.user, ConnectionPhase.PLAY, ClientboundPackets.ENTITY_MOTION, motionPacket, false);
-            var explodePacket =
-                    new ClientboundExplode(new Vec3d(player.x, player.y, player.z), new Vec3d(0, 0, push));
+            var explodePacket = new ClientboundExplode(new Vec3d(player.x, player.y, player.z), new Vec3d(0, 0, push));
             var explode = new PacketSendEvent<>(
                     fixture.user, ConnectionPhase.PLAY, ClientboundPackets.EXPLODE, explodePacket, false);
             motion.sharedPing(ping);

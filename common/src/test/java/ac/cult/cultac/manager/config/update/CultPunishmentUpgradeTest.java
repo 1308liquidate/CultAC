@@ -41,11 +41,11 @@ class CultPunishmentUpgradeTest {
         var data = read(file);
         assertTrue(result.migrated);
         assertEquals(1, result.oldVersion);
-        assertEquals(4, result.newVersion);
-        assertEquals(4, data.get("cult-config-version"));
+        assertEquals(5, result.newVersion);
+        assertEquals(5, data.get("cult-config-version"));
         assertEquals(List.of("Knockback", "Explosion", "KeepSprint"), checks(data, "Knockback"));
         assertEquals(
-                List.of("Interact", "Aim", "AttackPlayerVisibility", "AttackMobVisibility"), checks(data, "Combat"));
+                List.of("Interact", "Aim", "AttackPlayerVisibility", "AttackEntityVisibility"), checks(data, "Combat"));
         assertEquals(List.of("NoSlow", "NoSneakSlow", "Sprint", "Place", "Break", "SkinBlinker"), checks(data, "Misc"));
         assertEquals(List.of("Cloud"), checks(data, "Cloud"));
         assertEquals(1800, group(data, "Cloud").get("remove-violations-after"));
@@ -68,7 +68,7 @@ class CultPunishmentUpgradeTest {
         assertFalse(upgrade(file).migrated);
         assertEquals(migrated, Files.readString(file));
         assertEquals(
-                List.of("Interact", "Aim", "AttackMobVisibility", "AttackPlayerVisibility"),
+                List.of("Interact", "Aim", "AttackEntityVisibility", "AttackPlayerVisibility"),
                 checks(read(file), "Combat"));
         assertFalse(Files.exists(directory.resolve("punishments.yml.cult-v2.bak")));
     }
@@ -110,7 +110,7 @@ class CultPunishmentUpgradeTest {
         var data = read(file);
         assertEquals(List.of("Knockback", "Explosion", "KeepSprint"), checks(data, "VelocityRules"));
         assertEquals(
-                List.of("Interact", "Aim", "AttackPlayerVisibility", "AttackMobVisibility"),
+                List.of("Interact", "Aim", "AttackPlayerVisibility", "AttackEntityVisibility"),
                 checks(data, "FightRules"));
         assertEquals(
                 List.of("9:2 custom-combat %player%"), group(data, "FightRules").get("commands"));
@@ -125,7 +125,7 @@ class CultPunishmentUpgradeTest {
         upgrade(file);
         var data = read(file);
         assertEquals(List.of("KeepSprint"), checks(data, "Knockback"));
-        assertEquals(List.of("AttackPlayerVisibility", "AttackMobVisibility"), checks(data, "Combat"));
+        assertEquals(List.of("AttackPlayerVisibility", "AttackEntityVisibility"), checks(data, "Combat"));
         assertEquals(
                 List.of("20:40 [alert]", "1:1 [log]"), group(data, "Combat").get("commands"));
         assertEquals(List.of("1:1 custom"), group(data, "Custom").get("commands"));
@@ -140,7 +140,7 @@ class CultPunishmentUpgradeTest {
         assertEquals(List.of("Simulation", "Timer", "BedrockMovement"), checks(data, "Simulation"));
         assertEquals(List.of("Knockback", "Explosion", "KeepSprint"), checks(data, "Knockback"));
         assertEquals(
-                List.of("Interact", "Aim", "AttackPlayerVisibility", "AttackMobVisibility"), checks(data, "Combat"));
+                List.of("Interact", "Aim", "AttackPlayerVisibility", "AttackEntityVisibility"), checks(data, "Combat"));
     }
 
     private static final String REVISION_2 = """
@@ -162,7 +162,7 @@ class CultPunishmentUpgradeTest {
         var result = upgrade(file);
         assertTrue(result.migrated);
         assertEquals(2, result.oldVersion);
-        assertEquals(4, result.newVersion);
+        assertEquals(5, result.newVersion);
         assertEquals(List.of("Vehicle", "NoSlow", "NoSneakSlow", "Sprint", "SkinBlinker"), checks(read(file), "Misc"));
     }
 
@@ -185,9 +185,9 @@ class CultPunishmentUpgradeTest {
         try (var source = CultConfigSpecs.class.getResourceAsStream("/punishments/" + language + ".yml")) {
             assertNotNull(source);
             Map<String, Object> data = new Yaml().load(source);
-            assertEquals(4, data.get("cult-config-version"));
+            assertEquals(5, data.get("cult-config-version"));
             assertTrue(checks(data, "Knockback").contains("KeepSprint"));
-            assertTrue(checks(data, "Combat").containsAll(List.of("AttackPlayerVisibility", "AttackMobVisibility")));
+            assertTrue(checks(data, "Combat").containsAll(List.of("AttackPlayerVisibility", "AttackEntityVisibility")));
             List<?> misc = checks(data, "Misc");
             assertEquals("NoSneakSlow", misc.get(misc.indexOf("NoSlow") + 1));
             assertEquals("SkinBlinker", misc.get(misc.indexOf("Exploit") + 1));
@@ -233,6 +233,66 @@ class CultPunishmentUpgradeTest {
         assertEquals(List.of("Cloud"), checks(data, "Bans"));
         assertEquals(600, group(data, "Bans").get("remove-violations-after"));
         assertEquals(List.of("2:0 ban %player%"), group(data, "Bans").get("commands"));
+    }
+
+    private static final String REVISION_4 = """
+            cult-config-version: 4
+            Punishments:
+              Combat:
+                checks: [Interact, AttackPlayerVisibility, AttackMobVisibility, Aim]
+                commands: ['20:40 [alert]']
+            """;
+
+    @Test
+    void renamesAttackMobVisibilityInPlace() throws Exception {
+        Path file = write(REVISION_4);
+        var result = upgrade(file);
+        assertTrue(result.migrated);
+        assertEquals(4, result.oldVersion);
+        assertEquals(5, result.newVersion);
+        assertEquals(
+                List.of("Interact", "AttackPlayerVisibility", "AttackEntityVisibility", "Aim"),
+                checks(read(file), "Combat"));
+    }
+
+    @Test
+    void renamesExclusionsAndKeepsPartialSelectorsPunishingTheRenamedCheck() throws Exception {
+        Path file = write(REVISION_4.replace(
+                        "[Interact, AttackPlayerVisibility, AttackMobVisibility, Aim]",
+                        "[Interact, MobVisibility, Aim]")
+                + "  Misc:\n    checks: [Place, '!attackmobvisibility']\n    commands: ['1:1 [log]']\n");
+        upgrade(file);
+        var data = read(file);
+        assertEquals(List.of("Interact", "MobVisibility", "AttackEntityVisibility", "Aim"), checks(data, "Combat"));
+        assertEquals(List.of("Place", "!AttackEntityVisibility"), checks(data, "Misc"));
+    }
+
+    @Test
+    void selectorsThatWouldNewlyMatchTheRenamedCheckExcludeIt() throws Exception {
+        Path file = write(REVISION_4
+                + "  Entities:\n    checks: [Entity]\n    commands: ['1:1 [log]']\n"
+                + "  Players:\n    checks: [Player]\n    commands: ['1:1 [log]']\n");
+        upgrade(file);
+        var data = read(file);
+        // Entity selected InteractEntityVisibility, player targets included, but never AttackMobVisibility.
+        assertEquals(
+                List.of("Entity", "InteractPlayerVisibility", "!AttackEntityVisibility"), checks(data, "Entities"));
+        assertEquals(List.of("Player", "!InteractPlayerVisibility"), checks(data, "Players"));
+    }
+
+    @Test
+    void playerInteractionsStayWhereEntityInteractionsWerePunished() throws Exception {
+        Path file = write(REVISION_4.replace("[Interact, AttackPlayerVisibility, AttackMobVisibility, Aim]", "[Aim]")
+                + "  Visibility:\n    checks: [InteractEntityVisibility, PlaceVisibility]\n    commands: ['1:1 [log]']\n"
+                + "  Misc:\n    checks: [Interact, '!InteractEntityVisibility']\n    commands: ['1:1 [log]']\n");
+        upgrade(file);
+        var data = read(file);
+        assertEquals(List.of("Aim"), checks(data, "Combat"));
+        assertEquals(
+                List.of("InteractEntityVisibility", "InteractPlayerVisibility", "PlaceVisibility"),
+                checks(data, "Visibility"));
+        assertEquals(
+                List.of("Interact", "!InteractEntityVisibility", "!InteractPlayerVisibility"), checks(data, "Misc"));
     }
 
     private Path write(String content) throws Exception {

@@ -18,10 +18,11 @@ import ac.cult.cultac.bedrock.MovementPlatform;
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.impl.combat.EntityReach;
 import ac.cult.cultac.checks.impl.combat.PlayerReach;
-import ac.cult.cultac.checks.impl.visibility.AttackMobVisibility;
+import ac.cult.cultac.checks.impl.visibility.AttackEntityVisibility;
 import ac.cult.cultac.checks.impl.visibility.AttackPlayerVisibility;
 import ac.cult.cultac.checks.impl.visibility.BreakVisibility;
 import ac.cult.cultac.checks.impl.visibility.InteractEntityVisibility;
+import ac.cult.cultac.checks.impl.visibility.InteractPlayerVisibility;
 import ac.cult.cultac.checks.impl.visibility.PlaceVisibility;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
@@ -65,18 +66,18 @@ class InteractionVisibilityTest {
             try (var setup = new Setup()) {
                 setup.wall("stone");
                 var players = setup.check(AttackPlayerVisibility.class);
-                var mobs = setup.check(AttackMobVisibility.class);
+                var nonPlayers = setup.check(AttackEntityVisibility.class);
                 var placing = setup.check(PlaceVisibility.class);
                 var breaking = setup.check(BreakVisibility.class);
                 setup.fixture.player.compensatedEntities.addEntity(42, type, new Vec3(.5, 64, 1.5), 0, 0, 0);
                 assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
                 assertEquals(type == EntityTypeIds.PLAYER ? 1 : 0, players.violations);
-                assertEquals(type == EntityTypeIds.PLAYER ? 0 : 1, mobs.violations);
+                assertEquals(type == EntityTypeIds.PLAYER ? 0 : 1, nonPlayers.violations);
                 assertEquals(0, placing.violations);
                 assertEquals(0, breaking.violations);
                 assertEquals("AttackPlayerVisibility", players.getConfigName());
-                assertEquals("AttackMobVisibility", mobs.getConfigName());
-                assertNotEquals(players.getStableKey(), mobs.getStableKey());
+                assertEquals("AttackEntityVisibility", nonPlayers.getConfigName());
+                assertNotEquals(players.getStableKey(), nonPlayers.getStableKey());
             }
         }
     }
@@ -86,14 +87,14 @@ class InteractionVisibilityTest {
         try (var setup = new Setup()) {
             setup.wall("stone");
             var players = setup.check(AttackPlayerVisibility.class);
-            var mobs = setup.check(AttackMobVisibility.class);
+            var nonPlayers = setup.check(AttackEntityVisibility.class);
             setup.fixture.player.compensatedEntities.addEntity(42, EntityTypeIds.COW, new Vec3(.5, 64, 1.5), 0, 0, 0);
             var interaction =
                     new ServerboundInteract(42, InteractAction.INTERACT, Hand.MAIN_HAND, Optional.empty(), false);
             assertFalse(setup.route(ServerboundPackets.INTERACT, interaction).isCancelled());
             assertFalse(setup.route(ServerboundPackets.INTERACT, attack(999)).isCancelled());
             assertEquals(0, players.violations);
-            assertEquals(0, mobs.violations);
+            assertEquals(0, nonPlayers.violations);
         }
     }
 
@@ -121,7 +122,7 @@ class InteractionVisibilityTest {
         try (var setup = new Setup()) {
             setup.wall("stone");
             var players = setup.check(AttackPlayerVisibility.class);
-            var mobs = setup.check(AttackMobVisibility.class);
+            var nonPlayers = setup.check(AttackEntityVisibility.class);
             var entities = setup.fixture.player.compensatedEntities;
             entities.addEntity(42, EntityTypeIds.PLAYER, new Vec3(.5, 64, 1.5), 0, 0, 0);
             entities.addEntity(43, EntityTypeIds.COW, new Vec3(.5, 64, 1.5), 0, 0, 0);
@@ -129,7 +130,7 @@ class InteractionVisibilityTest {
             assertFalse(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
             assertTrue(setup.route(ServerboundPackets.INTERACT, attack(43)).isCancelled());
             players.setEnabled(true);
-            mobs.setEnabled(false);
+            nonPlayers.setEnabled(false);
             assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
             assertFalse(setup.route(ServerboundPackets.INTERACT, attack(43)).isCancelled());
         }
@@ -141,7 +142,7 @@ class InteractionVisibilityTest {
             setup.check(PlaceVisibility.class);
             setup.check(BreakVisibility.class);
             setup.check(AttackPlayerVisibility.class);
-            setup.check(AttackMobVisibility.class);
+            setup.check(AttackEntityVisibility.class);
             var player = setup.fixture.player;
             player.compensatedEntities.addEntity(42, EntityTypeIds.PLAYER, new Vec3(.5, 64, 1.5), 0, 0, 0);
             player.compensatedEntities.addEntity(43, EntityTypeIds.COW, new Vec3(.5, 64, 1.5), 0, 0, 0);
@@ -200,7 +201,8 @@ class InteractionVisibilityTest {
         try (var setup = new Setup()) {
             setup.wall("stone");
             setup.check(AttackPlayerVisibility.class);
-            setup.check(AttackMobVisibility.class);
+            setup.check(AttackEntityVisibility.class);
+            setup.check(InteractPlayerVisibility.class);
             setup.check(InteractEntityVisibility.class);
             setup.check(PlaceVisibility.class);
             setup.check(BreakVisibility.class);
@@ -230,8 +232,8 @@ class InteractionVisibilityTest {
             assertEquals(
                     List.of(
                             "AttackPlayerVisibility: ",
-                            "AttackMobVisibility: type=minecraft:cow",
-                            "InteractEntityVisibility: action=INTERACT_AT, type=minecraft:player",
+                            "AttackEntityVisibility: type=minecraft:cow",
+                            "InteractPlayerVisibility: action=INTERACT_AT",
                             "InteractEntityVisibility: action=INTERACT_AT, type=minecraft:cow",
                             "PlaceVisibility: block=minecraft:stone, pos=0, 64, 2, face=NORTH",
                             "BreakVisibility: action=START_DESTROY_BLOCK, block=minecraft:stone, pos=0, 64, 2, face=NORTH"),
@@ -350,14 +352,14 @@ class InteractionVisibilityTest {
         for (int type : new int[] {EntityTypeIds.PLAYER, EntityTypeIds.COW, EntityTypeIds.OAK_BOAT}) {
             try (var setup = new Setup()) {
                 var players = setup.check(AttackPlayerVisibility.class);
-                var mobs = setup.check(AttackMobVisibility.class);
+                var nonPlayers = setup.check(AttackEntityVisibility.class);
                 setup.check(PlayerReach.class);
                 setup.check(EntityReach.class);
                 setup.block(0, 64, 2, "air");
                 // 3.7 blocks from the eye to the hitbox: out of reach, in plain sight.
                 setup.fixture.player.compensatedEntities.addEntity(42, type, new Vec3(.5, 64, 2.5), 0, 0, 0);
                 assertFalse(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
-                assertEquals(0, players.violations + mobs.violations);
+                assertEquals(0, players.violations + nonPlayers.violations);
             }
         }
     }
@@ -366,12 +368,12 @@ class InteractionVisibilityTest {
     void targetsReachDoesNotEnforceStayHiddenBeyondRange() throws Exception {
         for (int type : new int[] {EntityTypeIds.SHULKER, EntityTypeIds.ARMOR_STAND}) {
             try (var setup = new Setup()) {
-                var mobs = setup.check(AttackMobVisibility.class);
+                var nonPlayers = setup.check(AttackEntityVisibility.class);
                 setup.check(EntityReach.class);
                 setup.block(0, 64, 2, "air");
                 setup.fixture.player.compensatedEntities.addEntity(42, type, new Vec3(.5, 64, 2.5), 0, 0, 0);
                 assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled(), "type=" + type);
-                assertEquals(1, mobs.violations, "type=" + type);
+                assertEquals(1, nonPlayers.violations, "type=" + type);
             }
         }
         try (var setup = new Setup()) {
@@ -390,7 +392,7 @@ class InteractionVisibilityTest {
     @Test
     void anOccludedEyeInRangeIsNotRescuedByAnotherEyeBeyondRange() throws Exception {
         try (var setup = new Setup()) {
-            var mobs = setup.check(AttackMobVisibility.class);
+            var nonPlayers = setup.check(AttackEntityVisibility.class);
             // Standing and crouching eyes are within 2.95 blocks; the crawling eye is 3.08 blocks away.
             setup.fixture.player.compensatedEntities.addEntity(
                     42, EntityTypeIds.SILVERFISH, new Vec3(.5, 65.3, 1.65), 0, 0, 0);
@@ -403,7 +405,7 @@ class InteractionVisibilityTest {
             // Blocks every ray from the two eyes in range; the crawling eye still sees under it.
             setup.block(0, 65, -1, "stone");
             assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
-            assertEquals(1, mobs.violations);
+            assertEquals(1, nonPlayers.violations);
             setup.fixture
                     .player
                     .checkManager
@@ -543,7 +545,7 @@ class InteractionVisibilityTest {
                 }
                 Check check = type == EntityTypeIds.PLAYER
                         ? setup.check(AttackPlayerVisibility.class)
-                        : setup.check(AttackMobVisibility.class);
+                        : setup.check(AttackEntityVisibility.class);
                 assertTrue(setup.route(ServerboundPackets.INTERACT, attack(42)).isCancelled());
                 assertEquals(1, check.violations);
             }

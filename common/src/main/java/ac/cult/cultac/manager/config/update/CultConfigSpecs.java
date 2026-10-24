@@ -137,16 +137,79 @@ public final class CultConfigSpecs {
     public static @NotNull ConfigUpdater.Spec cultConfig(String resourceDirectory) {
         ConfigUpdater.Spec.Builder builder = ConfigUpdater.Spec.builder(
                         resourceDirectory,
-                        resourceDirectory.equals("/punishments/") ? 4 : 0,
+                        resourceDirectory.equals("/punishments/") ? 5 : 0,
                         ConfigUpdater.ConfigFlavor.V2)
                 .cultVersioning();
         if (resourceDirectory.equals("/punishments/")) {
             builder.migration(1, CultConfigSpecs::addBedrockPunishment)
                     .migration(2, CultConfigSpecs::addMissingCheckPunishments)
                     .migration(3, CultConfigSpecs::addNoSneakSlowPunishment)
-                    .migration(4, CultConfigSpecs::addSkinBlinkerAndCloudPunishments);
+                    .migration(4, CultConfigSpecs::addSkinBlinkerAndCloudPunishments)
+                    .migration(5, CultConfigSpecs::renameAndSplitVisibilityPunishments);
         }
         return builder.build();
+    }
+
+    /**
+     * AttackMobVisibility becomes AttackEntityVisibility, and InteractEntityVisibility's player targets move to
+     * InteractPlayerVisibility. Every group punishes the new names exactly where it punished the old ones: an entry
+     * naming AttackMobVisibility is renamed, a selector that only matched an old name gains the new name beside it,
+     * and a group a selector would newly pull a new name into excludes it.
+     */
+    private static void renameAndSplitVisibilityPunishments(MigrationContext ctx) {
+        Map<String, Object> groups = ctx.output().getMap("Punishments");
+        if (groups == null) return;
+        for (var entry : groups.entrySet()) {
+            if (!(entry.getValue() instanceof Map<?, ?> group) || !(group.get("checks") instanceof List<?> existing))
+                continue;
+            List<Object> checks = new ArrayList<>(existing);
+            boolean changed = carryPunishment(checks, "AttackMobVisibility", "AttackEntityVisibility", true);
+            changed |= carryPunishment(checks, "InteractEntityVisibility", "InteractPlayerVisibility", false);
+            if (changed) ctx.output().put("Punishments." + entry.getKey() + ".checks", checks);
+        }
+    }
+
+    /** Makes the group select {@code target} exactly when it selected {@code source}, renaming entries if asked. */
+    private static boolean carryPunishment(List<Object> checks, String source, String target, boolean rename) {
+        boolean selected = selectsCheck(checks, source);
+        boolean changed = false;
+        for (int i = 0; rename && i < checks.size(); i++) {
+            if (!(checks.get(i) instanceof String text)) continue;
+            boolean exclude = text.startsWith("!");
+            if (!source.equalsIgnoreCase(exclude ? text.substring(1) : text)) continue;
+            checks.set(i, exclude ? "!" + target : target);
+            changed = true;
+        }
+        if (selected == selectsCheck(checks, target)) return changed;
+        if (!selected) {
+            checks.add("!" + target);
+            return true;
+        }
+        // An exclusion that only matches the new name wins over any entry; the operator ruled those checks out.
+        if (checks.stream().anyMatch(value -> excludesCheck(value, target))) return changed;
+        int insertAt = checks.size();
+        for (int i = 0; i < checks.size(); i++) {
+            if (checks.get(i) instanceof String text && !text.startsWith("!") && matchesCheck(text, source))
+                insertAt = i + 1;
+        }
+        checks.add(insertAt, target);
+        return true;
+    }
+
+    /** PunishmentManager's selection: some entry is part of the name and no {@code !} entry is. */
+    private static boolean selectsCheck(List<Object> checks, String name) {
+        return checks.stream()
+                        .anyMatch(value ->
+                                value instanceof String text && !text.startsWith("!") && matchesCheck(text, name))
+                && checks.stream().noneMatch(value -> excludesCheck(value, name));
+    }
+
+    private static boolean excludesCheck(Object value, String name) {
+        return value instanceof String text && text.startsWith("!") && matchesCheck(text.substring(1), name);
+    }
+
+    private static boolean matchesCheck(String selector, String name) {
+        return name.toLowerCase(Locale.ROOT).contains(selector.toLowerCase(Locale.ROOT));
     }
 
     private static void addSkinBlinkerAndCloudPunishments(MigrationContext ctx) {
@@ -189,6 +252,7 @@ public final class CultConfigSpecs {
                 ctx,
                 "Combat",
                 List.of("Interact", "Aim"),
+                // The name at revision 2; revision 5 renames it to AttackEntityVisibility.
                 List.of("AttackPlayerVisibility", "AttackMobVisibility"),
                 List.of("20:40 [alert]", "1:1 [log]"));
     }

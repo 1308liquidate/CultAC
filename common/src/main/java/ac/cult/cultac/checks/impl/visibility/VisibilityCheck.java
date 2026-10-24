@@ -11,6 +11,7 @@ import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
+import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
 import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
 import ac.cult.cultac.utils.visibility.ClientVisibility.Sight;
@@ -29,6 +30,11 @@ abstract class VisibilityCheck extends Check implements CheckListener {
             event.setCancelled(true);
             player.onPacketCancel();
         }
+    }
+
+    /** A right click on an entity, which Minecraft#startUseItem sends as INTERACT or INTERACT_AT. */
+    protected static boolean isInteraction(InteractAction action) {
+        return action == InteractAction.INTERACT || action == InteractAction.INTERACT_AT;
     }
 
     protected static String type(PacketEntity entity) {
