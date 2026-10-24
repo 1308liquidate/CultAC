@@ -30,7 +30,6 @@ import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CollisionModifier;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.ExternalMovementUncertainty;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.ExternalMovementUncertainty.Snapshot;
-import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.Fireworks;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.InsideBlock;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.MovementTrace;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.PistonShulkerPush;
@@ -199,20 +198,6 @@ public final class BedrockUncertaintyPipelineTest {
                 valid.transformTraceTowards(new Vec3(0.02, 0.4, 0.01), null).position();
         Assert.assertEquals(0.4, bounded.y, 0.0);
         Assert.assertTrue(bounded.isBoundedStep());
-    }
-
-    @Test
-    public void fireworkCompensationIsInactiveOrBoundedBySharedSphereAndKeepsLineage() {
-        PredVector source = new PredVector(Vec3.ZERO);
-        PredVector start = source.withX(0.2, "collision lineage");
-        Fireworks handler = new Fireworks();
-        PredVector inactive = handler.handleUncertainty(
-                playerWithFireworks(false), null, null, null, null, start, new Vec3(3.0, 0.0, 0.0));
-        Assert.assertSame(start, inactive);
-        PredVector active = handler.handleUncertainty(
-                playerWithFireworks(true), null, null, null, null, start, new Vec3(3.0, 0.0, 0.0));
-        Assert.assertEquals(1.7, active.distanceTo(start), 1.0E-12);
-        Assert.assertTrue(active.hasReason("collision lineage"));
     }
 
     @Test

@@ -7,6 +7,7 @@ import ac.cult.cultac.checks.impl.prediction.PredictionCommit;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.pipeline.MovementEngine;
+import ac.cult.cultac.checks.impl.prediction.stage.FireworkBoost;
 import ac.cult.cultac.checks.impl.prediction.stage.MovementModifiers;
 import ac.cult.cultac.checks.impl.prediction.stage.VelocityTransformer;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.CollisionModifier;
@@ -67,6 +68,8 @@ public final class JavaMovementEngine implements MovementEngine {
             if (filtered.isEmpty()) return new ArrayList<>();
             startingVelocities = filtered;
         }
+        // FireworkRocketEntity#tick runs after the LocalPlayer's, before the block entities and this tick's packets.
+        startingVelocities = FireworkBoost.carryIntoTravel(player, context, lastPrediction, startingVelocities);
         // Before 26.3 the shulker box block shoves run between the last travel and this one.
         PistonPushes pushes =
                 context.getWorldData() == null ? null : context.getWorldData().getPistonPushes();

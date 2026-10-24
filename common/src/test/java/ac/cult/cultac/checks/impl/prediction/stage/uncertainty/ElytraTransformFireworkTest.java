@@ -17,6 +17,7 @@ import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.network.protocol.player.User;
 import ac.cult.cultac.platform.api.player.PlatformPlayer;
 import ac.cult.cultac.player.CultPlayer;
+import ac.cult.cultac.utils.data.BubbleColumnData;
 import ac.cult.cultac.utils.math.TrigHandler;
 import ac.cult.cultac.utils.math.Vec3;
 import ac.cult.cultac.utils.math.Vector3dm;
@@ -64,6 +65,36 @@ class ElytraTransformFireworkTest {
             Vec3 transformed = transform(player, velocity, boosted);
             assertEquals(0.0D, unboosted.distanceTo(transformed), 1.0E-3D);
             assertTrue(boosted.distanceTo(transformed) > 0.5D);
+        });
+    }
+
+    /** Issue #146: vertical movement past the boosted glide is not absorbed by the rocket. */
+    @Test
+    void anUpwardPushPastTheBoostedGlideIsNotAbsorbed() {
+        withPlayer(player -> {
+            player.compensatedFireworks.addNewFirework(100);
+            Vec3 boosted = glide(player, boost(VELOCITY, ReachUtils.getLook(player, LAST_YAW, LAST_PITCH)));
+            Vec3 cheated = boosted.add(0.0D, 0.6D, 0.0D);
+
+            Vec3 transformed = transform(player, context(player), lastTick(true), new PredVector(VELOCITY), cheated);
+            assertClose(boosted, transformed);
+            assertEquals(0.6D, cheated.distanceTo(transformed), 1.0E-9D);
+        });
+    }
+
+    /** FireworkRocketEntity#tick boosts only while LivingEntity#isFallFlying, after the LocalPlayer's tick. */
+    @Test
+    void noRocketBoostsTheVelocityOfATickThatDidNotEndFallFlying() {
+        withPlayer(player -> {
+            player.compensatedFireworks.addNewFirework(100);
+            Vec3 unboosted = glide(player, VELOCITY);
+            Vec3 boosted = glide(player, boost(VELOCITY, ReachUtils.getLook(player, LAST_YAW, LAST_PITCH)));
+
+            Vec3 transformed = transform(player, context(player), lastTick(false), new PredVector(VELOCITY), boosted);
+            // The vanilla and fast math glides bound the unboosted candidate.
+            assertEquals(0.0D, unboosted.distanceTo(transformed), 1.0E-3D);
+            assertTrue(boosted.distanceTo(transformed) > 0.5D);
+            assertClose(boosted, transform(player, context(player), lastTick(true), new PredVector(VELOCITY), boosted));
         });
     }
 
@@ -139,6 +170,7 @@ class ElytraTransformFireworkTest {
         WorldData worldData = mock(WorldData.class);
         SimulationContext context = mock(SimulationContext.class);
         when(context.usesFallFlyingMovement()).thenReturn(true);
+        when(context.isGliding()).thenReturn(true);
         when(context.getWorldData()).thenReturn(worldData);
         when(context.getVersion()).thenReturn(ClientVersion.V_26_1);
         when(context.getXRot()).thenReturn(YAW);
@@ -149,11 +181,27 @@ class ElytraTransformFireworkTest {
     }
 
     private static Vec3 transform(CultPlayer player, SimulationContext context, PredVector start, Vec3 end) {
+        return transform(player, context, null, start, end);
+    }
+
+    private static Vec3 transform(
+            CultPlayer player, SimulationContext context, PredictionResult last, PredVector start, Vec3 end) {
         PredictionResult result = mock(PredictionResult.class);
         when(result.getSimulationContext()).thenReturn(context);
         when(result.getPossibleGravity(anyDouble(), anyDouble())).thenReturn(List.of(GRAVITY));
         return new ElytraTransform()
-                .handleUncertainty(player, mock(ValidMovements.class), result, context, null, start, end);
+                .handleUncertainty(player, mock(ValidMovements.class), result, context, last, start, end);
+    }
+
+    private static PredictionResult lastTick(boolean gliding) {
+        WorldData worldData = mock(WorldData.class);
+        when(worldData.getBubbleColumn()).thenReturn(new BubbleColumnData(0, 0, 0, 0));
+        SimulationContext context = mock(SimulationContext.class);
+        when(context.isGliding()).thenReturn(gliding);
+        when(context.getWorldData()).thenReturn(worldData);
+        PredictionResult last = mock(PredictionResult.class);
+        when(last.getSimulationContext()).thenReturn(context);
+        return last;
     }
 
     private static void assertClose(Vec3 expected, Vec3 actual) {

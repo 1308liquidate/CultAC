@@ -156,7 +156,7 @@ class UncertaintyFilterEquivalenceTest {
     private static final int FIREWORK = 1_000_001;
 
     /** Handlers whose predicate the scenarios alone never turn false; a variant must make each one move a trace. */
-    private static final Set<String> MUST_ACT = Set.of("BoatTransform", "Fireworks", "Honey", "StuckSpeed");
+    private static final Set<String> MUST_ACT = Set.of("BoatTransform", "Honey", "StuckSpeed");
 
     private static final List<Variant> VARIANTS = List.of(
             Variant.of(Owner.WORLD, "inWater", () -> DesyncStatus.TRUE),
