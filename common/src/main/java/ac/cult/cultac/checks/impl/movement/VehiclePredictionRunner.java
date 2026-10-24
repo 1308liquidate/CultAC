@@ -4,6 +4,7 @@ import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.CultProcessor;
 import ac.cult.cultac.checks.impl.prediction.DesyncStatus;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
+import ac.cult.cultac.checks.impl.prediction.checks.psuedo.BoatPseudo;
 import ac.cult.cultac.checks.impl.prediction.stage.uncertainty.BoatTransform;
 import ac.cult.cultac.checks.impl.vehicle.VehicleC;
 import ac.cult.cultac.checks.type.ClientTickEndListener;
@@ -182,7 +183,8 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
             // deltaRotation on the root entity. A packet accepted from
             // LocalPlayer#tick proves that AbstractBoat#tick completed, so carry
             // those exact post-tick fields into the next vehicle prediction.
-            BoatTransform.commitAcceptedBoatTickState(player, result);
+            float turnedYaw = BoatTransform.commitAcceptedBoatTickState(player, result);
+            checkBoatYaw(turnedYaw, vehicleUpdate.getXRot());
         } else if (riding instanceof PacketEntityHappyGhast) {
             Vec3 velocity =
                     uniqueVelocity(player.checkManager.getSimulationProcessor().getValidPlayerStartingVels());
@@ -230,6 +232,18 @@ public class VehiclePredictionRunner extends CultProcessor implements VehicleLis
                 }
             }
         }
+    }
+
+    /**
+     * LocalPlayer#sendChanges sends ServerboundMoveVehiclePacket#fromEntity after the boat's tick, so its yaw is the
+     * boat's yaw after AbstractBoat#controlBoat turned it by deltaRotation, exactly in float. Any other yaw is a turn
+     * the boat's controls cannot make.
+     */
+    private void checkBoatYaw(float turnedYaw, float statedYaw) {
+        // A Java client's packet: Bedrock boats are predicted by the Bedrock engine.
+        if (player.isBedrockMovement()) return;
+        if (Float.isNaN(turnedYaw) || turnedYaw == statedYaw) return;
+        player.checkManager.getListener(BoatPseudo.class).flag("yaw=" + statedYaw + ", expected=" + turnedYaw);
     }
 
     void evaluateItemControlledVehicle(PacketEntity riding) {

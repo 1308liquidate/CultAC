@@ -62,13 +62,34 @@ public class BoatTransform implements UncertaintyHandler {
         return start.with(tick.vector(), "boat inputs");
     }
 
-    public static void commitAcceptedBoatTickState(CultPlayer player, PredictionResult result) {
+    /**
+     * Carries the accepted tick's AbstractBoat fields into the next tick; returns the yaw AbstractBoat#controlBoat
+     * turned the boat to, which the tick's ServerboundMoveVehiclePacket states, or NaN when the packet need not state
+     * it or the yaw the turn started from is not known.
+     */
+    public static float commitAcceptedBoatTickState(CultPlayer player, PredictionResult result) {
         SimulationContext context = result.getSimulationContext();
-        if (context.getVehicle() == null || !EntityTypeUtil.isBoat(context.getVehicle().type)) return;
+        if (context.getVehicle() == null || !EntityTypeUtil.isBoat(context.getVehicle().type)) return Float.NaN;
 
+        float turnStart = turnStartYaw(player, context);
         BoatTickResult tick = selectBoatTick(
                 player, context, result.getInitialStartingVel(), BoatTickState.capture(player), result.getTarget());
         tick.state().apply(player);
+        return Float.isNaN(turnStart) ? Float.NaN : tick.postControlYaw();
+    }
+
+    /**
+     * The yaw AbstractBoat#controlBoat turns a driven boat from in this client tick: the yaw the last tick, a snap or
+     * this tick's interpolation step left it (CultPlayer#boatYawBeforeTurn). NaN when it is not known, or when the
+     * tick's vehicle move states an interpolation target rather than the boat's own yaw.
+     */
+    private static float turnStartYaw(CultPlayer player, SimulationContext context) {
+        if (!player.packetStateData.isVehicleMovementFromClientTick()
+                || context.getVehicle() != player.compensatedEntities.getSelf().getRiding()
+                || !context.getVehicle().sendsOwnRotation()) {
+            return Float.NaN;
+        }
+        return player.boatYawBeforeTurn;
     }
 
     public static String debugBoatTick(CultPlayer player, SimulationContext context, Vec3 vector) {
@@ -323,7 +344,13 @@ public class BoatTransform implements UncertaintyHandler {
         float deltaRotation = applyBoatControlDelta(state.deltaRotation(), inputs);
         float startYaw;
         float postControlYaw;
-        if (player.packetStateData.isVehicleMovementFromClientTick()) {
+        float turnStart = turnStartYaw(player, context);
+        if (!Float.isNaN(turnStart)) {
+            // AbstractBoat#controlBoat: setYRot(getYRot() + deltaRotation), in float, from the yaw the boat held.
+            // The client's stated yaw is checked against this turn after prediction, never trusted for the thrust.
+            startYaw = turnStart;
+            postControlYaw = turnStart + deltaRotation;
+        } else if (player.packetStateData.isVehicleMovementFromClientTick()) {
             // ServerboundMoveVehiclePacket#fromEntity serializes the root boat
             // after AbstractBoat#controlBoat has already added deltaRotation.
             postControlYaw = context.getXRot();

@@ -775,6 +775,15 @@ public class PacketEntity {
         }
     }
 
+    /**
+     * Whether ServerboundMoveVehiclePacket#fromEntity states this locally moved root's own yaw: it serializes
+     * Entity#getClientPositionAndRotation, which is a running InterpolationHandler's target while one may be active.
+     */
+    public boolean sendsOwnRotation() {
+        return oldPacketLocation == null
+                && (newPacketLocation == null || !newPacketLocation.hasActiveInterpolationTarget());
+    }
+
     private boolean hasActiveLocalRootInterpolation() {
         return hasActiveSteppedInterpolation()
                 || (boat
