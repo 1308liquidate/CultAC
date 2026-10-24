@@ -53,8 +53,7 @@ class BoatBlockSpeedFactorTest {
         drive(BlockIds.HONEY_BLOCK, HONEY_TOP, 1.0F, false);
     }
 
-    private static void drive(BlockDefinition block, double top, float speedFactor, boolean legal)
-            throws Exception {
+    private static void drive(BlockDefinition block, double top, float speedFactor, boolean legal) throws Exception {
         try (var f = mount(block, top)) {
             Vec3 position = new Vec3(0.5, top, 0.5);
             // The tick before the keys reach the boat: LocalPlayer#rideTick copies them after the root boat tick.
