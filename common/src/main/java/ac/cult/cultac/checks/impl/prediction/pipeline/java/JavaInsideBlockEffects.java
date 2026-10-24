@@ -7,6 +7,7 @@ import ac.cult.blocksim.engine.shapes.VoxelShape;
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
+import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.GameMode;
@@ -18,6 +19,8 @@ import ac.cult.cultac.utils.nmsutil.Collisions;
 import ac.cult.cultac.utils.nmsutil.InsideBlockEffectScan;
 import ac.cult.cultac.utils.nmsutil.JavaCollisionState;
 import ac.cult.cultac.utils.nmsutil.NativeBlockCollisionHelper;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /** 26.1/26.2 Entity#checkInsideBlocks and the movement-affecting block callbacks. */
 public final class JavaInsideBlockEffects {
@@ -137,12 +140,29 @@ public final class JavaInsideBlockEffects {
 
     /**
      * Whether the velocity carried out of {@code context}'s move holds {@link #stepOn}: a Java client's own or its
-     * living vehicle's.
+     * living vehicle's. From 1.21.2 LivingEntity#aiStep runs Entity#applyEffectsFromBlocks, and so SlimeBlock#stepOn,
+     * after travel on the tick's own shift key, which the client reports with its input.
      */
     public static boolean carriesStepOn(CultPlayer player, SimulationContext context) {
         return !player.isBedrockMovement()
-                && JavaMovementEngine.contextUsesExactEffects(context)
+                && context != null
+                && context.getVersion().isNewerThanOrEquals(ClientVersion.V_1_21_2)
                 && (context.getVehicle() == null || context.getVehicle().isLivingEntity());
+    }
+
+    /**
+     * {@link #stepOn} for each velocity a move without the exact inside-block pass carries, the clients before
+     * 1.21.11 whose {@link #carriesStepOn} holds.
+     */
+    public static Set<Vec3> stepOn(
+            CultPlayer player, PredictionResult result, Vec3 acceptedDiff, Set<Vec3> velocities) {
+        SimulationContext context = result.getSimulationContext();
+        if (!carriesStepOn(player, context)
+                || !BlockIds.is(context.getWorldData().getOnBlock(), BlockIds.SLIME_BLOCK)) return velocities;
+        JavaFallDistance.Moved moved = JavaFallDistance.afterCollision(player, result, acceptedDiff);
+        Set<Vec3> stepped = new LinkedHashSet<>(velocities.size());
+        for (Vec3 velocity : velocities) stepped.add(stepOn(player, result, moved, velocity));
+        return stepped;
     }
 
     /**

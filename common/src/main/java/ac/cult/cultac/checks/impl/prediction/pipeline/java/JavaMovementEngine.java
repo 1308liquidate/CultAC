@@ -226,8 +226,12 @@ public final class JavaMovementEngine implements MovementEngine {
         }
         return new PredictionCommit(
                 JavaFallDistance.commit(player, result, acceptedDiff),
-                NextTickVelocityDeriver.findVelocitiesForNextTick(
-                        player, result, lastPrediction, acceptedDiff, scratch));
+                JavaInsideBlockEffects.stepOn(
+                        player,
+                        result,
+                        acceptedDiff,
+                        NextTickVelocityDeriver.findVelocitiesForNextTick(
+                                player, result, lastPrediction, acceptedDiff, scratch)));
     }
 
     /**
