@@ -28,6 +28,68 @@ public class BedrockPendingTeleportTickTest {
         runDelayedTeleport(true);
     }
 
+    /**
+     * Issue #13: a Bedrock client keeps authoring ticks from its own position until it handles a setback's MovePlayer,
+     * and may ignore it until a resend. Those frames are simulated against the pending setback's carry, never measured
+     * against the setback anchor as a Java move, so their distance from it is no CrashF move length.
+     */
+    @Test
+    public void framesFarFromAPendingOrIgnoredSetbackDoNotTripCrashF() {
+        OfflineCultTestBootstrap.installConfig();
+        var player = OfflineBedrockReplayRunnerTest.offlinePlayer();
+        try {
+            player.gamemode = GameMode.SURVIVAL;
+            player.compensatedWorld.ensureValidationChunkLoaded(0, 0);
+            for (int x = 0; x < 4; x++)
+                for (int z = 0; z < 4; z++)
+                    player.compensatedWorld.updateBlock(
+                            x,
+                            105,
+                            z,
+                            DataTables.defaults()
+                                    .registry()
+                                    .block("minecraft:stone")
+                                    .defaultState());
+            Vec3 ground = new Vec3(1.5, 106, 1.5);
+            player.x = player.lastX = ground.x;
+            player.y = player.lastY = ground.y;
+            player.z = player.lastZ = ground.z;
+            player.onGround = player.lastOnGround = true;
+            player.boundingBox = GetBoundingBox.getCollisionBoxForPlayer(player, ground.x, ground.y, ground.z);
+            var teleports = player.getSetbackTeleportUtil();
+            teleports.hasFullyLoaded = teleports.hasFullyJoined = true;
+            assertNotNull(process(player, frame(player, 634, ground, -0.0784, false, false)));
+
+            teleports.addSentTeleport(ground, 10, new RelativeFlag(0), false, 1);
+            teleports.pendingTeleports.removeIf(pending -> pending.getBedrockTransportRevision() < 0);
+            var operation = new BedrockTeleportOperation(1, BedrockTeleportProvenance.CULT_SETBACK, 10);
+            teleports.addImmediateBedrockTransportTeleport(
+                    ground, true, BedrockCoordinateFrame.IDENTITY, null, operation, 10);
+            player.lastTransactionReceived.set(100);
+            assertTrue(teleports.mustAcknowledgeBedrockTransportTeleport());
+
+            var crash = player.checkManager.getListener(
+                    ac.cult.cultac.checks.impl.crash.CrashF.class);
+            // Before the client handles the MovePlayer, and after it ignores it until the resend below.
+            for (int tick = 635; tick < 642; tick++) {
+                assertNull(process(player, frame(player, tick, new Vec3(tick - 575, 106, 1.5), 0, false, false)));
+                assertTrue(teleports.mustAcknowledgeBedrockTransportTeleport());
+                assertEquals(ground.x, player.x, 0);
+                if (tick == 638) {
+                    teleports.addImmediateBedrockTransportTeleport(
+                            ground, true, BedrockCoordinateFrame.IDENTITY, null, operation, 11);
+                    player.lastTransactionReceived.set(101);
+                }
+            }
+            assertNotNull(process(player, frame(player, 645, ground, 0, false, true)));
+            assertFalse(teleports.mustAcknowledgeBedrockTransportTeleport());
+            assertEquals(0, crash.violations, 0);
+            assertEquals(0, player.checkManager.getListener(BedrockMovement.class).violations, 0);
+        } finally {
+            OfflineBedrockReplayRunnerTest.closeOfflinePlayer(player);
+        }
+    }
+
     @Test
     public void writtenJavaMarkerReceiptMakesChunkAndTeleportReadyForImmediateAuthBeforePong() throws Exception {
         OfflineCultTestBootstrap.installConfig();
