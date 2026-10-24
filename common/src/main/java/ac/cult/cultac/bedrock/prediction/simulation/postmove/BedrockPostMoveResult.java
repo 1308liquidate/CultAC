@@ -111,6 +111,22 @@ public record BedrockPostMoveResult(
                 nonHopVelocity);
     }
 
+    /** The velocity a spin attack rebound leaves; the rebound owns every axis it scales. */
+    public BedrockPostMoveResult withSpinAttackRebound(Vec3d velocity, Vec3d nonHopVelocity) {
+        return new BedrockPostMoveResult(
+                new VelocityEffects(
+                        velocity,
+                        velocityEffects.preDownwardBubbleColumnVelocity(),
+                        velocityEffects.preInsideBlockVelocity(),
+                        standingSurfaceHorizontalSlowdownApplied(),
+                        true,
+                        true,
+                        horizontalFriction()),
+                collisionEffects,
+                stateModes,
+                nonHopVelocity);
+    }
+
     public BedrockPostMoveResult withPendingBlockMovementSlowdownState(BlockMovementSlowdownState state) {
         return new BedrockPostMoveResult(
                 velocityEffects,

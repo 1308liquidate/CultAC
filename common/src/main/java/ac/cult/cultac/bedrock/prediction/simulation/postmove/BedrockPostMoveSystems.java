@@ -60,6 +60,7 @@ public final class BedrockPostMoveSystems {
                 ? context.applyLiquidClimbOut(frame, blockMove.position())
                 : BedrockPostMoveResult.afterLiquidClimbOut(frame, frame.velocity(), frame.flags(), 1.0D);
         result = BedrockEntityInsideMovement.apply(context, result, blockMove.position());
+        if (travel) result = BedrockSpinAttackMovement.apply(context, result, blockMove);
         result = result.withPendingBlockMovementSlowdownState(
                 context.resolvePendingBlockMovementSlowdown(blockMove.position()));
         result = context.withPostMoveStateModes(result, blockMove.position());

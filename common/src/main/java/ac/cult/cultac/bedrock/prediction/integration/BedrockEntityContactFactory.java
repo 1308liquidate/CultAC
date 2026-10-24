@@ -2,6 +2,7 @@ package ac.cult.cultac.bedrock.prediction.integration;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.bedrock.prediction.geometry.Vec3d;
+import ac.cult.cultac.bedrock.prediction.geometry.WorldCollisionBox;
 import ac.cult.cultac.bedrock.prediction.model.PlayerDimensionsState;
 import ac.cult.cultac.bedrock.prediction.state.BedrockMovementState;
 import ac.cult.cultac.bedrock.prediction.world.DolphinBoostState;
@@ -11,7 +12,10 @@ import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.data.packetentity.PacketEntityPlayer;
 import ac.cult.cultac.utils.latency.CompensatedEntities;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 final class BedrockEntityContactFactory {
@@ -22,11 +26,41 @@ final class BedrockEntityContactFactory {
     EntityContactState create(CultPlayer player, SimulationContext context) {
         DolphinBoostState dolphinBoostState = new DolphinBoostState(hasDolphinProximity(player, context));
         var entities = context.getEntities() != null ? context.getEntities() : player.compensatedEntities;
+        boolean passenger = context.getVehicle() == null
+                && entities != null
+                && entities.getSelf().inVehicle();
         return new EntityContactState(
                 dolphinBoostState,
-                context.getVehicle() == null
-                        && entities != null
-                        && entities.getSelf().inVehicle());
+                passenger,
+                context.getVehicle() != null || passenger ? List.of() : spinAttackTargets(context, entities));
+    }
+
+    /**
+     * The mobs a riptide spin attack may hit this tick: every living entity the client holds but a dead one, a
+     * spectator or an untracked rider, in the box the client shows it in. Only a profile that is spinning or charging
+     * a riptide release can spin this tick.
+     */
+    private static List<WorldCollisionBox> spinAttackTargets(SimulationContext context, CompensatedEntities entities) {
+        if (entities == null || entities.entityMap.isEmpty()) return List.of();
+        boolean maySpin = BedrockProfileState.profileEntries(context).stream()
+                .map(BedrockProfileState.Entry::state)
+                .anyMatch(state -> state.riptideSpinActive() || state.riptideChargeTicks() > 0L);
+        if (!maySpin) return List.of();
+        ArrayList<WorldCollisionBox> targets = new ArrayList<>();
+        for (PacketEntity entity : entities.entityMap.values()) {
+            if (entity == null
+                    || !entity.isLivingEntity()
+                    || entity.isDead
+                    || entities.isUntrackedRider(entity)
+                    || entity instanceof PacketEntityPlayer remote
+                            && remote.profile != null
+                            && remote.actionSpectator(entities.clientPlayerModes)) {
+                continue;
+            }
+            SimpleCollisionBox box = entity.getPossibleMovementCollisionBoxes();
+            targets.add(new WorldCollisionBox(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ));
+        }
+        return targets;
     }
 
     private boolean hasDolphinProximity(CultPlayer player, SimulationContext context) {
