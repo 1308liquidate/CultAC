@@ -25,6 +25,25 @@ public final class RiptideUtil {
         return ac.cult.cultac.utils.inventory.ItemUtil.enchantmentLevel(item, "minecraft:riptide");
     }
 
+    /**
+     * The distinct riptide levels TridentItem#releaseUsing may read on a release of the use in {@code hand}, from the
+     * stack LivingEntity#releaseUsingItem passes: LivingEntity.useItem, rebound at the last entity tick, which a slot
+     * change since then has not rebound. Without a modelled use, the hand's stack.
+     */
+    public static int[] releaseLevels(CultPlayer player, Hand hand) {
+        if (hand == null) return new int[0];
+        List<SimItemStack> stacks = player.usesModernJavaItemUse() ? player.clientItemUse.useStacks(hand) : List.of();
+        if (stacks.isEmpty()) {
+            SimItemStack held = player.getInventory().getHandItem(hand);
+            stacks = held == null ? List.of() : List.of(held);
+        }
+        return stacks.stream()
+                .mapToInt(RiptideUtil::getRiptideLevel)
+                .filter(level -> level > 0)
+                .distinct()
+                .toArray();
+    }
+
     public static boolean isValidRiptideRelease(CultPlayer player, Hand hand) {
         return isFullyCharged(player, hand) && canUseRiptideAtCurrentState(player);
     }

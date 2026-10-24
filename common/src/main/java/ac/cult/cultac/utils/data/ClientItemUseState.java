@@ -270,6 +270,17 @@ public final class ClientItemUseState {
         return new ActiveUse(first.hand(), itemKey);
     }
 
+    /**
+     * The stacks LivingEntity.useItem may hold for a use in {@code hand}: LivingEntity.updatingUsingItem rebinds it at
+     * each entity tick to the same item in the hand, which a number key may have selected without a carried-item
+     * packet, and Item#releaseUsing reads that stack, not the one the hand holds at release.
+     */
+    public List<SimItemStack> useStacks(Hand hand) {
+        var stacks = new ArrayList<SimItemStack>(candidates.size());
+        for (Use use : candidates) if (use.hand() == hand) stacks.add(use.stack());
+        return stacks;
+    }
+
     public boolean hasObligation() {
         return obligation != null;
     }

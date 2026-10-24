@@ -12,6 +12,7 @@ import ac.cult.cultac.protocol.value.Hand;
 import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.utils.anticheat.update.BlockBreak;
 import ac.cult.cultac.utils.nmsutil.RiptideUtil;
+import java.util.Arrays;
 
 public class PacketPlayerDigging {
     // LOW
@@ -32,11 +33,12 @@ public class PacketPlayerDigging {
             PacketReceiveEvent<ServerboundPlayerAction> event, CultPlayer player, ServerboundPlayerAction packet) {
         if (packet.action() == PlayerAction.RELEASE_USE_ITEM) {
             Hand hand = player.packetStateData.riptideUseHand;
-            SimItemStack item = hand == null ? null : player.getInventory().getHandItem(hand);
-            int j = RiptideUtil.getRiptideLevel(item);
+            int[] levels = RiptideUtil.releaseLevels(player, hand);
+            int j = levels.length == 0 ? 0 : levels[0];
 
             if (j > 0 && RiptideUtil.isValidRiptideRelease(player, hand)) {
                 player.packetStateData.riptideLevel = j;
+                player.packetStateData.riptideAlternativeLevels = Arrays.copyOfRange(levels, 1, levels.length);
                 player.packetStateData.riptideReleaseCertain = RiptideUtil.isCertainRiptideRelease(player);
                 player.riptideSpinAttackTicks = 20;
                 player.riptideSpinCertain = player.packetStateData.riptideReleaseCertain;
@@ -84,9 +86,9 @@ public class PacketPlayerDigging {
         // Stop people from spamming the server with out of bounds exceptions
         if (slotId > 8 || slotId < 0) return;
 
+        // ServerGamePacketListenerImpl#handleSetCarriedItem stops the server's main-hand use, but the client keeps
+        // its use: LivingEntity#updatingUsingItem stops it only at an entity tick holding a different item, so a
+        // trident use continues across the change and its release still spins (ClientItemUseState models the stack).
         player.packetStateData.lastSlotSelected = slotId;
-        if (player.packetStateData.riptideUseHand != Hand.OFF_HAND) {
-            RiptideUtil.clearTrackedUse(player);
-        }
     }
 }

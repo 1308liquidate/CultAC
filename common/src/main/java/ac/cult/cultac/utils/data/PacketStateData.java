@@ -51,6 +51,9 @@ public class PacketStateData {
     private int slowedByUsingItemSlot = Integer.MIN_VALUE;
     public KnownInput knownInput = KnownInput.DEFAULT;
     public int riptideLevel = 0;
+    /** The other riptide levels this tick's release may spin with, beside {@link #riptideLevel}. */
+    public int[] riptideAlternativeLevels = new int[0];
+
     public boolean riptideReleaseCertain = false;
     public int acceptedClientTick = 0;
     public int riptideUseStartClientTick = Integer.MIN_VALUE;

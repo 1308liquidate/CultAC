@@ -1113,6 +1113,7 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
             this.lastGliding = this.player.isGliding;
             if (!this.player.isBedrockMovement()) this.endSpinAttack(result);
             this.player.packetStateData.riptideLevel = 0;
+            this.player.packetStateData.riptideAlternativeLevels = new int[0];
             this.player.packetStateData.riptideReleaseCertain = false;
             this.player.riptideSpinAttackTicks = Math.max(0, this.player.riptideSpinAttackTicks - 1);
             this.couldPotentiallyTickSkip = false;
@@ -2072,7 +2073,9 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                     movementProfile);
         }
         boolean certain = player.packetStateData.riptideReleaseCertain;
-        List<SimulationContext> released = new ArrayList<>(contexts.size() * 2);
+        int level = player.packetStateData.riptideLevel;
+        int[] alternatives = player.packetStateData.riptideAlternativeLevels;
+        List<SimulationContext> released = new ArrayList<>(contexts.size() * (2 + alternatives.length));
         if (!certain) {
             for (SimulationContext context : contexts) context.setRiptideLevel(0);
             released.addAll(contexts);
@@ -2080,27 +2083,25 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
         // A spin context builds its own world: the spin leaves onGround false for the tick's LivingEntity#aiStep.
         player.packetStateData.riptideReleaseCertain = true;
         try {
-            List<SimulationContext> spins = certain
-                    ? contexts
-                    : this.createSimulationContexts(
-                            player,
-                            lastPrediction,
-                            target,
-                            start,
-                            end,
-                            lastTickSkip,
-                            testing,
-                            xRot,
-                            yRot,
-                            authoredMovementFrame,
-                            movementProfile);
-            for (SimulationContext spin : spins) {
-                spin.setWaterMovementEfficiency(
-                        getWaterMovementEfficiency(player.compensatedEntities.getSelf(), DesyncStatus.FALSE));
-                released.add(spin);
-                if (!spin.consumesStuckSpeed()
-                        || !spin.getWorldData().getCarriedOnGround().getStates().contains(true)) continue;
-                SimulationContext lift = this.createSimulationContext(
+            // TridentItem#releaseUsing spins with the level of each stack the client's use may be bound to.
+            for (int i = -1; i < alternatives.length; i++) {
+                player.packetStateData.riptideLevel = i < 0 ? level : alternatives[i];
+                this.addSpinContexts(
+                        released,
+                        certain && i < 0
+                                ? contexts
+                                : this.createSimulationContexts(
+                                        player,
+                                        lastPrediction,
+                                        target,
+                                        start,
+                                        end,
+                                        lastTickSkip,
+                                        testing,
+                                        xRot,
+                                        yRot,
+                                        authoredMovementFrame,
+                                        movementProfile),
                         player,
                         lastPrediction,
                         target,
@@ -2111,19 +2112,56 @@ public class SimulationProcessor extends CultProcessor implements PositionListen
                         xRot,
                         yRot,
                         authoredMovementFrame,
-                        movementProfile,
-                        false,
-                        null,
-                        null);
-                lift.setProfileCarry(spin.getProfileCarry());
-                lift.setRiptideLiftStuck(spin.getLastStuckSpeed());
-                lift.setWaterMovementEfficiency(spin.getWaterMovementEfficiency());
-                released.add(lift);
+                        movementProfile);
             }
         } finally {
             player.packetStateData.riptideReleaseCertain = certain;
+            player.packetStateData.riptideLevel = level;
         }
         return released;
+    }
+
+    /** Each spin context, then a lift context where the spin's lift on the ground consumes a stuck speed. */
+    private void addSpinContexts(
+            List<SimulationContext> released,
+            List<SimulationContext> spins,
+            CultPlayer player,
+            PredictionResult lastPrediction,
+            Vec3 target,
+            Vec3 start,
+            Vec3 end,
+            LastInstance lastTickSkip,
+            boolean testing,
+            float xRot,
+            float yRot,
+            AuthoredMovementFrame authoredMovementFrame,
+            MovementProfile movementProfile) {
+        for (SimulationContext spin : spins) {
+            spin.setWaterMovementEfficiency(
+                    getWaterMovementEfficiency(player.compensatedEntities.getSelf(), DesyncStatus.FALSE));
+            released.add(spin);
+            if (!spin.consumesStuckSpeed()
+                    || !spin.getWorldData().getCarriedOnGround().getStates().contains(true)) continue;
+            SimulationContext lift = this.createSimulationContext(
+                    player,
+                    lastPrediction,
+                    target,
+                    start,
+                    end,
+                    lastTickSkip,
+                    testing,
+                    xRot,
+                    yRot,
+                    authoredMovementFrame,
+                    movementProfile,
+                    false,
+                    null,
+                    null);
+            lift.setProfileCarry(spin.getProfileCarry());
+            lift.setRiptideLiftStuck(spin.getLastStuckSpeed());
+            lift.setWaterMovementEfficiency(spin.getWaterMovementEfficiency());
+            released.add(lift);
+        }
     }
 
     /**
