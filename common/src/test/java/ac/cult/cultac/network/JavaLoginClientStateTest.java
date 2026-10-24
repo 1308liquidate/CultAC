@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ac.cult.cultac.bedrock.replay.offline.OfflineCultTestBootstrap;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsA;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsC;
+import ac.cult.cultac.checks.impl.inventory.InventoryA;
 import ac.cult.cultac.events.packets.PacketServerRegistries;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.protocol.ConnectionPhase;
@@ -99,14 +99,14 @@ class JavaLoginClientStateTest {
         return (int) (check.violations - before);
     }
 
-    /** A container click; the MultiActionsC violations it added. */
+    /** A container click; the InventoryA violations it added. */
     @SuppressWarnings("unchecked")
     private static int click(JavaTickFixture f) {
         PacketType<InventoryClick> type = (PacketType<InventoryClick>) OfflineCultTestBootstrap.catalog().stream()
                 .filter(packet -> packet.recordClass() == InventoryClick.class)
                 .findFirst()
                 .orElseThrow();
-        MultiActionsC check = f.player.checkManager.getCheck(MultiActionsC.class);
+        InventoryA check = f.player.checkManager.getCheck(InventoryA.class);
         double before = check.violations;
         var click = new InventoryClick(0, 0, 36, 0, WindowClickType.PICKUP, Map.of(), null);
         check.onContainerClick(f.event(type, click), f.player, click);

@@ -26,6 +26,7 @@ import ac.cult.cultac.checks.impl.exploit.ExploitB;
 import ac.cult.cultac.checks.impl.exploit.ExploitC;
 import ac.cult.cultac.checks.impl.exploit.ExploitF;
 import ac.cult.cultac.checks.impl.groundspoof.NoFallExecutor;
+import ac.cult.cultac.checks.impl.inventory.*;
 import ac.cult.cultac.checks.impl.misc.ClientBrand;
 import ac.cult.cultac.checks.impl.misc.GhostBlockMitigation;
 import ac.cult.cultac.checks.impl.misc.SkinBlinker;
@@ -349,20 +350,16 @@ public class CheckManager {
                 new SelfInteract(player),
                 new MultiActionsA(player),
                 new MultiActionsB(player),
+                new InventoryA(player),
+                new InventoryB(player),
                 new MultiActionsC(player),
-                new MultiActionsD(player),
-                new MultiActionsE(player),
-                new MultiActionsH(player),
-                new MultiActionsI(player),
-                new MultiActionsJ(player),
-                new MultiActionsL(player),
-                new MultiActionsM(player),
-                new MultiActionsN(player),
-                new MultiActionsP(player),
-                new MultiActionsQ(player),
-                new MultiActionsR(player),
-                new MultiActionsS(player),
-                new MultiActionsT(player),
+                new InventoryC(player),
+                new InventoryE(player),
+                new InventoryF(player),
+                new InventoryH(player),
+                new InventoryI(player),
+                new InventoryJ(player),
+                new InventoryK(player),
                 new MultiInteractA(player),
                 new MultiInteractB(player),
                 player.openWindow,
@@ -396,7 +393,7 @@ public class CheckManager {
                 new AimModulo360(player),
                 new AimDuplicateLook(player),
                 new ExploitF(player),
-                new MultiActionsO(player)));
+                new InventoryG(player)));
     }
 
     private static ClassToInstanceMap<VehicleListener> buildVehicleChecks(CultPlayer player) {
@@ -462,9 +459,9 @@ public class CheckManager {
                 new InvalidPlaceB(player),
                 new AirLiquidPlace(player),
                 new MultiPlace(player),
-                new MultiActionsF(player),
-                new MultiActionsG(player),
-                new MultiActionsK(player),
+                new MultiActionsD(player),
+                new MultiActionsE(player),
+                new InventoryD(player),
                 new CrashG(player),
                 new FarPlace(player),
                 new FabricatedPlace(player),
@@ -520,15 +517,14 @@ public class CheckManager {
         registerEarlyReceive(registrations, packetChecks.get(ChatC.class));
         registerEarlyReceive(registrations, packetChecks.get(ChatD.class));
         registerEarlyReceive(registrations, packetChecks.get(ChatE.class));
+        registerEarlyReceive(registrations, blockPlaceCheck.get(InventoryD.class));
         for (Class<? extends CheckListener> type : List.of(
-                MultiActionsI.class,
-                MultiActionsJ.class,
-                MultiActionsM.class,
-                MultiActionsN.class,
-                MultiActionsP.class,
-                MultiActionsQ.class,
-                MultiActionsR.class,
-                MultiActionsT.class)) {
+                InventoryE.class,
+                InventoryF.class,
+                InventoryH.class,
+                InventoryI.class,
+                InventoryJ.class,
+                InventoryK.class)) {
             registerEarlyReceive(registrations, packetChecks.get(type));
         }
         registerEarlyReceive(registrations, postPredictionCheck.get(SprintH.class));
@@ -547,7 +543,7 @@ public class CheckManager {
         registerEarlyReceive(registrations, packetChecks.get(PacketOrderD.class));
         registerEarlyReceive(registrations, packetChecks.get(SelfInteract.class));
         registerEarlyReceive(registrations, packetChecks.get(MultiActionsA.class));
-        registerEarlyReceive(registrations, packetChecks.get(MultiActionsE.class));
+        registerEarlyReceive(registrations, packetChecks.get(MultiActionsC.class));
         registerEarlyReceive(registrations, packetChecks.get(AirLiquidBreak.class));
         registerEarlyReceive(registrations, packetChecks.get(FastBreak.class));
         registerEarlyReceive(registrations, packetChecks.get(MultiBreak.class));
@@ -555,7 +551,7 @@ public class CheckManager {
 
         var packetOrder = packetChecks.getInstance(PacketOrderO.class);
         registerNonAsyncReceive(packetOrder, packetOrder::onNonAsyncPacket);
-        registerDecodedReceive(packetChecks.get(MultiActionsS.class));
+        registerDecodedReceive(blockPlaceCheck.get(InventoryD.class));
         registerDecodedReceive(packetChecks.get(BadPacketsJ.class));
         registerDecodedReceive(postPredictionCheck.get(BadPacketsX.class));
         registerDecodedReceive(postPredictionCheck.get(ElytraC.class));
@@ -605,8 +601,8 @@ public class CheckManager {
         registerReceive(registrations, packetChecks.get(BadPacketsV.class));
         registerReceive(registrations, blockPlaceCheck.get(BadPacketsH.class));
         registerReceive(registrations, packetChecks.get(PacketOrderProcessor.class));
-        registerReceive(registrations, packetChecks.get(MultiActionsC.class));
-        registerReceive(registrations, packetChecks.get(MultiActionsD.class));
+        registerReceive(registrations, packetChecks.get(InventoryA.class));
+        registerReceive(registrations, packetChecks.get(InventoryB.class));
         registerReceive(registrations, packetChecks.get(VehicleA.class));
         registerReceive(registrations, packetChecks.get(VehicleD.class));
         registerReceive(registrations, packetChecks.get(VehicleE.class));
@@ -637,9 +633,9 @@ public class CheckManager {
         registerTickEnd(packetChecks.get(AutoclickerLimit.class));
         registerTickEnd(packetChecks.get(PacketWorldBorder.class));
         registerTickEnd(positionCheck.get(CompensatedCooldown.class));
-        registerTickEnd(packetChecks.get(MultiActionsH.class));
+        registerTickEnd(packetChecks.get(InventoryC.class));
         registerTickEnd(postPredictionCheck.get(SprintH.class));
-        registerTickEnd(rotationCheck.get(MultiActionsO.class));
+        registerTickEnd(rotationCheck.get(InventoryG.class));
         registerTickEnd(packetChecks.get(BadPacketsJ.class));
         registerTickEnd(player.openWindow);
 
@@ -677,7 +673,7 @@ public class CheckManager {
             registerReceive(registrations, allCheckListeners.get(type));
         }
         for (Class<? extends BlockPlaceCheck> type :
-                List.of(MultiPlace.class, MultiActionsF.class, MultiActionsG.class, PacketOrderN.class)) {
+                List.of(MultiPlace.class, MultiActionsD.class, MultiActionsE.class, PacketOrderN.class)) {
             registerReceive(registrations, blockPlaceCheck.get(type));
         }
 

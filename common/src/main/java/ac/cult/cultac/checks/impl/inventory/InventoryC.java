@@ -1,4 +1,4 @@
-package ac.cult.cultac.checks.impl.multiactions;
+package ac.cult.cultac.checks.impl.inventory;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
@@ -11,11 +11,11 @@ import ac.cult.cultac.protocol.packet.serverbound.*;
 import ac.cult.cultac.protocol.value.*;
 
 @CheckData(
-        name = "MultiActionsH",
+        name = "InventoryC",
         stableKey = "cult.multiactions.inventory_move",
         description = "Moving while in an inventory")
-public class MultiActionsH extends Check implements CheckListener, ClientTickEndListener {
-    public MultiActionsH(CultPlayer player) {
+public class InventoryC extends Check implements CheckListener, ClientTickEndListener {
+    public InventoryC(CultPlayer player) {
         super(player);
     }
 

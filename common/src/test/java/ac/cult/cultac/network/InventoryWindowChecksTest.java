@@ -4,10 +4,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import ac.cult.blocksim.engine.SimItemStack;
+import ac.cult.cultac.CultAPI;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsP;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsWindow;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsH;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsS;
+import ac.cult.cultac.checks.impl.inventory.InventoryC;
+import ac.cult.cultac.checks.impl.inventory.InventoryD;
 import ac.cult.cultac.checks.impl.verbose.VerboseCodecs;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerWindow;
 import ac.cult.cultac.network.event.PacketListenerPriority;
@@ -21,19 +22,26 @@ import ac.cult.cultac.protocol.ProtocolVersion;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.clientbound.ClientboundOpenScreen;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerAction;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundSwing;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItem;
 import ac.cult.cultac.protocol.value.BlockPos;
 import ac.cult.cultac.protocol.value.Direction;
+import ac.cult.cultac.protocol.value.Hand;
+import ac.cult.cultac.protocol.value.InteractAction;
 import ac.cult.cultac.protocol.value.PlayerAction;
 import ac.cult.cultac.protocol.wire.Wire;
 import ac.cult.cultac.utils.data.KnownInput;
 import ac.cult.cultac.utils.inventory.InventoryClick;
 import ac.cult.cultac.utils.inventory.inventory.MenuType;
 import ac.cult.cultac.utils.inventory.inventory.WindowClickType;
+import ac.grim.grimac.api.event.events.FlagEvent;
 import io.netty.buffer.ByteBuf;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -122,7 +130,7 @@ class InventoryWindowChecksTest {
     void inventoryInputChecksUseKeysRatherThanMomentum() {
         try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
             f.player.openWindow.onClientOpenOrCloseWindow(true);
-            var check = spy(new MultiActionsH(f.player));
+            var check = spy(new InventoryC(f.player));
             doReturn(true).when(check).flag();
             doReturn(true).when(check).shouldModifyPackets();
             f.player.packetStateData.knownInput = KnownInput.DEFAULT;
@@ -138,17 +146,95 @@ class InventoryWindowChecksTest {
     void aVanillaInventoryDropSwingMustBeFollowedByADropClick() {
         try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
             f.player.openWindow.onClientOpenOrCloseWindow(true);
-            var check = spy(new MultiActionsS(f.player));
-            doReturn(true).when(check).flag();
+            f.player.setExperimentalChecks(true);
+            var check = new InventoryD(f.player);
             var swing = new PacketReceiveEvent<>(
                     f.user, ConnectionPhase.PLAY, ServerboundPackets.SWING, ServerboundSwing.PUNCH);
-            check.onDecodedPacketReceive(swing);
-            check.onDecodedPacketReceive(clickEvent(f, click(0, 36, WindowClickType.THROW)));
-            verify(check, never()).flag();
-            check.onDecodedPacketReceive(swing);
-            check.onDecodedPacketReceive(clickEvent(f, click(0, 36, WindowClickType.PICKUP)));
-            verify(check).flag();
+            var flags = inventoryDFlags(() -> {
+                check.onDecodedPacketReceive(swing);
+                check.onDecodedPacketReceive(clickEvent(f, click(0, 36, WindowClickType.THROW)));
+            });
+            assertEquals(List.of(), flags);
+            flags = inventoryDFlags(() -> {
+                check.onDecodedPacketReceive(swing);
+                check.onDecodedPacketReceive(clickEvent(f, click(0, 36, WindowClickType.PICKUP)));
+            });
+            assertEquals(List.of("action=swing"), flags);
         }
+    }
+
+    @Test
+    void anInventorySwingFlagsOnlyWithExperimentalChecks() {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+            f.player.openWindow.onClientOpenOrCloseWindow(true);
+            f.player.setExperimentalChecks(false);
+            var check = new InventoryD(f.player);
+            var swing = new PacketReceiveEvent<>(
+                    f.user, ConnectionPhase.PLAY, ServerboundPackets.SWING, ServerboundSwing.PUNCH);
+            var flags = inventoryDFlags(() -> {
+                check.onDecodedPacketReceive(swing);
+                check.onDecodedPacketReceive(clickEvent(f, click(0, 36, WindowClickType.PICKUP)));
+            });
+            assertEquals(List.of(), flags);
+        }
+    }
+
+    @Test
+    void handActionsInAnInventoryNameTheActionInTheVerbose() {
+        try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
+            var check = new InventoryD(f.player);
+            var flags = inventoryDFlags(() -> {
+                interact(f, check, InteractAction.ATTACK);
+                useItem(f, check);
+            });
+            assertEquals(List.of(), flags);
+
+            f.player.openWindow.onClientOpenOrCloseWindow(true);
+            flags = inventoryDFlags(() -> {
+                interact(f, check, InteractAction.ATTACK);
+                interact(f, check, InteractAction.INTERACT);
+                interact(f, check, InteractAction.INTERACT_AT);
+                useItem(f, check);
+            });
+            assertEquals(List.of("action=attack", "action=interact", "action=interact_at", "action=use_item"), flags);
+        }
+    }
+
+    private static void interact(RecordReceiveFixture f, InventoryD check, InteractAction action) {
+        var packet = new ServerboundInteract(1, action, Hand.MAIN_HAND, Optional.empty(), false);
+        check.onInteract(
+                new PacketReceiveEvent<>(f.user, ConnectionPhase.PLAY, ServerboundPackets.INTERACT, packet),
+                f.player,
+                packet);
+    }
+
+    private static void useItem(RecordReceiveFixture f, InventoryD check) {
+        var packet = new ServerboundUseItem(Hand.MAIN_HAND, 0, 0, 0);
+        check.onUseItem(
+                new PacketReceiveEvent<>(f.user, ConnectionPhase.PLAY, ServerboundPackets.USE_ITEM, packet),
+                f.player,
+                packet);
+    }
+
+    /** InventoryD's verbose of each flag {@code body} raises; the flags are cancelled, so none is committed. */
+    private static List<String> inventoryDFlags(Runnable body) {
+        VerboseCodecs.ensureRegistered();
+        List<String> verbose = new ArrayList<>();
+        FlagEvent.Channel channel = CultAPI.INSTANCE.getEventBus().get(FlagEvent.class);
+        FlagEvent.SupplierHandler record = (user, flagged, text, cancelled) -> {
+            if (flagged.getCheckName().equals("InventoryD")) {
+                verbose.add(text.get());
+                return true;
+            }
+            return cancelled;
+        };
+        channel.onFlagSupplier(CultAPI.INSTANCE.getGrimPlugin(), record, 0, false);
+        try {
+            body.run();
+        } finally {
+            channel.unsubscribe(record);
+        }
+        return verbose;
     }
 
     @Test

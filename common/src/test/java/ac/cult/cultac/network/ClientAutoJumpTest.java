@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import ac.cult.blocksim.data.DataTables;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsH;
+import ac.cult.cultac.checks.impl.inventory.InventoryC;
 import ac.cult.cultac.checks.impl.prediction.PredictionResult;
 import ac.cult.cultac.checks.impl.prediction.SimulationContext;
 import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump;
@@ -29,9 +29,9 @@ class ClientAutoJumpTest {
             f.player.packetStateData.knownInput = new KnownInput(false, false, false, false, true, false, false);
             engine.onPredictionComplete(complete);
             assertTrue(engine.jumpedThisTick());
-            assertFalse(ac.cult.cultac.checks.impl.multiactions.MultiActionsC.isVerboseInput(f.player));
+            assertFalse(ac.cult.cultac.checks.impl.inventory.InventoryA.isVerboseInput(f.player));
             f.player.openWindow.onClientOpenOrCloseWindow(true);
-            var check = spy(new MultiActionsH(f.player));
+            var check = spy(new InventoryC(f.player));
             doReturn(true).when(check).flag();
             check.onPlayerTickEnd(null);
             verify(check, never()).flag();

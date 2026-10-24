@@ -1,4 +1,4 @@
-package ac.cult.cultac.checks.impl.multiactions;
+package ac.cult.cultac.checks.impl.inventory;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
@@ -11,12 +11,12 @@ import ac.cult.cultac.protocol.value.*;
 import ac.cult.cultac.utils.inventory.InventoryClick;
 
 @CheckData(
-        name = "MultiActionsR",
+        name = "InventoryJ",
         stableKey = "cult.multiactions.inventory_portal",
         description = "Clicking in inventory while in a nether portal",
         experimental = true)
-public class MultiActionsR extends Check implements CheckListener {
-    public MultiActionsR(CultPlayer player) {
+public class InventoryJ extends Check implements CheckListener {
+    public InventoryJ(CultPlayer player) {
         super(player);
     }
 

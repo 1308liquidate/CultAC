@@ -4,8 +4,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import ac.cult.cultac.checks.impl.cloud.Cloud;
+import ac.cult.cultac.checks.impl.inventory.InventoryK;
 import ac.cult.cultac.checks.impl.misc.SkinBlinker;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsT;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.ProtocolVersion;
@@ -53,7 +53,7 @@ class CloudAndInventoryChecksTest {
     @Test
     void aHeldSlotChangeWithAnInventoryOpenFlags() {
         try (var f = new RecordReceiveFixture(ProtocolVersion.V26_3)) {
-            var check = spy(new MultiActionsT(f.player));
+            var check = spy(new InventoryK(f.player));
             doReturn(true).when(check).flag();
             doReturn(true).when(check).shouldModifyPackets();
             var packet = new ServerboundSetCarriedItem(3);

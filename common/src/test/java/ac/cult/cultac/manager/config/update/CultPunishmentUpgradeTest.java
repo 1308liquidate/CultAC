@@ -41,8 +41,8 @@ class CultPunishmentUpgradeTest {
         var data = read(file);
         assertTrue(result.migrated);
         assertEquals(1, result.oldVersion);
-        assertEquals(4, result.newVersion);
-        assertEquals(4, data.get("cult-config-version"));
+        assertEquals(5, result.newVersion);
+        assertEquals(5, data.get("cult-config-version"));
         assertEquals(List.of("Knockback", "Explosion", "KeepSprint"), checks(data, "Knockback"));
         assertEquals(
                 List.of("Interact", "Aim", "AttackPlayerVisibility", "AttackMobVisibility"), checks(data, "Combat"));
@@ -162,7 +162,7 @@ class CultPunishmentUpgradeTest {
         var result = upgrade(file);
         assertTrue(result.migrated);
         assertEquals(2, result.oldVersion);
-        assertEquals(4, result.newVersion);
+        assertEquals(5, result.newVersion);
         assertEquals(List.of("Vehicle", "NoSlow", "NoSneakSlow", "Sprint", "SkinBlinker"), checks(read(file), "Misc"));
     }
 
@@ -185,14 +185,62 @@ class CultPunishmentUpgradeTest {
         try (var source = CultConfigSpecs.class.getResourceAsStream("/punishments/" + language + ".yml")) {
             assertNotNull(source);
             Map<String, Object> data = new Yaml().load(source);
-            assertEquals(4, data.get("cult-config-version"));
+            assertEquals(5, data.get("cult-config-version"));
             assertTrue(checks(data, "Knockback").contains("KeepSprint"));
             assertTrue(checks(data, "Combat").containsAll(List.of("AttackPlayerVisibility", "AttackMobVisibility")));
             List<?> misc = checks(data, "Misc");
             assertEquals("NoSneakSlow", misc.get(misc.indexOf("NoSlow") + 1));
             assertEquals("SkinBlinker", misc.get(misc.indexOf("Exploit") + 1));
+            assertEquals("Inventory", misc.get(misc.indexOf("MultiActions") + 1));
             assertEquals(List.of("Cloud"), checks(data, "Cloud"));
         }
+    }
+
+    private static final String REVISION_4 = """
+            cult-config-version: 4
+            Punishments:
+              Misc:
+                checks:
+                  - "Sprint"
+                  - "MultiActions"
+                  - "Place"
+                commands:
+                  - "10:5 [alert]"
+              Strict:
+                checks: [Multi, '!multiactionsk', MultiActionsE, multiactionsi, MultiActionsS, '!Actions']
+                commands: ['1:1 [log]']
+              Custom:
+                checks: [Reach]
+                commands: ['1:1 custom']
+            """;
+
+    @Test
+    void addsTheInventoryCategoryBesideEveryMultiActionsSelector() throws Exception {
+        Path file = write(REVISION_4);
+        var result = upgrade(file);
+        assertTrue(result.migrated);
+        assertEquals(4, result.oldVersion);
+        assertEquals(5, result.newVersion);
+        var data = read(file);
+        assertEquals(List.of("Sprint", "MultiActions", "Inventory", "Place"), checks(data, "Misc"));
+        assertEquals(
+                List.of("Multi", "Inventory", "!InventoryD", "MultiActionsC", "InventoryD", "!Actions", "!Inventory"),
+                checks(data, "Strict"));
+        assertEquals(List.of("Reach"), checks(data, "Custom"));
+        assertFalse(upgrade(file).migrated);
+    }
+
+    @Test
+    void doesNotAddInventoryWhereMultiActionsWasNotPunished() throws Exception {
+        Path file = write(REVISION_4
+                .replace("      - \"MultiActions\"\n", "")
+                .replace(
+                        "[Multi, '!multiactionsk', MultiActionsE, multiactionsi, MultiActionsS, '!Actions']",
+                        "[Reach]"));
+        upgrade(file);
+        var data = read(file);
+        assertEquals(List.of("Sprint", "Place"), checks(data, "Misc"));
+        assertEquals(List.of("Reach"), checks(data, "Strict"));
     }
 
     private static final String REVISION_3 = """

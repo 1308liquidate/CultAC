@@ -1,4 +1,4 @@
-package ac.cult.cultac.checks.impl.multiactions;
+package ac.cult.cultac.checks.impl.inventory;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
@@ -13,10 +13,10 @@ import org.jetbrains.annotations.NotNull;
 
 // cinematic camera doesn't apply in inventories.
 @CheckData(
-        name = "MultiActionsO",
+        name = "InventoryG",
         stableKey = "cult.multiactions.inventory_rotation",
         description = "Rotating while in an inventory")
-public class MultiActionsO extends Check implements RotationListener, ClientTickEndListener {
+public class InventoryG extends Check implements RotationListener, ClientTickEndListener {
     // From 26.3, a boat rider's Rot awaiting the tick end: the client sends it before the vehicle move that carries the
     // turn AbstractBoat#positionRider gave it this tick.
     private boolean boatLookPending;
@@ -32,7 +32,7 @@ public class MultiActionsO extends Check implements RotationListener, ClientTick
     private float rideTickFromYaw;
     private float rideTickYaw;
 
-    public MultiActionsO(CultPlayer player) {
+    public InventoryG(CultPlayer player) {
         super(player);
     }
 

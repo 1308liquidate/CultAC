@@ -9,8 +9,8 @@ import ac.cult.blocksim.data.Components;
 import ac.cult.blocksim.data.DataTables;
 import ac.cult.blocksim.engine.SimItemStack;
 import ac.cult.blocksim.entity.EntityTypeIds;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsC;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsD;
+import ac.cult.cultac.checks.impl.inventory.InventoryA;
+import ac.cult.cultac.checks.impl.inventory.InventoryB;
 import ac.cult.cultac.checks.impl.sprint.SprintH;
 import ac.cult.cultac.events.packets.listeners.PacketEntityAction;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -119,13 +119,13 @@ class VehicleSprintStateTest {
 
     @SuppressWarnings("unchecked")
     private static void inventoryActions(JavaTickFixture f, int violations) {
-        var clickCheck = f.player.checkManager.getCheck(MultiActionsC.class);
-        var closeCheck = f.player.checkManager.getCheck(MultiActionsD.class);
+        var clickCheck = f.player.checkManager.getCheck(InventoryA.class);
+        var closeCheck = f.player.checkManager.getCheck(InventoryB.class);
         f.player.setExperimentalChecks(true);
         clickCheck.setEnabled(true);
         closeCheck.setEnabled(true);
         clickCheck.violations = closeCheck.violations = 0;
-        assertFalse(MultiActionsC.isVerboseInput(f.player));
+        assertFalse(InventoryA.isVerboseInput(f.player));
         var click = new InventoryClick(0, 0, 36, 0, WindowClickType.SWAP, Map.of(), SimItemStack.EMPTY);
         var type = (PacketType<InventoryClick>)
                 f.fixture.registrar.scanner().runtime().typeForRecord(InventoryClick.class);
@@ -146,7 +146,7 @@ class VehicleSprintStateTest {
             for (int tick = 0; tick < 3; tick++) f.rideTick();
 
             assertFalse(f.player.isClientSprinting());
-            assertFalse(MultiActionsC.isVerboseSprinting(f.player));
+            assertFalse(InventoryA.isVerboseSprinting(f.player));
             assertEquals(0, check.violations);
         }
     }
@@ -200,7 +200,7 @@ class VehicleSprintStateTest {
             for (int tick = 0; tick < 3; tick++) f.rideTick();
 
             assertFalse(f.player.isClientSprinting());
-            assertFalse(MultiActionsC.isVerboseSprinting(f.player));
+            assertFalse(InventoryA.isVerboseSprinting(f.player));
             assertEquals(0, check.violations);
         }
     }

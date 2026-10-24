@@ -137,16 +137,75 @@ public final class CultConfigSpecs {
     public static @NotNull ConfigUpdater.Spec cultConfig(String resourceDirectory) {
         ConfigUpdater.Spec.Builder builder = ConfigUpdater.Spec.builder(
                         resourceDirectory,
-                        resourceDirectory.equals("/punishments/") ? 4 : 0,
+                        resourceDirectory.equals("/punishments/") ? 5 : 0,
                         ConfigUpdater.ConfigFlavor.V2)
                 .cultVersioning();
         if (resourceDirectory.equals("/punishments/")) {
             builder.migration(1, CultConfigSpecs::addBedrockPunishment)
                     .migration(2, CultConfigSpecs::addMissingCheckPunishments)
                     .migration(3, CultConfigSpecs::addNoSneakSlowPunishment)
-                    .migration(4, CultConfigSpecs::addSkinBlinkerAndCloudPunishments);
+                    .migration(4, CultConfigSpecs::addSkinBlinkerAndCloudPunishments)
+                    .migration(5, CultConfigSpecs::splitInventoryPunishments);
         }
         return builder.build();
+    }
+
+    /** The checks renamed when the inventory checks left MultiActions; MultiActionsI, J, K, L and S merged. */
+    static final Map<String, String> INVENTORY_SPLIT_RENAMES = Map.ofEntries(
+            Map.entry("multiactionsc", "InventoryA"),
+            Map.entry("multiactionsd", "InventoryB"),
+            Map.entry("multiactionse", "MultiActionsC"),
+            Map.entry("multiactionsf", "MultiActionsD"),
+            Map.entry("multiactionsg", "MultiActionsE"),
+            Map.entry("multiactionsh", "InventoryC"),
+            Map.entry("multiactionsi", "InventoryD"),
+            Map.entry("multiactionsj", "InventoryD"),
+            Map.entry("multiactionsk", "InventoryD"),
+            Map.entry("multiactionsl", "InventoryD"),
+            Map.entry("multiactionss", "InventoryD"),
+            Map.entry("multiactionsm", "InventoryE"),
+            Map.entry("multiactionsn", "InventoryF"),
+            Map.entry("multiactionso", "InventoryG"),
+            Map.entry("multiactionsp", "InventoryH"),
+            Map.entry("multiactionsq", "InventoryI"),
+            Map.entry("multiactionsr", "InventoryJ"),
+            Map.entry("multiactionst", "InventoryK"));
+
+    /**
+     * The inventory checks left MultiActions for their own Inventory category. A selector naming one old check names
+     * its new one, and every selector that matched all MultiActions checks gains an Inventory twin right after it,
+     * excluding or not alike, so each group keeps matching and excluding the same checks.
+     */
+    static void splitInventoryPunishments(MigrationContext ctx) {
+        Map<String, Object> groups = ctx.output().getMap("Punishments");
+        if (groups == null) return;
+        for (Map.Entry<String, Object> entry : groups.entrySet()) {
+            if (!(entry.getValue() instanceof Map<?, ?> group) || !(group.get("checks") instanceof List<?> checks))
+                continue;
+            List<Object> updated = new ArrayList<>();
+            for (Object value : checks) {
+                Object renamed = value;
+                if (value instanceof String text) {
+                    String prefix = text.startsWith("!") ? "!" : "";
+                    String selector = text.substring(prefix.length());
+                    String target = INVENTORY_SPLIT_RENAMES.get(selector.toLowerCase(Locale.ROOT));
+                    if (target != null) renamed = prefix + target;
+                }
+                if (!updated.contains(renamed)) updated.add(renamed);
+            }
+            for (int i = 0; i < updated.size(); i++) {
+                if (!(updated.get(i) instanceof String text)) continue;
+                String prefix = text.startsWith("!") ? "!" : "";
+                String selector = text.substring(prefix.length()).toLowerCase(Locale.ROOT);
+                if (selector.isEmpty() || !"multiactions".contains(selector) || "inventory".contains(selector))
+                    continue;
+                String twin = prefix + "Inventory";
+                if (updated.stream().anyMatch(value -> value instanceof String other && other.equalsIgnoreCase(twin)))
+                    continue;
+                updated.add(++i, twin);
+            }
+            if (!updated.equals(checks)) ctx.output().put("Punishments." + entry.getKey() + ".checks", updated);
+        }
     }
 
     private static void addSkinBlinkerAndCloudPunishments(MigrationContext ctx) {

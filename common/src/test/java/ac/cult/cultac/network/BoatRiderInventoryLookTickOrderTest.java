@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsJ;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsO;
+import ac.cult.cultac.checks.impl.inventory.InventoryG;
 import ac.cult.cultac.network.protocol.ClientVersion;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
@@ -122,7 +122,7 @@ class BoatRiderInventoryLookTickOrderTest {
             names = {"V_1_21_11", "V_26_1", "V_26_2", "V_26_3"})
     void aRiderTurningInABoatItNeverDroveIsFlagged(ClientVersion version) throws Exception {
         try (var f = board(version, false)) {
-            MultiActionsO check = enable(f);
+            InventoryG check = enable(f);
             float yaw = clampRotation(LOOK_YAW, 0);
             int turnedLooks = 0;
             for (int tick = 0; tick < TICKS; tick++) {
@@ -142,8 +142,7 @@ class BoatRiderInventoryLookTickOrderTest {
     @EnumSource(
             value = ClientVersion.class,
             names = {"V_1_21_11", "V_26_1", "V_26_2"})
-    void aRiderBackInABoatItLeftTurningKeepsItsTurnInItsInventoryIsNotRotating(ClientVersion version)
-            throws Exception {
+    void aRiderBackInABoatItLeftTurningKeepsItsTurnInItsInventoryIsNotRotating(ClientVersion version) throws Exception {
         Run run = backAboard(version, false, true);
 
         assertTrue(run.turnedLooks > 0, "the boat turned no judged look");
@@ -185,7 +184,7 @@ class BoatRiderInventoryLookTickOrderTest {
     void aRiderTurningByTheTurnOfABoatBeforeItRespawnedIsFlagged(ClientVersion version) throws Exception {
         float[] turns = vanillaDeltaRotations(NEVER);
         try (var f = board(version, true)) {
-            MultiActionsO check = enable(f);
+            InventoryG check = enable(f);
             float boatYaw = driveUntilHandOver(f, version, turns);
             seat(f, BOAT, List.of(OTHER_RIDER, f.player.entityID));
             f.player.compensatedEntities.removeEntity(BOAT);
@@ -205,8 +204,7 @@ class BoatRiderInventoryLookTickOrderTest {
     @EnumSource(
             value = ClientVersion.class,
             names = {"V_1_21_11", "V_26_1", "V_26_2", "V_26_3"})
-    void aDriverBackInABoatItLeftAWhileTurningItFromItsHeldTurnIsNotRotating(ClientVersion version)
-            throws Exception {
+    void aDriverBackInABoatItLeftAWhileTurningItFromItsHeldTurnIsNotRotating(ClientVersion version) throws Exception {
         DriveAgain run = driveAgain(version, heldTurn(version), false);
 
         assertTrue(run.turnedLooks > 0, "the boat turned no judged look");
@@ -255,7 +253,7 @@ class BoatRiderInventoryLookTickOrderTest {
             throws Exception {
         float[] turns = vanillaDeltaRotations(RELEASE_TICK);
         try (var f = board(version, true)) {
-            MultiActionsO check = enable(f);
+            InventoryG check = enable(f);
             float boatYaw = 0;
             // Entity#turn, then AbstractBoat#onPassengerTurned, before the first tick.
             float yaw = clampRotation(LOOK_YAW, boatYaw);
@@ -292,7 +290,7 @@ class BoatRiderInventoryLookTickOrderTest {
     private static Run handOver(ClientVersion version, boolean leftoverTurn) throws Exception {
         float[] turns = vanillaDeltaRotations(NEVER);
         try (var f = board(version, true)) {
-            MultiActionsO check = enable(f);
+            InventoryG check = enable(f);
             boolean turnOfItsTick = sendsTurnOfItsTick(version);
             float boatYaw = 0;
             float yaw = clampRotation(LOOK_YAW, boatYaw);
@@ -337,7 +335,7 @@ class BoatRiderInventoryLookTickOrderTest {
         float[] turns = vanillaDeltaRotations(NEVER);
         try (var f = board(version, true)) {
             f.player.compensatedEntities.addEntity(OTHER_BOAT, EntityTypeIds.OAK_BOAT, SEAT, 0, 0, 0);
-            MultiActionsO check = enable(f);
+            InventoryG check = enable(f);
             float boatYaw = driveUntilHandOver(f, version, turns);
             seat(f, BOAT, List.of());
             f.input(RELEASED);
@@ -369,14 +367,14 @@ class BoatRiderInventoryLookTickOrderTest {
      * with the keys released and drives it again, its deltaRotation starting from {@code startTurn}. Back aboard the
      * keys steer left from the first tick until {@link #OPEN_TICK}, when they are released and the inventory opens, or,
      * when {@code useItems}, a use_item comes from Minecraft#handleKeybinds every tick after instead. Counts the turned
-     * looks MultiActionsO judges, or the use_items of a tick the boat turned the rider, those of them whose turn differs
+     * looks InventoryG judges, or the use_items of a tick the boat turned the rider, those of them whose turn differs
      * from the one a client of {@code version} gives the boat and the rider from the same yaws, and the check's
      * violations.
      */
     private static DriveAgain driveAgain(ClientVersion version, float startTurn, boolean useItems) throws Exception {
         float[] turns = vanillaDeltaRotations(NEVER);
         try (var f = board(version, true)) {
-            MultiActionsO look = enable(f);
+            InventoryG look = enable(f);
             BadPacketsJ use = f.player.checkManager.getListener(BadPacketsJ.class);
             float boatYaw = driveUntilHandOver(f, version, turns);
             seat(f, BOAT, List.of());
@@ -456,7 +454,7 @@ class BoatRiderInventoryLookTickOrderTest {
      * multiplies it by the land friction each tick first.
      */
     private static Run ride(
-            JavaTickFixture f, MultiActionsO check, ClientVersion version, float boatYaw, float turn, boolean drives) {
+            JavaTickFixture f, InventoryG check, ClientVersion version, float boatYaw, float turn, boolean drives) {
         boolean turnOfItsTick = sendsTurnOfItsTick(version);
         float yaw = boatYaw;
         float lastSent = yaw;
@@ -516,8 +514,8 @@ class BoatRiderInventoryLookTickOrderTest {
         return friction / 9;
     }
 
-    private static MultiActionsO enable(JavaTickFixture f) {
-        MultiActionsO check = f.player.checkManager.getCheck(MultiActionsO.class);
+    private static InventoryG enable(JavaTickFixture f) {
+        InventoryG check = f.player.checkManager.getCheck(InventoryG.class);
         f.player.setExperimentalChecks(true);
         check.setEnabled(true);
         check.reload();

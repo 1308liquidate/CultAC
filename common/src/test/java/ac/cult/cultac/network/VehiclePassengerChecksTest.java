@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
 import ac.cult.cultac.checks.impl.badpackets.BadPacketsR;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsO;
+import ac.cult.cultac.checks.impl.inventory.InventoryG;
 import ac.cult.cultac.events.packets.listeners.PacketPlayerRespawn;
 import ac.cult.cultac.network.codec.ModelRegistryNamesState;
 import ac.cult.cultac.network.event.PacketSendEvent;
@@ -38,7 +38,7 @@ class VehiclePassengerChecksTest {
     @Test
     void anInventoryOpenedWhileRidingIsNotRotatedByThePassengersUnchangedRot() throws Exception {
         try (var f = ride(EntityTypeIds.PIG)) {
-            MultiActionsO check = enabled(f, MultiActionsO.class);
+            InventoryG check = enabled(f, InventoryG.class);
             f.player.openWindow.onClientOpenOrCloseWindow(true);
             for (int tick = 0; tick < 5; tick++) f.rideTick();
 
@@ -49,7 +49,7 @@ class VehiclePassengerChecksTest {
     @Test
     void rotatingTheLookInAnInventoryWhileRidingIsStillFlagged() throws Exception {
         try (var f = ride(EntityTypeIds.PIG)) {
-            MultiActionsO check = enabled(f, MultiActionsO.class);
+            InventoryG check = enabled(f, InventoryG.class);
             f.player.openWindow.onClientOpenOrCloseWindow(true);
             f.rideTick();
             f.rideTick();

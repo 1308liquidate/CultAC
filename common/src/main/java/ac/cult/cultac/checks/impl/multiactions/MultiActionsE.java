@@ -1,80 +1,90 @@
 package ac.cult.cultac.checks.impl.multiactions;
 
-import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
-import ac.cult.cultac.checks.type.CheckListener;
+import ac.cult.cultac.checks.type.BlockPlaceCheck;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.protocol.packet.Opaque;
-import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
-import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerAction;
-import ac.cult.cultac.protocol.packet.serverbound.ServerboundSwing;
-import ac.cult.cultac.protocol.value.Hand;
-import ac.cult.cultac.protocol.value.PlayerAction;
-import org.jetbrains.annotations.Nullable;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundInteract;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundSpectatorAction;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundUseItem;
+import ac.cult.cultac.protocol.value.InteractAction;
+import ac.cult.cultac.utils.anticheat.update.BlockPlace;
+import ac.cult.cultac.utils.data.packetentity.PacketEntity;
+import ac.cult.cultac.utils.nmsutil.EntityTypeUtil;
+import ac.grim.grimac.api.storage.verbose.Verbose;
 
 @CheckData(
         name = "MultiActionsE",
-        stableKey = "cult.multiactions.swing_while_using",
-        description = "Swinging while using an item",
+        stableKey = "cult.multiactions.action_while_rowing",
+        description = "Attacking or using items while rowing a boat",
         experimental = true)
-public class MultiActionsE extends Check implements CheckListener {
-    private boolean dropping;
-    private @Nullable Hand useSwingHand;
+public class MultiActionsE extends BlockPlaceCheck {
+    private static final Verbose V = Verbose.of("action=interact")
+            .or("action=attack")
+            .or("action=spectateEntity")
+            .or("action=use")
+            .or("action=place"); // shape index == ACTION_* value
+
+    private static final int ACTION_INTERACT = 0;
+    private static final int ACTION_ATTACK = 1;
+    private static final int ACTION_SPECTATE_ENTITY = 2;
+    private static final int ACTION_USE = 3;
+    private static final int ACTION_PLACE = 4;
 
     public MultiActionsE(CultPlayer player) {
         super(player);
     }
 
-    @CultPacketHandler
-    public void onSwing(PacketReceiveEvent<ServerboundSwing> event, CultPlayer player, ServerboundSwing packet) {
-        // A drop exempts only the one swing that follows it.
-        boolean droppedBeforeSwing = dropping;
-        dropping = false;
-        boolean usedBeforeSwing = packet.hand() == useSwingHand;
-        useSwingHand = null;
+    private Verbose.Writer writeAction(int action) {
+        return V.write(verbose(), action);
+    }
 
-        if (!droppedBeforeSwing && !usedBeforeSwing && isActivelyUsingItem()) {
-            if (flag() && shouldModifyPackets()) {
-                event.setCancelled(true);
-                player.onPacketCancel();
-            }
+    @CultPacketHandler
+    public void onInteractEntity(
+            PacketReceiveEvent<ServerboundInteract> event, CultPlayer player, ServerboundInteract packet) {
+        int action = packet.action() == InteractAction.ATTACK ? ACTION_ATTACK : ACTION_INTERACT;
+        if (isCheckActive() && flag(writeAction(action)) && shouldModifyPackets()) {
+            event.setCancelled(true);
+            player.onPacketCancel();
         }
     }
 
     @CultPacketHandler
-    public void onPlayerAction(
-            PacketReceiveEvent<ServerboundPlayerAction> event, CultPlayer player, ServerboundPlayerAction packet) {
-        // 1.15+ Minecraft#handleKeybinds swings right after a successful drop,
-        // which is the only way to swing while using an item.
-        PlayerAction action = packet.action();
-        dropping = action == PlayerAction.DROP_ITEM || action == PlayerAction.DROP_ALL_ITEMS;
+    public void onSpectatorAction(
+            PacketReceiveEvent<ServerboundSpectatorAction> event,
+            CultPlayer player,
+            ServerboundSpectatorAction packet) {
+        if (isCheckActive() && flag(writeAction(ACTION_SPECTATE_ENTITY)) && shouldModifyPackets()) {
+            event.setCancelled(true);
+            player.onPacketCancel();
+        }
     }
 
-    /**
-     * Minecraft#startUseItem swings the used hand when MultiPlayerGameMode#useItem succeeds with a client-side swing,
-     * as BundleItem#use does after Player#startUsingItem.
-     */
-    public void onPredictedUseSwing(Hand hand) {
-        useSwingHand = hand;
-    }
-
-    // The drop or use and its swing are sent before the tick's movement packet and tick end.
     @CultPacketHandler
-    public void onMovePlayer(
-            PacketReceiveEvent<ServerboundMovePlayer> event, CultPlayer player, ServerboundMovePlayer packet) {
-        dropping = false;
-        useSwingHand = null;
+    public void onUseItem(PacketReceiveEvent<ServerboundUseItem> event, CultPlayer player, ServerboundUseItem packet) {
+        if (isCheckActive() && flag(writeAction(ACTION_USE)) && shouldModifyPackets()) {
+            event.setCancelled(true);
+            player.onPacketCancel();
+        }
     }
 
-    @CultPacketHandler("serverbound.client_tick_end")
-    public void onClientTickEnd(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {
-        dropping = false;
-        useSwingHand = null;
+    @Override
+    public void onBlockPlace(BlockPlace place) {
+
+        int action = place.isUseItem() ? ACTION_USE : ACTION_PLACE;
+        if (isCheckActive() && flag(writeAction(action)) && shouldModifyPackets() && shouldCancel()) {
+            place.resync();
+        }
     }
 
-    private boolean isActivelyUsingItem() {
-        return MultiActionsA.isActivelyUsingItem(player);
+    public boolean isCheckActive() {
+        PacketEntity riding = player.compensatedEntities.getSelf().getRiding();
+        return !player.vehicleData.wasVehicleSwitch // one tick off?
+                && player.inVehicle()
+                && riding != null
+                && EntityTypeUtil.isBoat(riding.type)
+                && player.compensatedEntities.vehicles.mayLocalPlayerControl(riding)
+                && player.boatData.nextVehicleKeys.movingNoJump();
     }
 }

@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsG;
+import ac.cult.cultac.checks.impl.multiactions.MultiActionsE;
 import ac.cult.cultac.protocol.packet.ServerboundPackets;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
 import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerInput;
@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
  * LocalPlayer#rideTick sets handsBusy from the raw movement keys only when Entity#getControlledVehicle is an
  * AbstractBoat, and AbstractBoat#getControllingPassenger is its first passenger.
  */
-class MultiActionsGBoatRiderTest {
+class MultiActionsEBoatRiderTest {
     private static final int BOAT = 100;
     private static final int OTHER_RIDER = 101;
     private static final Vec3 SEAT = new Vec3(0.5, FLOOR_Y, 0.5);
@@ -59,7 +59,7 @@ class MultiActionsGBoatRiderTest {
             f.listener.onMovePlayer(f.event(ServerboundPackets.MOVE_PLAYER, rot), f.player, rot);
             f.tickEnd();
             f.input(input);
-            return f.player.checkManager.getCheck(MultiActionsG.class).isCheckActive();
+            return f.player.checkManager.getCheck(MultiActionsE.class).isCheckActive();
         }
     }
 }

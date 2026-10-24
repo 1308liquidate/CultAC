@@ -17,7 +17,7 @@ import ac.cult.cultac.checks.impl.movement.timer.NegativeTimerCheck;
 import ac.cult.cultac.checks.impl.movement.timer.TickTimer;
 import ac.cult.cultac.checks.impl.movement.timer.TimerCheck;
 import ac.cult.cultac.checks.impl.movement.timer.VehicleTimer;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsE;
+import ac.cult.cultac.checks.impl.multiactions.MultiActionsC;
 import ac.cult.cultac.checks.impl.packetorder.PacketOrderB;
 import ac.cult.cultac.checks.impl.packetorder.PacketOrderH;
 import ac.cult.cultac.checks.impl.packetorder.PacketOrderO;
@@ -73,7 +73,7 @@ public final class OrderedLegacyCheckDispatchTest {
                     .getNetworkManager()
                     .dispatcher()
                     .scanner();
-            assertTrue(records.hasReceiveHandlerDeclaration(MultiActionsE.class));
+            assertTrue(records.hasReceiveHandlerDeclaration(MultiActionsC.class));
             assertTrue(records.hasReceiveHandlerDeclaration(PacketOrderB.class));
             // PacketOrderO flags any packet between movement and tick end, so it observes the whole stream.
             assertFalse(records.hasReceiveHandlerDeclaration(PacketOrderO.class));
@@ -88,7 +88,7 @@ public final class OrderedLegacyCheckDispatchTest {
         CultPlayer player = offlineJavaPlayer();
         player.setDisabled(true);
         try {
-            MultiActionsE check = player.checkManager.getListener(MultiActionsE.class);
+            MultiActionsC check = player.checkManager.getListener(MultiActionsC.class);
             ServerboundPlayerAction drop = new ServerboundPlayerAction(
                     PlayerAction.DROP_ITEM,
                     new ac.cult.cultac.protocol.value.BlockPos(0, 0, 0),
@@ -456,7 +456,7 @@ public final class OrderedLegacyCheckDispatchTest {
         CultPlayer player = offlineJavaPlayer();
         player.setDisabled(true);
         try {
-            MultiActionsE check = player.checkManager.getListener(MultiActionsE.class);
+            MultiActionsC check = player.checkManager.getListener(MultiActionsC.class);
             var food = OfflineCultTestBootstrap.item("minecraft:golden_apple");
             player.clientItemUse.start(Hand.MAIN_HAND, food, ClientItemUseState.duration(food), true);
             assertTrue(invokeBoolean(check, "isActivelyUsingItem"));

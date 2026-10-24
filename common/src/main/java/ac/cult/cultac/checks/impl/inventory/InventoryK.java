@@ -1,4 +1,4 @@
-package ac.cult.cultac.checks.impl.multiactions;
+package ac.cult.cultac.checks.impl.inventory;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
@@ -11,12 +11,12 @@ import ac.cult.cultac.protocol.packet.serverbound.ServerboundSetCarriedItem;
 // Minecraft#handleKeybinds reads the hotbar keys and the scroll wheel only while no screen is open; a hotbar key in a
 // container screen is a swap click, never a held slot change.
 @CheckData(
-        name = "MultiActionsT",
+        name = "InventoryK",
         stableKey = "cult.multiactions.inventory_slot",
         description = "Changed the held slot while in an inventory",
         experimental = true)
-public class MultiActionsT extends Check implements CheckListener {
-    public MultiActionsT(CultPlayer player) {
+public class InventoryK extends Check implements CheckListener {
+    public InventoryK(CultPlayer player) {
         super(player);
     }
 

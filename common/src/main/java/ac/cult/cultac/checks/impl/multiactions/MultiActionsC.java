@@ -2,57 +2,79 @@ package ac.cult.cultac.checks.impl.multiactions;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
-import ac.cult.cultac.checks.impl.prediction.PredictionResult;
-import ac.cult.cultac.checks.impl.prediction.pipeline.java.JavaAutoJump;
-import ac.cult.cultac.checks.impl.prediction.stage.world.WorldData;
 import ac.cult.cultac.checks.type.CheckListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
-import ac.cult.cultac.utils.inventory.InventoryClick;
-import ac.grim.grimac.api.storage.verbose.Verbose;
-import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NotNull;
+import ac.cult.cultac.protocol.packet.Opaque;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundMovePlayer;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundPlayerAction;
+import ac.cult.cultac.protocol.packet.serverbound.ServerboundSwing;
+import ac.cult.cultac.protocol.value.Hand;
+import ac.cult.cultac.protocol.value.PlayerAction;
+import org.jetbrains.annotations.Nullable;
 
 @CheckData(
         name = "MultiActionsC",
-        stableKey = "cult.multiactions.inventory_click_while_moving",
-        description = "Clicked in inventory while moving")
+        stableKey = "cult.multiactions.swing_while_using",
+        description = "Swinging while using an item",
+        experimental = true)
 public class MultiActionsC extends Check implements CheckListener {
-    private static final Verbose V = Verbose.of("sprinting={bool}, sneaking={bool}, input={bool}");
+    private boolean dropping;
+    private @Nullable Hand useSwingHand;
 
     public MultiActionsC(CultPlayer player) {
         super(player);
     }
 
-    @Contract(pure = true)
-    public static boolean isVerboseSprinting(@NotNull CultPlayer player) {
-        if (!player.isClientSprinting()) return false;
+    @CultPacketHandler
+    public void onSwing(PacketReceiveEvent<ServerboundSwing> event, CultPlayer player, ServerboundSwing packet) {
+        // A drop exempts only the one swing that follows it.
+        boolean droppedBeforeSwing = dropping;
+        dropping = false;
+        boolean usedBeforeSwing = packet.hand() == useSwingHand;
+        useSwingHand = null;
 
-        PredictionResult last = player.checkManager.getSimulationProcessor().getLastPrediction();
-        if (last == null || last.getSimulationContext() == null) return true;
-
-        WorldData world = last.getSimulationContext().getWorldData();
-        return !(world.getInWater().determineOptimistically()
-                && world.getLastOnGround().determineOptimistically());
-    }
-
-    @Contract(pure = true)
-    public static boolean isVerboseInput(@NotNull CultPlayer player) {
-        return player.checkManager.getListener(JavaAutoJump.class).hasManualMovementInput();
+        if (!droppedBeforeSwing && !usedBeforeSwing && isActivelyUsingItem()) {
+            if (flag() && shouldModifyPackets()) {
+                event.setCancelled(true);
+                player.onPacketCancel();
+            }
+        }
     }
 
     @CultPacketHandler
-    public void onContainerClick(PacketReceiveEvent<InventoryClick> event, CultPlayer player, InventoryClick packet) {
-        if (player.serverOpenedInventoryThisTick) return;
+    public void onPlayerAction(
+            PacketReceiveEvent<ServerboundPlayerAction> event, CultPlayer player, ServerboundPlayerAction packet) {
+        // 1.15+ Minecraft#handleKeybinds swings right after a successful drop,
+        // which is the only way to swing while using an item.
+        PlayerAction action = packet.action();
+        dropping = action == PlayerAction.DROP_ITEM || action == PlayerAction.DROP_ALL_ITEMS;
+    }
 
-        boolean sprinting = isVerboseSprinting(player);
-        boolean input = isVerboseInput(player);
-        if (!sprinting && !input) return;
+    /**
+     * Minecraft#startUseItem swings the used hand when MultiPlayerGameMode#useItem succeeds with a client-side swing,
+     * as BundleItem#use does after Player#startUsingItem.
+     */
+    public void onPredictedUseSwing(Hand hand) {
+        useSwingHand = hand;
+    }
 
-        if (flag(V.write(verbose()).bool(sprinting).bool(false).bool(input)) && shouldModifyPackets()) {
-            event.setCancelled(true);
-            player.onPacketCancel();
-        }
+    // The drop or use and its swing are sent before the tick's movement packet and tick end.
+    @CultPacketHandler
+    public void onMovePlayer(
+            PacketReceiveEvent<ServerboundMovePlayer> event, CultPlayer player, ServerboundMovePlayer packet) {
+        dropping = false;
+        useSwingHand = null;
+    }
+
+    @CultPacketHandler("serverbound.client_tick_end")
+    public void onClientTickEnd(PacketReceiveEvent<Opaque> event, CultPlayer player, Opaque packet) {
+        dropping = false;
+        useSwingHand = null;
+    }
+
+    private boolean isActivelyUsingItem() {
+        return MultiActionsA.isActivelyUsingItem(player);
     }
 }

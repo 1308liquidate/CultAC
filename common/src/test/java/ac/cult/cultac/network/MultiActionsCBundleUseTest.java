@@ -7,7 +7,7 @@ import static ac.cult.cultac.network.ItemUseTestSupport.useOffhand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsE;
+import ac.cult.cultac.checks.impl.multiactions.MultiActionsC;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ConnectionPhase;
@@ -24,13 +24,13 @@ import org.junit.jupiter.api.Test;
  * BundleItem#use starts using the bundle and succeeds, so Minecraft#startUseItem swings the used hand right after the
  * use_item packet.
  */
-class MultiActionsEBundleUseTest {
+class MultiActionsCBundleUseTest {
     @Test
     void theSwingAfterUsingABundleIsNotFlagged() throws Exception {
         try (var services = new RecordConsumerServices();
                 var f = fixture()) {
             var player = useBundle(f);
-            var check = player.checkManager.getCheck(MultiActionsE.class);
+            var check = player.checkManager.getCheck(MultiActionsC.class);
             swing(player, check, Hand.OFF_HAND);
             assertEquals(0, check.violations);
         }
@@ -41,7 +41,7 @@ class MultiActionsEBundleUseTest {
         try (var services = new RecordConsumerServices();
                 var f = fixture()) {
             var player = useBundle(f);
-            var check = player.checkManager.getCheck(MultiActionsE.class);
+            var check = player.checkManager.getCheck(MultiActionsC.class);
             swing(player, check, Hand.OFF_HAND);
             swing(player, check, Hand.OFF_HAND);
             assertEquals(1, check.violations);
@@ -53,7 +53,7 @@ class MultiActionsEBundleUseTest {
         try (var services = new RecordConsumerServices();
                 var f = fixture()) {
             var player = useBundle(f);
-            var check = player.checkManager.getCheck(MultiActionsE.class);
+            var check = player.checkManager.getCheck(MultiActionsC.class);
             player.getInventory()
                     .inventory
                     .getInventoryStorage()
@@ -74,7 +74,7 @@ class MultiActionsEBundleUseTest {
         return player;
     }
 
-    private static void swing(CultPlayer player, MultiActionsE check, Hand hand) {
+    private static void swing(CultPlayer player, MultiActionsC check, Hand hand) {
         var packet = new ServerboundSwing(hand, SwingKind.SWING);
         check.onSwing(
                 new PacketReceiveEvent<>(player.user, ConnectionPhase.PLAY, ServerboundPackets.SWING, packet),

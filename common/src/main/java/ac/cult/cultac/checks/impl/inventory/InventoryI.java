@@ -1,4 +1,4 @@
-package ac.cult.cultac.checks.impl.multiactions;
+package ac.cult.cultac.checks.impl.inventory;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
@@ -10,12 +10,12 @@ import ac.cult.cultac.protocol.packet.serverbound.*;
 import ac.cult.cultac.protocol.value.*;
 
 @CheckData(
-        name = "MultiActionsQ",
+        name = "InventoryI",
         stableKey = "cult.multiactions.inventory_swap",
         description = "Swapping items with offhand without using click packets while in an inventory",
         experimental = true)
-public class MultiActionsQ extends Check implements CheckListener {
-    public MultiActionsQ(CultPlayer player) {
+public class InventoryI extends Check implements CheckListener {
+    public InventoryI(CultPlayer player) {
         super(player);
     }
 

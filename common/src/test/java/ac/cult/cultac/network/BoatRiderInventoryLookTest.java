@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ac.cult.blocksim.entity.EntityTypeIds;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsO;
+import ac.cult.cultac.checks.impl.inventory.InventoryG;
 import ac.cult.cultac.network.event.PacketSendEvent;
 import ac.cult.cultac.protocol.ConnectionPhase;
 import ac.cult.cultac.protocol.packet.ClientboundPackets;
@@ -112,12 +112,12 @@ class BoatRiderInventoryLookTest {
      * Steers left until {@link #RELEASE_TICK}, opens the inventory at {@link #OPEN_TICK} and has the server teleport the
      * boat 5 blocks and 150 degrees round at {@link #TELEPORT_TICK}; the boat moves {@code drift} a tick from then on.
      * The ping the server sends after the teleport is answered after the next tick when {@code trailingPong}. Returns
-     * MultiActionsO's violations.
+     * InventoryG's violations.
      */
     private static double teleportInAnInventory(Vec3 drift, boolean trailingPong) throws Exception {
         float[] turns = deltaRotations();
         try (var f = board(true)) {
-            MultiActionsO check = f.player.checkManager.getCheck(MultiActionsO.class);
+            InventoryG check = f.player.checkManager.getCheck(InventoryG.class);
             f.player.setExperimentalChecks(true);
             check.setEnabled(true);
             check.reload();
@@ -187,7 +187,7 @@ class BoatRiderInventoryLookTest {
             throws Exception {
         float[] turns = deltaRotations();
         try (var f = board(controls)) {
-            MultiActionsO check = f.player.checkManager.getCheck(MultiActionsO.class);
+            InventoryG check = f.player.checkManager.getCheck(InventoryG.class);
             f.player.setExperimentalChecks(true);
             check.setEnabled(true);
             check.reload();

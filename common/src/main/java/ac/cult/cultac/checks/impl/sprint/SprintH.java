@@ -2,7 +2,7 @@ package ac.cult.cultac.checks.impl.sprint;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsC;
+import ac.cult.cultac.checks.impl.inventory.InventoryA;
 import ac.cult.cultac.checks.type.ClientTickEndListener;
 import ac.cult.cultac.checks.type.PostPredictionListener;
 import ac.cult.cultac.network.CultPacketHandler;
@@ -42,7 +42,7 @@ public class SprintH extends Check implements PostPredictionListener, ClientTick
     private void onTick() {
         boolean sprinting = player.packetStateData.knownInput.sprint()
                         && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21_9)
-                || MultiActionsC.isVerboseSprinting(player);
+                || InventoryA.isVerboseSprinting(player);
         if (sprinting && player.openWindow.mustBeOpen() && flag(V.write(verbose(), 0)) && shouldModifyPackets())
             player.closeInventorySafely();
     }

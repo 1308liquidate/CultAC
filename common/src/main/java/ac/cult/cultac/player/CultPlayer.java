@@ -318,7 +318,7 @@ public class CultPlayer implements GrimUser {
     public long lastRotated;
     public final @NotNull VehicleData vehicleData = new VehicleData();
     public boolean serverOpenedInventoryThisTick;
-    // Whether this tick's movement intersected a nether portal block (see MultiActionsD)
+    // Whether this tick's movement intersected a nether portal block (see InventoryB)
     public boolean intersectedWithNetherPortal;
 
     @Getter

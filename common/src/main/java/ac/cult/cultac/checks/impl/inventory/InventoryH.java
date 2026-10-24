@@ -1,4 +1,4 @@
-package ac.cult.cultac.checks.impl.multiactions;
+package ac.cult.cultac.checks.impl.inventory;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
@@ -10,12 +10,12 @@ import ac.cult.cultac.protocol.packet.serverbound.*;
 import ac.cult.cultac.protocol.value.*;
 
 @CheckData(
-        name = "MultiActionsP",
+        name = "InventoryH",
         stableKey = "cult.multiactions.inventory_drop",
         description = "Dropping items without using click packets while in an inventory",
         experimental = true)
-public class MultiActionsP extends Check implements CheckListener {
-    public MultiActionsP(CultPlayer player) {
+public class InventoryH extends Check implements CheckListener {
+    public InventoryH(CultPlayer player) {
         super(player);
     }
 

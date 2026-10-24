@@ -90,6 +90,7 @@ Punishments:
       - "NoSneakSlow"
       - "Sprint"
       - "MultiActions"
+      - "Inventory"
       - "Place"
       - "Baritone"
       - "Break"
@@ -131,4 +132,4 @@ Punishments:
       - "3:3 [webhook]"
       - "3:3 [proxy]"
 
-cult-config-version: 4
+cult-config-version: 5

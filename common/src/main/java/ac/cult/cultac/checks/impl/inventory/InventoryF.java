@@ -1,4 +1,4 @@
-package ac.cult.cultac.checks.impl.multiactions;
+package ac.cult.cultac.checks.impl.inventory;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
@@ -10,12 +10,12 @@ import ac.cult.cultac.protocol.packet.serverbound.*;
 import ac.cult.cultac.protocol.value.*;
 
 @CheckData(
-        name = "MultiActionsN",
+        name = "InventoryF",
         stableKey = "cult.multiactions.inventory_inventory",
         description = "Opened an inventory while in an inventory",
         experimental = true)
-public class MultiActionsN extends Check implements CheckListener {
-    public MultiActionsN(CultPlayer player) {
+public class InventoryF extends Check implements CheckListener {
+    public InventoryF(CultPlayer player) {
         super(player);
     }
 

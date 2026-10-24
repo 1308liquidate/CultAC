@@ -14,7 +14,7 @@ import ac.cult.blocksim.engine.Vec3;
 import ac.cult.blocksim.interaction.BlockHit;
 import ac.cult.blocksim.interaction.BreakSession;
 import ac.cult.blocksim.interaction.SimInteraction;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsE;
+import ac.cult.cultac.checks.impl.multiactions.MultiActionsC;
 import ac.cult.cultac.events.packets.PacketWorldBorder;
 import ac.cult.cultac.player.CultPlayer;
 import ac.cult.cultac.protocol.ProtocolVersion;
@@ -90,7 +90,7 @@ public final class ClientBlockActions {
         if (!wasUsingItem
                 && result.decline() == null
                 && result.interaction().swing() == SimInteraction.Swing.PREDICTED) {
-            player.checkManager.getCheck(MultiActionsE.class).onPredictedUseSwing(hand);
+            player.checkManager.getCheck(MultiActionsC.class).onPredictedUseSwing(hand);
         }
         debugPlacement(player, prediction, item, null);
     }

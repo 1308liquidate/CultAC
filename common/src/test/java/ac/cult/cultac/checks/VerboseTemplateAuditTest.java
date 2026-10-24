@@ -48,10 +48,11 @@ class VerboseTemplateAuditTest {
     private static final Map<String, String> PARTIALLY_AUDITED = Map.of(
             "ExploitB.java", "flagLiteral passes the shape selector as a variable",
             "PacketOrderC.java", "writeKind passes the shape selector as a variable",
-            "MultiActionsF.java", "writeAction passes the shape selector as a variable",
-            "MultiActionsG.java", "writeAction passes the shape selector as a variable",
+            "MultiActionsD.java", "writeAction passes the shape selector as a variable",
+            "MultiActionsE.java", "writeAction passes the shape selector as a variable",
             "PacketOrderK.java", "writer extended conditionally after write(buf, kind)",
-            "MultiActionsM.java", "shape passed as a ternary");
+            "InventoryD.java", "onInteract passes the shape selector as a variable",
+            "InventoryE.java", "shape passed as a ternary");
 
     private static final Map<String, List<VerboseSchema.TypeTag>> WRITER_METHODS = writerMethods();
 

@@ -1,4 +1,4 @@
-package ac.cult.cultac.checks.impl.multiactions;
+package ac.cult.cultac.checks.impl.inventory;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
@@ -11,12 +11,12 @@ import ac.cult.cultac.protocol.value.*;
 import ac.grim.grimac.api.storage.verbose.Verbose;
 
 @CheckData(
-        name = "MultiActionsM",
+        name = "InventoryE",
         stableKey = "cult.multiactions.inventory_sneak",
         description = "Sneaking while in an inventory",
         experimental = true)
-public class MultiActionsM extends Check implements CheckListener {
-    public MultiActionsM(CultPlayer player) {
+public class InventoryE extends Check implements CheckListener {
+    public InventoryE(CultPlayer player) {
         super(player);
     }
 

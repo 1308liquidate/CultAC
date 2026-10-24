@@ -2,7 +2,7 @@ package ac.cult.cultac.checks.impl.chat;
 
 import ac.cult.cultac.checks.Check;
 import ac.cult.cultac.checks.CheckData;
-import ac.cult.cultac.checks.impl.multiactions.MultiActionsC;
+import ac.cult.cultac.checks.impl.inventory.InventoryA;
 import ac.cult.cultac.checks.type.CheckListener;
 import ac.cult.cultac.network.CultPacketHandler;
 import ac.cult.cultac.network.event.PacketReceiveEvent;
@@ -56,8 +56,8 @@ public class ChatC extends Check implements CheckListener {
             return;
         }
 
-        boolean sprinting = MultiActionsC.isVerboseSprinting(player);
-        boolean input = MultiActionsC.isVerboseInput(player);
+        boolean sprinting = InventoryA.isVerboseSprinting(player);
+        boolean input = InventoryA.isVerboseInput(player);
         if ((sprinting || input)
                 && flag(V.write(verbose()).bool(sprinting).bool(false).bool(input))
                 && shouldModifyPackets()) {
